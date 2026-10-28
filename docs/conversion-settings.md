@@ -82,7 +82,7 @@ What to do with author metadata from the source. Reading .docx this comes from a
 
 ## math
 
-Math the source wrote in the wrong characters, or as text. Every change is a row in reports.math_repaired.
+Math the source wrote in the wrong characters, or as text, whose every change is a row in reports.math_repaired; and the display style a page sets a formula in running text in.
 
 **`math.repair_equations`**—`bool`; default `true`
 
@@ -91,6 +91,10 @@ Give each equation the characters it means: mu for the micro sign, Delta for the
 **`math.from_text`**—`bool`; default `true`
 
 Make an equation of math typed as ordinary text: a relation (=, <, >, and the rest) between operands, with at least one variable, an italic letter or a Greek one (mu = 34, P(x < 160) = 0.3); and a Greek letter, or an italic letter with a sub- or superscript, standing alone (mu, H sub 0). A plain letter is a word, but before a parenthesis, a function's name (P(x < 160)), or before a sub- or superscript, the letter it's set on (n in n sub 1 = 4), and a lone italic letter is left alone, since outside math it's mostly emphasis. Conservative on purpose: text becomes math only when it's clearly math.
+
+**`math.display_style_in_text`**—`bool`; default `false`
+
+Keep the display style an HTML page sets a formula in running text or a table's cell in, as MathML says it (an mstyle with displaystyle), which Pandoc's reader drops, so that every output sets it in text style: a fraction's parts small, a sum's limits beside it as scripts, the line no taller than its text needs. True sets it in display style in a PDF, on a page, and in an EPUB, where display style changes it (a fraction, a large operator, or a sum's or a limit's limits, set so), at the cost of a taller line; a Word file sets it in text style either way. Read from an HTML page: a web page's, an EPUB's, and a CNX book's, OpenStax setting 6,768 formulas in running text and 473 in a table's cell in display style where it changes them, in its repositories. A LaTeX book's \displaystyle is its own TeX, kept in its PDF either way, and on a page where it opens the formula.
 
 ## images
 

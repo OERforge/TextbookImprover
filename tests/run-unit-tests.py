@@ -2673,6 +2673,60 @@ def check_ua1_math():
     ]
 
 
+def check_display_style_in_text():
+    """lib/mathstyle.py: a formula in running text an HTML page sets in
+    display style, where display style changes it, put in a span of class
+    displaystyle-text for math-repair.lua; the rest of the page as it was,
+    a comment, an attribute, and a script whatever they hold."""
+    import mathstyle
+    m = '<math xmlns="http://www.w3.org/1998/Math/MathML">%s</math>'
+    on = '<mstyle displaystyle="true">%s</mstyle>'
+    fraction = m % (on % "<mfrac><mn>1</mn><mn>2</mn></mfrac>")
+    sum_ = m % (on % "<munderover><mo>&#x2211;</mo><mi>i</mi><mi>n</mi></munderover>")
+    letter = m % (on % "<mi>x</mi>")
+    scripted = m % (on % "<msup><mi>y</mi><mfrac><mn>1</mn><mn>3</mn></mfrac></msup>")
+    accent = m % (on % '<mover><mi>x</mi><mo>&#x2192;</mo></mover>')
+    off_inside = m % (on % '<mstyle displaystyle="false"><mfrac><mn>1</mn><mn>4</mn></mfrac>'
+                      '</mstyle>')
+    own = ('<math xmlns="http://www.w3.org/1998/Math/MathML" displaystyle="true">'
+           '<mfrac><mn>1</mn><mn>5</mn></mfrac></math>')
+    block = fraction.replace("<math ", '<math display="block" ')
+    marked = '<span class="displaystyle">%s</span>' % fraction
+    page = ("<p>" + " | ".join((fraction, sum_, letter, scripted, accent, off_inside, own,
+                                 block, marked)) + "<br/></p>")
+    out, count = mathstyle.marked_in_text(page)
+
+    def wrapped(formula):
+        return '<span class="displaystyle-text">%s</span>' % formula
+    return [
+        ("a fraction, a sum's limits, and a formula whose math element says so are marked",
+         lambda: count == 3 and all(wrapped(f) in out for f in (fraction, sum_, own))),
+        ("a letter, a fraction in a script, an accent, and a fraction display style turns "
+         "off again aren't, nor a display formula, nor one marked already",
+         lambda: all(wrapped(f) not in out
+                     for f in (letter, scripted, accent, off_inside, block))
+         and out.count("displaystyle-text") == 3
+         and out.count('<span class="displaystyle">') == 1),
+        ("the rest of the page is as it was, a formula at a time edited as text",
+         lambda: out.replace('<span class="displaystyle-text">', "").replace(
+             "</span>", "") == page.replace("</span>", "")),
+        ("a page with no display style is returned as it was",
+         lambda: mathstyle.marked_in_text("<p>" + m % "<mi>x</mi>" + "</p>")
+         == ("<p>" + m % "<mi>x</mi>" + "</p>", 0)),
+        ("a formula is found as an HTML parser finds it: the words <math> in a comment, in "
+         "an attribute's value, an empty formula, and a formula in a script are left as "
+         "they are, and the formula after each is marked, its span its own",
+         lambda: all(mathstyle.marked_in_text(before + fraction + " after</p>")
+                     == (before + wrapped(fraction) + " after</p>", 1)
+                     for before in ('<p lang="fr">Before <!-- the <math> element --> then ',
+                                    '<p><img alt="Diagram of the <math> element"/> then ',
+                                    '<p><math/> then ',
+                                    '<p><script type="math/mml">%s</script> then ' % fraction))),
+        ("and the page as it marks it is marked no more",
+         lambda: mathstyle.marked_in_text(out) == (out, 0)),
+    ]
+
+
 def check_math_words():
     """A word or a unit an HTML page's formula holds as an <mi> of more than
     two letters, or of two set upright or applied as a function, is made an
@@ -5638,6 +5692,7 @@ GROUPS = [
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
     ("a formula's words, in an HTML source", check_math_words),
+    ("display style in running text, in an HTML source", check_display_style_in_text),
     ("a table whose head holds every row, in an HTML source", check_head_only_tables),
     ("header cells holding only formulas, in a PDF", check_pdf_formula_headers),
     ("an image named in another case, in a source's copy", check_cased_images_in_copies),

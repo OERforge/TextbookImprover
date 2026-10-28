@@ -90,6 +90,7 @@ try:
     import htmlrepair
     import languages
     import mathjax
+    import mathstyle
     import notes as notes_lib
     import pagefooter
     import oerconfig
@@ -985,6 +986,11 @@ LANGUAGE_DECLARED = False
 # by its master, as its preamble gives it. LANGUAGES: each page's
 # languages.Decision, by its name, worked out once for every target.
 PAGE_SOURCES = {}
+# How many formulas in running text each HTML page sets in display style,
+# which math.display_style_in_text keeps: by a page's stem, and by the path
+# of a target's variant of one (read_variants).
+DISPLAY_STYLE_KEPT = {}
+DISPLAY_STYLE_VARIANTS = {}
 LATEX_LANGUAGES = {}
 LANGUAGES = {}
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
@@ -2166,6 +2172,51 @@ def html_sources(base, others, hand):
     return found
 
 
+def display_style_marked(path):
+    """How many formulas in running text the HTML page at path, a copy
+    the run reads, sets in display style, which Pandoc's reader drops, each
+    marked in the copy for math-repair.lua to set so where
+    math.display_style_in_text says to (lib/mathstyle.py)."""
+    with open(path, encoding="utf-8") as fh:
+        markup = fh.read()
+    markup, marked = mathstyle.marked_in_text(markup)
+    if marked:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(markup)
+    return marked
+
+
+def display_style_said(targets):
+    """The run's line for math.display_style_in_text, or None where no
+    target that sets it keeps a formula: how many formulas in running text,
+    on how many pages, each such target keeps in display style, counted in
+    the pages it reads, a variant of its own in place of the page it
+    replaces, and the targets that keep as many said together, by name
+    where not every target keeps them."""
+    groups = {}
+    for target in targets:
+        if not target["math.display_style_in_text"]:
+            continue
+        counts = {stem: n for stem, n in DISPLAY_STYLE_KEPT.items()
+                  if stem not in target.variants}
+        counts.update({stem: DISPLAY_STYLE_VARIANTS[path]
+                       for stem, path in target.variants.items()
+                       if path in DISPLAY_STYLE_VARIANTS})
+        total = sum(counts.values())
+        if total:
+            groups.setdefault((total, sum(1 for n in counts.values() if n)), []).append(
+                target.name)
+    if not groups:
+        return None
+    every = len(groups) == 1 and len(next(iter(groups.values()))) == len(targets)
+    kept = [f"{total} formula(s) in running text on {pages} page(s)"
+            + ("" if every or len(groups) == 1 else f" by {', '.join(names)}")
+            for (total, pages), names in groups.items()]
+    by = "" if every or len(groups) > 1 else ", by " + ", ".join(next(iter(groups.values())))
+    return ("math.display_style_in_text: " + "; ".join(kept) + " kept in display style, as "
+            "their pages set them, which Pandoc's reader drops" + by + ".")
+
+
 def read_html_to_json(base, docs, env, work):
     """An HTML source is read with raw_html on, which is what stops the
     reader fetching every <iframe> over the network (Readers/HTML.hs,
@@ -2209,6 +2260,7 @@ def read_html_to_json(base, docs, env, work):
                             "rendering can be read back"}
             say(f"{name}: " + "; ".join(f"{n} formula(s) {said[k]}"
                                         for k, n in counts.items() if n))
+        DISPLAY_STYLE_KEPT[stem] = display_style_marked(repaired)
         run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
              repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,
@@ -2433,6 +2485,7 @@ def read_variants(base, target, work, env):
         elif name.endswith(".html"):
             repaired = os.path.join(out_dir, name)
             htmlrepair.repaired_copy(path, repaired)
+            DISPLAY_STYLE_VARIANTS[path] = display_style_marked(repaired)
             run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
                  repaired, "-o", out, "--lua-filter=" + HTML_RAW_FILTER,
                  "--lua-filter=" + HTML_SOURCE_FILTER,
@@ -2898,6 +2951,7 @@ def filter_env(target, base, paths, env, reads=None):
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
+        "MATH_DISPLAY_STYLE_IN_TEXT": "true" if r["math.display_style_in_text"] else "false",
         "MATH_KEEP": MATH_KEEP_PAGES or (reads["math_keep"] if os.path.exists(reads["math_keep"])
                                          else ""),
         "TABLE_CAPTIONS": reads["table_captions"],
@@ -6137,6 +6191,11 @@ def main():
                 target, pages, paths, reports,
                 splitting=any(int(t["pages.split_level"]) > 0 for t in targets))
         report_languages(project, reports, paths)
+        # Formulas in running text the pages set in display style, kept so
+        # by the targets that ask (math.display_style_in_text, math-repair.lua).
+        line = display_style_said(targets)
+        if line:
+            say(line)
 
         if args.check_only:
             say("Check only: the reports are written; nothing was rendered "

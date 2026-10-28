@@ -3106,6 +3106,7 @@ def case_empty_rows(work):
 
 DISPLAY_STYLE = """<!DOCTYPE html><html lang="en"><head><title>Integrals</title></head><body><main><h1>Integrals</h1>
 <p>Marked: <span class="displaystyle"><math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mo>=</mo><mstyle displaystyle="true"><mo>&#x222B;</mo></mstyle><mfrac><mn>1</mn><mi>x</mi></mfrac><mi>d</mi><mi>x</mi></mrow></math></span> and not: <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mo>&#x222B;</mo><mfrac><mn>1</mn><mi>u</mi></mfrac><mi>d</mi><mi>u</mi></mrow></math>.</p>
+<p>In text: <math xmlns="http://www.w3.org/1998/Math/MathML"><mstyle displaystyle="true"><mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle></math>, whose display style draws its fraction larger, and <math xmlns="http://www.w3.org/1998/Math/MathML"><mstyle displaystyle="true"><msup><mi>y</mi><mfrac><mn>1</mn><mn>3</mn></mfrac></msup></mstyle></math>, whose fraction is a script.</p>
 </main></body></html>
 """
 
@@ -3119,7 +3120,10 @@ def case_display_style(work):
     formula. And a formula whose TeX opens with \\displaystyle in a Markdown
     source is in display style on its page too, laid out as a display is,
     a sum's limits under and over it, but in a picture's description or a
-    heading, whose text the writer reads: there it keeps its TeX."""
+    heading, whose text the writer reads: there it keeps its TeX. And a
+    formula in running text a page sets in display style, kept so by a
+    target with math.display_style_in_text, its variant of a page too,
+    repaired first, so that math-keep.csv keeps it in either target."""
     import importlib.util
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
@@ -3171,6 +3175,58 @@ def case_display_style(work):
         subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         back = read(again, "md", "integrals.md") if exists(again, "md", "integrals.md") else ""
+    # The page again, math.display_style_in_text set for one target and
+    # not the other: a formula in running text that MathML sets in display
+    # style, marked before Pandoc reads it, each target filtering its own.
+    kept = os.path.join(work, "kept")
+    os.makedirs(kept)
+    with open(os.path.join(kept, "integrals.html"), "w", encoding="utf-8") as fh:
+        fh.write(DISPLAY_STYLE)
+    with open(os.path.join(kept, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  md:\n    format: markdown\n    math:\n"
+                 "      display_style_in_text: true\n"
+                 "  plain:\n    format: markdown\n")
+    kept_run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                              cwd=kept, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+    kept_md = read(kept, "md", "integrals.md") if exists(kept, "md", "integrals.md") else ""
+    kept_plain = read(kept, "plain", "integrals.md") \
+        if exists(kept, "plain", "integrals.md") else ""
+    # A page's variant for the target that sets math.display_style_in_text
+    # (styled.styled.html), whose formulas are marked as a shared page's are; and
+    # a formula set in display style whose en dash math repair makes a
+    # minus, its row of math-repaired.csv the same whatever the setting,
+    # and kept as it was by math-keep.csv in either target.
+    varied = os.path.join(work, "varied")
+    os.makedirs(varied)
+    half = ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mstyle displaystyle="true">'
+            '<mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle></math>')
+    dashed = ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mstyle displaystyle="true">'
+              '<mfrac><mrow><mi>x</mi><mo>\u2013</mo><mn>1</mn></mrow><mn>2</mn></mfrac>'
+              '</mstyle></math>')
+    for name, words in (("styled.html", "In shared"), ("styled.styled.html", "In variant")):
+        with open(os.path.join(varied, name), "w", encoding="utf-8") as fh:
+            fh.write("<!DOCTYPE html><html lang=\"en\"><head><title>Styled</title></head><body>"
+                     "<main><h1>Styled</h1><p>%s: %s, a half.</p><p>Dashed: %s, a dash.</p>"
+                     "</main></body></html>\n" % (words, half, dashed))
+    with open(os.path.join(varied, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  styled:\n    format: markdown\n    math:\n"
+                 "      display_style_in_text: true\n  plain:\n    format: markdown\n")
+
+    def varied_run():
+        """(what the run said, the styled target's page, the plain target's,
+        the rows of math-repaired.csv)."""
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                              cwd=varied, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        pages = [read(varied, t, "styled.md") if exists(varied, t, "styled.md") else ""
+                 for t in ("styled", "plain")]
+        rows = read(varied, "math-repaired.csv") if exists(varied, "math-repaired.csv") else ""
+        return [done.stdout + done.stderr] + pages + [rows]
+    varied_said, varied_on, varied_off, varied_rows = varied_run()
+    with open(os.path.join(varied, "math-keep.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Kind,Page,Before\nequation,styled,\\frac{x\u20131}{2}\n")
+    kept_said, kept_on, kept_off, _ = varied_run()
     displayed = (r'<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML">'
                  r'<semantics><mstyle displaystyle="true"><mrow><mo>=</mo>'
                  r'<mo>(?:&#x222B;|∫)</mo><mfrac>.*?</mfrac>.*?</mrow></mstyle>'
@@ -3186,6 +3242,43 @@ def case_display_style(work):
          and page.count("<mstyle") == 1 and chapters.count("<mstyle") == 1),
         ("the page read again has the formula it was written from",
          lambda: "Marked: $\\displaystyle = \\int\\frac{1}{x}dx$" in back),
+        ("a formula in running text that MathML sets in display style is in text style, "
+         "as Pandoc's reader reads it",
+         lambda: re.search(r"In text: \$\\frac\{1\}\{2\}\$, whose", md)
+         and re.search(r"and \$y\^\{\\frac\{1\}\{3\}\}\$, whose", md)),
+        ("with math.display_style_in_text it's in display style, marked before Pandoc reads "
+         "the page, where display style changes it, a fraction, not a fraction in a script, "
+         "in the target that sets it, not the one beside it, and the run says how many it "
+         "kept, and by which target",
+         lambda: re.search(r"In text: \$\\frac\{1\}\{2\}\$, whose", kept_plain)
+         and "displaystyle-text" not in kept_plain + kept_md
+         and "math.display_style_in_text: 1 formula(s) in running text on 1 page(s) kept in "
+             "display style, as their pages set them, which Pandoc's reader drops, by md."
+             in kept_run.stdout + kept_run.stderr),
+        ("and the formula is so in the target that sets it",
+         lambda: re.search(r"In text: \$\\displaystyle \\frac\{1\}\{2\}\$, whose", kept_md)
+         and re.search(r"and \$y\^\{\\frac\{1\}\{3\}\}\$, whose", kept_md)
+         and "Marked: $\\displaystyle = \\int\\frac{1}{x}dx$ and not: "
+             "$\\int\\frac{1}{u}du$" in kept_md
+         and "math.display_style_in_text: 1 formula(s) in running text on 1 page(s)"
+             in kept_run.stdout + kept_run.stderr),
+        ("a page's variant for the target that sets it is marked as a shared page is, and "
+         "the run counts the pages each target reads",
+         lambda: "In variant: $\\displaystyle \\frac{1}{2}$, a half." in varied_on
+         and "In shared: $\\frac{1}{2}$, a half." in varied_off
+         and "math.display_style_in_text: 2 formula(s) in running text on 1 page(s) kept in "
+             "display style, as their pages set them, which Pandoc's reader drops, by styled."
+             in varied_said),
+        ("a formula math repair changes is repaired before it's set in display style, its row "
+         "of math-repaired.csv the same whatever the setting, and that row in math-keep.csv "
+         "keeps it as it was in either target",
+         lambda: "Dashed: $\\displaystyle \\frac{x-1}{2}$, a dash." in varied_on
+         and "Dashed: $\\frac{x-1}{2}$, a dash." in varied_off
+         and "equation,styled,\\frac{x\u20131}{2},\\frac{x-1}{2}" in varied_rows
+         and "\\displaystyle" not in varied_rows
+         and "Dashed: $\\displaystyle \\frac{x\u20131}{2}$, a dash." in kept_on
+         and "Dashed: $\\frac{x\u20131}{2}$, a dash." in kept_off
+         and "kept nothing" not in kept_said),
         ("a formula whose TeX opens with \\displaystyle in a Markdown source is in display "
          "style on its page too, a sum's limits under and over it, as TeX sets them, where "
          "another sum's are its scripts",

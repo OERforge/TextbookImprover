@@ -784,6 +784,40 @@ local function block_with_inlines(block)
   end
 end
 
+-- ------------------------------------------------------------------------
+-- display style in running text
+
+-- A formula in running text its HTML page sets in display style, which
+-- the run marks before Pandoc reads the page, its reader dropping MathML's
+-- display style (lib/mathstyle.py: a span of class displaystyle-text): set
+-- in display style, \displaystyle opening its TeX, as html-source.lua sets
+-- a formula of class displaystyle, where math.display_style_in_text says
+-- so, and otherwise in text style, as the reader reads it. The span goes
+-- either way, where it holds nothing else of its own. After the repairs,
+-- so that a formula's TeX is the same to math-repaired.csv and
+-- math-keep.csv whatever the setting: given \displaystyle first, a row
+-- copied from a target without the setting kept nothing in one with it.
+local DISPLAY_IN_TEXT = (os.getenv('MATH_DISPLAY_STYLE_IN_TEXT') or 'false'):lower() == 'true'
+local TEXT_CLASS = 'displaystyle-text'
+local DISPLAYED = '^%s*\\displaystyle%f[^%a]'
+
+local function display_in_text(span)
+  if not span.classes:includes(TEXT_CLASS) then return nil end
+  if DISPLAY_IN_TEXT then
+    span.content = span.content:walk({ Math = function(math_)
+      if math_.mathtype == 'InlineMath' and not math_.text:match(DISPLAYED) then
+        math_.text = '\\displaystyle ' .. math_.text
+        return math_
+      end
+    end })
+  end
+  span.classes = span.classes:filter(function(name) return name ~= TEXT_CLASS end)
+  if span.identifier == '' and #span.classes == 0 and #span.attributes == 0 then
+    return span.content
+  end
+  return span
+end
+
 local filters = {}
 if REPAIR then
   filters[#filters + 1] = {Math = repair_math}
@@ -791,4 +825,5 @@ end
 if FROM_TEXT then
   filters[#filters + 1] = {Para = block_with_inlines, Plain = block_with_inlines}
 end
+filters[#filters + 1] = {Span = display_in_text}
 return filters

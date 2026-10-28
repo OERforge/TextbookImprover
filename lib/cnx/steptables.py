@@ -115,7 +115,9 @@ import unicodedata
 
 from lxml import etree
 
+import mathstyle
 import tablecensus as tc
+from mathstyle import DISPLAY_CLASS
 
 from .bake.core import classes
 from .mathml import MATHML
@@ -589,21 +591,6 @@ SPACES = re.compile(r"[\s\u200b]+")
 ALIGNMENTS = {"left", "right", "center"}
 # What a formula's text set in a style is in HTML.
 STYLED = {"bold": "strong", "italic": "em", "bold-italic": "strong"}
-# The large operators, which display style draws at their larger size: an
-# integral, a sum, a product, a union, and their kin, as MathML's operator
-# dictionary has them (largeop).
-LARGE_OPERATORS = set("∫∬∭∮∯∰∱∲∳⨋⨌⨍⨎⨏⨐⨑⨒⨓⨔⨕⨖⨗⨘⨙⨚⨛⨜"
-                      "∑∏∐⋀⋁⋂⋃⨀⨁⨂⨃⨄⨅⨆⨉")
-# What makes an element an operator still, holding one alone (MathML's
-# embellished operators).
-EMBELLISHING = ("mrow", "mstyle", "mpadded", "mphantom")
-# What holds scripts, which are in text style or smaller after the first
-# of what it holds, its base.
-SCRIPTED = {"msub", "msup", "msubsup", "munder", "mover", "munderover",
-            "mmultiscripts", "mroot"}
-# The class of a span around a formula OpenStax set in display style, which
-# html-source.lua reads: Pandoc's reader drops MathML's display style.
-DISPLAY_CLASS = "displaystyle"
 
 
 def _name(el):
@@ -773,34 +760,6 @@ def _formula(cell, display, ends):
     return math
 
 
-def _large(el):
-    """Whether an mo is a large operator: as its largeop says, or else as
-    LARGE_OPERATORS has it."""
-    if el.get("largeop") in ("true", "false"):
-        return el.get("largeop") == "true"
-    return _text(el).strip() in LARGE_OPERATORS
-
-
-def _style_set(el):
-    """Whether display style draws an element otherwise than text style
-    does: a fraction, its parts at full size; a large operator, at its
-    larger size; and an operator's limits, a sum's or a limit's (a large
-    operator, or one named in letters), under and over it, where text
-    style sets them as scripts. An accent over a letter, a brace under
-    it, or words over an arrow are drawn the same in both."""
-    name = _name(el)
-    if name == "mfrac":
-        return True
-    if name in ("munder", "mover", "munderover"):
-        base = next((k for k in el if _name(k)), None)
-        while base is not None and _name(base) in EMBELLISHING:
-            kids = [k for k in base if _name(k)]
-            base = kids[0] if len(kids) == 1 else None
-        return base is not None and _name(base) == "mo" and (
-            _large(base) or _text(base).strip().isalpha())
-    return name == "mo" and _large(el)
-
-
 def _display_at(el, display):
     """Whether an element of a cell stands in display style: as the
     nearest mstyle above it that sets displaystyle says, or, where none
@@ -821,29 +780,13 @@ def _display_at(el, display):
 
 def _displayed(pieces, display):
     """Whether a formula, the pieces of a cell it's made of, holds
-    something display style draws otherwise (_style_set) set in display
-    style: under an mstyle with displaystyle "true", nearer than one with
-    "false", or anywhere where the table set its cells so (display). A
-    fraction's parts, a script, and a table's cells are in text style or
-    smaller, as MathML sets them, whatever the formula's style, unless a
-    table says its cells are in display style. OpenStax sets most such
-    formulas' integral sign alone so, the integrand in text style (54 of
-    the 97 parts in display style in Calculus Volume 2's steps)."""
-    def walk(el, on):
-        name = _name(el)
-        if name == "mstyle" and el.get("displaystyle") in ("true", "false"):
-            on = el.get("displaystyle") == "true"
-        if on and _style_set(el):
-            return True
-        if name == "mfrac":
-            on = False
-        elif name == "mtable":
-            on = el.get("displaystyle") == "true"
-        for at, kid in enumerate(k for k in el if _name(k)):
-            if walk(kid, on and not (at and name in SCRIPTED)):
-                return True
-        return False
-    return any(walk(piece, _display_at(piece, display)) for piece in pieces)
+    something display style draws otherwise set in display style
+    (mathstyle.displayed): under an mstyle with displaystyle "true",
+    nearer than one with "false", or anywhere where the table set its
+    cells so (display, _display_at). OpenStax sets most such formulas'
+    integral sign alone so, the integrand in text style (54 of the 97
+    parts in display style in Calculus Volume 2's steps)."""
+    return mathstyle.displayed(pieces, lambda piece: _display_at(piece, display))
 
 
 def _display_marked(math, parent=None):

@@ -665,7 +665,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % than its line runs into both margins alike; and one that would come
 % within a quarter inch of the paper's edge even at three quarters of its
 % size is set smaller still, as far as it takes, to half its size at
-% least. Type set smaller isn't always as much narrower: Latin Modern
+% least, but for a block of code that would even at half, whose lines too
+% long for their line wrap (\__oer_fit_wrap:, below). Type set smaller
+% isn't always as much narrower: Latin Modern
 % Roman, the default's face where IBM Plex isn't installed, has designs
 % for sizes from 5 to 17 points, each wider for its size than the next
 % larger (the 9-point 2.8 percent wider than the 10-point, the 8-point 3.3
@@ -714,6 +716,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 \ifdefined\directlua
   \newattribute\OERFitAttribute
   \newattribute\OERFitStepsAttribute
+  \newattribute\OERFitWrapAttribute
   \directlua{
     local attribute = luatexbase.attributes.OERFitAttribute
     local column = luatexbase.attributes.OERFitStepsAttribute
@@ -729,7 +732,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
                width = {}, tight = {}, sep = {}, sep0 = {}, where = {}, twocol = {}, run = 0,
                sources = { status.filename }, seen = { [status.filename] = true }, stored = {},
                steps = {}, entries = {}, natural = {}, longest = {}, pieces = {}, applied = {},
-               low = {}, edge = {} }
+               low = {}, edge = {}, right = {}, tall = {} }
     if string.sub(status.filename, 1, 2) == "./" then oerfit.seen[string.sub(status.filename, 3)] = true end
     local function current()
       local id = tex.getattribute(attribute)
@@ -903,6 +906,142 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.steps")
+    local wrapping = luatexbase.attributes.OERFitWrapAttribute
+    local WHATSIT, BOUNDARY, MARK, LOCALPAR = node.id("whatsit"), node.id("boundary"), node.id("mark"), node.id("local_par")
+    local INDENT, ROOM = 3, 20
+    for subtype, name in pairs(node.subtypes("hlist")) do
+      if name == "indent" then INDENT = subtype end
+    end
+    local unwrap = nil
+    local function blank(c)
+      return c == 32 or c == 160 or (c >= 8192 and c <= 8203) or c == 8239 or c == 8287 or c == 12288
+    end
+    local function letter(c)
+      return c and ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+                    or c >= 192 and not blank(c))
+    end
+    local function spacing(n)
+      return n and (n.id == GLUE and not EDGES[n.subtype] or n.id == GLYPH and blank(n.char))
+    end
+    local function joined(n)
+      return n.width == 0 or (n.char >= 768 and n.char <= 879)
+    end
+    local function rtl(c)
+      return (c >= 1424 and c <= 2303) or (c >= 64285 and c <= 65023) or (c >= 65136 and c <= 65279)
+    end
+    local shaped = {}
+    local function ahead(n)
+      if not (joined(n) and rtl(n.char)) then return false end
+      if shaped[n.font] == nil then
+        local f = fonts and fonts.hashes and fonts.hashes.identifiers and fonts.hashes.identifiers[n.font]
+        shaped[n.font] = (f and f.hb and true) or false
+      end
+      return shaped[n.font]
+    end
+    local function natural(head)
+      local width = 0
+      for n in node.traverse(head) do width = width + node.dimensions(n, n.next) end
+      return width
+    end
+    function oerfit.box_width(box)
+      tex.sprint(math.min(natural(tex.getbox(box).head), 1073741823))
+    end
+    local function wrap_penalty(at, value)
+      local p = node.new(PENALTY)
+      p.penalty = value
+      p.attr = at.attr
+      return p
+    end
+    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      if status.output_active then return true end
+      local first = head
+      while first and not (first.id == GLYPH) do first = first.next end
+      if not (first and node.has_attribute(first, wrapping)) then return true end
+      head = node.flatten_discretionaries(head)
+      local id = current()
+      if measured(id) and oerfit.kind[id] == "c" then oerfit.code(id, natural(head)) end
+      local text = first
+      while text and not (text.id == GLYPH and not blank(text.char)) do text = text.next end
+      local indent = node.dimensions(head, text or first)
+      local char = 0
+      for g in node.traverse_id(GLYPH, text or first) do
+        if g.width > 0 then
+          char = g.width
+          break
+        end
+      end
+      local left, right = 0, tex.hsize
+      if type(tex.parshape) == "table" then
+        for _, entry in ipairs(tex.parshape) do left, right = entry[1], entry[1] + entry[2] end
+      end
+      local edge = right
+      if not oerfit.boxed and id and oerfit.right[id] then edge = oerfit.right[id] end
+      local width, stretch, shrink, stretchorder, shrinkorder = tex.getglue("leftskip")
+      if natural(head) <= edge - left - width + TOLERANCE then return head end
+      local most = edge - left - width - ROOM * char
+      local hang = math.max(0, math.min(indent + 2 * char, most))
+      local n, last, glyph = head, nil, first
+      while n do
+        local after = n.next
+        if spacing(n) then
+          if not (spacing(after) or after and after.id == PENALTY and spacing(after.next)) then
+            head = node.insert_after(head, n, wrap_penalty(glyph, 0))
+          end
+          last = n
+        elseif n.id == GLYPH then
+          if last and last.id == GLYPH
+              and not (blank(last.char) or ahead(last) or joined(n) and (joined(last) or not ahead(n))) then
+            local value = 120
+            if letter(last.char) then value = 150 end
+            head = node.insert_before(head, n, wrap_penalty(n, value))
+          end
+          last, glyph = n, n
+        elseif not (n.id == WHATSIT or n.id == KERN or n.id == BOUNDARY or n.id == MARK) then
+          last = n
+        end
+        n = after
+      end
+      unwrap = { left = { width, stretch, shrink, stretchorder, shrinkorder },
+                 right = { tex.getglue("rightskip") }, lines = tex.interlinepenalty,
+                 id = id, boxed = oerfit.boxed }
+      tex.setglue("leftskip", width + hang, stretch, shrink, stretchorder, shrinkorder)
+      tex.setglue("rightskip", right - edge, tex.hsize, 0, 0, 0)
+      tex.interlinepenalty = 10000
+      local k = node.new(KERN)
+      k.kern, k.attr = -hang, first.attr
+      local at = head
+      while at and (at.id == LOCALPAR or at.id == DIR or at.id == HLIST and at.subtype == INDENT) do
+        at = at.next
+      end
+      head = node.insert_before(head, at, k)
+      return head
+    end, "oer.fit.wrap")
+    luatexbase.add_to_callback("post_linebreak_filter", function(head)
+      if unwrap then
+        local id, tall = unwrap.id, 0
+        for n in node.traverse(head) do
+          if n.id == HLIST then
+            tall = tall + n.height + n.depth
+          elseif n.id == GLUE then
+            tall = tall + n.width
+          elseif n.id == KERN then
+            tall = tall + n.kern
+          end
+        end
+        if unwrap.boxed then
+          if id and tall > tex.vsize then oerfit.tall[id] = true end
+        elseif tall > tex.vsize / 2 then
+          for n in node.traverse_id(PENALTY, head) do
+            if n.penalty >= 10000 then n.penalty = n.penalty - 10000 + unwrap.lines end
+          end
+        end
+        tex.setglue("leftskip", table.unpack(unwrap.left))
+        tex.setglue("rightskip", table.unpack(unwrap.right))
+        tex.interlinepenalty = unwrap.lines
+        unwrap = nil
+      end
+      return true
+    end, "oer.fit.unwrap")
     function oerfit.open(id, kind, line, room, size, columns, where, sep0, twocol)
       oerfit.kind[id], oerfit.line[id], oerfit.room[id] = kind, line, room
       oerfit.size[id], oerfit.columns[id], oerfit.where[id] = size, columns, where
@@ -910,11 +1049,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       local s = oerfit.state[id]
       if s then
         tex.sprint(string.char(92) .. "OERFitApply{" .. kind .. "}{" .. s.narrow .. "}{"
-          .. s.factor .. "}{" .. s.columns .. "}{" .. s.center .. "}{" .. columns .. "}")
+          .. s.factor .. "}{" .. s.columns .. "}{" .. s.center .. "}{" .. columns .. "}{"
+          .. (s.wrap or 0) .. "}")
       end
     end
     function oerfit.table(id, width, sep)
       oerfit.width[id], oerfit.sep[id] = width, sep
+    end
+    function oerfit.wrap(id)
+      if oerfit.state[id] then oerfit.state[id].wrap = 1 end
     end
     function oerfit.code(id, width, line)
       if oerfit.kind[id] == "p" then
@@ -925,9 +1068,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         oerfit.width[id] = width
       end
     end
-    function oerfit.code_line(width, line)
+    function oerfit.code_line(box, line)
       local id = current()
-      if measured(id) then oerfit.code(id, width, line) end
+      if measured(id) then oerfit.code(id, natural(tex.getbox(box).head), line) end
     end
     function oerfit.entry(id, width)
       local e = oerfit.entries[id]
@@ -1080,7 +1223,12 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         local f = math.min(1, s.factor * line / w * AIM)
         if f >= FLOOR then return { narrow = narrow, factor = down(f, 1000), columns = 1, center = center } end
         local least = FLOOR
-        if w * FLOOR / s.factor > room then least = math.max(LEAST, down(s.factor * room / w * AIM, 1000)) end
+        if w * FLOOR / s.factor > room then
+          if kind == "c" and w * LEAST / s.factor > room then
+            return { narrow = 0, factor = FLOOR, columns = 1, center = 0, wrap = 1 }
+          end
+          least = math.max(LEAST, down(s.factor * room / w * AIM, 1000))
+        end
         return { narrow = narrow, factor = least, columns = 1, center = center }
       end
       local k = oerfit.columns[id]
@@ -1171,14 +1319,17 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     function oerfit.decide()
       local run = oerfit.run + 1
-      local changed, narrowed, smaller, smallest, wide = 0, 0, 0, 1, {}
+      local changed, narrowed, smaller, smallest, wide, wrapped, tall = 0, 0, 0, 1, {}, {}, {}
       for id, kind in pairs(oerfit.kind) do
         local s = oerfit.state[id] or { narrow = 0, factor = 1, columns = 1, center = 0 }
         local w, line, room = oerfit.width[id], oerfit.line[id], oerfit.room[id]
         local tight = oerfit.tight[id] or 0
         local over = w and w > line + TOLERANCE
         local cells = kind == "p" and tight > 1.002
-        if over or cells then
+        if s.wrap == 1 then
+          wrapped[id] = oerfit.where[id] .. " " .. s.factor .. " " .. (oerfit.twocol[id] or 0)
+          if oerfit.tall[id] then tall[id] = oerfit.where[id] end
+        elseif over or cells then
           local onpaper = 1
           if w and w > room then onpaper = 0 end
           wide[id] = kind .. " " .. points(math.max(0, (w or 0) - (oerfit.edge[id] or line)))
@@ -1208,9 +1359,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         end
         if new and ((refit and (not (new.narrow == s.narrow) or not (new.center == s.center)
                                 or math.abs(new.factor - s.factor) > 0.0005
-                                or math.abs(new.columns - s.columns) > 0.00005))
+                                or math.abs(new.columns - s.columns) > 0.00005
+                                or not ((new.wrap or 0) == (s.wrap or 0))))
                     or new.narrow > s.narrow or new.center > s.center
-                    or new.factor < s.factor - 0.0005) then
+                    or new.factor < s.factor - 0.0005 or (new.wrap or 0) > (s.wrap or 0)) then
           oerfit.state[id], s = new, new
           changed = changed + 1
         end
@@ -1225,6 +1377,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         local s = oerfit.state[id]
         tex.sprint(string.char(92) .. "OERFitWrite{" .. id .. "}{" .. s.narrow .. "}{" .. s.factor
           .. "}{" .. s.columns .. "}{" .. s.center .. "}")
+        if s.wrap == 1 then tex.sprint(string.char(92) .. "OERFitWrapWrite{" .. id .. "}") end
         if s.widths then
           for j, width in pairs(s.widths) do
             tex.sprint(string.char(92) .. "OERFitStepsWrite{" .. id .. "}{" .. j .. "}{" .. math.floor(width) .. "}")
@@ -1241,6 +1394,12 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         .. " narrowed, " .. smaller .. " smaller, smallest " .. smallest)
       for id, said in pairs(wide) do
         texio.write_nl("term and log", "TextbookImprover fit wide: " .. said)
+      end
+      for id, said in pairs(wrapped) do
+        texio.write_nl("term and log", "TextbookImprover fit wrapped: " .. said)
+      end
+      for id, said in pairs(tall) do
+        texio.write_nl("term and log", "TextbookImprover fit tall: " .. said)
       end
       if changed > 0 then
         texio.write_nl("term and log", "Package TextbookImprover Warning: " .. changed
@@ -1259,6 +1418,17 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \cs_new_protected:Npn \OERFitSource #1#2 { \directlua { oerfit.stored[oerfit.unhex("#1")] = "#2" } }
   \cs_new_protected:Npn \OERFitWrite #1#2#3#4#5
     { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitState {#1}{#2}{#3}{#4}{#5} } }
+  % A block of code whose lines wrap (\OERFitCode, below), after its
+  % \OERFitState: written so that macros from before it read past it.
+  \cs_new_protected:Npn \OERFitWrap #1 { \directlua { oerfit.wrap(#1) } }
+  \cs_new_protected:Npn \OERFitWrapWrite #1
+    {
+      \exp_args:Nc \iow_now:Ne { @auxout }
+        {
+          \token_to_str:N \ifdefined \token_to_str:N \OERFitWrap
+          \token_to_str:N \OERFitWrap {#1} \token_to_str:N \fi
+        }
+    }
   \cs_new_protected:Npn \OERFitWriteRun #1
     { \exp_args:Nc \iow_now:Ne { @auxout } { \token_to_str:N \OERFitRun {#1} } }
   \cs_new_protected:Npn \OERFitWriteSource #1#2
@@ -1360,9 +1530,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % s a worked example's steps, d a display formula, e a numbered one, i a
   % formula in text, c a block of code; #2 its spaces narrowed or not; #3 its type's size, a part of its own; #4 a
   % wrapping table's columns' width, a part of the widths its LaTeX gives
-  % them; #5 centered or not; and #6 a table's number of columns.
-  \cs_new_protected:Npn \OERFitApply #1#2#3#4#5#6
+  % them; #5 centered or not; #6 a table's number of columns; and #7 1
+  % where a block of code's lines wrap.
+  \cs_new_protected:Npn \OERFitApply #1#2#3#4#5#6#7
     {
+      \int_compare:nNnT {#7} = { 1 } { \__oer_fit_wrap: }
       \fp_compare:nNnT {#3} < { 1 }
         {
           \str_case:nnF {#1}
@@ -1521,6 +1693,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % a table's cell is the code's. Wrapped once, in the outermost group.
   \box_new:N \l__oer_fit_code_box
   \bool_new:N \l__oer_fit_code_lines_bool
+  \bool_new:N \l__oer_fit_wrap_bool
   \cs_new_protected:Npn \__oer_fit_code_lines:
     {
       \bool_if:NF \l__oer_fit_code_lines_bool
@@ -1534,13 +1707,121 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
                   \hbox_set:Nn \l__oer_fit_code_box { \__oer_fit_code_line:n {##1} }
                   \directlua
                     {
-                      oerfit.code_line(\dim_to_decimal_in_sp:n { \box_wd:N \l__oer_fit_code_box },
+                      oerfit.code_line(\int_eval:n { \l__oer_fit_code_box },
                         \dim_to_decimal_in_sp:n { \linewidth })
                     }
-                  \hbox_unpack_drop:N \l__oer_fit_code_box
+                  \bool_if:NTF \l__oer_fit_wrap_bool
+                    { \__oer_fit_wrap_line: }
+                    { \hbox_unpack_drop:N \l__oer_fit_code_box }
                 }
             }
         }
+    }
+  % A block of code whose lines wrap: one too long for the paper even at
+  % half its size, set at three quarters (oerfit.next), each line too long
+  % for its line broken where it reaches the line's end, the line the fit
+  % measured it against, the text's or a quotation's, not into the margin.
+  % What it holds is marked
+  % (\OERFitWrapAttribute), so that TeX may break a paragraph of it: LaTeX's
+  % verbatim's lines, each a paragraph already, and a line of fancyvrb's
+  % too long for its line, set as one here, in a box where fancyvrb puts
+  % the line's (\__oer_fit_wrap_line:), as fvextra sets a line it breaks.
+  % That box is as deep as its lines, from its first line's base, and TeX
+  % sets the next line under it by its depth: so each of fancyvrb's lines
+  % in the block holds a strut, the line's height above its base and its
+  % depth below, and the block sets lines touching where they would
+  % otherwise come closer than its spacing, no space between them, so that
+  % a line follows a wrapped one at the block's spacing, its own strut's
+  % height under the wrapped one's last. Before TeX breaks such a
+  % paragraph (oer.fit.wrap, above), it's measured whole, for the fit, by
+  % what it holds, in Lua, whose sums run past TeX's largest dimension;
+  % within half a point of its line it isn't broken, as fancyvrb's line
+  % isn't. It may break after a run of spaces, no-break spaces among them,
+  % the space kept at the line's end, which tagpdf writes as a space
+  % character, so the line's text is as written: the break, a penalty, has
+  % the attributes of the character before the space, since the line's
+  % right skip takes the break's, and with the space's tagpdf wrote a
+  % second space for it. Or between two characters, after a mark rather
+  % than between two letters, a mark's break dearer than a part a space
+  % ends can cost, (10 + 100) squared at most with the right skip below, so
+  % a word that fits the next row whole goes there; but not to part a
+  % character of no width, as a combining mark is once it's set, from the
+  % letter it's on: that's the letter before it, but for a mark of a
+  % right-to-left script that HarfBuzz shapes (luaotfload's harf mode, as
+  % the fallback fonts are loaded), which is set before its letter, as a
+  % review found a Hebrew point, which a break left on the line before,
+  % where node mode sets it after. Each part after the
+  % first hangs the line's indentation (no-break spaces counted, as
+  % OpenStax indents code) and two characters further in, a character as
+  % wide as the first that has a width, but no further
+  % than leaves ROOM characters to a part, where the most had been half
+  % the text's width, which set the parts of a line indented further left
+  % of its text, and broke a long word's line right after its
+  % indentation, leaving its row blank. A run of blanks is one place to
+  % break, after it, the indentation too, which TeX takes only where the
+  % parts after it have more room than its row, a line indented deeper
+  % than leaves ROOM characters: its text then on the next row where its
+  % first word doesn't fit after the indentation, rather than run off the
+  % paper. Elsewhere a long word after the indentation breaks where the
+  % row ends, the parts after it having no more room.
+  % The hang is a left skip that much wider, and a kern taking it back
+  % from the first line, which a list's paragraph shape doesn't override,
+  % as it does a hanging indent. Its right skip ends a part at the line's
+  % end, the fit's line from \OERFitCode (oerfit.right), whatever the
+  % paragraph's line: a quotation's line ends inside the text's, where
+  % LaTeX's own verbatim sets only a left skip, and latex-lab's a
+  % paragraph shape 30 points shorter than the quotation's line, as of
+  % 2026-06-01, so that its parts had ended 30 points inside it. It
+  % stretches as far as the line is wide, so that TeX fills a line
+  % before breaking it; the paragraph's discretionaries are taken out, as
+  % the line shows them unbroken, so nothing is hyphenated; and a line's
+  % parts stay on a page together, as a box's do, unless they take more
+  % than half the page: then they break across pages, as a paragraph's
+  % lines do (oer.fit.unwrap), where a line too long for a page left its
+  % page blank and ran off the next's foot. oer.fit.unwrap puts the
+  % paragraph's settings back once it's broken, and keeps for the run's
+  % report whether a line of fancyvrb's is taller than the page, its box
+  % unbroken (oerfit.tall).
+  \cs_new_protected:Npn \__oer_fit_wrap:
+    {
+      \bool_set_true:N \l__oer_fit_wrap_bool
+      \setattribute \OERFitWrapAttribute { 1 }
+      \skip_zero:N \lineskip
+      \dim_zero:N \lineskiplimit
+    }
+  % fancyvrb's line, set in \l__oer_fit_code_box: as it is where it fits
+  % its line, and otherwise as a paragraph as wide as the line, which TeX
+  % breaks. The line is the fit's (\l__oer_fit_code_end_dim, from
+  % \OERFitCode) from where fancyvrb's begins: fancyvrb's own is the text's
+  % width less the left margin, a quotation's right margin in it. Its
+  % width is read in Lua, which reads one past TeX's largest dimension,
+  % about 2,275 characters at 12 points, where TeX stopped. LaTeX's tagging
+  % tags no paragraph in such a box (2026-06-01): the line's text is its
+  % line's (block/verbatim/codeline), as before. The box can't break
+  % across pages, as fvextra's can't, which is why oer.fit.unwrap says
+  % where one is taller than the page.
+  \dim_new:N \l__oer_fit_code_end_dim
+  \dim_new:N \l__oer_fit_code_row_dim
+  \cs_new_protected:Npn \__oer_fit_wrap_line:
+    {
+      \dim_set:Nn \l__oer_fit_code_row_dim { \l__oer_fit_code_end_dim - \leftmargin }
+      \dim_compare:nNnTF
+        { \directlua { oerfit.box_width(\int_eval:n { \l__oer_fit_code_box }) } sp }
+        > { \l__oer_fit_code_row_dim + 0.5 pt }
+        {
+          \vtop
+            {
+              \hsize \l__oer_fit_code_row_dim
+              \skip_zero:N \leftskip
+              \tex_parshape:D 0 \scan_stop:
+              \dim_zero:N \parindent
+              \skip_set:Nn \parfillskip { 0pt plus 1fil }
+              \directlua { oerfit.boxed = true }
+              \leavevmode \strut \hbox_unpack_drop:N \l__oer_fit_code_box \strut \par
+              \directlua { oerfit.boxed = false }
+            }
+        }
+        { \strut \hbox_unpack_drop:N \l__oer_fit_code_box }
     }
   % A block of code, between \OERFitCode and \OERFitCodeEnd, which
   % pdf-target.lua writes around it, a group: #1 its number. Its lines are
@@ -1556,9 +1837,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % characters, and its type set smaller, as much as it takes, but to
   % three quarters of its size at least, and smaller still, to half at
   % least, where it would come within a quarter inch of the paper's edge on
-  % its right; its lines closer with its type, as a table's are. One still
+  % its right; its lines closer with its type, as a table's are. One that
+  % would come that near even at half is set at three quarters, and its
+  % lines too long for their line wrap (\__oer_fit_wrap:, above), where
+  % it ran off the paper: in OpenStax's books, 7 of 667 blocks of code, 5 of
+  % Principles of Data Science's (a paragraph written as a string, 749
+  % characters) and 2 of Introduction to Python Programming's. One still
   % wider than its line is said to be by how far it runs past the text's
-  % edge, none in a quotation's right margin. The log says where each
+  % edge, none in a quotation's right margin, and one whose lines wrap is
+  % said to, and to be too tall where a line of it fancyvrb sets runs
+  % off its page. The log says where each
   % begins and ends, so that a line LaTeX reports as too wide between them,
   % one of verbatim's, is known as code's (latexbuild.overfull_lines):
   % TeX names a line by the line of the file it's reading, the book's or,
@@ -1578,7 +1866,9 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             \dim_to_decimal_in_sp:n { \use:c { f@size } pt }, 0, \int_use:N \tex_inputlineno:D,
             0, \legacy_if:nTF { @twocolumn } { 1 } { 0 })
           oerfit.edge[#1] = \dim_to_decimal_in_sp:n { \hsize - \use:c { @totalleftmargin } }
+          oerfit.right[#1] = \dim_to_decimal_in_sp:n { \use:c { @totalleftmargin } + \linewidth }
         }
+      \dim_set:Nn \l__oer_fit_code_end_dim { \use:c { @totalleftmargin } + \linewidth }
       \__oer_fit_code_lines:
     }
   \NewDocumentCommand \OERFitCodeEnd { m }
@@ -1602,6 +1892,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \NewDocumentCommand\OERFitCode{m}{}
   \NewDocumentCommand\OERFitCodeEnd{m}{}
   \def\OERFitState#1#2#3#4#5{}
+  \def\OERFitWrap#1{}
   \def\OERFitStepsWidth#1#2#3{}
   \def\OERFitStepsState#1#2{}
   \def\OERFitRun#1{}
@@ -2486,17 +2777,27 @@ FITTED = re.compile(r"^TextbookImprover fit: run (\d+), (\d+) narrowed, (\d+) sm
                     r"smallest ([\d.]+)$", re.M)
 FIT_WIDE = re.compile(r"^TextbookImprover fit wide: ([tpsdeic]) ([\d.]+) (\d+) ([\d.]+) ([01]) ([01]) "
                       r"([01])$", re.M)
+# And each block of code whose lines wrap on the run, too long for the
+# paper even at half its size: the line of LaTeX its group opened on, the
+# part of its type's size it's in, and whether its page has two columns.
+FIT_WRAPPED = re.compile(r"^TextbookImprover fit wrapped: (\d+) ([\d.]+) ([01])$", re.M)
+# And each of them with a line of fancyvrb's, highlighted code's, taller
+# than the page wrapped, which can't break across pages: the line of LaTeX
+# its group opened on.
+FIT_TALL = re.compile(r"^TextbookImprover fit tall: (\d+)$", re.M)
 
 
 def fit_report(output, source, pages):
     """[lines to print] for what FIT_MACROS fitted, from what LaTeX's last
     run said (output) about its input (source), pages as overfull_lines
     takes them: what it fitted; what's still wider than the text, centered
-    on the page, which LaTeX doesn't report as an overfull box, and a block
-    of code still wider than the text, running into the margin; and, as
+    on the page, which LaTeX doesn't report as an overfull box, a block
+    of code still wider than the text, running into the margin, and one
+    whose lines wrap (FIT_WRAPPED); and, as
     warnings, what isn't a quarter inch inside the paper's edge even at the
-    least it sets type in, and what's wider than its column, on a page of
-    two. A formula still wider than its line, but a display centered
+    least it sets type in, what's wider than its column, on a page of
+    two, and a block of code with a highlighted line too long for a page
+    even wrapped (FIT_TALL). A formula still wider than its line, but a display centered
     within the margins, is LaTeX's overfull box as well, which
     overfull_lines names among the lines too wide; a table, centered, isn't
     one."""
@@ -2542,6 +2843,28 @@ def fit_report(output, source, pages):
                     + (": on " + page_list(list(dict.fromkeys(w[2] for w in code if w[2])))
                        if any(w[2] for w in code) else "")
                     + ".")
+    # A block of code too long for the paper even at half its size, whose
+    # lines wrap, is on the paper: said, not warned of.
+    wrapped = [(page(line), float(factor)) for line, factor, _columns in FIT_WRAPPED.findall(output)]
+    if wrapped:
+        pages_wrapped = list(dict.fromkeys(p for p, _f in wrapped if p))
+        said.append(f"{len(wrapped)} block(s) of code with a line too long for the paper even at "
+                    f"half {'its' if len(wrapped) == 1 else 'their'} size "
+                    f"{'is' if len(wrapped) == 1 else 'are'} set at "
+                    f"{round(min(f for _p, f in wrapped) * 100)}% of "
+                    f"{'its' if len(wrapped) == 1 else 'their'} size, each line too long for its "
+                    "line wrapped where it reaches the line's end"
+                    + (": on " + page_list(pages_wrapped) if pages_wrapped else "") + ".")
+    # Highlighted code's line wrapped is set in a box, as fvextra sets one,
+    # which TeX can't break across pages: one taller than the page runs
+    # off its foot.
+    tall = [page(line) for line in FIT_TALL.findall(output)]
+    if tall:
+        said.append(f"WARNING: {len(tall)} block(s) of code in a language "
+                    f"{'has' if len(tall) == 1 else 'have'} a line too long for a page even "
+                    "wrapped, which runs off its page's foot"
+                    + (": on " + page_list(list(dict.fromkeys(p for p in tall if p)))
+                       if any(tall) else "") + ".")
     if middle:
         tables = sum(1 for w in middle if w[1] in "tps")
         said.append(f"{len(middle)} of them, still wider than the text, "

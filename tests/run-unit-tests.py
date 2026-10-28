@@ -2601,8 +2601,9 @@ def check_code_fit_report():
     line of text; a footnote's own paragraph, which LaTeX reports at the
     line its text ends on, the footnote's last block's \\OERFitCodeEnd, is,
     and so is a line of text after it; and the fit report names a block as
-    code running into the margin, and warns of a block too wide for the
-    paper with the tables and formulas."""
+    code running into the margin, warns of a block too wide for the
+    paper with the tables and formulas, and says where a block's lines
+    wrap."""
     import latexbuild
     source = "\n".join(["\\label{page-code}", "Words one.", "", "Words two.", "",
                         "\\OERFitCode{1}", "", "\\begin{verbatim}", "Marginline",
@@ -2650,6 +2651,24 @@ def check_code_fit_report():
              "TextbookImprover fit wide: c 0.0 6 0.75 0 1 0\n", source, owners)
          == ["Fitted 1 table(s), formula(s), and block(s) of code too wide for their lines "
              "to them: 1 in smaller type, the smallest at 75% of its size."]),
+        ("a block of code whose lines wrap, too long for the paper even at half its size, is "
+         "said to be, where it is, and not warned of",
+         lambda: latexbuild.fit_report(
+             "TextbookImprover fit: run 2, 0 narrowed, 1 smaller, smallest 0.75\n"
+             "TextbookImprover fit wrapped: 6 0.75 0\n", source, owners)
+         == ["Fitted 1 table(s), formula(s), and block(s) of code too wide for their lines "
+             "to them: 1 in smaller type, the smallest at 75% of its size.",
+             "1 block(s) of code with a line too long for the paper even at half its size is "
+             "set at 75% of its size, each line too long for its line wrapped where it reaches "
+             "the line's end: on code."]),
+        ("a block of highlighted code with a line too long for a page even wrapped, which "
+         "runs off its page's foot, is warned of",
+         lambda: latexbuild.fit_report(
+             "TextbookImprover fit: run 2, 0 narrowed, 1 smaller, smallest 0.75\n"
+             "TextbookImprover fit wrapped: 6 0.75 0\n"
+             "TextbookImprover fit tall: 6\n", source, owners)[2:]
+         == ["WARNING: 1 block(s) of code in a language has a line too long for a page even "
+             "wrapped, which runs off its page's foot: on code."]),
     ]
 
 

@@ -2692,7 +2692,8 @@ def case_unsettled(work):
 
 
 # A slide's table and a slide's formula too wide for it, which LaTeX fits
-# to it as it does a book's (latexbuild's FIT_MACROS).
+# to it as it does a book's (latexbuild's FIT_MACROS), and a slide whose
+# code is too long for it even at half its size, which wraps.
 WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
                + "| " + " | ".join("Column %d" % c for c in range(12)) + " |\n"
                + "|" + "---|" * 12 + "\n"
@@ -2700,7 +2701,9 @@ WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
                + "\n# A formula\n\n$$x = "
                + " + ".join("a_{%d} b_{%d} c_{%d}" % (k, k, k) for k in range(16)) + "$$\n"
                + "\n# Code\n\n```python\nCodeslide = \"" + "x" * 100 + "\"\n```\n"
-               + "\n# Short code\n\n```python\nShortslide = 1\n```\n")
+               + "\n# Short code\n\n```python\nShortslide = 1\n```\n"
+               + "\n# Long code\n\n```python\nCodewrap = \"" + " ".join(
+                   "word%02d" % k for k in range(50)) + "\"\n```\n")
 
 # A section's footnote with code that fits, and a slide with code too wide
 # for it, which deck-pdf.lua and pdf-target.lua number apart; and the deck
@@ -2720,7 +2723,9 @@ def case_wide_slide(work):
     size (a line of 74 characters had fit it, fitted or not), and a slide
     of code that fits it is beside it. And a section's footnote's code
     that fits keeps its size beside a slide's set smaller (SECTION_CODE):
-    its fit numbered from 1, as the deck's are, it had the slide's."""
+    its fit numbered from 1, as the deck's are, it had the slide's. And a
+    slide whose line of code is too long for it even at half its size,
+    set at three quarters and wrapped."""
     real = shutil.which("lualatex")
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
@@ -2757,6 +2762,12 @@ def case_wide_slide(work):
         return len(boxes) >= least and all(18 <= left and right <= width - 18
                                            for _, _, left, right, _ in boxes)
 
+    def rows(slide):
+        """The wide deck's slide's lines of text: its baselines."""
+        if not os.path.exists(path):
+            return []
+        return sorted({round(b[1], 1) for b in pdftext.glyph_boxes(path) if b[0] == slide})
+
     def advance(deck, word):
         """How wide a glyph of the line of code that opens with word is, on
         average, in the deck's PDF; 0 where there's none."""
@@ -2776,6 +2787,11 @@ def case_wide_slide(work):
          "slide's code that fits",
          lambda: inside(1, 200) and inside(2, 100) and inside(3, 100)
          and 0 < advance("wide", "Codeslide") < 0.9 * advance("wide", "Shortslide")),
+        ("a slide's line of code too long for it even at half its size is set at three "
+         "quarters of its size and wrapped, every part a quarter inch inside the slide's "
+         "edges",
+         lambda: inside(5, 300) and len(rows(5)) >= 3
+         and abs(advance("wide", "Codewrap") - 0.75 * advance("wide", "Shortslide")) < 0.05),
         ("a section's footnote's code that fits is set at its size beside a slide's code set "
          "smaller, as wide a character as where the slide's code fits too",
          lambda: 0 < advance("sections", "Slidecode") < 0.9 * advance("sectionsshort", "Slidecode")

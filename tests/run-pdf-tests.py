@@ -1913,29 +1913,58 @@ def rules_checks(rules_path):
 # one in no language, which the writer sets in LaTeX's verbatim, each set
 # smaller to fit it; a line in no language in a list's item that fits the
 # text's width but not the item's, measured without the list's margin; a
-# line in no language too long for its line even at
-# three quarters of its size, set at that size, running on into the
-# margin, which LaTeX reports as a line of text too wide and the build
-# names as code; one that would come within a quarter inch of the paper's
-# edge at three quarters, set smaller to end that far inside it; one too
-# long for the paper even at half its size, set at half, of which the
-# build warns; and a footnote's, fitted to the footnote's line. And what
-# a review found: a line in no language with hyphens, which TeX broke
-# after one, ragged right letting it; a quotation's line, fitted to the
-# quotation's line and inside the text's, not said to run into the
-# margin; a definition that opens with code, whose term the writer's ~
-# keeps on a line of its own; code in a table's cell, in no language in
-# one table and highlighted in another, each table fitted by its lines; a footnote's code in a
-# table's cell, a table whose columns wrap, so that the footnote's code,
-# set after the table in its group, which measures highlighted code too,
-# is measured as its own; a footnote's code in no language still too
-# wide, which
-# LaTeX reports at a line of the file it's read from, named once, as code;
-# and a footnote whose words are too wide for its line and whose last
-# block is code, which LaTeX reports at the line the footnote's text ends
-# on, named as a line of text. Each line, its text as written, opens with
-# a word of its own.
+# line in no language too long for its line even at three quarters of its
+# size, set at that size, running on into the margin, which LaTeX reports as
+# a line of text too wide and the build names as code; one that would come
+# within a quarter inch of the paper's edge at three quarters, set smaller
+# to end that far inside it; one that would come that near even at half, but
+# for the little more room the fit aims to leave, set at half, not wrapped;
+# a block with a line too long for the paper even at half its size, set at
+# three quarters, its lines too long for their line wrapped where they reach
+# its end, a line of one word broken between its letters, one of a word TeX
+# would hyphenate, not hyphenated, a line of words indented with spaces and
+# one with no-break spaces, as OpenStax's code is, broken at their spaces,
+# and a line after them, and lines in no language so, one of hyphened
+# words broken after a hyphen, and one longer than its line by less than
+# half a point, not broken, as a highlighted one isn't; a block of a long
+# word after an indentation, broken in the word, not after the
+# indentation, a line indented deeper than leaves twenty characters to a
+# part, its text twenty characters from the line's end, a line of words
+# joined by no-break spaces, broken after one, a word after a space that
+# fits the next row whole, not broken after a dot, a line that opens with
+# a mark, its parts two characters in, and Hebrew with its points, each
+# kept with its letter, one line with a point on every letter; and a
+# line in no language
+# where a page ends, whose parts go on to the next page together, all of
+# which the build says it wrapped; and a footnote's, fitted to the
+# footnote's line. And what a review found: a line in no language with
+# hyphens, which TeX broke after one, ragged right letting it; a quotation's
+# line, fitted to the quotation's line and inside the text's, not said to
+# run into the margin; a definition that opens with code, whose term the
+# writer's ~ keeps on a line of its own; code in a table's cell, in no
+# language in one table and highlighted in another, each table fitted by its
+# lines; a footnote's code in a table's cell, a table whose columns wrap, so
+# that the footnote's code, set after the table in its group, which measures
+# highlighted code too, is measured as its own; a footnote's code in no
+# language still too wide, which LaTeX reports at a line of the file it's
+# read from, named once, as code; and a footnote whose words are too wide
+# for its line and whose last block is code, which LaTeX reports at the line
+# the footnote's text ends on, named as a line of text. Each line, its text
+# as written, opens with a word of its own.
 CODE_LONG = "def longline(price, quantity, discount, tax_rate, shipping, handling, region):"
+PAPER_WORDS = " ".join("word%02d" % i for i in range(30))
+FOOT_WORDS = " ".join("word%02d" % i for i in range(90))
+PAPER_HYPHEN = "incomprehensibilities" * 10
+PAPER_DASHES = "abcde-" * 40
+PAPER_LEAD = " " * 60 + "Paperlead" + "x" * 31 + " = 1"
+PAPER_DEEP = " " * 90 + "Paperdeep = \"" + PAPER_WORDS + "\""
+PAPER_HEB = "Paperheb = \"" + "\u05e9\u05b8\u05c1\u05dc\u05d5\u05b9\u05dd" * 40 + "\""
+PAPER_JOINED = "Paperjoined = \"" + PAPER_WORDS.replace(" ", "\u00a0") + "\""
+PAPER_POINTED = "Paperpointed = \"" + "\u05d1\u05bc" * 150 + "\""
+PAPER_DOTS = "Paperdots = " + ".".join("part%d" % i for i in range(13))
+PAPER_MARK = "\u0301Papermark = \"" + PAPER_WORDS + "\""
+PAPER_EXACT = "Paperexact = " + "e" * 74
+TALL_WORDS = " ".join("t%03d" % i for i in range(1000))
 CODE_CELL = ("Cellplain = [" + ", ".join(str(i) for i in range(10, 19)) + "]",
              "Cellcode = [" + ", ".join(str(i) for i in range(10, 19)) + "]")
 FIT_CODE = (
@@ -1948,8 +1977,20 @@ FIT_CODE = (
     "A line in no language too long for its line even at three quarters of its size:\n\n```\n"
     "Marginline = \"" + "x" * 80 + "\"\n```\n\nA line that would come within a quarter inch of "
     "the paper's edge at three quarters of its size:\n\n```python\nRoomline = \"" + "w" * 109
-    + "\"\n```\n\nA line too long for the paper even at half its size:\n\n```python\n"
-    "Paperline = \"" + "y" * 200 + "\"\n```\n\nA footnote with code.[^code]\n\n"
+    + "\"\n```\n\nA line that would come that near even at half its size, but for the room "
+    "the fit leaves:\n\n```python\nHalfline = \"" + "h" * 130 + "\"\n```\n\n"
+    "A line too long for the paper even at half its size, and lines of words, "
+    "one indented with no-break spaces, as OpenStax indents code:\n\n```python\nPaperline = \""
+    + "y" * 200 + "\"\nPaperhyphen = \"" + PAPER_HYPHEN + "\"\n    Paperwords = \""
+    + PAPER_WORDS + "\"\n\u00a0\u00a0Papernbsp = \""
+    + PAPER_WORDS + "\"\nPaperafter = 1\n```\n\nA line in no language too long for the paper "
+    "even at half its size:\n\n```\nPaperplain = " + PAPER_WORDS + "\nPaperdash = " + PAPER_DASHES
+    + "\n" + PAPER_EXACT + "\n```\n\nA line indented deeper than leaves twenty characters to a part, a long word "
+    "after an indentation, words joined by no-break spaces, a word that fits the next row "
+    "whole, a line that opens with a mark, and Hebrew with its points:\n\n"
+    "```python\n" + PAPER_LEAD + "\n" + PAPER_DEEP + "\n" + PAPER_JOINED + "\n" + PAPER_DOTS
+    + "\n" + PAPER_MARK + "\n" + PAPER_HEB + "\n" + PAPER_POINTED + "\n```\n\n"
+    "A footnote with code.[^code]\n\n"
     "A line in no language with hyphens, too long for its line:\n\n```\nHyphenline = \""
     + "abcd-" * 12 + "abcd\"\n```\n\n> A quotation's code, too long for its line but not the "
     "text's at three quarters of its size:\n>\n> ```\n> Quoteline = \"" + "q" * 64 + "\"\n> ```\n\n"
@@ -1965,7 +2006,9 @@ FIT_CODE = (
     "| A cell's note.[^cell]" + " " * 8 + "| Here" + " " * 7 + "|\n+" + "-" * 30 + "+"
     + "-" * 12 + "+\n\nA footnote whose code is too long for its line even at three quarters of its "
     "size.[^wide]\n\nA footnote whose words are too wide for its line and whose last block is "
-    "code.[^words]\n\n[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
+    "code.[^words]\n\n```{=latex}\n\\clearpage\n\\vspace*{\\dimexpr\\textheight-4\\baselineskip"
+    "\\relax}\n```\n\n```\nPagefoot = " + FOOT_WORDS + "\n```\n\n"
+    "[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
     + "\"\n    ```\n\n[^cell]: Its code:\n\n    ```python\n    Cellnote = \"" + "c" * 87
     + "\"\n    ```\n\n[^wide]: Its code:\n\n    ```\n    Notewide = \"" + "n" * 106
     + "\"\n    ```\n\n[^words]: Its words: `Wideword" + "q" * 100 + "`\n\n    ```python\n"
@@ -1980,11 +2023,13 @@ FIT_CODE = (
 # the item's, fitted to the item's line, in a tagged PDF, where latex-lab's
 # verbatim indents it by a paragraph shape, and in an untagged one (the
 # target untagged), where LaTeX's own verbatim indents it by its left skip,
-# which isn't the line's to measure; and a list's item holding a block of
+# which isn't the line's to measure; a list's item holding a block of
 # code in no language that runs across a page's break, its lines short, at
 # the text's size, not set smaller by the footer's lines, which the output
 # routine sets while the block's group is open and which are wider than the
-# item's line.
+# item's line; and a quotation's lines too long for the paper even at half
+# their size, highlighted and in no language, wrapped at the quotation's
+# line's end, tagged and untagged.
 CODE_MARGINS = ("geometry:\n  - left=0.75in\n  - right=1.5in\n  - top=0.8in\n"
                 "  - bottom=0.8in\n  - footskip=0.3in\nclassoption: [oneside]\n")
 FIT_CODE_MARGINS = (
@@ -1995,7 +2040,22 @@ FIT_CODE_MARGINS = (
     "1. A list's item whose line in no language fits the text's width but not the item's:\n\n"
     "    ```\n    Itemline = [" + ", ".join(str(i) for i in range(1, 16)) + "]\n    ```\n\n"
     "2. A list's item whose code runs across a page's break:\n\n    ```\n"
-    + "".join("    Footline_%02d = %d\n" % (i, i) for i in range(1, 81)) + "    ```\n")
+    + "".join("    Footline_%02d = %d\n" % (i, i) for i in range(1, 81)) + "    ```\n\n"
+    "> A quotation's lines too long for the paper even at half their size:\n>\n> ```python\n"
+    "> Quotewrap = \"" + PAPER_WORDS + "\"\n> ```\n>\n> ```\n> Quoteplain = " + PAPER_WORDS
+    + "\n> ```\n")
+# A page 4 inches tall (CODE_TALL_PAGE, build_code), the default's
+# otherwise: a highlighted line too long for a page even wrapped, said to
+# run off its foot, wider at the text's size than TeX's largest dimension,
+# which stopped LaTeX where the fit measured it, and than a box's width
+# TeX can hold; and a line in no language taller than half the page
+# wrapped, which breaks across pages.
+CODE_TALL_PAGE = ("geometry:\n  - left=1in\n  - right=1in\n  - top=0.8in\n  - bottom=0.8in\n"
+                  "  - footskip=0.3in\n  - paperheight=4in\n")
+FIT_CODE_TALL = (
+    "# Tall\n\nA highlighted line too long for a page even wrapped:\n\n```python\nTallcode = \""
+    + TALL_WORDS + "\"\n```\n\nA line in no language taller than half the page wrapped:\n\n"
+    "```\nTallplain = " + TALL_WORDS + "\n```\n")
 CODE_FOOTER = ("This footer runs to two lines, the first wider than a list's item's line, "
                "which a block of code in an item the output routine interrupts was measured by.")
 
@@ -2006,8 +2066,10 @@ def build_code(work):
     Mono are wider for their size, each a target of its own; and
     FIT_CODE_MARGINS on CODE_MARGINS' page, with CODE_FOOTER, in the folder
     beside it ending -margins, and untagged, without it, in its folder
-    untagged: (the PDF's path, Latin Modern's, what the run said, the
-    margins book's PDF's path, what its run said)."""
+    untagged; and FIT_CODE_TALL on CODE_TALL_PAGE's page, in the folder
+    beside it ending -tall: (the PDF's path, Latin Modern's, what the run
+    said, the margins book's PDF's path, what its run said, the tall book's
+    PDF's path, what its run said)."""
     os.makedirs(work)
     with open(os.path.join(work, "code.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE)
@@ -2035,11 +2097,25 @@ def build_code(work):
                  "  untagged:\n    format: pdf\n    pdf:\n      standard: []\n"
                  "      metadata: page.yaml\n")
     margined = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], margins)
+    tall = work + "-tall"
+    os.makedirs(tall)
+    with open(os.path.join(tall, "tall.md"), "w", encoding="utf-8") as fh:
+        fh.write(FIT_CODE_TALL)
+    with open(os.path.join(tall, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Tall\n  identifier: org.example.tall\n"
+                 "  language: en-US\n  contents:\n    - tall\n")
+    with open(os.path.join(tall, "page.yaml"), "w", encoding="utf-8") as fh:
+        fh.write(CODE_TALL_PAGE)
+    with open(os.path.join(tall, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: page.yaml\n")
+    talled = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], tall)
     return (os.path.join(work, "pdf", "org.example.code.pdf"),
             os.path.join(work, "latin", "org.example.code.pdf"),
             converted.stdout + converted.stderr,
             os.path.join(margins, "pdf", "org.example.margins.pdf"),
-            margined.stdout + margined.stderr)
+            margined.stdout + margined.stderr,
+            os.path.join(tall, "pdf", "org.example.tall.pdf"),
+            talled.stdout + talled.stderr)
 
 
 def code_line(path, word):
@@ -2057,7 +2133,7 @@ def code_line(path, word):
     return None
 
 
-def code_checks(code_path, latin_path, said, margins_path, margins_said):
+def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_path, tall_said):
     """The code book's checks (build_code), and its margins book's. The
     default page is US Letter with an inch at the sides: its text runs from
     72 points to 540, 468 points, and a quarter inch inside the paper's
@@ -2111,6 +2187,178 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said):
                 return page
         return None
 
+    def advance_of(glyphs):
+        return (glyphs[-1][1] - glyphs[0][0]) / len(glyphs)
+
+    def parts(path, word, indent, step=None):
+        """[(page, baseline, glyphs)] of the line of code that opens with
+        word, wrapped: its first row, and each after it on its page, a
+        wrapped line's parts kept together, that begins the line's
+        indentation (indent characters) and two characters further in, a
+        character as wide as the first row's, or step where that's given,
+        as for an untagged PDF, whose spaces aren't characters."""
+        rows = glyph_rows(path)
+        for i, (page, _baseline, glyphs) in enumerate(rows):
+            if "".join(g[2] for g in glyphs).startswith(word):
+                found, step = [rows[i]], step or advance_of(glyphs)
+                for later in rows[i + 1:]:
+                    if later[0] != page or abs(later[2][0][0] - glyphs[0][0]
+                                               - (indent + 2) * step) > 0.5:
+                        break
+                    found.append(later)
+                return found
+        return []
+
+    def wrapped(path, whole, indent, piece, advance, full, edge=540, spaces=True):
+        """The line whole, indented indent characters, is wrapped (parts),
+        its parts holding it all, its spaces among them (where they're
+        characters: not in an untagged PDF), each part's characters as wide
+        as each other's, advance wide where that's given, smaller than full
+        where it isn't, ending inside its line's end (edge, the text's
+        unless given), and each but the last filled: less room left at its
+        end than the next part's first piece TeX may break after needs,
+        piece characters at most, a word, or a letter of a word longer than
+        the line."""
+        found = parts(path, whole[:indent + 6], indent, None if spaces else advance)
+        steps = [advance_of(glyphs) if spaces else advance for _page, _baseline, glyphs in found]
+        text = whole if spaces else whole.replace(" ", "")
+        return len(found) >= 2 and all(glyphs[-1][1] <= edge + 0.5 for _p, _b, glyphs in found) \
+            and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == text \
+            and max(steps) - min(steps) < 0.01 \
+            and all(glyphs[-1][1] > edge - (piece + 1) * steps[0] for _p, _b, glyphs in found[:-1]) \
+            and (abs(steps[0] - advance) < 0.05 if advance else steps[0] < full - 0.05)
+
+    def deep(path):
+        """The line indented deeper than leaves twenty characters to a part
+        (PAPER_DEEP): its indentation, and on its row as much of its text
+        as fits there whole, a word, or none, its first word in Plex Mono,
+        whose character is wider than Latin Modern Mono's, its next rows
+        twenty characters from the text's edge, inside it, on one page."""
+        rows = glyph_rows(path)
+        for i, (page, _baseline, glyphs) in enumerate(rows):
+            text = "".join(g[2] for g in glyphs)
+            if "Paperdeep" in text and text.strip().startswith("Paperdeep"):
+                found = [rows[i - 1]] if text.startswith("Paperdeep") and i > 0 else []
+                found.append(rows[i])
+                step = advance_of(glyphs[-10:])
+                for later in rows[i + 1:]:
+                    if later[0] != page or abs(later[2][0][0] - (540 - 20 * step)) > 0.5:
+                        break
+                    found.append(later)
+                return len(found) >= 3 and found[0][0] == page \
+                    and all(g[1] <= 540.5 for _p, _b, glyphs in found for g in glyphs
+                            if g[2] != " ") \
+                    and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == PAPER_DEEP
+        return False
+
+    def joined(path):
+        """The line of words joined by no-break spaces (PAPER_JOINED) breaks
+        after one, each part after the first opening with a word."""
+        found = parts(path, "Paperjoined", 0)
+        return len(found) >= 2 and all("".join(g[2] for g in glyphs).startswith("word")
+                                       for _p, _b, glyphs in found[1:])
+
+    def pointed(path):
+        """Each part of the lines of Hebrew with their points (PAPER_HEB,
+        PAPER_POINTED) holds its letters' points, which a fallback font
+        HarfBuzz shapes sets before its letters: as many holams as vavs,
+        qamatses and shin dots as shins, and daggeshes as bets, where a
+        review found a holam on the line before its vav, and a second found
+        a line whose every letter had a point unbroken. True where no font
+        has Hebrew."""
+        found = ["".join(g[2] for g in glyphs) for _p, _b, glyphs in glyph_rows(path)
+                 if any("\u05d0" <= g[2] <= "\u05ea" for g in glyphs)]
+        return not found or len(found) >= 4 and all(
+            text.count("\u05d5") == text.count("\u05b9")
+            and text.count("\u05e9") == text.count("\u05b8") == text.count("\u05c1")
+            and text.count("\u05d1") == text.count("\u05bc")
+            and all(g[1] <= 540.5 for _p, _b, glyphs in glyph_rows(path)
+                    for g in glyphs if "\u05d0" <= g[2] <= "\u05ea")
+            for text in found)
+
+    def whole_word(path):
+        """The word of the line that wraps before it (PAPER_DOTS), which
+        fits the next row whole, is on one row, not broken after a dot; and
+        the line just long enough for its line by less than half a point
+        (PAPER_EXACT) is on one row too, as a highlighted line is."""
+        texts = ["".join(g[2] for g in glyphs) for _p, _b, glyphs in glyph_rows(path)]
+        word = PAPER_DOTS.split(" = ")[1]
+        return any(word in text for text in texts) and PAPER_EXACT in texts
+
+    def marked(path):
+        """The line that opens with a mark (PAPER_MARK), which has no width,
+        has its parts after the first two characters in, as wide as its
+        letters."""
+        found = parts(path, PAPER_MARK[:6], 0, None)
+        return len(found) >= 2
+
+    def tall_rows(path):
+        """[(page, baseline, glyphs)] of the tall book's line in no
+        language, wrapped (Tallplain): its first row and each after it at
+        the line's indentation and two characters further in, on any page,
+        past the running head over a page's first, to the row that ends
+        it."""
+        rows = glyph_rows(path)
+        for i, (_page, _baseline, glyphs) in enumerate(rows):
+            if "".join(g[2] for g in glyphs).startswith("Tallplain"):
+                step, found = advance_of(glyphs), [rows[i]]
+                for later in rows[i + 1:]:
+                    if TALL_WORDS.split()[-1] in "".join(g[2] for g in found[-1][2]):
+                        break
+                    if abs(later[2][0][0] - glyphs[0][0] - 2 * step) < 0.5:
+                        found.append(later)
+                return found
+        return []
+
+    def dashed(path):
+        """Each part of the line of hyphened words in no language but its
+        last ends after a hyphen, where TeX may break in LaTeX's verbatim
+        once its discretionaries are taken out, its exhyphenpenalty 10000."""
+        found = parts(path, "Paperdash", 0)
+        return len(found) >= 2 and all("".join(g[2] for g in glyphs).endswith("-")
+                                       for _p, _b, glyphs in found[:-1])
+
+    def codeline_kids(path):
+        """The tags of the structure elements a /codeline element holds,
+        none where each line's text is its own marked content."""
+        if not os.path.exists(path):
+            return {"no PDF"}
+        found = set()
+        with pdftext.pikepdf.open(path) as pdf:
+            def walk(element, inside):
+                if isinstance(element, pdftext.pikepdf.Array):
+                    for kid in element:
+                        walk(kid, inside)
+                elif isinstance(element, pdftext.pikepdf.Dictionary) and "/S" in element:
+                    if inside:
+                        found.add(str(element.S))
+                    if element.get("/K") is not None:
+                        walk(element.K, inside or element.S == "/codeline")
+            walk(pdf.Root.StructTreeRoot.K, False)
+        return found
+
+    def spaced(path, pairs):
+        """For each (line_, after) of pairs, the line that opens with after,
+        line_ (word, indent) wrapped above it: where it's on the page the
+        wrapped line ends on, under its last part by as much as each of its
+        parts is under the one before; and so for two at least, a page's
+        break aside."""
+        measured = 0
+        for line_, after in pairs:
+            found = parts(path, line_[0], line_[1])
+            below = next(((page, baseline) for page, baseline, glyphs in glyph_rows(path)
+                          if "".join(g[2] for g in glyphs).startswith(after)), None)
+            if len(found) < 2 or below is None:
+                return False
+            step = found[0][1] - found[1][1]
+            if step <= 0 or any(abs(a[1] - b[1] - step) > 0.05 for a, b in zip(found, found[1:])):
+                return False
+            if below[0] == found[-1][0]:
+                if abs(found[-1][1] - below[1] - step) > 0.05:
+                    return False
+                measured += 1
+        return measured >= 2
+
     def overfull(text):
         """[how many points too wide the line of text each target's build
         names is], where each names one line of text alone; [] otherwise."""
@@ -2139,12 +2387,12 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said):
          and 62 * plex < 468),
         ("a line in no language too long for its line even at three quarters of its size is "
          "set at three quarters, running on into the margin, and the build names it as code, "
-         "with a line that would come within a quarter inch of the paper's edge and a "
-         "footnote's line still too wide, and not a quotation's line, which runs past the "
-         "quotation's line but not the text's",
+         "with a line that would come within a quarter inch of the paper's edge, one that "
+         "would at half its size, and a footnote's line still too wide, and not a "
+         "quotation's line, which runs past the quotation's line but not the text's",
          lambda: abs(line(code_path, "Marginline")[2] - 0.75 * plex) < 0.05
          and 540.5 < line(code_path, "Marginline")[1] <= 594
-         and re.search(r"3 block\(s\) of code, still wider than the text in smaller type, the "
+         and re.search(r"4 block\(s\) of code, still wider than the text in smaller type, the "
                        r"smallest at \d+% of its size, run into the margin on its right, the "
                        r"widest \d+ points wider: on code\.", said)),
         ("one that would come within a quarter inch of the paper's edge at three quarters "
@@ -2153,13 +2401,64 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said):
          lambda: all(560 < line(path, "Roomline")[1] <= 594
                      and 0 < line(path, "Roomline")[2] < 0.75 * full - 0.05
                      for path, full in ((code_path, plex), (latin_path, latin)))),
-        ("one too long for the paper even at half its size is set at half, and the build "
-         "warns of it, after saying what it fitted",
-         lambda: abs(line(code_path, "Paperline")[2] - 0.5 * plex) < 0.05
-         and "Fitted 13 table(s), formula(s), and block(s) of code too wide for their lines "
-         "to them: 13 in smaller type, the smallest at 50% of its size." in said
-         and "WARNING: 1 table(s), formula(s), or block(s) of code are too wide for the "
-         "paper even in smaller type, the smallest at 50% of its size" in said),
+        # Set smaller to end a little further in than a quarter inch, as
+        # the fit aims, it would need less than half its size; at half it
+        # still ends inside, and isn't wrapped.
+        ("one that would come within a quarter inch of the paper's edge even at half its "
+         "size, but for the little more room the fit aims to leave, is set at half, inside "
+         "that edge, its line whole",
+         lambda: abs(line(code_path, "Halfline")[2] - 0.5 * plex) < 0.05
+         and 560 < line(code_path, "Halfline")[1] <= 594
+         and len(parts(code_path, "Halfline", 0)) == 1),
+        ("a line too long for the paper even at half its size, highlighted or in no "
+         "language, is set at three quarters of its size, wrapped where it reaches its "
+         "line's end, every part of it inside the text's width, each after the first after "
+         "the line's indentation and two characters more, each but the last filled, a line "
+         "of one word broken between its letters, not hyphenated, and a line of words at its "
+         "spaces, a line of words joined by no-break spaces after one, a word that fits the "
+         "next row whole moved there, a line of hyphened words in no language after a "
+         "hyphen, a line longer than its line by less than half a point not broken, a line "
+         "that opens with a mark two characters in, a long word after "
+         "an indentation broken in the word, not after the indentation, a line indented "
+         "deeper than leaves twenty characters to a part broken after its indentation, "
+         "twenty characters from the line's end, and Hebrew with each letter's points, a "
+         "line with a point on every letter among them, its "
+         "parts on one page, one where a page ends going on to the next whole, its text one "
+         "line of code in the PDF's structure, no paragraph of its own, in Plex Mono and in "
+         "Latin Modern Mono, and the build says so, warning of nothing too wide for the "
+         "paper",
+         lambda: all(wrapped(path, whole, indent, piece, advance, full)
+                     for path, advance, full in ((code_path, 0.75 * plex, plex),
+                                                 (latin_path, None, latin))
+                     for whole, indent, piece in (
+                         ("Paperline = \"" + "y" * 200 + "\"", 0, 1),
+                         ("Paperhyphen = \"" + PAPER_HYPHEN + "\"", 0, 1),
+                         ("    Paperwords = \"" + PAPER_WORDS + "\"", 4, 7),
+                         ("\u00a0\u00a0Papernbsp = \"" + PAPER_WORDS + "\"", 2, 7),
+                         ("Paperplain = " + PAPER_WORDS, 0, 7),
+                         ("Paperdash = " + PAPER_DASHES, 0, 6),
+                         (PAPER_LEAD, 60, 1),
+                         (PAPER_JOINED, 0, 7),
+                         ("Pagefoot = " + FOOT_WORDS, 0, 7)))
+         and codeline_kids(code_path) == set()
+         and all(dashed(path) and deep(path) and pointed(path) and joined(path)
+                 and whole_word(path) and marked(path)
+                 for path in (code_path, latin_path))
+         and "Fitted 17 table(s), formula(s), and block(s) of code too wide for their lines "
+         "to them: 17 in smaller type" in said
+         and said.count("4 block(s) of code with a line too long for the paper even at half "
+                        "their size are set at 75% of their size, each line too long for its "
+                        "line wrapped where it reaches the line's end: on code.") == 2
+         and "too wide for the paper" not in said),
+        ("a line after a wrapped one, wrapped or not, is set at the block's spacing under the "
+         "wrapped line's last part, as its parts are under each other, where no page's break "
+         "parts them",
+         lambda: all(spaced(path, ((("Paperline", 0), "Paperhyphen"),
+                                   (("Paperhyphen", 0), "    Paperwords"),
+                                   (("    Paperwords", 4), "\u00a0\u00a0Papernbsp"),
+                                   (("\u00a0\u00a0Papernbsp", 2), "Paperafter"),
+                                   (("Paperplain", 0), "Paperdash")))
+                     for path in (code_path, latin_path))),
         ("a footnote's code is fitted to the footnote's line, a footnote's in a table's cell "
          "too, whose text is set after the table",
          lambda: fitted(code_path, "Noteline", 0.6 * 9.963, low=500)
@@ -2189,25 +2488,66 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said):
          "footnote's text ends on",
          lambda: 540.5 < line(code_path, "Notewide")[1] <= 594
          and len(overfull(said)) == 2 and min(overfull(said)) > 50),
-        ("each line's text is as written, its spaces kept, fitted or not",
-         lambda: os.path.exists(code_path) and pdftext.code_lines(code_path)
+        ("each line's text is as written, its spaces kept, fitted or not, a line of Hebrew "
+         "with its points holding its characters",
+         lambda: os.path.exists(code_path)
+         and [line_ for line_ in pdftext.code_lines(code_path)
+              if not line_.startswith(("Paperheb", "Paperpointed"))]
          == ["def shortline(p):", "    return p", CODE_LONG, "    return price",
              "Plainlong = \"" + "abcdefghijklmnopqrstuvwxyz" * 2 + "abcdefghijkl\"",
              "Listline = [" + ", ".join(str(i) for i in range(1, 16)) + "]",
              "Marginline = \"" + "x" * 80 + "\"", "Roomline = \"" + "w" * 109 + "\"",
-             "Paperline = \"" + "y" * 200 + "\"", "Noteline = \"" + "z" * 70 + "\"",
+             "Halfline = \"" + "h" * 130 + "\"",
+             "Paperline = \"" + "y" * 200 + "\"", "Paperhyphen = \"" + PAPER_HYPHEN + "\"",
+             "    Paperwords = \"" + PAPER_WORDS + "\"",
+             "\u00a0\u00a0Papernbsp = \"" + PAPER_WORDS + "\"", "Paperafter = 1",
+             "Paperplain = " + PAPER_WORDS, "Paperdash = " + PAPER_DASHES,
+             PAPER_EXACT, PAPER_LEAD, PAPER_DEEP, PAPER_JOINED, PAPER_DOTS, PAPER_MARK,
+             "Noteline = \"" + "z" * 70 + "\"",
              "Hyphenline = \"" + "abcd-" * 12 + "abcd\"", "Quoteline = \"" + "q" * 64 + "\"",
              "Defline = 1", "Plaindef = 2", CODE_CELL[0], CODE_CELL[1],
              "Cellnote = \"" + "c" * 87 + "\"", "Notewide = \"" + "n" * 106 + "\"",
-             "Footcode = 1"]),
+             "Footcode = 1", "Pagefoot = " + FOOT_WORDS]
+         and [sorted(line_) for line_ in pdftext.code_lines(code_path)
+              if line_.startswith(("Paperheb", "Paperpointed"))]
+         == [sorted(PAPER_HEB), sorted(PAPER_POINTED)]),
         ("on a one-sided page whose right margin is wider than its left, a line too long "
          "even at three quarters of its size runs into the right margin at three quarters, "
          "as far as a quarter inch from the paper's edge, the left margin's width aside, and "
          "a numbered display too",
          lambda: abs(line(margins_path, "Rightline")[2] - 0.75 * plex) < 0.05
          and 560 < line(margins_path, "Rightline")[1] <= 594
-         and "Fitted 3 table(s), formula(s), and block(s) of code too wide for their lines "
-         "to them: 3 in smaller type, the smallest at 75% of its size." in margins_said),
+         and "Fitted 5 table(s), formula(s), and block(s) of code too wide for their lines "
+         "to them: 5 in smaller type, the smallest at 75% of its size." in margins_said),
+        # The quotation's lines end 30 points (29.9 PDF points) inside the
+        # text's edge, at 504; fancyvrb's line is as wide as the text less
+        # the quotation's left margin, and latex-lab's verbatim sets a
+        # paragraph shape 30 points shorter than the quotation's line, and
+        # LaTeX's own verbatim, untagged, a left skip alone.
+        ("a quotation's lines too long for the paper even at half their size wrap at the "
+         "quotation's line's end, highlighted or in no language, in a tagged PDF and in an "
+         "untagged one",
+         lambda: all(wrapped(path, whole, 0, 7, 0.75 * plex, plex, edge=474.1, spaces=spaces)
+                     for path, spaces in ((margins_path, True), (os.path.join(
+                         os.path.dirname(os.path.dirname(margins_path)), "untagged",
+                         os.path.basename(margins_path)), False))
+                     for whole in ("Quotewrap = \"" + PAPER_WORDS + "\"",
+                                   "Quoteplain = " + PAPER_WORDS))),
+        ("a highlighted line too long for a page even wrapped is said to run off its foot, "
+         "and one wider than TeX's largest dimension at the text's size doesn't stop LaTeX "
+         "where it's measured; a line in no language taller than half the page wrapped "
+         "breaks across pages, each part inside the page's text",
+         lambda: "WARNING: 1 block(s) of code in a language has a line too long for a page "
+         "even wrapped, which runs off its page's foot: on tall." in tall_said
+         and os.path.exists(tall_path)
+         and pdftext.code_lines(tall_path) == ["Tallcode = \"" + TALL_WORDS + "\"",
+                                              "Tallplain = " + TALL_WORDS]
+         and len(tall_rows(tall_path)) > 20
+         and "".join(g[2] for _p, _b, glyphs in tall_rows(tall_path) for g in glyphs)
+         == "Tallplain = " + TALL_WORDS
+         and len({page for page, _b, _g in tall_rows(tall_path)}) >= 2
+         and all(57 < baseline < 230 and glyphs[-1][1] <= 540.5
+                 for _p, baseline, glyphs in tall_rows(tall_path))),
         # An untagged PDF's spaces in code aren't characters, so its line's
         # glyphs are fewer than its characters: its end is the measure.
         ("a list's item's line in no language that fits the text's width but not the item's "
@@ -4480,7 +4820,7 @@ def fancy_checks(fancy_path, fancy_said):
 # The folders the books are built in, each the main book's (work) with its
 # suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
 # preamble, AAA, fit, two-column, evaluation bar's, languages, rules,
-# code, and code margins books are built beside it (build_ua1 to
+# code, code margins, and code tall books are built beside it (build_ua1 to
 # build_code), and the default book's copy, built again where TeX lacks a
 # file of IBM Plex's (build_default). The cleanup removes them and --keep names them, from
 # this one list, and a check sees that no build leaves another: the
@@ -4488,7 +4828,7 @@ def fancy_checks(fancy_path, fancy_said):
 # run, when the cleanup and the message each had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-fit", "-columns",
-                "-bars", "-languages", "-rules", "-code", "-code-margins")
+                "-bars", "-languages", "-rules", "-code", "-code-margins", "-code-tall")
 
 
 def checks(work, jobs=1):
@@ -4527,7 +4867,8 @@ def checks(work, jobs=1):
             bars_path, bars_source = barred.result()
             languages_path = spoken.result()
             rules_path = ruled.result()
-            code_path, latin_code_path, code_said, margins_path, margins_said = coded.result()
+            (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
+         tall_said) = coded.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -4545,8 +4886,8 @@ def checks(work, jobs=1):
         bars_path, bars_source = build_blank_lines(work + "-bars")
         languages_path = build_languages(work + "-languages")
         rules_path = build_rules(work + "-rules")
-        code_path, latin_code_path, code_said, margins_path, margins_said = build_code(
-            work + "-code")
+        (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
+         tall_said) = build_code(work + "-code")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -5332,7 +5673,8 @@ def checks(work, jobs=1):
     ]
     items += language_checks(languages_path)
     items += rules_checks(rules_path)
-    items += code_checks(code_path, latin_code_path, code_said, margins_path, margins_said)
+    items += code_checks(code_path, latin_code_path, code_said, margins_path, margins_said,
+                         tall_path, tall_said)
     items.append(("every folder a book is built in is one the suite removes once it's done, "
                   "or names when told to keep them (BOOK_FOLDERS)",
                   lambda: {os.path.basename(path) for path in glob.glob(glob.escape(work) + "*")}

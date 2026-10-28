@@ -177,7 +177,10 @@ keys:
       loaded, as Pandoc's template loads it for a formula that strikes a
       term out, and a LaTeX book may itself: pict2e is loaded for cancel's
       strokes either way, as before, and then draws the book's pictures
-      too. Needs pict2e installed.
+      too. On needs pict2e installed: without it the build stops, and the
+      run's advice names this setting, since off builds a book that
+      strikes out no term, and whose own LaTeX doesn't load pict2e,
+      without it.
 
   title_page:
     type: enum

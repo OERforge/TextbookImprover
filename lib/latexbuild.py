@@ -2590,14 +2590,28 @@ def failure_advice(log):
     # out. Both are named at once; a book that loads pict2e for drawings of
     # its own is told the same, cancel included.
     if {"cancel.sty", "pict2e.sty"} & set(missing):
-        said.append("LaTeX can't find cancel.sty or pict2e.sty. The run loads pict2e to draw "
-                    "picture mode's lines, arrows, and circles as paths, a formula's "
-                    "struck-out term's strokes among them, and a struck-out term "
-                    "(\\cancel, \\bcancel, or \\xcancel) needs TeX's cancel package too. "
-                    "For TinyTeX or TeX Live from tug.org, "
-                    f"`{tlmgr_command('install cancel pict2e')}` installs both; for Debian's "
-                    "or Ubuntu's texlive packages, `sudo apt install texlive-latex-extra "
-                    "texlive-pictures`.")
+        advice = ("LaTeX can't find cancel.sty or pict2e.sty. The run loads pict2e to draw "
+                  "picture mode's lines, arrows, and circles as paths, a formula's "
+                  "struck-out term's strokes among them, and a struck-out term "
+                  "(\\cancel, \\bcancel, or \\xcancel) needs TeX's cancel package too. "
+                  "For TinyTeX or TeX Live from tug.org, "
+                  f"`{tlmgr_command('install cancel pict2e')}` installs both; for Debian's "
+                  "or Ubuntu's texlive packages, `sudo apt install texlive-latex-extra "
+                  "texlive-pictures`.")
+        # A build that stopped on pict2e.sty alone may be a book that
+        # strikes out no term, which builds without pict2e where
+        # picture_paths is off, a setting of a target's or of defaults:,
+        # unless its own LaTeX loads pict2e; one that stopped on cancel.sty
+        # strikes a term out, and cancel's strokes load pict2e whatever the
+        # setting.
+        if "pict2e.sty" in missing and "cancel.sty" not in missing:
+            advice += (" Or, where the book strikes out no term and its own LaTeX doesn't "
+                       "load pict2e, `picture_paths: off` in conversion.yaml, under "
+                       "`defaults:` or the target's name, builds without pict2e, LaTeX "
+                       "drawing picture mode with its own fonts "
+                       "(docs/conversion-settings.md); a struck-out term needs pict2e either "
+                       "way.")
+        said.append(advice)
     # tlmgr only manages a TeX Live installed from tug.org or as TinyTeX;
     # Debian's and Ubuntu's texlive packages come with a tlmgr that runs in
     # an uninitialized user mode and installs nothing, so both routes are

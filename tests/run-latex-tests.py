@@ -3771,6 +3771,16 @@ def case_pieces(work):
                                        "! LaTeX Error: File `pict2e.sty' not found.\n"
                                        "! LaTeX Error: File `hanging.sty' not found.\n")[1:]
          == latexbuild.failure_advice("! LaTeX Error: File `hanging.sty' not found.\n")),
+        # pict2e.sty alone is what a book that strikes out no term stops on,
+        # which picture_paths: off builds without it; cancel.sty means a
+        # term is struck out, whose strokes load pict2e whatever the setting.
+        ("and without pict2e alone, the advice names picture_paths: off, which a book "
+         "that strikes out no term builds without it with; without cancel, it doesn't",
+         lambda: "`picture_paths: off` in conversion.yaml, under `defaults:` or the target's "
+         "name, builds without pict2e"
+         in latexbuild.failure_advice("! LaTeX Error: File `pict2e.sty' not found.\n")[0]
+         and "picture_paths" not in latexbuild.failure_advice(
+             "! LaTeX Error: File `cancel.sty' not found.\n")[0]),
         ("a font that isn't installed is named, its name split over fontspec's lines too, "
          "with where an OpenStax book's faces come from",
          lambda: any("LaTeX can't find the font IBM Plex Serif Text." in advice

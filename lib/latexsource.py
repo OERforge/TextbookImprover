@@ -3193,7 +3193,7 @@ def reading_order(texts, includes=None, after_preamble=None, at=None, watch=None
         yield from walk(name)
 
 
-def macro_walk(texts, describe, includes=None, after_preamble=None, at=None):
+def macro_walk(texts, describe, includes=None, after_preamble=None, at=None, macros=None):
     """The book's definitions, read as LaTeX reads them (reading_order, which
     takes texts, includes, after_preamble, and at), so a later definition
     replaces an earlier one, and \\providecommand defines only a name
@@ -3204,8 +3204,11 @@ def macro_walk(texts, describe, includes=None, after_preamble=None, at=None):
     [(start, end)]}, the span of every definition in each text; and for
     each (text's name, position) in at, a list of positions by text, the
     value there of each macro defined without arguments, {name: body}, as
-    \\chapterfolder is set at each chapter's start (OpenIntro Statistics)."""
-    macros, defined, values, spans_by_text, snapshots = {}, set(), {}, {}, {}
+    \\chapterfolder is set at each chapter's start (OpenIntro Statistics).
+    macros: the dict the descriptions are kept in as they're read, where
+    describe reads the ones before (image_macros), a new one if None."""
+    macros = {} if macros is None else macros
+    defined, values, spans_by_text, snapshots = set(), {}, {}, {}
 
     def define(found, arguments, default, body, provide):
         if provide and found in defined:
@@ -3234,14 +3237,43 @@ def image_macros(texts, includes=None, after_preamble=None):
     """({name: macro}, {text's name: [(start, end)]}): each macro the book
     defines, with \\newcommand and its kin or \\def with plain arguments,
     whose body holds one \\includegraphics with its file made from one of
-    its arguments, and the span of every definition in each text. A macro
-    is a dict: arguments, how many; default, the first one's when it's
-    optional, else None; file, the file as the body writes it, #1 and
-    all; body, the whole body; alt, the argument the body's own alt key
+    its arguments, or one call of such a macro defined before it, whose
+    file it makes from its own (composed), and the span of every
+    definition in each text. A macro is a dict: arguments, how many;
+    default, the first one's when it's optional, else None; file, the
+    file as the body writes it, #1 and all; body, the whole body, a call
+    of another's written out; alt, the argument the body's own alt key
     takes, or None; keyed, whether the body gives alt text or artifact of
     its own. texts, includes, and after_preamble are as macro_walk reads
     them."""
-    return macro_walk(texts, image_macro, includes, after_preamble)[:2]
+    known = {}
+
+    def describe(body, arguments, default):
+        found = image_macro(body, arguments, default)
+        if found is None:
+            found = image_macro(composed(body, known), arguments, default)
+            if found is not None:
+                found["composed"] = True
+        return found
+    return macro_walk(texts, describe, includes, after_preamble, macros=known)[:2]
+
+
+def composed(body, macros):
+    """body with its one call of one of macros (image_macros' so far)
+    written out, the call's arguments for the macro's own, as TeX expands
+    it, so that a macro of the book's that calls its own macro for an
+    image, \\newcommand{\\Fig}[2]{\\Image{#1}{figures/#2}}, is one for
+    an image too; where it holds no such call, or more than one, or an
+    \\includegraphics of its own, body as it is. Such a macro's image had
+    been left in the copy as the call wrote it, unconverted, a PDF image
+    that a page can't show and the run didn't name."""
+    if BODY_GRAPHICS.search(body):
+        return body
+    calls = macro_calls(body, macros, skip_spans(body))
+    if len(calls) != 1:
+        return body
+    start, end, name, args = calls[0]
+    return body[:start] + with_arguments(macros[name]["body"], args) + body[end:]
 
 
 def include_macro(body, arguments, default):
@@ -6964,7 +6996,9 @@ def alt_arguments(texts, definitions_text=""):
     macros, spans = image_macros(texts)
     found = []
     for name, macro in sorted(macros.items()):
-        if macro["alt"] is not None or macro["keyed"] or re.search(
+        # One that calls another's for its image (composed) is that one's
+        # to pass an argument on, which its definition would hold.
+        if macro.get("composed") or macro["alt"] is not None or macro["keyed"] or re.search(
                 r"\\renewcommand\s*\{?\s*\\%s(?![A-Za-z@])" % re.escape(name), definitions_text):
             continue
         body = macro["body"]

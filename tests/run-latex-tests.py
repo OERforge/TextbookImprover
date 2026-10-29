@@ -930,13 +930,16 @@ def case_unmade_images(work):
     which stopped the Word file read back as a source, and nothing was
     said. One is in the master's preamble, in \\title and in a macro, which
     the copy had kept as the book wrote it; one has a ] in its alt text,
-    which the copy had passed over. The runs' PATH holds Pandoc, Python,
+    which the copy had passed over; and one is a macro's that calls the
+    book's own macro for an image, which the copy had left as the call
+    wrote it, the page showing the PDF, unnamed. The runs' PATH holds Pandoc, Python,
     and file alone (tools_alone), then a pdftocairo that fails as well, so
     the case runs alike wherever it runs, and then, where poppler-utils is
     installed, its pdftocairo."""
     os.makedirs(os.path.join(work, "img"))
     pdf(os.path.join(work, "img", "diagram.pdf"))
     pdf(os.path.join(work, "img", "logo.pdf"))
+    pdf(os.path.join(work, "img", "chart.pdf"))
     with open(os.path.join(work, "img", "shape.eps"), "w") as fh:
         fh.write("%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n"
                  "newpath 0 0 moveto 10 10 lineto stroke\nshowpage\n")
@@ -944,11 +947,14 @@ def case_unmade_images(work):
     with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n"
                  "\\newcommand{\\logo}{\\includegraphics[height=1em,alt={A logo.}]{img/logo.pdf}}\n"
+                 "\\newcommand{\\Image}[2]{\\includegraphics[width=#1,alt={A chart.}]{#2}}\n"
+                 "\\newcommand{\\Fig}[1]{\\Image{2cm}{img/#1}}\n"
                  "\\title{Notes \\includegraphics[height=1cm,alt={A crest.}]{img/logo}}\n"
                  "\\begin{document}\n\\maketitle\n"
                  "\\section{Shapes}\nA plot: \\includegraphics[alt={A diagram.}]{img/diagram}, "
                  "and again: \\includegraphics[width=1cm]{img/diagram.pdf}, and once more: "
-                 "\\includegraphics[alt={A [bracketed] plot.}]{img/diagram.pdf}. Ours: \\logo.\n\n"
+                 "\\includegraphics[alt={A [bracketed] plot.}]{img/diagram.pdf}. Ours: \\logo. "
+                 "A graph: \\Fig{chart}.\n\n"
                  "\\begin{figure}\\centering\n\\includegraphics[width=2cm]{img/shape.eps}\n"
                  "\\caption{A shape}\\label{fig:shape}\n\\end{figure}\n\n"
                  "A square: \\includegraphics[alt={A square.}]{img/square}.\n"
@@ -1022,35 +1028,38 @@ def case_unmade_images(work):
             and sources.get("A logo.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A crest.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A diagram.", "").endswith("rendered/img/diagram.svg") \
-            and sources.get("A [bracketed] plot.", "").endswith("rendered/img/diagram.svg")
+            and sources.get("A [bracketed] plot.", "").endswith("rendered/img/diagram.svg") \
+            and sources.get("A chart.", "").endswith("rendered/img/chart.svg")
     return [
         ("without pdftocairo, a PDF or EPS image is left out of the pages, a figure's caption "
          "kept, and the run says so, naming each once and what installs what it needs",
-         lambda: "WARNING: 3 PDF or EPS image(s) need epstopdf (TeX Live's epstopdf package), "
+         lambda: "WARNING: 4 PDF or EPS image(s) need epstopdf (TeX Live's epstopdf package), "
          "Ghostscript (ghostscript), and pdftocairo (poppler-utils) to become SVG images a "
          "page can show, and they aren't installed; they're left out of the pages: "
-         "img/logo.pdf, img/diagram.pdf, img/shape.eps." in said
+         "img/logo.pdf, img/diagram.pdf, img/chart.pdf, img/shape.eps." in said
          and "<embed" not in page and "<img" in page
          and not any(word in page for word in ("diagram", "bracketed", "logo", "crest",
-                                               "shape.eps"))
+                                               "chart", "shape.eps"))
          and "A shape" in page and 'alt="A square."' in page),
         ("and the Word file holds no image Word can't show, so read back it gives the page "
          "again", word_reads_back),
         ("one pdftocairo fails on is left out too, and the run says what pdftocairo said, "
          "one whose programs are missing named apart",
          lambda: re.search(
-             r"^WARNING: 2 PDF or EPS image\(s\) couldn't be made SVG images a page can show, "
-             r"so they're left out of the pages: img/logo\.pdf, img/diagram\.pdf\. Of "
-             r"img/diagram\.pdf, pdftocairo said: Syntax Error: Couldn't find trailer "
-             r"dictionary$", failed_said, re.M) is not None
+             r"^WARNING: 3 PDF or EPS image\(s\) couldn't be made SVG images a page can show, "
+             r"so they're left out of the pages: img/logo\.pdf, img/diagram\.pdf, "
+             r"img/chart\.pdf\. Of img/chart\.pdf, pdftocairo said: Syntax Error: Couldn't "
+             r"find trailer dictionary$", failed_said, re.M) is not None
          and "WARNING: 1 PDF or EPS image(s) need epstopdf (TeX Live's epstopdf package) and "
          "Ghostscript (ghostscript) to become SVG images a page can show, and they aren't "
          "installed; they're left out of the pages: img/shape.eps." in failed_said
          and "<embed" not in failed_page and "diagram" not in failed_page
-         and "logo" not in failed_page and 'alt="A square."' in failed_page),
+         and "logo" not in failed_page and "chart" not in failed_page
+         and 'alt="A square."' in failed_page),
         ("pdftocairo is tried once for each image, not at each place the book includes it",
-         lambda: len(tried) == 2),
-        ("with pdftocairo, each is made an SVG, in the preamble's \\title and macro too",
+         lambda: len(tried) == 3),
+        ("with pdftocairo, each is made an SVG, in the preamble's \\title and macro too, "
+         "and a macro's that calls the book's own macro for its image",
          made_svg),
     ]
 
@@ -1959,6 +1968,80 @@ def case_struck_out(work):
          and "c__oer_pictiie_names_clist" in read(pictures, "paths", "drawn.tex")
          and "its drawings in picture mode drawn with paths by pict2e" in drawn_said
          and "c__oer_pictiie_names_clist" not in read(pictures, "fonts", "drawn.tex")),
+    ]
+
+
+def case_code_label(work):
+    """A book that loads fancyvrb, a list's item opening with its Verbatim,
+    whose label LaTeX's tagging sets over the next item's (latexbuild's
+    CODE_ITEM_LABEL, as a book's PDF from its pages has it): its tagged
+    copy keeps the label beside the code's first line, and the run says
+    so; its PDF, built from its own LaTeX, has it there, the next item's
+    label alone; a copy made from the copy has the fix once; a book that
+    loads fvextra, which loads fancyvrb, gets it, and one that loads
+    neither doesn't."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    import texremediate
+    os.makedirs(work)
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{fancyvrb}\n\\begin{document}\n"
+                 "\\begin{enumerate}\n\\item Labelfirst.\n\\item\n\\begin{Verbatim}\n"
+                 "Labelcode\n\\end{Verbatim}\n\\item Labelthird.\n\\end{enumerate}\n"
+                 "\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 "  pdf:\n    format: pdf\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    copy = os.path.join(work, "tagged", "notes.tex")
+    hook = "cmd / FV@ListVSpace / before"
+
+    def labels():
+        """The PDF's rows that hold the code and the third item, squeezed:
+        each item's label its own, the second's beside the code."""
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return skip(why)
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return skip("no pikepdf to read the PDF")
+        import pdftext
+        path = os.path.join(work, "pdf", "book.pdf")
+        if not os.path.exists(path):
+            return False
+        rows = {}
+        for page, baseline, _left, _right, char in pdftext.glyph_boxes(path):
+            rows.setdefault((page, round(baseline, 1)), []).append(char)
+        texts = ["".join(chars).replace(" ", "") for chars in rows.values()]
+        return "2.Labelcode" in texts and "3.Labelthird." in texts \
+            and "a list's item's label kept beside the code that opens the item" in said
+
+    def tagged(preamble):
+        texts = {"b.tex": "\\documentclass{article}\n" + preamble
+                 + "\\begin{document}\nA line.\n\\end{document}\n"}
+        counts = texremediate.tag(texts, "b.tex", "en", False, ("ua-2",), None)
+        return texts["b.tex"], counts
+    again = {"notes.tex": read(work, "tagged", "notes.tex")} if os.path.exists(copy) else {}
+    if again:
+        texremediate.tag(again, "notes.tex", "en", True, ("ua-2",), None)
+    fvextra, fvextra_counts = tagged("\\usepackage{fvextra}\n")
+    plain, plain_counts = tagged("\\usepackage{verbatim}\n")
+    return [
+        ("a tagged copy of a book that loads fancyvrb keeps a list's item's label beside the "
+         "code that opens it, and the run says so",
+         lambda: os.path.exists(copy) and read(work, "tagged", "notes.tex").count(hook) == 1
+         and "fancyvrb's lists told to keep a list's item's label beside the code that opens "
+         "the item" in said),
+        ("its PDF, built from its own LaTeX, has the item's label beside the code's first "
+         "line, and the next item's label alone", labels),
+        ("a copy made again from such a copy has it once",
+         lambda: again and again["notes.tex"].count(hook) == 1),
+        ("a book that loads fvextra, which loads fancyvrb, gets it too, counted, and one "
+         "that loads neither doesn't",
+         lambda: latexbuild.CODE_ITEM_LABEL in fvextra and fvextra_counts.get("code_label") == 1
+         and hook not in plain and not plain_counts.get("code_label")),
     ]
 
 
@@ -5859,6 +5942,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
+         ("a list's item that opens with fancyvrb's code", case_code_label),
          ("the AAA page's measure of its lines", case_line_measure),
          ("the PDF build's copy of the book", case_pdf_copy),
          ("the book's other masters", case_other_masters),

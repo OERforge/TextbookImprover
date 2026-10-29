@@ -1387,6 +1387,10 @@ def _opening_formulas(text):
     return text, len(at)
 
 
+# The packages that load fancyvrb, whose lists a tagged copy has keep an
+# item's label beside the code that opens it (tag).
+FANCYVRB_LOADERS = {"fancyvrb", "fvextra", "minted"}
+
 # A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
 # (tag), counted to say so.
 PICTURE = re.compile(r"\\begin\s*\{picture\}")
@@ -1437,6 +1441,15 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
         counts["cancel"] = int("cancel" in packages)
         counts["picture"] = int(picture_paths and any(
             latexsource.code_matches(PICTURE, t) for t in texts.values()))
+    # A list's item that opens with fancyvrb's code keeps its label beside
+    # the code's first line under tagging, as a book's PDF from its pages
+    # does (latexbuild.CODE_ITEM_LABEL, CNX-NOTES' item 103), where the
+    # book loads fancyvrb or a package that loads it; not again in a copy
+    # made from a copy.
+    if packages & FANCYVRB_LOADERS and not any(
+            "cmd / FV@ListVSpace / before" in piece for piece in pieces):
+        block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"
+        counts["code_label"] = 1
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

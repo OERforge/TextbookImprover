@@ -186,7 +186,7 @@ An exercise's formulas are TeX in the bank; Pandoc's TeX reader makes them MathM
 | `table-kept-as-data` | A table that would be a layout table (a worked example's steps, a Key Equations table, a grid of key terms) that the header guess reads a header row in, left a data table; a row of `layout` in `table-headers.csv` makes it a layout table. |
 | `table-summary-reads-out` | A table's description in `table-captions.csv`, drafted from OpenStax's summary, that reads the table out, a row or a cell at a time; a screen reader hears it before the table itself, so what the table shows would serve better in its place. |
 | `table-label-left-out` | OpenStax's label for a table, which isn't written, and whether the table is a layout table. |
-| `content-mathml` | A formula written in content MathML that isn't one of the simple forms made presentation MathML (names, numbers, relations, arithmetic, powers, roots, a function applied): an integral, say. Pandoc would keep its text and lose the formula. |
+| `content-mathml` | A formula written in content MathML that isn't one of the simple forms made presentation MathML (names, numbers, relations, arithmetic, powers, roots, a function applied): an integral, say, or a name made of markup, a variable with a subscript, even a function's. Pandoc would keep its text and lose the formula. |
 | `script-repaired` | A formula's superscript or subscript of other than two parts, which Pandoc would keep as text, made a base and its script, or of one part, that part alone (above). |
 | `symbol-font-character` | A character of Microsoft's Symbol font, in Unicode's private use area, made the character it stands for (above): how many on the page or in a table's summary, and what each was made, taken as the Symbol font's. |
 

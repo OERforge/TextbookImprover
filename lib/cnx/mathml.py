@@ -284,6 +284,11 @@ def _convert(el):
             return _m("mrow", None, _m("mo", "\u00ac"),
                       _operand(args[0], "times"))
         if (op in FUNCTIONS or op == "ci") and args:
+            if op == "ci" and any(isinstance(c.tag, str) for c in head):
+                # A function's name that is markup, P with a subscript s
+                # applied to k: its text alone is nothing, and the name
+                # would be lost without a word ("(k)").
+                raise _Unconverted("a <ci> with markup in it")
             name_el = _m("mi", op if op != "ci" else (head.text or "").strip())
             if op == "log":
                 base = [a for a in args if _local(a) == "logbase"]

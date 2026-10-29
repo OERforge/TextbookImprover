@@ -289,7 +289,9 @@ goods for goods</meaning></definition></glossary>""")
 <para id="p1">Algebra, briefly: <m:math><m:apply><m:eq/><m:ci>y</m:ci>
 <m:apply><m:times/><m:apply><m:plus/><m:ci>a</m:ci><m:cn>1</m:cn>
 </m:apply><m:ci>x</m:ci></m:apply></m:apply></m:math>, and
-<m:math><m:apply><m:int/><m:ci>x</m:ci></m:apply></m:math>.</para>
+<m:math><m:apply><m:int/><m:ci>x</m:ci></m:apply></m:math>, and
+<m:math><m:apply><m:ci type="fn"><m:msub><m:mi>P</m:mi><m:mi>s</m:mi></m:msub>
+</m:ci><m:ci>k</m:ci></m:apply></m:math>.</para>
 <equation id="eq2"><m:math><m:mstyle><m:mi>v</m:mi><m:mo>=</m:mo>
 <m:mfrac><m:mi>b</m:mi><m:mi>p</m:mi></m:mfrac><m:mspace linebreak="newline"/>
 <m:mo>(</m:mo><m:mi>w</m:mi><m:mo>)</m:mo></m:mstyle></m:math></equation>
@@ -497,7 +499,15 @@ def case_trade(work):
          lambda: "<mi>y</mi><mo>=</mo><mrow><mrow><mo>(</mo><mrow><mi>a"
          "</mi><mo>+</mo><mn>1</mn></mrow><mo>)</mo></mrow><mo>\u00d7"
          "</mo><mi>x</mi></mrow>" in read(out, "a-some-math.html")
-         and [r["Check"] for r in report].count("content-mathml") == 1),
+         and [r["Check"] for r in report].count("content-mathml") == 2),
+        ("a function whose name is markup, which isn't converted, is left "
+         "as written and reported, not made a function with no name",
+         lambda: "<msub><mi>P</mi><mi>s</mi></msub>" in re.sub(
+             r">\s+<", "><", read(out, "a-some-math.html"))
+         and "<mi></mi>" not in read(out, "a-some-math.html")
+         and any(r["Check"] == "content-mathml"
+                 and "a <ci> with markup in it" in r["Detail"]
+                 for r in report)),
         ("a script of the wrong number of parts, which texmath rejects, is "
          "a base and its script, what's before them set before them and a "
          "space after them after, in a row where it stood for an argument; "

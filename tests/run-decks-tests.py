@@ -2774,8 +2774,10 @@ def case_unsettled(work):
 
 
 # A slide's table and a slide's formula too wide for it, which LaTeX fits
-# to it as it does a book's (latexbuild's FIT_MACROS), and a slide whose
-# code is too long for it even at half its size, which wraps.
+# to it as it does a book's (latexbuild's FIT_MACROS), a slide whose code
+# is too long for it even at half its size, which wraps, and a slide whose
+# paragraph's highlighted code is longer than a line, which fancyvrb had
+# set in a box TeX couldn't break, running off the slide.
 WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
                + "| " + " | ".join("Column %d" % c for c in range(12)) + " |\n"
                + "|" + "---|" * 12 + "\n"
@@ -2785,7 +2787,9 @@ WIDE_SLIDES = ("---\ntitle: Wide\n---\n\n# A table\n\n"
                + "\n# Code\n\n```python\nCodeslide = \"" + "x" * 100 + "\"\n```\n"
                + "\n# Short code\n\n```python\nShortslide = 1\n```\n"
                + "\n# Long code\n\n```python\nCodewrap = \"" + " ".join(
-                   "word%02d" % k for k in range(50)) + "\"\n```\n")
+                   "word%02d" % k for k in range(50)) + "\"\n```\n"
+               + "\n# Inline code\n\nIts code: `Inlineslide = \"" + " ".join(
+                   "word%02d" % k for k in range(30)) + "\"`{.python} and after it.\n")
 
 # A section's footnote with code that fits, and a slide with code too wide
 # for it, which deck-pdf.lua and pdf-target.lua number apart; and the deck
@@ -2807,7 +2811,8 @@ def case_wide_slide(work):
     that fits keeps its size beside a slide's set smaller (SECTION_CODE):
     its fit numbered from 1, as the deck's are, it had the slide's. And a
     slide whose line of code is too long for it even at half its size,
-    set at three quarters and wrapped."""
+    set at three quarters and wrapped; and a slide whose paragraph's
+    highlighted code, longer than a line, breaks at its spaces."""
     real = shutil.which("lualatex")
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
@@ -2874,6 +2879,9 @@ def case_wide_slide(work):
          "edges",
          lambda: inside(5, 300) and len(rows(5)) >= 3
          and abs(advance("wide", "Codewrap") - 0.75 * advance("wide", "Shortslide")) < 0.05),
+        ("a slide's paragraph's highlighted code longer than a line breaks at its spaces, "
+         "every row a quarter inch inside the slide's edges",
+         lambda: inside(6, 200) and len(rows(6)) >= 3),
         ("a section's footnote's code that fits is set at its size beside a slide's code set "
          "smaller, as wide a character as where the slide's code fits too",
          lambda: 0 < advance("sections", "Slidecode") < 0.9 * advance("sectionsshort", "Slidecode")

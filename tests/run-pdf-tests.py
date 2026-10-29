@@ -1950,8 +1950,19 @@ def rules_checks(rules_path):
 # read from, named once, as code; and a footnote whose words are too wide
 # for its line and whose last block is code, which LaTeX reports at the line
 # the footnote's text ends on, named as a line of text. Each line, its text
-# as written, opens with a word of its own.
-CODE_LONG = "def longline(price, quantity, discount, tax_rate, shipping, handling, region):"
+# as written, opens with a word of its own. And in a chapter of its own,
+# highlighted code in a paragraph (INLINE_CODE), which fancyvrb had set in
+# a box TeX couldn't break, running into the margin: a span longer than
+# its line, broken at its spaces; a word longer than its line, broken
+# after a run of marks, not between a path's two backslashes, a path in
+# twelve lengths, so that a line ends between them in one; a word that
+# fits a line, moved to the next whole, the line before it ragged; the
+# same word in a paragraph set flush to both margins, broken after a mark
+# rather than between two letters; and a table whose columns have no
+# widths, a cell of code longer than its column, set in the text's type,
+# its code broken at its spaces, where the span whole had set the table
+# smaller.
+CODE_LONG ="def longline(price, quantity, discount, tax_rate, shipping, handling, region):"
 PAPER_WORDS = " ".join("word%02d" % i for i in range(30))
 FOOT_WORDS = " ".join("word%02d" % i for i in range(90))
 PAPER_HYPHEN = "incomprehensibilities" * 10
@@ -1967,6 +1978,36 @@ PAPER_EXACT = "Paperexact = " + "e" * 74
 TALL_WORDS = " ".join("t%03d" % i for i in range(1000))
 CODE_CELL = ("Cellplain = [" + ", ".join(str(i) for i in range(10, 19)) + "]",
              "Cellcode = [" + ", ".join(str(i) for i in range(10, 19)) + "]")
+INLINE_WORDS = "Inlinewords = \"" + PAPER_WORDS + "\""
+INLINE_PATHS = ["Inlinepath = \"c:\\\\" + "a" * k
+                + "".join("\\\\folder%02d" % j for j in range(10)) + "\\\\file.txt\""
+                for k in range(1, 13)]
+INLINE_MOVE = "Inlinemove.method_name(arg).attribute_name"
+INLINE_JUST = "Inlinejust.method_name(arg).attribute_name"
+INLINE_CELL = ("Inlinecell = {value:>7} print(Inlinecell.format(value = 255)) "
+               "print(Inlinecell.format(value = 65535))")
+INLINE_TEXTS = (
+    ["A span of highlighted code longer than its line: " + INLINE_WORDS
+     + " and the text after it."]
+    + ["A word of highlighted code longer than its line: " + path + " and the text after it."
+       for path in INLINE_PATHS]
+    + ["Words of text before a word of code that will not fit at the end of the line"
+       + " x" * k + ": " + INLINE_MOVE + " and the text after it." for k in range(3)]
+    + ["Words of text set flush to both margins before a word of code" + " x" * k + ": "
+       + INLINE_JUST + " and the text after it." for k in range(3)])
+INLINE_CODE = (
+    "```{=latex}\n\\clearpage\n```\n\n## Inline\n\n"
+    + "".join(text.replace(code, "`" + code + "`{.python}") + "\n\n"
+              for text, code in zip(INLINE_TEXTS[:16], [INLINE_WORDS] + INLINE_PATHS
+                                    + [INLINE_MOVE] * 3))
+    + "```{=latex}\n{\\rightskip=0pt\\relax\n```\n\n"
+    + "".join(text.replace(INLINE_JUST, "`" + INLINE_JUST + "`{.python}") + "\n\n"
+              for text in INLINE_TEXTS[16:])
+    + "```{=latex}\n\\par}\n```\n\n"
+    "<table><thead><tr><th>Alignment</th><th>Code</th></tr></thead><tbody><tr><td>Right, "
+    "seven characters wide, in a table whose columns have no widths</td><td><code "
+    "class=\"python\">" + INLINE_CELL.replace(">", "&gt;") + "</code></td></tr></tbody>"
+    "</table>\n\n")
 FIT_CODE = (
     "# Code\n\nA block whose lines fit theirs:\n\n```python\ndef shortline(p):\n    return p\n"
     "```\n\nA highlighted line too long for its line:\n\n```python\n" + CODE_LONG
@@ -2007,8 +2048,8 @@ FIT_CODE = (
     + "-" * 12 + "+\n\nA footnote whose code is too long for its line even at three quarters of its "
     "size.[^wide]\n\nA footnote whose words are too wide for its line and whose last block is "
     "code.[^words]\n\n```{=latex}\n\\clearpage\n\\vspace*{\\dimexpr\\textheight-4\\baselineskip"
-    "\\relax}\n```\n\n```\nPagefoot = " + FOOT_WORDS + "\n```\n\n"
-    "[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
+    "\\relax}\n```\n\n```\nPagefoot = " + FOOT_WORDS + "\n```\n\n" + INLINE_CODE
+    + "[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
     + "\"\n    ```\n\n[^cell]: Its code:\n\n    ```python\n    Cellnote = \"" + "c" * 87
     + "\"\n    ```\n\n[^wide]: Its code:\n\n    ```\n    Notewide = \"" + "n" * 106
     + "\"\n    ```\n\n[^words]: Its words: `Wideword" + "q" * 100 + "`\n\n    ```python\n"
@@ -2029,9 +2070,12 @@ FIT_CODE = (
 # routine sets while the block's group is open and which are wider than the
 # item's line; a quotation's lines too long for the paper even at half
 # their size, highlighted and in no language, wrapped at the quotation's
-# line's end, tagged and untagged; and a list whose first item opens with
+# line's end, tagged and untagged; a list whose first item opens with
 # highlighted code, whose number LaTeX's tagging had set over the next
-# item's.
+# item's; and a list's item holding a word of highlighted code longer
+# than the item's line but not the text's, broken between its letters
+# inside the item's line, tagged and untagged.
+ITEM_WORD = "Itemword" + "x" * 52
 CODE_MARGINS = ("geometry:\n  - left=0.75in\n  - right=1.5in\n  - top=0.8in\n"
                 "  - bottom=0.8in\n  - footskip=0.3in\nclassoption: [oneside]\n")
 FIT_CODE_MARGINS = (
@@ -2046,7 +2090,9 @@ FIT_CODE_MARGINS = (
     "> A quotation's lines too long for the paper even at half their size:\n>\n> ```python\n"
     "> Quotewrap = \"" + PAPER_WORDS + "\"\n> ```\n>\n> ```\n> Quoteplain = " + PAPER_WORDS
     + "\n> ```\n\nA list whose first item opens with highlighted code:\n\n"
-    "1. ```python\n   Itemopens = 1\n   ```\n\n2. The item after the code.\n")
+    "1. ```python\n   Itemopens = 1\n   ```\n\n2. The item after the code.\n\n"
+    "A list item with a word of code longer than its line but not the text width:\n\n"
+    "1. Its word: `" + ITEM_WORD + "`{.python}\n")
 # A page 4 inches tall (CODE_TALL_PAGE, build_code), the default's
 # otherwise: a highlighted line too long for a page even wrapped, said to
 # run off its foot, wider at the text's size than TeX's largest dimension,
@@ -2387,6 +2433,118 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                            text)
         return ([int(points) for points in found]
                 if len(found) == text.count("line(s) of the PDF") else [])
+
+    def texts(rows):
+        return ["".join(g[2] for g in glyphs) for _p, _b, glyphs in rows]
+
+    def inline_rows(path, opening, closing):
+        """[(page, baseline, glyphs)] of the rows from the one that opens
+        with opening to the one that holds closing."""
+        found = every_inline_rows(path, opening, closing)
+        return found[0] if found else []
+
+    def every_inline_rows(path, opening, closing):
+        """inline_rows for each paragraph that opens with opening, its rows
+        those of the text's block, not a page's running head or foot."""
+        rows = [row for row in glyph_rows(path) if 50 < row[1] < 745]
+        said = texts(rows)
+        found = []
+        for i, text in enumerate(said):
+            if text.startswith(opening):
+                for j in range(i, len(rows)):
+                    if closing in said[j]:
+                        found.append(rows[i:j + 1])
+                        break
+        return found
+
+    def broken_well(rows):
+        """Two rows at least, each inside the text's width, each but the
+        last ending after a space, or after a run of marks where the next
+        opens with a letter or a digit: not between two letters, nor inside
+        the run."""
+        said = texts(rows)
+        return len(rows) >= 2 and all(inside(glyphs) for _p, _b, glyphs in rows) \
+            and all(text.endswith(" ") or (not text[-1].isalnum() and after[:1].isalnum())
+                    for text, after in zip(said, said[1:]))
+
+    def inside(glyphs, edge=540.5):
+        """A row's characters but its spaces end inside the line's end: a
+        space tagpdf writes at a row's end can stand a little past it."""
+        return all(g[1] <= edge for g in glyphs if g[2].strip())
+
+    def moved(path):
+        """Each of the three words of code that fit a line but not the end
+        of the line they'd have shared (INLINE_MOVE) opens the next row,
+        whole."""
+        said = texts(glyph_rows(path))
+        holding = [text for text in said if "Inlinemove" in text]
+        return len(holding) == 3 and all(text.startswith(INLINE_MOVE) for text in holding)
+
+    def flush(path):
+        """In the paragraphs set flush to both margins (INLINE_JUST), the
+        word of code that won't fit at a line's end is broken after a run of
+        marks, the rest of it opening the next row with a letter, or moved
+        to that row whole, and broken in one paragraph at least."""
+        said = texts(glyph_rows(path))
+        broken = 0
+        for i, text in enumerate(said):
+            if "Inlinejust" not in text:
+                continue
+            part = text[text.index("Inlinejust"):]
+            if part.startswith(INLINE_JUST):
+                continue
+            rest = INLINE_JUST[len(part):]
+            if not (INLINE_JUST.startswith(part) and not part[-1].isalnum()
+                    and rest[:1].isalnum() and i + 1 < len(said)
+                    and said[i + 1].startswith(rest)):
+                return False
+            broken += 1
+        return broken >= 1
+
+    def cell(path, full):
+        """The table's cell of code (INLINE_CELL), its column's rows beside
+        the other column's: broken at its spaces, each row inside the text's
+        width, in the text's type, its characters full wide, as written."""
+        rows = glyph_rows(path)
+        for i, (_page, _baseline, glyphs) in enumerate(rows):
+            at = next((g[0] for k, g in enumerate(glyphs)
+                       if "".join(h[2] for h in glyphs[k:]).startswith("Inlinecell =")), None)
+            if at is None:
+                continue
+            parts = []
+            for _p, _b, row in rows[i:]:
+                parts.append([g for g in row if g[0] >= at - 0.5])
+                if "65535" in "".join(g[2] for g in parts[-1]):
+                    break
+            said = ["".join(g[2] for g in part) for part in parts]
+            return len(parts) >= 2 and "".join(said) == INLINE_CELL \
+                and all(inside(part) for part in parts) \
+                and all(text.endswith(" ") for text in said[:-1]) \
+                and abs(advance_of(parts[0]) - full) < 0.05
+        return False
+
+    def inline_texts(path):
+        """The PDF's structure's text of each paragraph holding highlighted
+        code of the inline chapter's, in reading order."""
+        return [text for text in pdftext.element_texts(path, "/text") if "Inline" in text] \
+            if os.path.exists(path) else []
+
+    def item_word(path):
+        """The margins book's list's item's word of code (ITEM_WORD), longer
+        than the item's line but not the text's: broken between its letters,
+        each row of it inside the item's line, which ends where the text's
+        does, at 504."""
+        rows = glyph_rows(path)
+        said = texts(rows)
+        for i, text in enumerate(said):
+            if "Itemword" in text:
+                joined, j = text[text.index("Itemword"):], i
+                while len(joined) < len(ITEM_WORD) and j + 1 < len(rows):
+                    j += 1
+                    joined += said[j]
+                return j > i and joined == ITEM_WORD \
+                    and all(inside(glyphs, 504.5) for _p, _b, glyphs in rows[i:j + 1])
+        return False
     items = [
         ("a block of code whose lines fit theirs is set at the text's size, in Plex Mono as "
          "in Latin Modern Mono",
@@ -2530,6 +2688,31 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
          and [sorted(line_) for line_ in pdftext.code_lines(code_path)
               if line_.startswith(("Paperheb", "Paperpointed"))]
          == [sorted(PAPER_HEB), sorted(PAPER_POINTED)]),
+        ("highlighted code in a paragraph, which fancyvrb sets in a box, breaks: a span "
+         "longer than its line at its spaces, and a word longer than its line after a run of "
+         "marks, not between a path's two backslashes, wherever its line ends in the path (12 "
+         "lengths), each row inside the text's width, in Plex Mono and in Latin Modern Mono",
+         lambda: all(broken_well(inline_rows(path, "A span of highlighted code", "it."))
+                     and len(every_inline_rows(path, "A word of highlighted code", "it."))
+                     == 12
+                     and all(broken_well(rows) for rows in every_inline_rows(
+                         path, "A word of highlighted code", "it."))
+                     for path in (code_path, latin_path))),
+        ("a word of highlighted code that fits a line, but not the end of the line before "
+         "it, opens the next row whole, the row before it ragged; set flush to both margins, "
+         "it's broken after a run of marks, not between two letters; and no row of them runs "
+         "past the text's width",
+         lambda: all(moved(path) and flush(path) and all(
+             inside(glyphs) for _p, _b, glyphs in inline_rows(
+                 path, "Words of text before a word of code", "65535"))
+             for path in (code_path, latin_path))),
+        ("a table whose columns have no widths, a cell of highlighted code longer than its "
+         "column, is set in the text's type, its code broken at its spaces inside the text's "
+         "width, where the code whole had set it smaller",
+         lambda: cell(code_path, plex) and cell(latin_path, latin)),
+        ("the paragraphs' text in the PDF's structure is as written, the code's spaces one "
+         "each where a row ends, and none where a word breaks",
+         lambda: inline_texts(code_path) == INLINE_TEXTS + [INLINE_CELL]),
         ("on a one-sided page whose right margin is wider than its left, a line too long "
          "even at three quarters of its size runs into the right margin at three quarters, "
          "as far as a quarter inch from the paper's edge, the left margin's width aside, and "
@@ -2589,6 +2772,12 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         ("a list's item that opens with highlighted code has its number beside the code's "
          "first line, in a tagged PDF and in an untagged one, and the next item its own",
          lambda: all(opened(path) for path in (margins_path, os.path.join(
+             os.path.dirname(os.path.dirname(margins_path)), "untagged",
+             os.path.basename(margins_path))))),
+        ("a list's item's word of highlighted code longer than the item's line but not the "
+         "text's breaks between its letters inside the item's line, in a tagged PDF and in an "
+         "untagged one",
+         lambda: all(item_word(path) for path in (margins_path, os.path.join(
              os.path.dirname(os.path.dirname(margins_path)), "untagged",
              os.path.basename(margins_path))))),
     ]

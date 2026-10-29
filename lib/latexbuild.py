@@ -386,10 +386,23 @@ def math_setup(standards, choice):
 # color's change became no character at all ("return12-2* p >0"), and a
 # run of spaces, an indentation, one. A space as \nobreak\ , as LaTeX's
 # own verbatim makes one, is a character each, and nothing on the page
-# moves. Read after Pandoc's highlighting macros: by build-pdf.py in a
-# book's preamble when it has highlighted code, and by a deck's template.
+# moves. And inline code with a language, which Pandoc's writer sets as
+# skylighting's \VERB, fancyvrb's \Verb, whose text fancyvrb puts in an
+# \mbox TeX can't break, is marked (\OERInlineCode, FIT_MACROS), so that
+# the box is taken apart in its paragraph and can break there
+# (oer.inline.code): a span in Introduction to Python Programming's 14.3
+# ran 627 points past the text, 555 of them off the paper. Only where
+# \VERB is as Pandoc's highlighting macros define it, the same in Pandoc
+# 3.1.3, 3.12.1, and 3.13; another definition is left as it is, unbroken.
+# Read after Pandoc's highlighting macros: by build-pdf.py in a book's
+# preamble when it has highlighted code, and by a deck's template.
 CODE_SPACES = r"""\makeatletter
 \fvset{formatcom*={\def\FV@Space{\nobreak\ }}}
+\providecommand\OERInlineCode{}
+\def\OER@VERB@pandoc{\Verb[commandchars=\\\{\}]}
+\ifx\VERB\OER@VERB@pandoc
+  \def\VERB{\Verb[commandchars=\\\{\},formatcom*={\OERInlineCode}]}
+\fi
 \makeatother
 """
 
@@ -713,10 +726,34 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % before they read it, since node.has_attribute reads a nil as attribute 0,
 % which luaotfload sets for every node, so that without it, as where the
 % LaTeX suite reads these macros alone, no run of underscores is a blank.
+% Highlighted inline code, which Pandoc's writer sets as fancyvrb's \Verb
+% (skylighting's \VERB), its text in an \mbox TeX can't break, is marked
+% (\OERInlineCode, from CODE_SPACES), and its box is taken apart in its
+% paragraph before TeX breaks the paragraph or the fit measures it
+% (oer.inline.code, the first of these filters). Whole, a span in
+% Introduction to Python Programming's 14.3 ran 627 points past the text,
+% 555 of them off the paper; and a table whose cells hold code is now
+% measured by the code's words, not its spans, so that the same book's
+% Table 8.2, set at half its size and still past the paper's edges, fits
+% at 61 percent. The code breaks as a line of wrapped code does
+% (\__oer_fit_wrap:, below), at the same costs: after a run of spaces, the
+% space kept at the line's end; in a word, after a run of marks before a
+% letter, which TeX takes only where the word won't go whole to another
+% line, as in a ragged paragraph only a word longer than the line won't,
+% or where moving it would leave a line flush to both margins looser than
+% the break costs; and between two letters, or inside a run of marks, only
+% in a word longer than the paragraph's narrowest line (its paragraph
+% shape's, or its hanging indentation's, its left and right skips taken
+% off), the word measured on to the nearest places TeX may break outside
+% it. Allowed in any word, a break between letters filled a line flush to
+% both margins, as a trial found ("att" over "ribute_name"), where TeX now
+% breaks after a mark or moves the word.
 \ifdefined\directlua
   \newattribute\OERFitAttribute
   \newattribute\OERFitStepsAttribute
   \newattribute\OERFitWrapAttribute
+  \newattribute\OERInlineCodeAttribute
+  \protected\def\OERInlineCode{\setattribute\OERInlineCodeAttribute{1}}
   \directlua{
     local attribute = luatexbase.attributes.OERFitAttribute
     local column = luatexbase.attributes.OERFitStepsAttribute
@@ -891,28 +928,8 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       if bit > most then most = bit end
       return line, low, longest, most
     end
-    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
-      local id, j = current(), tex.getattribute(column)
-      if id and oerfit.kind[id] == "s" and j and j > 0 then
-        local line, low, longest, most = oerfit.paragraph(head)
-        local nat, long, bits = oerfit.natural[id] or {}, oerfit.longest[id] or {}, oerfit.pieces[id] or {}
-        oerfit.natural[id], oerfit.longest[id], oerfit.pieces[id] = nat, long, bits
-        local lows = oerfit.low[id] or {}
-        oerfit.low[id] = lows
-        if low > (lows[j] or 0) then lows[j] = low end
-        if line > (nat[j] or 0) then nat[j] = line end
-        if longest > (long[j] or 0) then long[j] = longest end
-        if most > (bits[j] or 0) then bits[j] = most end
-      end
-      return true
-    end, "oer.fit.steps")
-    local wrapping = luatexbase.attributes.OERFitWrapAttribute
-    local WHATSIT, BOUNDARY, MARK, LOCALPAR = node.id("whatsit"), node.id("boundary"), node.id("mark"), node.id("local_par")
-    local INDENT, ROOM = 3, 20
-    for subtype, name in pairs(node.subtypes("hlist")) do
-      if name == "indent" then INDENT = subtype end
-    end
-    local unwrap = nil
+    local inline = luatexbase.attributes.OERInlineCodeAttribute
+    local WHATSIT, BOUNDARY, MARK, DISC = node.id("whatsit"), node.id("boundary"), node.id("mark"), node.id("disc")
     local function blank(c)
       return c == 32 or c == 160 or (c >= 8192 and c <= 8203) or c == 8239 or c == 8287 or c == 12288
     end
@@ -938,6 +955,123 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return shaped[n.font]
     end
+    local function wrap_penalty(at, value)
+      local p = node.new(PENALTY)
+      p.penalty = value
+      p.attr = at.attr
+      return p
+    end
+    local function opening(n, inside)
+      if inside and spacing(n) or n.id == DISC or n.id == PENALTY and n.penalty < 10000 then return true end
+      return n.id == GLUE and not EDGES[n.subtype] and not (n.prev and n.prev.id == PENALTY and n.prev.penalty >= 10000)
+    end
+    local function piece(n, start, stop)
+      local a, inside = n, true
+      while a.prev do
+        if a == start then inside = false end
+        if opening(a.prev, inside) then break end
+        a = a.prev
+      end
+      local b = n
+      inside = true
+      while b.next do
+        if b.next == stop then inside = false end
+        if opening(b.next, inside) then break end
+        b = b.next
+      end
+      return node.dimensions(a, b.next)
+    end
+    local function narrowest()
+      local width = tex.hsize
+      if type(tex.parshape) == "table" then
+        for _, entry in ipairs(tex.parshape) do
+          if entry[2] < width then width = entry[2] end
+        end
+      elseif not (tex.hangindent == 0) then
+        width = width - math.abs(tex.hangindent)
+      end
+      return width - tex.getglue("leftskip") - tex.getglue("rightskip")
+    end
+    local function breaks(head, n, stop, glyph, room)
+      local start, last, long = n, nil, not room
+      while n and not (n == stop) do
+        local after = n.next
+        if spacing(n) then
+          if not (spacing(after) or after and after.id == PENALTY and spacing(after.next)) then
+            head = node.insert_after(head, n, wrap_penalty(glyph or n, 0))
+          end
+          last = n
+        elseif n.id == GLYPH then
+          local inword = last and last.id == GLYPH and not blank(last.char)
+          if room and not inword then long = piece(n, start, stop) > room end
+          if inword and not (ahead(last) or joined(n) and (joined(last) or not ahead(n))) then
+            local value = nil
+            if letter(n.char) and not letter(last.char) then value = 120 elseif long then value = 200 end
+            if value then head = node.insert_before(head, n, wrap_penalty(n, value)) end
+          end
+          last, glyph = n, n
+        elseif not (n.id == WHATSIT or n.id == KERN or n.id == BOUNDARY or n.id == MARK) then
+          last = n
+        end
+        n = after
+      end
+      return head
+    end
+    local function code_box(n)
+      if not (n.id == HLIST) or not n.head then return false end
+      for g in node.traverse_id(GLYPH, n.head) do
+        return node.has_attribute(g, inline) == 1
+      end
+      return false
+    end
+    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      local n, room = head, nil
+      while n do
+        local after = n.next
+        if code_box(n) then
+          local first, prev = n.head, n.prev
+          local last = node.tail(first)
+          n.head = nil
+          if prev then prev.next = first else head = first end
+          first.prev = prev
+          last.next = after
+          if after then after.prev = last end
+          n.prev, n.next = nil, nil
+          node.free(n)
+          local glyph = nil
+          for g in node.traverse_id(GLYPH, first) do
+            glyph = g
+            break
+          end
+          room = room or narrowest()
+          head = breaks(head, first, after, glyph, room)
+        end
+        n = after
+      end
+      return head
+    end, "oer.inline.code")
+    luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      local id, j = current(), tex.getattribute(column)
+      if id and oerfit.kind[id] == "s" and j and j > 0 then
+        local line, low, longest, most = oerfit.paragraph(head)
+        local nat, long, bits = oerfit.natural[id] or {}, oerfit.longest[id] or {}, oerfit.pieces[id] or {}
+        oerfit.natural[id], oerfit.longest[id], oerfit.pieces[id] = nat, long, bits
+        local lows = oerfit.low[id] or {}
+        oerfit.low[id] = lows
+        if low > (lows[j] or 0) then lows[j] = low end
+        if line > (nat[j] or 0) then nat[j] = line end
+        if longest > (long[j] or 0) then long[j] = longest end
+        if most > (bits[j] or 0) then bits[j] = most end
+      end
+      return true
+    end, "oer.fit.steps")
+    local wrapping = luatexbase.attributes.OERFitWrapAttribute
+    local LOCALPAR = node.id("local_par")
+    local INDENT, ROOM = 3, 20
+    for subtype, name in pairs(node.subtypes("hlist")) do
+      if name == "indent" then INDENT = subtype end
+    end
+    local unwrap = nil
     local function natural(head)
       local width = 0
       for n in node.traverse(head) do width = width + node.dimensions(n, n.next) end
@@ -945,12 +1079,6 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     function oerfit.box_width(box)
       tex.sprint(math.min(natural(tex.getbox(box).head), 1073741823))
-    end
-    local function wrap_penalty(at, value)
-      local p = node.new(PENALTY)
-      p.penalty = value
-      p.attr = at.attr
-      return p
     end
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
       if status.output_active then return true end
@@ -980,27 +1108,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       if natural(head) <= edge - left - width + TOLERANCE then return head end
       local most = edge - left - width - ROOM * char
       local hang = math.max(0, math.min(indent + 2 * char, most))
-      local n, last, glyph = head, nil, first
-      while n do
-        local after = n.next
-        if spacing(n) then
-          if not (spacing(after) or after and after.id == PENALTY and spacing(after.next)) then
-            head = node.insert_after(head, n, wrap_penalty(glyph, 0))
-          end
-          last = n
-        elseif n.id == GLYPH then
-          if last and last.id == GLYPH
-              and not (blank(last.char) or ahead(last) or joined(n) and (joined(last) or not ahead(n))) then
-            local value = 120
-            if letter(last.char) then value = 150 end
-            head = node.insert_before(head, n, wrap_penalty(n, value))
-          end
-          last, glyph = n, n
-        elseif not (n.id == WHATSIT or n.id == KERN or n.id == BOUNDARY or n.id == MARK) then
-          last = n
-        end
-        n = after
-      end
+      head = breaks(head, head, nil, first)
       unwrap = { left = { width, stretch, shrink, stretchorder, shrinkorder },
                  right = { tex.getglue("rightskip") }, lines = tex.interlinepenalty,
                  id = id, boxed = oerfit.boxed }
@@ -1741,10 +1849,15 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % character, so the line's text is as written: the break, a penalty, has
   % the attributes of the character before the space, since the line's
   % right skip takes the break's, and with the space's tagpdf wrote a
-  % second space for it. Or between two characters, after a mark rather
-  % than between two letters, a mark's break dearer than a part a space
-  % ends can cost, (10 + 100) squared at most with the right skip below, so
-  % a word that fits the next row whole goes there; but not to part a
+  % second space for it. Or between two characters: after a run of marks,
+  % before a letter, rather than between two letters or inside the run,
+  % which would part an escape's two backslashes or an operator's two
+  % marks, the first break dearer than a part a space ends can cost,
+  % (10 + 100) squared at most with the right skip below, so
+  % a word that fits the next row whole goes there, and the second dearer
+  % than two of the first, so TeX makes another part rather than part a
+  % path's backslashes, where at 150 it had parted them (or a folder's
+  % name) to save one; but not to part a
   % character of no width, as a combining mark is once it's set, from the
   % letter it's on: that's the letter before it, but for a mark of a
   % right-to-left script that HarfBuzz shapes (luaotfload's harf mode, as

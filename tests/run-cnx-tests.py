@@ -256,6 +256,19 @@ src="https://www.youtube.com/embed/abc123" width="660"
 height="370.5"/></media></para>
 <para id="p4">More at www.example.org/trade, not at
 https://doi.org:10.1016/x.1.</para>
+<para id="p7"><code class="python inline-code">print("a")<newline/>
+print("b")</code></para>
+<para id="p8"><code class="python inline-code">one_line()</code></para>
+<para id="p9"><code display="inline">x = 1<newline/>
+y = 2</code></para>
+<para id="p10"><code id="c5" class="python inline-code">a()<newline/>
+b()</code></para>
+<para><code id="c6" class="python inline-code">c()<newline/>
+d()</code></para>
+<para id="p11" xml:lang="es"><code class="python inline-code">e()<newline/>
+f()</code><!-- a comment --></para>
+<para id="p12"><code class="python inline-code">g()<newline/>
+h()</code><!-- a comment -->and more text.</para>
 <para id="p5">To add them up: <code class="python">a = 1<newline/>
 b = 2</code></para>
 <code id="c1" class="python line-numbering">
@@ -441,6 +454,28 @@ def case_trade(work):
          '<code class="python line-numbering">total = 0\nfor gain in gains:'
          '\n    total += gain</code></pre>' in gains
          and '<pre id="c2"><code>first\nsecond</code></pre>' in gains),
+        # Introduction to Python Programming's Table 8.2 has a program and
+        # its output in its cells so, each code of class inline-code in a
+        # paragraph of its own, which a reader of HTML ran together on one
+        # line.
+        # And what a review found it lost: the code's own id, the
+        # paragraph's language, and text after a comment.
+        ("a paragraph that holds nothing but code of more than one line is a block of "
+         "code, the paragraph's id its, the class inline-code dropped, the code's own id "
+         "its where the paragraph has none, else the block's, the paragraph's a division's "
+         "around it, and the paragraph's language its; a paragraph of code of one line, or "
+         "code said to be inline, or code with text after a comment, is a paragraph still",
+         lambda: '<pre class="python" id="p7"><code class="python">print("a")\nprint("b")'
+         '</code></pre>' in gains
+         and '<p id="p8"><code class="python inline-code">one_line()</code></p>' in gains
+         and '<p id="p9"><code>x = 1<br/>' in gains
+         and '<div id="p10"><pre class="python" id="c5"><code class="python">a()\nb()'
+         '</code></pre></div>' in gains
+         and '<pre class="python" id="c6"><code class="python">c()\nd()</code></pre>' in gains
+         and '<pre class="python" id="p11" lang="es"><code class="python">e()\nf()'
+         '</code></pre>' in gains
+         and re.search(r'<p id="p12"><code class="python inline-code">g\(\)<br/>\s*h\(\)'
+                       r'</code>and more text\.</p>', gains)),
         ("code in a line of text, or of class inline-code, is inline",
          lambda: '<code class="python">a = 1<br/>' in gains
          and '<code class="python inline-code" id="c3">sum()</code>'

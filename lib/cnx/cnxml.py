@@ -107,6 +107,30 @@ def list_mark(number, style):
     return str(number)
 
 
+def lone_code(para):
+    """The code a paragraph holds, where it holds nothing else and the
+    code is more than one line, by its line breaks or its newline
+    elements, and isn't said to be inline: Introduction to Python
+    Programming's Table 8.2 has a program and its output in a cell so,
+    each a code of class inline-code in a paragraph of its own, which a
+    reader of HTML ran together on one line, a run of spaces in the
+    output, which the table is about, one; and a paragraph in a list's
+    item holds the lines a reader is to add to a program so (1.1). Else
+    None. Text after a comment is the paragraph's too (a review found it
+    lost)."""
+    if any((text or "").strip() for text in [para.text] + [c.tail for c in para]):
+        return None
+    children = [c for c in para if isinstance(c.tag, str)]
+    if len(children) != 1 or local(children[0]) != "code" \
+            or ns(children[0]) != CNXML or children[0].get("display") == "inline":
+        return None
+    code = children[0]
+    lines = "".join(code.itertext()).strip()
+    if "\n" not in lines and not code.xpath("c:newline", namespaces={"c": CNXML}):
+        return None
+    return code
+
+
 def code_lines(code):
     """A block of code's lines as its text's own. A newline element (a
     <br> by now) is a line break, and the line break the source writes
@@ -543,6 +567,10 @@ class Converter:
         dst.append(out)
 
     def do_para(self, el, dst):
+        code = lone_code(el)
+        if code is not None:
+            self.do_code(code, dst, holder=el)
+            return
         out = E("p", {"class": el.get("class")})
         self.copy_id(el, out)
         self.lang(el, out)
@@ -594,7 +622,7 @@ class Converter:
         self.children(el, out)
         dst.append(out)
 
-    def do_code(self, el, dst):
+    def do_code(self, el, dst, holder=None):
         """Code is a block where it says so, and where it stands as one:
         anywhere but in a line of text (a paragraph, a list, a title), as
         OpenStax's assembly reads it. Introduction to Python Programming
@@ -606,14 +634,25 @@ class Converter:
         A block of code that holds words in bold or italics (a program's
         run, its example input in bold, as Introduction to Python
         Programming shows one) is a paragraph of code, line by line,
-        since a code block holds text alone."""
+        since a code block holds text alone.
+
+        holder: the paragraph that holds this code and nothing else, more
+        than one line of it (lone_code), whose code is a block: its id is
+        the block's, or where the code has an id of its own, which a link
+        may name, a division's around the block, as the source nests them,
+        since a reader of HTML keeps no id of a pre's code (a review found
+        the code's lost); its language is the block's; and the class
+        inline-code isn't. Its class isn't kept, as a reader of HTML keeps
+        no paragraph's."""
         display = el.get("display")
-        block = display == "block" or (
+        block = holder is not None or display == "block" or (
             display != "inline"
             and "inline-code" not in (el.get("class") or "").split()
             and not any(ns(a) == CNXML and local(a) in CODE_IN_TEXT
                         for a in el.iterancestors()))
-        code = E("code", {"class": el.get("class")})
+        classes = [c for c in (el.get("class") or "").split()
+                   if holder is None or c != "inline-code"]
+        code = E("code", {"class": " ".join(classes) or None})
         if el.get("lang"):
             code.set("data-lang", el.get("lang"))
         self.children(el, code)
@@ -626,14 +665,20 @@ class Converter:
             code_breaks(code)
             out = E("p")
         else:
-            classes = (el.get("class") or "").split()
             # Lines OpenStax numbers, which the text cites ("Line 6
             # shows…"), in the class Pandoc numbers them by.
             if "line-numbering" in classes:
                 classes.append("numberLines")
             out = E("pre", {"class": " ".join(classes) or None})
-        self.copy_id(el, out)
+        self.copy_id(el if holder is None or el.get("id") else holder, out)
         out.append(code)
+        if holder is not None:
+            self.lang(holder, out)
+            if el.get("id") and holder.get("id"):
+                division = E("div")
+                self.copy_id(holder, division)
+                division.append(out)
+                out = division
         dst.append(out)
 
     # lists ------------------------------------------------------------

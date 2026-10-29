@@ -135,6 +135,8 @@ def render_keys(keys, path, depth, out):
             t = spec["type"]
             if t == "enum" and spec.get("values"):
                 t = "one of " + ", ".join("`%s`" % v for v in spec["values"])
+            elif "minimum" in spec and "maximum" in spec:
+                t = "`%s` from %s to %s" % (t, spec["minimum"], spec["maximum"])
             else:
                 t = "`%s`" % t
             bits.append(t)

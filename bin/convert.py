@@ -4245,7 +4245,8 @@ def deck_pdfs(target, stems, names, base, language):
             repair_captions=bool(target["pdf.repair_captions"]),
             remove_empty_paragraphs=bool(target["pdf.remove_empty_paragraphs"]), env=env,
             trace=(lambda c: say("+ " + " ".join(shell_quote(p) for p in c[:12]) + " ..."))
-            if TRACE else None, picture_paths=str(target["picture_paths"]) == "on")
+            if TRACE else None, picture_paths=str(target["picture_paths"]) == "on",
+            code_wrap=target["code_wrap"])
 
     workers = max(1, min(len(stems), os.cpu_count() or 1, 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:

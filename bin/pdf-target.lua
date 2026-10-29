@@ -449,6 +449,12 @@ local function as_tabular(inner, in_layout)
     .. table.concat(lines, '\n') .. '\n\\end{tabular}}', notes)
 end
 
+-- A table in a cell, written as LaTeX (flatten_nested), says how wide
+-- it is in a comment that opens it, which a cell's count reads
+-- (cell_size): written, it's no table to count.
+local WIDTH_MARK = '%%oer-width='
+local nested_width
+
 local function flatten_nested(tbl)
   local layout = is_layout(tbl)
   for _, row in ipairs(rows_of(tbl)) do
@@ -458,8 +464,16 @@ local function flatten_nested(tbl)
           -- The innermost first: a table in this one's cells is written
           -- before this one is.
           flatten_nested(inner)
+          local width = nested_width(inner)
           local tabular = as_tabular(inner, layout)
           if tabular then
+            local mark = WIDTH_MARK .. width .. '\n'
+            if tabular.t == 'RawBlock' then
+              tabular.text = mark .. tabular.text
+            else
+              local first = tabular.content[1].content[1]
+              first.text = mark .. first.text
+            end
             return tabular
           end
           if not nested_seen then
@@ -899,7 +913,45 @@ local function blanks_counted(block)
     end }
 end
 
-local function cell_size(cell)
+local cell_size
+
+-- The width a table in a cell takes, as the counts below make it: each
+-- of its columns as wide as its widest cell's line, and the spaces
+-- between them, the columns a cell spans widened together where it's
+-- wider than they are, as a row of a head across them can be (a review).
+-- TeX doesn't break it, so it's a cell's word: counted by its words
+-- alone, a column of Introduction to Python Programming's Table 15.2
+-- that holds a DataFrame's printed table was given the room of its
+-- longest name, and the table in it ran on into the next column.
+nested_width = function(tbl)
+  local widths, spans, count = {}, {}, 0
+  for _, row in ipairs(rows_of(tbl)) do
+    local column = 1
+    for _, cell in ipairs(row.cells) do
+      local length, span = cell_size(cell), cell.col_span or 1
+      if span == 1 then
+        widths[column] = math.max(widths[column] or 0, length)
+      else
+        spans[#spans + 1] = { column, span, length }
+      end
+      column = column + span
+    end
+    count = math.max(count, column - 1)
+  end
+  for _, s in ipairs(spans) do
+    local first, span, length = s[1], s[2], s[3]
+    local sum = GAP * (span - 1)
+    for j = first, first + span - 1 do sum = sum + (widths[j] or 0) end
+    if length > sum then
+      for j = first, first + span - 1 do widths[j] = (widths[j] or 0) + (length - sum) / span end
+    end
+  end
+  local total = 0
+  for j = 1, count do total = total + (widths[j] or 0) end
+  return math.ceil(total + GAP * math.max(0, count - 1))
+end
+
+cell_size = function(cell)
   local length, longest = 0, 0
   local counted = {
     Math = function(math_)
@@ -918,9 +970,27 @@ local function cell_size(cell)
     for line in (text .. '\n'):gmatch('(.-)\n') do
       length = math.max(length, utf8.len(line) or #line)
     end
+    -- A block of code's lines, which stringify doesn't give (a block's
+    -- text is its inlines'), each set whole, as it's written: in a cell,
+    -- a line doesn't wrap, so it's a word, as wide as the line, the block
+    -- the cell's or one inside a div in it (a review). Counted as nothing,
+    -- a cell of code, as Introduction to Python Programming's Table 8.2
+    -- has a program and its output, left its column the share the reader
+    -- gives every column, and the code ran into the next.
+    pandoc.Blocks{ block }:walk{ CodeBlock = function(code)
+      for line in (code.text .. '\n'):gmatch('(.-)\n') do
+        local size = utf8.len(line) or #line
+        length, longest = math.max(length, size), math.max(longest, size)
+      end
+    end }
     for word in stringify(blanks_counted(block):walk(counted)):gmatch('%S+') do
       longest = math.max(longest, utf8.len(word) or #word)
     end
+    local function marked(raw)
+      local width = tonumber(raw.text:match('^' .. WIDTH_MARK:gsub('%%', '%%%%'):gsub('%-', '%%-') .. '(%d+)'))
+      if width then longest, length = math.max(longest, width), math.max(length, width) end
+    end
+    pandoc.Blocks{ block }:walk{ RawBlock = marked, RawInline = marked }
   end
   return length, longest
 end
@@ -2360,6 +2430,18 @@ local function is_code(block)
     or block.t == 'RawBlock' and block.format == 'latex' and block.text:find(CODE_FILE) ~= nil
 end
 
+-- Inline code, each span marked (\OERInlineCode, latexbuild.FIT_MACROS),
+-- so that TeX may break a word of it longer than its line, as it breaks
+-- highlighted code's (oer.inline.code). The writer sets code in no
+-- language as \texttt, each space a \ , which breaks at its spaces only,
+-- so that a word of it longer than its line ran on into the margin: a
+-- word of 94 characters, 213 points past the text (Round 30's trial). A
+-- group, so the mark ends with the code; in a heading, whose writer sets
+-- code as \texttt too, and a caption, the mark is a protected macro.
+local function mark_code(code)
+  return { pandoc.RawInline('latex', '{\\OERInlineCode{}'), code, pandoc.RawInline('latex', '}') }
+end
+
 local function fit_code(doc)
   local function fit(block)
     local id = next_fit()
@@ -2408,6 +2490,7 @@ return {
         Str = blanks }
       return doc
     end },
+  { Code = mark_code },
   { Pandoc = fit_formulas },
   { Pandoc = fit_code },
   { DefinitionList = term_braces },

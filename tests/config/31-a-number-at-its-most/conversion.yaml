@@ -1,0 +1,5 @@
+defaults:
+  code_wrap: 1
+targets:
+  pdf:
+    format: pdf

@@ -1,0 +1,4 @@
+# YAML's .nan, a float no bound refuses, is refused as no number, not
+# taken (it had become code_wrap's least, 0.5).
+target: pdf
+error: should be a number, not nan

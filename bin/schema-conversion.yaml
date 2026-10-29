@@ -182,6 +182,27 @@ keys:
       strikes out no term, and whose own LaTeX doesn't load pict2e,
       without it.
 
+  code_wrap:
+    type: float
+    minimum: 0.5
+    maximum: 1
+    default: 0.75
+    stage: render
+    description: >
+      For a target that writes a PDF or LaTeX (pdf, a deck's PDF, and
+      latex): how far a block of code too wide for its line is set in
+      smaller type before its lines too long for the line wrap, as a part
+      of the code's size. A block whose longest line fits at that size or
+      larger is set as small as it takes, its lines whole; one whose longest
+      line doesn't is set at that size, and each line still too long is
+      wrapped where it reaches the line's end, its later parts indented,
+      so that no code runs into the margin. 1 wraps every line too long for
+      its line at the code's own size; 0.75, the default, sets a block as
+      small as three quarters of its size first; 0.5, the least, half. A
+      table's or a formula's fit isn't changed. A LaTeX book's PDF built
+      from its own files (pdf.from: book) isn't fitted, so it changes
+      nothing there.
+
   title_page:
     type: enum
     values: ["auto", "on", "off"]

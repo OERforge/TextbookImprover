@@ -1179,10 +1179,16 @@ AAA_TABLE = ("\n| Name | What it holds |\n|---|---|\n| One | A cell. |\n\n"
 
 def build_aaa(work):
     """FOOTER_ONE, and FOOTER_TWO with AAA_TABLE, a figure with a long
-    caption, and paragraphs, on the AAA page: the PDF's path."""
+    caption, and paragraphs, the last a poem's 30 short lines, each ended
+    by a line break, on the AAA page; its PDF built again, the page
+    naming Latin Modern's faces (LATIN_MODERN), in the folder beside it
+    ending -latin, and where TeX lacks a file of Plex's (LACKING_PLEX), in
+    the folder ending -lacking: (the PDF's path, what the run said, and
+    each other build's PDF's path and what it said)."""
     os.makedirs(work)
     two = (FOOTER_TWO + AAA_TABLE + "\n![" + FOOTER_CAPTION * 3 + "Henceforth.](cc.png)\n"
-           + "".join("\n" + FOOTER_WORDS * 4 + "\n" for _ in range(4)))
+           + "".join("\n" + FOOTER_WORDS * 4 + "\n" for _ in range(4))
+           + "\n" + "\\\n".join("A short line of a poem, %d." % i for i in range(30)) + "\n")
     for name, text in (("one.md", FOOTER_ONE), ("two.md", two)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -1194,9 +1200,23 @@ def build_aaa(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n"
                  "      metadata: pdf-layout-wcag-aaa.yaml\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
-                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.aaa.pdf")
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    found = [os.path.join(work, "pdf", "org.example.aaa.pdf"), converted.stdout + converted.stderr]
+    for suffix, code in (("-latin", None), ("-lacking", LACKING_PLEX)):
+        again = work + suffix
+        shutil.copytree(work, again)
+        path = os.path.join(again, "pdf", "org.example.aaa.pdf")
+        if os.path.exists(path):
+            os.remove(path)
+        if code is None:
+            with open(os.path.join(again, "pdf-layout-wcag-aaa.yaml"), "a",
+                      encoding="utf-8") as fh:
+                fh.write(LATIN_MODERN)
+        rebuilt = run(["python3"] + (["-c", code] if code else [])
+                      + [os.path.join(BIN, "build-pdf.py"), "-d", again, "--target", "pdf",
+                         "--intermediates", again], again)
+        found += [path, rebuilt.stdout + rebuilt.stderr]
+    return tuple(found)
 
 
 # Tables and formulas too wide for their lines, on the default page, which
@@ -1227,8 +1247,13 @@ def build_aaa(work):
 # longest words are wider than a line together, its corner's words
 # wrapping.
 # Then display formulas likewise, one wide by its spaces, each three quads
-# (54mu), and a numbered one; and a worked example's steps, an array in
-# text.
+# (54mu), and a numbered one; a worked example's steps, an array in text;
+# and a table whose cell holds a table wider than the cell's share of the
+# line, which Pandoc's HTML reader gives equal widths, the cell's table
+# counted by its columns' cells (pdf-target.lua's nested_width), where it
+# had counted as nothing, and run into the next column; and one whose
+# table has a row across its two columns of a letter each, its columns
+# widened for the row, where a review found it counted as the letters.
 FIT_NUMBERS = ("161.45", "199.50", "215.71", "224.58", "230.16", "233.99", "236.77",
                "238.88", "240.54", "241.88", "242.98", "243.91", "244.69", "245.36",
                "245.95", "246.46")
@@ -1600,7 +1625,15 @@ FIT_ONE = (
         'class="formula-steps"', 'class="formula-steps float"')
     + "A worked example's steps, an array in text:\n\n"
     "1. $\\begin{array}{lll} \\text{Arraysmaller} & = & " + fit_terms(11)
-    + " \\\\ & = & b \\end{array}$\n")
+    + " \\\\ & = & b \\end{array}$\n\n"
+    "A table whose cell holds a table:\n\n<table><tbody><tr><td><table><tbody><tr>"
+    "<td>Nestedone</td><td>Nestedtwo</td><td>Nestedthree</td><td>Nestedfour</td></tr>"
+    "</tbody></table></td><td><p>Besidenest, words that wrap in what the table leaves of "
+    "the line.</p></td></tr></tbody></table>\n\n"
+    "A table whose cell holds a table with a row across its columns:\n\n<table><tbody><tr>"
+    "<td><table><tbody><tr><td colspan=\"2\">Nestedspan words that run across both of the "
+    "columns</td></tr><tr><td>Na</td><td>Nb</td></tr></tbody></table></td><td><p>Besidespan, "
+    "words that wrap in what the table leaves of the line.</p></td></tr></tbody></table>\n")
 
 
 def build_fit(work):
@@ -1647,11 +1680,12 @@ def build_fit(work):
 # quarters of their type, set smaller still to fit it rather than run into
 # the other column; steps too wide for it even at half their type, of
 # which the build warns; and a line of code in no language too wide for its
-# column even at three quarters of its size, set smaller still to fit it,
-# below 8.5 points, where Latin Modern Mono's 8-point design, 3 percent
-# wider for its size, leaves it a little too wide, within 4 percent of its
-# column, until the second run fits it again. (longtable can't be set in
-# two columns.)
+# column even at three quarters of its size, which code_wrap at its
+# default sets at three quarters and wraps in its column, and code_wrap
+# 0.5, the target pdf's, sets smaller still to fit it, below 8.5 points,
+# where Latin Modern Mono's 8-point design, 3 percent wider for its size,
+# leaves it a little too wide, within 4 percent of its column, until the
+# second run fits it again. (longtable can't be set in two columns.)
 FIT_TWO = (
     "# Columns\n\nA display formula too wide for its column:\n\n$$\\text{Columndisplay} = "
     + fit_terms(10) + "$$\n\nA worked example's steps too wide for their column even at "
@@ -1664,7 +1698,9 @@ FIT_TWO = (
 
 def build_fit_columns(work):
     """FIT_TWO on the default page in two columns, under fleqn, in Latin
-    Modern (LATIN_MODERN): (the PDF's path, what the run said)."""
+    Modern (LATIN_MODERN), with code_wrap 0.5 (the target pdf) and at its
+    default (the target wrapped): (the first PDF's path, what the run said,
+    the second PDF's path)."""
     os.makedirs(work)
     with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_TWO)
@@ -1674,12 +1710,15 @@ def build_fit_columns(work):
     with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write("classoption: [twocolumn, fleqn]\n" + LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
+        fh.write("targets:\n  pdf:\n    format: pdf\n    code_wrap: 0.5\n    pdf:\n"
+                 "      metadata: meta.yaml\n  wrapped:\n    format: pdf\n    pdf:\n"
+                 "      metadata: meta.yaml\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
     return (os.path.join(work, "pdf", "org.example.columns.pdf"),
-            converted.stdout + converted.stderr)
+            converted.stdout + converted.stderr,
+            os.path.join(work, "wrapped", "org.example.columns.pdf"))
 
 
 # An evaluation bar's limits as OpenStax writes them, an mtable under the
@@ -1912,15 +1951,15 @@ def rules_checks(rules_path):
 # theirs, set at that size; a highlighted line too long for its line, and
 # one in no language, which the writer sets in LaTeX's verbatim, each set
 # smaller to fit it; a line in no language in a list's item that fits the
-# text's width but not the item's, measured without the list's margin; a
-# line in no language too long for its line even at three quarters of its
-# size, set at that size, running on into the margin, which LaTeX reports as
-# a line of text too wide and the build names as code; one that would come
-# within a quarter inch of the paper's edge at three quarters, set smaller
-# to end that far inside it; one that would come that near even at half, but
-# for the little more room the fit aims to leave, set at half, not wrapped;
-# a block with a line too long for the paper even at half its size, set at
-# three quarters, its lines too long for their line wrapped where they reach
+# text's width but not the item's, measured without the list's margin;
+# lines too long for their line even at three quarters of their size, set
+# at that size and wrapped, none running into the margin: one the margin
+# had room for, which had run on into it, its word moved to the next row
+# whole, one that would have come within a quarter inch of the paper's
+# edge at three quarters, and one that would have needed half its size,
+# each of which had been set smaller to keep that far inside it; a block
+# with a line too long for the paper even at half its size, set at three
+# quarters, its lines too long for their line wrapped where they reach
 # its end, a line of one word broken between its letters, one of a word TeX
 # would hyphenate, not hyphenated, a line of words indented with spaces and
 # one with no-break spaces, as OpenStax's code is, broken at their spaces,
@@ -1936,32 +1975,44 @@ def rules_checks(rules_path):
 # kept with its letter, one line with a point on every letter; and a
 # line in no language
 # where a page ends, whose parts go on to the next page together, all of
-# which the build says it wrapped; and a footnote's, fitted to the
-# footnote's line. And what a review found: a line in no language with
-# hyphens, which TeX broke after one, ragged right letting it; a quotation's
-# line, fitted to the quotation's line and inside the text's, not said to
-# run into the margin; a definition that opens with code, whose term the
-# writer's ~ keeps on a line of its own; code in a table's cell, in no
-# language in one table and highlighted in another, each table fitted by its
-# lines; a footnote's code in a table's cell, a table whose columns wrap, so
+# which the build says it wrapped, each part after a line's first with a
+# hook drawn before it, an arrow no reader reads; and a footnote's,
+# fitted to the footnote's line. And what a review found: a line in no
+# language with hyphens, which TeX broke after one, ragged right letting
+# it; a quotation's line too long for the quotation's line even at three
+# quarters of its size, wrapped inside it, not the text's (in Latin Modern
+# Mono, which holds more to a line, fitted to it); a definition that opens
+# with code, whose term the writer's ~ keeps on a line of its own; code in
+# a table's cell, in no language in one table and highlighted in another,
+# each table fitted by its lines; a table whose cells hold blocks, which
+# Pandoc's HTML reader gives equal widths, a cell of code whose lines are
+# longer than its share of the line, its column widened to them, where its
+# lines had counted as nothing and the code had been wrapped, and such a
+# cell whose code is inside a div (a review); a footnote's
+# code in a table's cell, a table whose columns wrap, so
 # that the footnote's code, set after the table in its group, which measures
 # highlighted code too, is measured as its own; a footnote's code in no
-# language still too wide, which LaTeX reports at a line of the file it's
-# read from, named once, as code; and a footnote whose words are too wide
-# for its line and whose last block is code, which LaTeX reports at the line
-# the footnote's text ends on, named as a line of text. Each line, its text
-# as written, opens with a word of its own. And in a chapter of its own,
-# highlighted code in a paragraph (INLINE_CODE), which fancyvrb had set in
-# a box TeX couldn't break, running into the margin: a span longer than
-# its line, broken at its spaces; a word longer than its line, broken
-# after a run of marks, not between a path's two backslashes, a path in
-# twelve lengths, so that a line ends between them in one; a word that
-# fits a line, moved to the next whole, the line before it ragged; the
-# same word in a paragraph set flush to both margins, broken after a mark
-# rather than between two letters; and a table whose columns have no
-# widths, a cell of code longer than its column, set in the text's type,
-# its code broken at its spaces, where the span whole had set the table
-# smaller.
+# language too long for its line even at three quarters of its size,
+# wrapped inside the footnote's line; and a footnote whose words are too
+# wide for its line and whose last block is code, which LaTeX reports at
+# the line the footnote's text ends on, named as a line of text. Each line,
+# its text as written, opens with a word of its own. And in a chapter of
+# its own, highlighted code in a paragraph (INLINE_CODE), which fancyvrb
+# had set in a box TeX couldn't break, running into the margin: a span
+# longer than its line, broken at its spaces; a word longer than its line,
+# broken after a run of marks, not between a path's two backslashes, a
+# path in twelve lengths, so that a line ends between them in one; a word
+# that fits a line, moved to the next whole, the line before it ragged;
+# the same word in a paragraph set flush to both margins, broken after a
+# mark rather than between two letters; code in no language, which the
+# writer sets as \texttt, which TeX had broken at its spaces alone, a word
+# of it longer than its line broken likewise, in the same twelve lengths;
+# code in struck text, which the writer sets in an \mbox there, in no
+# language and highlighted, its strike kept, where taking the \mbox apart
+# as highlighted code's box is had lost it; and a table whose columns have
+# no widths, a cell of code longer than its column, set in the text's
+# type, its code broken at its spaces, where the span whole had set the
+# table smaller.
 CODE_LONG ="def longline(price, quantity, discount, tax_rate, shipping, handling, region):"
 PAPER_WORDS = " ".join("word%02d" % i for i in range(30))
 FOOT_WORDS = " ".join("word%02d" % i for i in range(90))
@@ -1978,8 +2029,13 @@ PAPER_EXACT = "Paperexact = " + "e" * 74
 TALL_WORDS = " ".join("t%03d" % i for i in range(1000))
 CODE_CELL = ("Cellplain = [" + ", ".join(str(i) for i in range(10, 19)) + "]",
              "Cellcode = [" + ", ".join(str(i) for i in range(10, 19)) + "]")
+CODE_BLOCK_CELL = ("Blockshort = 1", "Blockcell = \"" + "k" * 35 + "\"")
+CODE_DIV_CELL = ("Divshort = 1", "Divcell = \"" + "v" * 37 + "\"")
 INLINE_WORDS = "Inlinewords = \"" + PAPER_WORDS + "\""
 INLINE_PATHS = ["Inlinepath = \"c:\\\\" + "a" * k
+                + "".join("\\\\folder%02d" % j for j in range(10)) + "\\\\file.txt\""
+                for k in range(1, 13)]
+INLINE_PLAIN = ["Inlineplain = \"c:\\\\" + "a" * k
                 + "".join("\\\\folder%02d" % j for j in range(10)) + "\\\\file.txt\""
                 for k in range(1, 13)]
 INLINE_MOVE = "Inlinemove.method_name(arg).attribute_name"
@@ -1994,7 +2050,9 @@ INLINE_TEXTS = (
     + ["Words of text before a word of code that will not fit at the end of the line"
        + " x" * k + ": " + INLINE_MOVE + " and the text after it." for k in range(3)]
     + ["Words of text set flush to both margins before a word of code" + " x" * k + ": "
-       + INLINE_JUST + " and the text after it." for k in range(3)])
+       + INLINE_JUST + " and the text after it." for k in range(3)]
+    + ["A word of code in no language longer than its line: " + path
+       + " and the text after it." for path in INLINE_PLAIN])
 INLINE_CODE = (
     "```{=latex}\n\\clearpage\n```\n\n## Inline\n\n"
     + "".join(text.replace(code, "`" + code + "`{.python}") + "\n\n"
@@ -2002,9 +2060,12 @@ INLINE_CODE = (
                                     + [INLINE_MOVE] * 3))
     + "```{=latex}\n{\\rightskip=0pt\\relax\n```\n\n"
     + "".join(text.replace(INLINE_JUST, "`" + INLINE_JUST + "`{.python}") + "\n\n"
-              for text in INLINE_TEXTS[16:])
+              for text in INLINE_TEXTS[16:19])
     + "```{=latex}\n\\par}\n```\n\n"
-    "<table><thead><tr><th>Alignment</th><th>Code</th></tr></thead><tbody><tr><td>Right, "
+    + "".join(text.replace(path, "`" + path + "`") + "\n\n"
+              for text, path in zip(INLINE_TEXTS[19:], INLINE_PLAIN))
+    + "Struck code: ~~`Strikeplain`~~ and ~~`Strikepython`{.python}~~.\n\n"
+    + "<table><thead><tr><th>Alignment</th><th>Code</th></tr></thead><tbody><tr><td>Right, "
     "seven characters wide, in a table whose columns have no widths</td><td><code "
     "class=\"python\">" + INLINE_CELL.replace(">", "&gt;") + "</code></td></tr></tbody>"
     "</table>\n\n")
@@ -2043,6 +2104,14 @@ FIT_CODE = (
     + "+\n| ```python" + " " * 39 + " | Besidetwo" + " " * 6 + "|\n| " + CODE_CELL[1].ljust(48)
     + " |" + " " * 16 + "|\n| ```" + " " * 45 + " |" + " " * 16 + "|\n+" + "-" * 50 + "+"
     + "-" * 16 + "+\n\n"
+    "A table whose cells hold blocks, which Pandoc's HTML reader gives equal widths, a block "
+    "of code in one whose lines are longer than its share of the line:\n\n<table><tbody><tr>"
+    "<td><pre><code>" + CODE_BLOCK_CELL[0] + "\n" + CODE_BLOCK_CELL[1] + "</code></pre></td>"
+    "<td><p>Besideblock, words that wrap in what the code leaves of the line.</p></td></tr>"
+    "</tbody></table>\n\nSuch a table whose code is inside a div in its cell:\n\n<table><tbody>"
+    "<tr><td><div><pre><code>" + CODE_DIV_CELL[0] + "\n" + CODE_DIV_CELL[1]
+    + "</code></pre></div></td><td><p>Besidediv, words that wrap in what the code leaves of "
+    "the line.</p></td></tr></tbody></table>\n\n"
     "A footnote in a table's cell, whose columns wrap:\n\n+" + "-" * 30 + "+" + "-" * 12 + "+\n"
     "| A cell's note.[^cell]" + " " * 8 + "| Here" + " " * 7 + "|\n+" + "-" * 30 + "+"
     + "-" * 12 + "+\n\nA footnote whose code is too long for its line even at three quarters of its "
@@ -2052,14 +2121,16 @@ FIT_CODE = (
     + "[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
     + "\"\n    ```\n\n[^cell]: Its code:\n\n    ```python\n    Cellnote = \"" + "c" * 87
     + "\"\n    ```\n\n[^wide]: Its code:\n\n    ```\n    Notewide = \"" + "n" * 106
-    + "\"\n    ```\n\n[^words]: Its words: `Wideword" + "q" * 100 + "`\n\n    ```python\n"
+    + "\"\n    ```\n\n[^words]: Its words: Wideword" + "q" * 130 + "\n\n    ```python\n"
     "    Footcode = 1\n    ```\n")
 # A one-sided page whose right margin is wider than its left (CODE_MARGINS,
 # build_code), in the default's faces, a footer of two lines at the foot
-# of each page: a line in no language that would come within a quarter inch
+# of each page: a numbered display that would come within a quarter inch
 # of the paper's edge at three quarters of its size if its margin were the
 # left one, set at three quarters, as the right one has room for, and a
-# numbered display likewise, which runs into the right margin too; a
+# line in no language likewise, which had run into the right margin at
+# three quarters too, wrapped there now, each part after its first with a
+# hook before it, as each wrapped line's is, tagged and untagged; a
 # list's item's line in no language that fits the text's width but not
 # the item's, fitted to the item's line, in a tagged PDF, where latex-lab's
 # verbatim indents it by a paragraph shape, and in an untagged one (the
@@ -2105,6 +2176,24 @@ FIT_CODE_TALL = (
     "# Tall\n\nA highlighted line too long for a page even wrapped:\n\n```python\nTallcode = \""
     + TALL_WORDS + "\"\n```\n\nA line in no language taller than half the page wrapped:\n\n"
     "```\nTallplain = " + TALL_WORDS + "\n```\n")
+# Three lines of code too long for their line on the default page
+# (FIT_CODE_WRAP, build_code), in the folder beside the code book's ending
+# -wrap, built for three targets: pdf, as the default sets code (code_wrap
+# 0.75), whole (code_wrap 1), and half (code_wrap 0.5). One in no language
+# fits its line at 85 percent of its size, a highlighted one at 60, and
+# one in no language at 40, each its word longer than the line at three
+# quarters but the first's; and one in no language of 86 characters fits
+# it at three quarters, but without the 2 percent of room the fit leaves
+# where there's room, which had wrapped it.
+CODE_WRAP_LINES = ("Wrapnear = \"" + "a" * 62 + "\"", "Wrapmid = \"" + "m" * 94 + "\"",
+                   "Wrapfar = \"" + "f" * 148 + "\"", "Wrapedge = \"" + "e" * 73 + "\"")
+FIT_CODE_WRAP = (
+    "# Wrap\n\nA line that fits its line at 85 percent of its size:\n\n```\n"
+    + CODE_WRAP_LINES[0] + "\n```\n\nA highlighted line that fits its line at 60 percent of "
+    "its size:\n\n```python\n" + CODE_WRAP_LINES[1] + "\n```\n\nA line that fits its line at "
+    "40 percent of its size:\n\n```\n" + CODE_WRAP_LINES[2] + "\n```\n\nA line that fits its "
+    "line at 75 percent of its size, and no smaller:\n\n```\n" + CODE_WRAP_LINES[3]
+    + "\n```\n")
 CODE_FOOTER = ("This footer runs to two lines, the first wider than a list's item's line, "
                "which a block of code in an item the output routine interrupts was measured by.")
 
@@ -2115,10 +2204,12 @@ def build_code(work):
     Mono are wider for their size, each a target of its own; and
     FIT_CODE_MARGINS on CODE_MARGINS' page, with CODE_FOOTER, in the folder
     beside it ending -margins, and untagged, without it, in its folder
-    untagged; and FIT_CODE_TALL on CODE_TALL_PAGE's page, in the folder
-    beside it ending -tall: (the PDF's path, Latin Modern's, what the run
-    said, the margins book's PDF's path, what its run said, the tall book's
-    PDF's path, what its run said)."""
+    untagged; FIT_CODE_TALL on CODE_TALL_PAGE's page, in the folder beside
+    it ending -tall; and FIT_CODE_WRAP, in the folder beside it ending
+    -wrap, for its three targets: (the PDF's path, Latin Modern's, what the
+    run said, the margins book's PDF's path, what its run said, the tall
+    book's PDF's path, what its run said, the wrap book's three PDFs'
+    paths, pdf's, whole's, and half's, and what its run said)."""
     os.makedirs(work)
     with open(os.path.join(work, "code.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE)
@@ -2158,13 +2249,27 @@ def build_code(work):
     with open(os.path.join(tall, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: page.yaml\n")
     talled = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], tall)
+    wrap = work + "-wrap"
+    os.makedirs(wrap)
+    with open(os.path.join(wrap, "wrap.md"), "w", encoding="utf-8") as fh:
+        fh.write(FIT_CODE_WRAP)
+    with open(os.path.join(wrap, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Wrap\n  identifier: org.example.wrap\n"
+                 "  language: en-US\n  contents:\n    - wrap\n")
+    with open(os.path.join(wrap, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n  whole:\n    format: pdf\n"
+                 "    code_wrap: 1\n  half:\n    format: pdf\n    code_wrap: 0.5\n")
+    wrapped_run = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], wrap)
     return (os.path.join(work, "pdf", "org.example.code.pdf"),
             os.path.join(work, "latin", "org.example.code.pdf"),
             converted.stdout + converted.stderr,
             os.path.join(margins, "pdf", "org.example.margins.pdf"),
             margined.stdout + margined.stderr,
             os.path.join(tall, "pdf", "org.example.tall.pdf"),
-            talled.stdout + talled.stderr)
+            talled.stdout + talled.stderr,
+            tuple(os.path.join(wrap, name, "org.example.wrap.pdf")
+                  for name in ("pdf", "whole", "half")),
+            wrapped_run.stdout + wrapped_run.stderr)
 
 
 def code_line(path, word):
@@ -2198,16 +2303,21 @@ def opened(path):
             and abs(code[0][1] - after[0][1]) < 0.5)
 
 
-def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_path, tall_said):
-    """The code book's checks (build_code), and its margins book's. The
+def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_path, tall_said,
+                wrap_paths, wrap_said):
+    """The code book's checks (build_code), and its margins book's, its tall
+    book's, and its wrap book's. The
     default page is US Letter with an inch at the sides: its text runs from
     72 points to 540, 468 points, and a quarter inch inside the paper's
     edge is 594. At 12 points, a character of Plex Mono is 0.6 of the
     type's size wide, and of Latin Modern Mono 0.515, 11.955 PDF points (12
-    TeX points) each; a list's item's line is 30 TeX points shorter, a
-    quotation's 60, and a footnote's type 10 points. The margins book's
-    text runs from 54 points to 504, its right margin room to 594."""
+    TeX points) each, and at 10 points, a footnote's type, 0.6 and 0.525 of
+    9.963; a list's item's line is 30 TeX points shorter, a quotation's
+    60. The margins book's text runs from 54 points to 504, its right
+    margin room to 594."""
     plex, latin = 0.6 * 11.955, 0.515 * 11.955
+    untagged_margins = os.path.join(os.path.dirname(os.path.dirname(margins_path)), "untagged",
+                                    os.path.basename(margins_path))
 
     def line(path, word):
         return code_line(path, word) or (0, 0, 0)
@@ -2529,6 +2639,71 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         return [text for text in pdftext.element_texts(path, "/text") if "Inline" in text] \
             if os.path.exists(path) else []
 
+    def struck(path, word):
+        """A level rule through word's glyphs, from before its first to
+        after its last, a little above its baseline: lua-ul's strike."""
+        rules = pdftext.level_rules(path) if os.path.exists(path) else []
+        for page, baseline, glyphs in glyph_rows(path):
+            text = "".join(g[2] for g in glyphs)
+            if word in text:
+                i = text.index(word)
+                left, right = glyphs[i][0], glyphs[i + len(word) - 1][1]
+                return any(r[0] == page and baseline < r[1] < baseline + 8
+                           and r[2] <= left + 0.5 and r[3] >= right - 0.5 for r in rules)
+        return False
+
+    def first_of(path, word):
+        """Where the first glyph of word is, on the row that holds it."""
+        for _page, _baseline, glyphs in glyph_rows(path):
+            text = "".join(g[2] for g in glyphs)
+            if word in text:
+                return glyphs[text.index(word)][0]
+        return None
+
+    def code_glyphs(path, code):
+        """(left, right, how wide each glyph is, on average) of code's
+        glyphs on the row that opens with it, the row's others aside, as a
+        table's next column's are; (0, 0, 0) where there's none."""
+        for _page, _baseline, glyphs in glyph_rows(path):
+            if "".join(g[2] for g in glyphs).startswith(code):
+                own = glyphs[:len(code)]
+                return own[0][0], own[-1][1], advance_of(own)
+        return 0, 0, 0
+
+    def display_end(path):
+        """Where the margins book's numbered display, its row of 29 plus
+        signs, ends, its number with it; 0 for no such row."""
+        return next((glyphs[-1][1] for _p, _b, glyphs in glyph_rows(path)
+                     if "".join(g[2] for g in glyphs).count("+") == 29), 0)
+
+    def hooked(path, lines, tagged=True, step=None):
+        """Each line of lines (word, indent) wrapped (parts), and beside each
+        of its parts after the first a hook (pdftext.hooks), an arrow down
+        and to the right, from 1.6 characters before the part's first to
+        0.45 before it, 0.7 of a character above its baseline down to 0.25,
+        drawn in an artifact's marked content in a tagged PDF; and no hook
+        beside a line's first part. step is a character's width where the
+        rows' spaces aren't characters (an untagged PDF)."""
+        drawn = pdftext.hooks(path) if os.path.exists(path) else []
+        for word, indent in lines:
+            found = parts(path, word, indent, step)
+            if len(found) < 2:
+                return False
+            c = step or advance_of(found[0][2])
+            for k, (page, baseline, glyphs) in enumerate(found):
+                left = glyphs[0][0]
+                beside = [h for h in drawn if h[0] == page
+                          and abs(h[1] - (left - 1.6 * c)) < 0.3
+                          and abs(h[2] - (left - 0.45 * c)) < 0.3
+                          and abs(h[3] - (baseline + 0.25 * c)) < 0.3
+                          and abs(h[4] - (baseline + 0.7 * c)) < 0.3]
+                near = [h for h in drawn if h[0] == page and left - 2 * c < h[2] < left
+                        and baseline < h[3] < baseline + c]
+                if k == 0 and near or k > 0 and (len(beside) != 1 or len(near) != 1
+                                                  or beside[0][5] != tagged):
+                    return False
+        return True
+
     def item_word(path):
         """The margins book's list's item's word of code (ITEM_WORD), longer
         than the item's line but not the text's: broken between its letters,
@@ -2562,31 +2737,26 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
          "to the item's",
          lambda: line(code_path, "Listline")[0] > 90 and fitted(code_path, "Listline", plex)
          and 62 * plex < 468),
-        ("a line in no language too long for its line even at three quarters of its size is "
-         "set at three quarters, running on into the margin, and the build names it as code, "
-         "with a line that would come within a quarter inch of the paper's edge, one that "
-         "would at half its size, and a footnote's line still too wide, and not a "
-         "quotation's line, which runs past the quotation's line but not the text's",
-         lambda: abs(line(code_path, "Marginline")[2] - 0.75 * plex) < 0.05
-         and 540.5 < line(code_path, "Marginline")[1] <= 594
-         and re.search(r"4 block\(s\) of code, still wider than the text in smaller type, the "
-                       r"smallest at \d+% of its size, run into the margin on its right, the "
-                       r"widest \d+ points wider: on code\.", said)),
-        ("one that would come within a quarter inch of the paper's edge at three quarters "
-         "of its size is set smaller, to end that far inside it, in Plex Mono and in Latin "
-         "Modern Mono, whose smallest design is wider for its size",
-         lambda: all(560 < line(path, "Roomline")[1] <= 594
-                     and 0 < line(path, "Roomline")[2] < 0.75 * full - 0.05
-                     for path, full in ((code_path, plex), (latin_path, latin)))),
-        # Set smaller to end a little further in than a quarter inch, as
-        # the fit aims, it would need less than half its size; at half it
-        # still ends inside, and isn't wrapped.
-        ("one that would come within a quarter inch of the paper's edge even at half its "
-         "size, but for the little more room the fit aims to leave, is set at half, inside "
-         "that edge, its line whole",
-         lambda: abs(line(code_path, "Halfline")[2] - 0.5 * plex) < 0.05
-         and 560 < line(code_path, "Halfline")[1] <= 594
-         and len(parts(code_path, "Halfline", 0)) == 1),
+        # Each had been set as far as the paper's edge left room for, at three
+        # quarters into the margin, or smaller, to half its size, to end a
+        # quarter inch inside the paper's edge (code_wrap, FIT_MACROS'
+        # oerfit.next). The first's word fits a row whole: moved there.
+        ("lines too long for their line even at three quarters of their size are set at "
+         "three quarters and wrapped inside the text's width, none running into the margin: "
+         "one the margin had room for at three quarters, its word moved to the next row "
+         "whole, one that would have come within a quarter inch of the paper's edge, and one "
+         "that would have needed half its size, their words longer than a row broken "
+         "between letters, in Plex Mono; in Latin Modern Mono, which holds more to a line for "
+         "its size, the first fits its line whole, smaller, and the others wrap",
+         lambda: all(wrapped(code_path, whole, 0, piece, 0.75 * plex, plex)
+                     for whole, piece in (("Marginline = \"" + "x" * 80 + "\"", 82),
+                                          ("Roomline = \"" + "w" * 109 + "\"", 1),
+                                          ("Halfline = \"" + "h" * 130 + "\"", 1)))
+         and fitted(latin_path, "Marginline", latin)
+         and all(wrapped(latin_path, whole, 0, 1, None, latin)
+                 for whole in ("Roomline = \"" + "w" * 109 + "\"",
+                               "Halfline = \"" + "h" * 130 + "\""))
+         and "block(s) of code, still wider" not in said),
         ("a line too long for the paper even at half its size, highlighted or in no "
          "language, is set at three quarters of its size, wrapped where it reaches its "
          "line's end, every part of it inside the text's width, each after the first after "
@@ -2621,12 +2791,25 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
          and all(dashed(path) and deep(path) and pointed(path) and joined(path)
                  and whole_word(path) and marked(path)
                  for path in (code_path, latin_path))
-         and "Fitted 17 table(s), formula(s), and block(s) of code too wide for their lines "
-         "to them: 17 in smaller type" in said
-         and said.count("4 block(s) of code with a line too long for the paper even at half "
-                        "their size are set at 75% of their size, each line too long for its "
-                        "line wrapped where it reaches the line's end: on code.") == 2
+         and "Fitted 19 table(s), formula(s), and block(s) of code too wide for their lines "
+         "to them: 19 in smaller type" in said
+         and all(said.count("%d block(s) of code with a line too long for its line even at 75%% "
+                            "of their size are set at 75%%, each line too long for its line "
+                            "wrapped where it reaches the line's end: on code." % n) == 1
+                 for n in (9, 7))
          and "too wide for the paper" not in said),
+        # A path, not a glyph: no character for a copy to hold or a screen
+        # reader to read (the lines' texts above, and the structure's).
+        ("each part of a wrapped line after its first has a hook drawn before it, an arrow "
+         "down and to the right inside the indentation the part is set at, an artifact, "
+         "which a screen reader doesn't read, and no line's first part has one, in Plex Mono "
+         "and in Latin Modern Mono",
+         lambda: all(hooked(path, (("Paperline", 0), ("Paperhyphen", 0), ("    Paperwords", 4),
+                                   ("\u00a0\u00a0Papernbsp", 2), ("Paperplain", 0),
+                                   ("Paperdash", 0), (PAPER_LEAD[:66], 60),
+                                   ("Pagefoot", 0), ("Halfline", 0)))
+                     for path in (code_path, latin_path))
+         and all(h[5] for path in (code_path, latin_path) for h in pdftext.hooks(path))),
         ("a line after a wrapped one, wrapped or not, is set at the block's spacing under the "
          "wrapped line's last part, as its parts are under each other, where no page's break "
          "parts them",
@@ -2643,10 +2826,15 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         ("a line in no language with hyphens, too long for its line, is set smaller to fit "
          "it, whole, not broken after a hyphen, as ragged right let TeX break it",
          lambda: fitted(code_path, "Hyphenline", plex)),
-        ("a quotation's line, too long for the quotation's line, is fitted to it, at three "
-         "quarters of its size, inside the text's",
-         lambda: abs(line(code_path, "Quoteline")[2] - 0.75 * plex) < 0.05
-         and 500 < line(code_path, "Quoteline")[1] <= 540.5),
+        # The quotation's line ends 30 points (29.9 PDF points) inside the
+        # text's, at 510.1.
+        ("a quotation's line too long for the quotation's line even at three quarters of its "
+         "size is set at three quarters, wrapped inside the quotation's line, its word moved "
+         "to the next row whole, in Plex Mono; in Latin Modern Mono it fits it whole, smaller",
+         lambda: wrapped(code_path, "Quoteline = \"" + "q" * 64 + "\"", 0, 66, 0.75 * plex,
+                         plex, edge=510.1)
+         and 490 < line(latin_path, "Quoteline")[1] <= 510.6
+         and 0 < line(latin_path, "Quoteline")[2] < latin - 0.05),
         ("a definition that opens with code has its term on a line of its own above the "
          "code, highlighted or in no language",
          lambda: term_above("Termone", "Defline") and term_above("Termtwo", "Plaindef")
@@ -2658,12 +2846,36 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                      (beside("Cellplain", "Beside"), beside("Cellcode", "Besidetwo")))
          and 0 < line(code_path, "Cellplain")[2] < plex - 0.05
          and 0 < line(code_path, "Cellcode")[2] < plex - 0.05),
-        ("a footnote's code in no language still too wide for its line runs into the margin, "
-         "named as code, not again as a line of text, which LaTeX reports it as, at a line of "
-         "the file it's read from; and a footnote's words too wide for its line, whose last "
+        # pdf-target.lua's cell_size counted the cell as empty, which left
+        # its column half the line, too narrow for the code even at three
+        # quarters of its size: it was wrapped. Counted by its lines, a
+        # character of them one of the text's, its column is a little
+        # narrower than the code, which is fitted to it, smaller.
+        ("a table whose cells hold blocks, which Pandoc's HTML reader gives equal widths, a "
+         "cell of code whose lines are longer than its share of the line, has the code's "
+         "column widened to its lines, each on a row of its own, in nearly the text's type, "
+         "ending before the next column's words, the code the cell's or inside a div in it, "
+         "in Plex Mono and in Latin Modern Mono",
+         lambda: all(0.85 * full < code_glyphs(path, cell[1])[2] <= full + 0.05
+                     and abs(code_glyphs(path, cell[1])[2]
+                             - code_glyphs(path, cell[0])[2]) < 0.05
+                     and 0 < code_glyphs(path, cell[1])[1]
+                     < (first_of(path, beside_) or 0) - 1
+                     for path, full in ((code_path, plex), (latin_path, latin))
+                     for cell, beside_ in ((CODE_BLOCK_CELL, "Besideblock"),
+                                           (CODE_DIV_CELL, "Besidediv")))),
+        # It had run into the margin at three quarters of its size, which
+        # LaTeX reports at a line of the file it's read from, and the build
+        # named as code, not again as a line of text.
+        ("a footnote's code in no language too long for its line even at three quarters of "
+         "its size is set at three quarters, wrapped inside the footnote's line, in Plex Mono "
+         "and in Latin Modern Mono; and a footnote's words too wide for its line, whose last "
          "block is code, are named as a line of text, which LaTeX reports at the line the "
          "footnote's text ends on",
-         lambda: 540.5 < line(code_path, "Notewide")[1] <= 594
+         lambda: wrapped(code_path, "Notewide = \"" + "n" * 106 + "\"", 0, 108,
+                         0.75 * 0.6 * 9.963, 0.6 * 9.963)
+         and wrapped(latin_path, "Notewide = \"" + "n" * 106 + "\"", 0, 108, None,
+                     0.525 * 9.963)
          and len(overfull(said)) == 2 and min(overfull(said)) > 50),
         ("each line's text is as written, its spaces kept, fitted or not, a line of Hebrew "
          "with its points holding its characters",
@@ -2682,8 +2894,10 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
              PAPER_EXACT, PAPER_LEAD, PAPER_DEEP, PAPER_JOINED, PAPER_DOTS, PAPER_MARK,
              "Noteline = \"" + "z" * 70 + "\"",
              "Hyphenline = \"" + "abcd-" * 12 + "abcd\"", "Quoteline = \"" + "q" * 64 + "\"",
-             "Defline = 1", "Plaindef = 2", CODE_CELL[0], CODE_CELL[1],
-             "Cellnote = \"" + "c" * 87 + "\"", "Notewide = \"" + "n" * 106 + "\"",
+             "Defline = 1", "Plaindef = 2", CODE_CELL[0], CODE_CELL[1], CODE_BLOCK_CELL[0],
+             CODE_BLOCK_CELL[1], CODE_DIV_CELL[0], CODE_DIV_CELL[1],
+             "Cellnote = \"" + "c" * 87 + "\"",
+             "Notewide = \"" + "n" * 106 + "\"",
              "Footcode = 1", "Pagefoot = " + FOOT_WORDS]
          and [sorted(line_) for line_ in pdftext.code_lines(code_path)
               if line_.startswith(("Paperheb", "Paperpointed"))]
@@ -2698,6 +2912,20 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                      and all(broken_well(rows) for rows in every_inline_rows(
                          path, "A word of highlighted code", "it."))
                      for path in (code_path, latin_path))),
+        # \texttt, the writer's for code in no language, had broken at its
+        # spaces alone, so that a word of it ran on into the margin.
+        ("code in no language in a paragraph, which the writer sets as \\texttt, breaks as "
+         "highlighted code does: a word longer than its line after a run of marks, not "
+         "between a path's two backslashes, wherever its line ends in the path (12 lengths), "
+         "each row inside the text's width, in Plex Mono and in Latin Modern Mono",
+         lambda: all(len(every_inline_rows(path, "A word of code in no language", "it.")) == 12
+                     and all(broken_well(rows) for rows in every_inline_rows(
+                         path, "A word of code in no language", "it."))
+                     for path in (code_path, latin_path))),
+        ("inline code in struck text, which the writer sets in an \\mbox there, keeps its "
+         "strike, in no language and highlighted, in Plex Mono and in Latin Modern Mono",
+         lambda: all(struck(path, word) for path in (code_path, latin_path)
+                     for word in ("Strikeplain", "Strikepython"))),
         ("a word of highlighted code that fits a line, but not the end of the line before "
          "it, opens the next row whole, the row before it ragged; set flush to both margins, "
          "it's broken after a run of marks, not between two letters; and no row of them runs "
@@ -2713,14 +2941,25 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         ("the paragraphs' text in the PDF's structure is as written, the code's spaces one "
          "each where a row ends, and none where a word breaks",
          lambda: inline_texts(code_path) == INLINE_TEXTS + [INLINE_CELL]),
-        ("on a one-sided page whose right margin is wider than its left, a line too long "
-         "even at three quarters of its size runs into the right margin at three quarters, "
-         "as far as a quarter inch from the paper's edge, the left margin's width aside, and "
-         "a numbered display too",
-         lambda: abs(line(margins_path, "Rightline")[2] - 0.75 * plex) < 0.05
-         and 560 < line(margins_path, "Rightline")[1] <= 594
+        # Set at three quarters, the display would come within a quarter
+        # inch of the paper's edge if its margin were the left one, and
+        # would be set smaller, the smallest then less than 75 percent; TeX
+        # shrinks its spaces to fit it to its line, its number at the line's
+        # end. The line of code had run into the right margin at three
+        # quarters of its size.
+        ("on a one-sided page whose right margin is wider than its left, a numbered display "
+         "too long for its line even at three quarters of its size is set at three quarters, "
+         "as the right margin's room to a quarter inch inside the paper's edge allows, the "
+         "left margin's width aside; a line of code so is wrapped at three quarters inside "
+         "the text's width",
+         lambda: wrapped(margins_path, "Rightline = \"" + "r" * 84 + "\"", 0, 1, 0.75 * plex,
+                         plex, edge=504)
+         and abs(display_end(margins_path) - 504) < 0.5
          and "Fitted 5 table(s), formula(s), and block(s) of code too wide for their lines "
-         "to them: 5 in smaller type, the smallest at 75% of its size." in margins_said),
+         "to them: 5 in smaller type, the smallest at 75% of its size." in margins_said
+         and "3 block(s) of code with a line too long for its line even at 75% of their size "
+         "are set at 75%, each line too long for its line wrapped where it reaches the line's "
+         "end: on margins." in margins_said),
         # The quotation's lines end 30 points (29.9 PDF points) inside the
         # text's edge, at 504; fancyvrb's line is as wide as the text less
         # the quotation's left margin, and latex-lab's verbatim sets a
@@ -2735,6 +2974,17 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                          os.path.basename(margins_path)), False))
                      for whole in ("Quotewrap = \"" + PAPER_WORDS + "\"",
                                    "Quoteplain = " + PAPER_WORDS))),
+        ("on the margins book's page, the three wrapped lines' later parts have a hook each "
+         "and nothing else has one, an artifact in a tagged PDF, a path in an untagged one",
+         lambda: hooked(margins_path, (("Rightline", 0), ("Quotewrap", 0), ("Quoteplain", 0)))
+         and len(pdftext.hooks(margins_path)) == sum(
+             len(parts(margins_path, word, 0)) - 1
+             for word in ("Rightline", "Quotewrap", "Quoteplain"))
+         and hooked(untagged_margins, (("Rightline", 0), ("Quotewrap", 0), ("Quoteplain", 0)),
+                    False, 0.75 * plex)
+         and len(pdftext.hooks(untagged_margins)) == sum(
+             len(parts(untagged_margins, word, 0, 0.75 * plex)) - 1
+             for word in ("Rightline", "Quotewrap", "Quoteplain"))),
         ("a highlighted line too long for a page even wrapped is said to run off its foot, "
          "and one wider than TeX's largest dimension at the text's size doesn't stop LaTeX "
          "where it's measured; a line in no language taller than half the page wrapped "
@@ -2780,6 +3030,58 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
          lambda: all(item_word(path) for path in (margins_path, os.path.join(
              os.path.dirname(os.path.dirname(margins_path)), "untagged",
              os.path.basename(margins_path))))),
+    ]
+    wrap_pdf, whole, half = wrap_paths
+
+    def near(path, word, part):
+        """The line of code that opens with word is on a row of its own,
+        ending inside the text, at part of the text's size."""
+        left, right, advance = line(path, word)
+        return 500 < right <= 540.5 and abs(advance - part * plex) < 0.02 \
+            and len(parts(path, word, 0)) == 1
+
+    def every_hook(path, words):
+        """hooked for each line that opens with one of words, and every
+        hook the PDF draws one of theirs."""
+        return hooked(path, [(word, 0) for word in words]) \
+            and len(pdftext.hooks(path)) == sum(len(parts(path, word, 0)) - 1 for word in words)
+    near_line, mid_line, far_line, edge_line = CODE_WRAP_LINES
+    items += [
+        # down(), FIT_MACROS: the factor to a thousandth, rounded down.
+        ("code_wrap at its default, 0.75: a line that fits its line at 85 percent of its size "
+         "is set at that size, whole, and one that fits at three quarters, at three quarters; "
+         "a highlighted one that fits at 60 percent, and one in no language at 40, are set at "
+         "three quarters, wrapped, a hook before each later part, and the build says so",
+         lambda: near(wrap_pdf, "Wrapnear", 0.852) and near(wrap_pdf, "Wrapedge", 0.75)
+         and all(wrapped(wrap_pdf, whole_, 0, len(whole_), 0.75 * plex, plex)
+                 for whole_ in (mid_line, far_line))
+         and every_hook(wrap_pdf, ("Wrapmid", "Wrapfar"))
+         and "Fitted 4 table(s), formula(s), and block(s) of code too wide for their lines to "
+         "them: 4 in smaller type, the smallest at 75% of its size." in wrap_said
+         and "2 block(s) of code with a line too long for its line even at 75% of their size "
+         "are set at 75%, each line too long for its line wrapped where it reaches the line's "
+         "end: on wrap." in wrap_said),
+        ("code_wrap 1: each line too long for its line is wrapped at the code's own size, a "
+         "hook before each later part, and the build says so, fitting nothing",
+         lambda: all(wrapped(whole, whole_, 0, len(whole_), plex, plex)
+                     for whole_ in CODE_WRAP_LINES)
+         and every_hook(whole, ("Wrapnear", "Wrapmid", "Wrapfar", "Wrapedge"))
+         and "4 block(s) of code with a line too long for its line have each such line "
+         "wrapped where it reaches the line's end: on wrap." in wrap_said
+         and wrap_said.count("Fitted ") == 2),
+        ("code_wrap 0.5: the lines that fit at 85 and 60 percent of their size are set at "
+         "that size, whole, and the one that fits at three quarters with less room than the fit "
+         "leaves where it can is set a little smaller, to leave it; the one that fits at 40 is "
+         "set at half, wrapped, a hook before each later part, and the build says so",
+         lambda: near(half, "Wrapnear", 0.852) and near(half, "Wrapmid", 0.603)
+         and near(half, "Wrapedge", 0.743)
+         and wrapped(half, far_line, 0, len(far_line), 0.5 * plex, plex)
+         and every_hook(half, ("Wrapfar",))
+         and "Fitted 4 table(s), formula(s), and block(s) of code too wide for their lines to "
+         "them: 4 in smaller type, the smallest at 50% of its size." in wrap_said
+         and "1 block(s) of code with a line too long for its line even at 50% of its size is "
+         "set at 50%, each line too long for its line wrapped where it reaches the line's end: "
+         "on wrap." in wrap_said),
     ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the code book's PDF, nor its margins book's",
@@ -4876,6 +5178,19 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         ("a worked example's steps, an array in text, are set smaller to fit their line, "
          "and fitted again on the second run",
          lambda: 0.75 * body < size("Arraysmaller") < 0.8 * body),
+        ("a table whose cell holds a table, which Pandoc's HTML reader gives equal widths, "
+         "has that cell's column widened to the table in it, set in the text's type, ending "
+         "before the next column's words",
+         lambda: at("Nestedone", 1)
+         and 0 < (span("Nestedfour", "Nestedfour") or (0, 999))[1]
+         < (span("Besidenest", "Besidenest") or (0, 0))[0] - 1
+         and within("Besidenest")),
+        ("and one whose table has a row across its columns, wider than they are, has that "
+         "cell's column widened to the row",
+         lambda: at("Nestedspan", 1)
+         and 0 < (span("Nestedspan", "columns") or (0, 999))[1]
+         < (span("Besidespan", "Besidespan") or (0, 0))[0] - 1
+         and within("Besidespan")),
         # Fitted on the third run, a formula's smaller type moves the page
         # breaks the fourth run reads its labels from the third with, the
         # contents' page numbers among them.
@@ -4895,10 +5210,11 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
     ]
 
 
-def columns_checks(columns_path, columns_said):
+def columns_checks(columns_path, columns_said, wrapped_path):
     """The two-column book's checks (build_fit_columns): its columns 229
     points wide, the left from 72 to 301 and the right from 311 to 540, in
-    12-point type, 11.96 of the PDF's."""
+    12-point type, 11.96 of the PDF's; a character of Latin Modern Mono at
+    three quarters of that, its 9-point design's, 0.525 of 8.97."""
     reader = pypdf.PdfReader(columns_path) if os.path.exists(columns_path) else None
     lines = glyph_lines(columns_path) if reader else {}
 
@@ -4923,9 +5239,9 @@ def columns_checks(columns_path, columns_said):
          "it, and not let run a margin's width into the other column",
          lambda: 0 < size("Columnarray") < 0.75 * 11.96 - 0.1
          and 71.5 <= ends("Columnarray")[0] and 0 < ends("Columnarray")[1] <= 307),
-        ("a line of code too wide for its column even at three quarters of its size is set "
-         "smaller still, to fit it, and fitted again on the second run, where Latin Modern "
-         "Mono's design for its smaller size leaves it a little too wide",
+        ("with code_wrap 0.5, a line of code too wide for its column even at three quarters "
+         "of its size is set smaller still, to fit it, and fitted again on the second run, "
+         "where Latin Modern Mono's design for its smaller size leaves it a little too wide",
          lambda: 0 < size("Columncode") < 0.75 * 11.96 - 0.1
          and (lambda left, right: (71.5 <= left and right <= 301.5)
               or (310.5 <= left and right <= 540.5))(*ends("Columncode"))),
@@ -4937,13 +5253,38 @@ def columns_checks(columns_path, columns_said):
                            r"at 50% of its size, and run past it, the widest \d+ points wider "
                            r"than the column: on one\.", columns_said)
          and "too wide for the paper" not in columns_said),
+        ("at code_wrap's default, it's set at three quarters of its size and wrapped inside "
+         "its column, an arrow before its later part",
+         lambda: (lambda rows, drawn: len(rows) == 2
+                  and rows[0][3].startswith("Columncode")
+                  and squeezed(rows[0][3] + rows[1][3]) == "Columncode=\"" + "c" * 45 + "\""
+                  and all(71.5 <= left and right <= 301.5 or 310.5 <= left and right <= 540.5
+                          for _b, left, right, _t in rows)
+                  and abs(rows[1][1] - rows[0][1] - 2 * 0.525 * 0.75 * 11.955) < 0.5
+                  and len(drawn) == 1 and drawn[0][5])(
+             code_rows(wrapped_path), pdftext.hooks(wrapped_path)
+             if os.path.exists(wrapped_path) else [])),
     ]
 
 
-def aaa_checks(aaa_path):
+def code_rows(path):
+    """The rows (baseline, left, right, text) of the two-column book's line
+    of code (Columncode) as glyph_lines gives them: the row that opens with
+    it and the one after it."""
+    for rows in (glyph_lines(path) if os.path.exists(path) else {}).values():
+        for i, row in enumerate(rows):
+            if row[3].startswith("Columncode"):
+                return rows[i:i + 2]
+    return []
+
+
+def aaa_checks(aaa_path, aaa_said, latin_path, latin_said, lacking_path, lacking_said):
     """The AAA book's checks (build_aaa): the page for WCAG 1.4.8 (AAA),
     bin/pdf-layout-wcag-aaa.yaml. 12.5pt is 12.45 of the PDF's points,
-    and a footnote's type, 10.42pt, is 10.38."""
+    and a footnote's type, 10.42pt, is 10.38. In Latin Modern, which
+    holds more to a line for its size than Plex, the page's full lines
+    hold about 86 characters at 12.5 points, where the criterion allows
+    80, and no more than that at 13.5."""
     reader = pypdf.PdfReader(aaa_path) if os.path.exists(aaa_path) else None
     lines = glyph_lines(aaa_path) if reader else {}
     opening = page_holding(aaa_path, "The first chapter opens")
@@ -4994,6 +5335,33 @@ def aaa_checks(aaa_path):
          lambda: len(note) > 2 and len(caption) > 2
          and abs(commonest_leading(note) - 1.5 * 10.38) < 0.15
          and abs(commonest_leading(caption) - 1.5 * 12.45) < 0.15),
+        # build-pdf.py's line_warning and face_warning, from what the page's
+        # measure of its lines said (latexbuild.LINE_LENGTH).
+        # The poem's lines, each ended by a forced break, aren't full lines:
+        # counted, they took Latin Modern's average below 80 (a review).
+        ("in Plex, its full lines hold no more than 80 characters, and the run says nothing "
+         "of it; set in Latin Modern, which the page names, they hold more, and the run "
+         "warns that the PDF doesn't meet WCAG 1.4.8, naming the size at which it would, a "
+         "poem's short lines, each ended by a line break, not counted among them",
+         lambda: os.path.exists(aaa_path) and "WCAG" not in aaa_said
+         and os.path.exists(latin_path)
+         and bool(re.search(r"WARNING: The PDF's page is meant to meet WCAG 1\.4\.8 \(AAA\), "
+                            r"but the text's full lines hold about (8[1-9]) characters, more "
+                            r"than the 80 the criterion allows: at 13\.5 points \(fontsize: "
+                            r"13\.5pt in the pdf\.metadata file\) they'd hold no more than 80 "
+                            r"\(docs/configuration\.md, \"WCAG 1\.4\.8 \(AAA\)\"\)\.",
+                            latin_said))),
+        ("where TeX lacks a file of Plex's and the page falls back to Latin Modern, the run's "
+         "warning of the fallback says the PDF no longer meets WCAG 1.4.8, and the size that "
+         "would",
+         lambda: os.path.exists(lacking_path) and "The PDF's page is meant" not in lacking_said
+         and bool(re.search(r"WARNING: TeX lacks the PDF's default faces, IBM Plex and IBM "
+                            r"Plex Math, so the book is set in Latin Modern: LaTeX found no "
+                            r"NoSuchMath-Regular\.otf\. On this page, which is meant to meet "
+                            r"WCAG 1\.4\.8 \(AAA\), the text's full lines then hold about "
+                            r"8[1-9] characters, more than the 80 the criterion allows, so the "
+                            r"PDF doesn't meet it\. TeX Live's plex package has them: .*, and set "
+                            r"fontsize: 13\.5pt there\.", lacking_said))),
     ]
 
 
@@ -5042,8 +5410,9 @@ def fancy_checks(fancy_path, fancy_said):
 # languages book's folder was left in the temporary directory by every
 # run, when the cleanup and the message each had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
-                "-default", "-default-lacking", "-preamble", "-aaa", "-fit", "-columns",
-                "-bars", "-languages", "-rules", "-code", "-code-margins", "-code-tall")
+                "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
+                "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
+                "-code-margins", "-code-tall", "-code-wrap")
 
 
 def checks(work, jobs=1):
@@ -5076,14 +5445,15 @@ def checks(work, jobs=1):
             fancy_path, fancy_said = fancied.result()
             default_path, default_said, lacking_path, lacking_said = defaulted.result()
             preamble_path, preamble_source, preamble_said = prefaced.result()
-            aaa_path = aaa.result()
+            (aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
+             aaa_lacking_said) = aaa.result()
             fit_path, fit_said, fit_source, fit_third = fitted.result()
-            columns_path, columns_said = columned.result()
+            columns_path, columns_said, columns_wrapped_path = columned.result()
             bars_path, bars_source = barred.result()
             languages_path = spoken.result()
             rules_path = ruled.result()
             (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
-         tall_said) = coded.result()
+             tall_said, wrap_paths, wrap_said) = coded.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -5095,14 +5465,15 @@ def checks(work, jobs=1):
         default_path, default_said, lacking_path, lacking_said = build_default(
             work + "-default")
         preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
-        aaa_path = build_aaa(work + "-aaa")
+        (aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
+         aaa_lacking_said) = build_aaa(work + "-aaa")
         fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
-        columns_path, columns_said = build_fit_columns(work + "-columns")
+        columns_path, columns_said, columns_wrapped_path = build_fit_columns(work + "-columns")
         bars_path, bars_source = build_blank_lines(work + "-bars")
         languages_path = build_languages(work + "-languages")
         rules_path = build_rules(work + "-rules")
         (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
-         tall_said) = build_code(work + "-code")
+         tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -5867,9 +6238,10 @@ def checks(work, jobs=1):
     items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path, default_said, lacking_path, lacking_said)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
-    items += aaa_checks(aaa_path)
+    items += aaa_checks(aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
+                        aaa_lacking_said)
     items += fit_checks(fit_path, fit_said, fit_source, fit_third)
-    items += columns_checks(columns_path, columns_said)
+    items += columns_checks(columns_path, columns_said, columns_wrapped_path)
     # pdf-target.lua's Math: an empty line in a formula, as texmath writes a
     # one-column matrix whose last row is empty, is that row, an empty group.
     matrices = re.findall(r"\\begin\{matrix\}.*?\\end\{matrix\}", bars_source, re.S)
@@ -5889,7 +6261,7 @@ def checks(work, jobs=1):
     items += language_checks(languages_path)
     items += rules_checks(rules_path)
     items += code_checks(code_path, latin_code_path, code_said, margins_path, margins_said,
-                         tall_path, tall_said)
+                         tall_path, tall_said, wrap_paths, wrap_said)
     items.append(("every folder a book is built in is one the suite removes once it's done, "
                   "or names when told to keep them (BOOK_FOLDERS)",
                   lambda: {os.path.basename(path) for path in glob.glob(glob.escape(work) + "*")}

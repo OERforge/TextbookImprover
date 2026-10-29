@@ -1962,6 +1962,53 @@ def case_struck_out(work):
     ]
 
 
+def case_line_measure(work):
+    """latexbuild.LINE_LENGTH, the AAA page's measure of its full lines, in
+    a document of LaTeX's own in Latin Modern: a paragraph of words a
+    hyphenation point divides inside a ligature (of-fi-cial), whose glyph
+    TeX keeps in the discretionary there, which the measure passed over,
+    and a poem's lines, each ended by a line break, which it counted as
+    full, as a review found; the measure's lines and characters are the
+    paragraph's full lines' in the PDF's text."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    os.makedirs(work)
+    words = " ".join(("official sufficient efficient difficult affluent office coffee effort "
+                      "afford different").split() * 8)
+    poem = "\\\\\n".join("A short line of a poem, %d." % i for i in range(12))
+    with open(os.path.join(work, "lines.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n" + latexbuild.LINE_LENGTH + "\\begin{document}\n"
+                 + words + ".\n\n" + poem + "\n\\end{document}\n")
+
+    def counted():
+        why = why_no_tex("no lualatex to build with", "lualatex")
+        if why:
+            return skip(why)
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        subprocess.run(["lualatex", "-interaction=nonstopmode", "lines.tex"], cwd=work,
+                       capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
+        log = os.path.join(work, "lines.log")
+        with open(log, encoding="utf-8", errors="replace") if os.path.exists(log) \
+                else io.StringIO() as fh:
+            measured = latexbuild.LINE_MEASURED.findall(fh.read())
+        text = subprocess.run(["pdftotext", "-raw", os.path.join(work, "lines.pdf"), "-"],
+                              capture_output=True, text=True).stdout
+        rows = [row.strip() for row in text.split("\n") if row.strip()]
+        last = next((i for i, row in enumerate(rows) if row.endswith("different.")), None)
+        if not measured or not last:
+            return False
+        full = rows[:last]
+        return (int(measured[-1][0]), int(measured[-1][1])) == (
+            len(full), sum(len(row) for row in full)) and len(full) > 4
+    return [
+        ("the AAA page's measure of a paragraph's full lines counts their characters as "
+         "the PDF's text has them, spaces among them, a ligature a hyphenation point "
+         "divides as its letters, and no line a line break ends",
+         counted),
+    ]
+
+
 def case_pdf_copy(work):
     """The PDF target's copy of the book's folder: a link the book makes
     to a folder beside it still finds it, the book's .latexmkrc is kept
@@ -2326,7 +2373,7 @@ def case_latex_target(work):
                  "Measured:\n\n```{#area-code .python .numberLines startFrom=\"3\"}\n"
                  "area = s * s  # in square units\nif area > 10 and s[0] != '{':\n"
                  "    print(\"big\\n\")\n```\n\n"
-                 "Called as `area(s[0])`{.python}, after [the code](#area-code).\n\n"
+                 "Called as `area(s[0])`{.python} or `area(t)`, after [the code](#area-code).\n\n"
                  "Its side is $s$.[^side]\n\n"
                  "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n\n"
                  "[^side]: ```python\n    side = s  # one side\n    ```\n")
@@ -2703,10 +2750,12 @@ def case_latex_target(work):
          and "\\begin{Highlighting}" in three),
         ("read back as a LaTeX source, each chapter gives the same page", round_trip),
         # Pandoc's reader made a highlighted block a paragraph and stopped
-        # on inline code holding a bracket (latexsource.highlighted_code).
+        # on inline code holding a bracket (latexsource.highlighted_code),
+        # and made the PDF target's group around inline code a span
+        # (latexsource.inline_code_marks), which a review found.
         ("and highlighted code is code again: a block with its language, numbered from 3, "
          "and its id, a footnote's, and inline code, the text of each as written, every "
-         "character of ASCII in it",
+         "character of ASCII in it, and no inline code, highlighted or not, in a span",
          lambda: reading()
          and re.search(r'<div class="sourceCode" id="[^"]*area-code"[^>]*><pre\s+class="sourceCode '
                        r'numberSource python numberLines"><code class="sourceCode python" '
@@ -2716,7 +2765,9 @@ def case_latex_target(work):
                  and inline_texts(page(back, s)) == inline_texts(page(work, s)) for s in ("one", "two"))
          and "if area > 10 and s[0] != '{':" in code_texts(page(back, "one"))[0]
          and ASCII in code_texts(page(back, "two"))[0]
-         and "<code>area(s[0])</code>" in page(back, "one")),
+         and "<code>area(s[0])</code>" in page(back, "one")
+         and "<code>area(t)</code>" in page(back, "one")
+         and not any(re.search(r"<span>\s*<code", page(back, s)) for s in ("one", "two"))),
         ("it builds with latexmk and LuaLaTeX", builds),
         ("a formula too wide for its line is marked to be fitted, as in the PDF, and "
          "latexmk's runs settle with it fitted",
@@ -5808,6 +5859,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
+         ("the AAA page's measure of its lines", case_line_measure),
          ("the PDF build's copy of the book", case_pdf_copy),
          ("the book's other masters", case_other_masters),
          ("calls of the book's macros for an image, as the review found them",

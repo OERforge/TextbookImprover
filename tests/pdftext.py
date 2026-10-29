@@ -565,6 +565,51 @@ def level_rules(path):
     return found
 
 
+def hooks(path):
+    """[(page index, left, right, bottom, top, artifact)] for each hook a
+    page's own content strokes, as the fit's wrap draws one at the start of
+    a wrapped line's later parts (latexbuild.FIT_MACROS): a path of two
+    segments, the first straight down, the second straight across to the
+    right, in points from the page's foot and left edge, and whether it's
+    drawn in an artifact's marked content."""
+    found = []
+
+    def at(ctm, x, y):
+        return (ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5])
+
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            ctm, saved, marked, points = [1, 0, 0, 1, 0, 0], [], [], []
+            for operands, op in pikepdf.parse_content_stream(page):
+                op = str(op)
+                if op == "q":
+                    saved.append(list(ctm))
+                elif op == "Q" and saved:
+                    ctm = saved.pop()
+                elif op == "cm" and len(operands) == 6:
+                    ctm = _times([float(x) for x in operands], ctm)
+                elif op in ("BMC", "BDC") and operands:
+                    marked.append(str(operands[0]))
+                elif op == "EMC" and marked:
+                    marked.pop()
+                elif op == "m" and len(operands) == 2:
+                    points = [at(ctm, *(float(v) for v in operands))]
+                elif op == "l" and points and len(operands) == 2:
+                    points.append(at(ctm, *(float(v) for v in operands)))
+                elif op in ("S", "s"):
+                    if len(points) == 3:
+                        (x0, y0), (x1, y1), (x2, y2) = points
+                        if abs(x0 - x1) < 0.01 and y0 > y1 + 0.01 and abs(y1 - y2) < 0.01 \
+                                and x2 > x1 + 0.01:
+                            found.append((n, round(x0, 2), round(x2, 2), round(y1, 2),
+                                          round(y0, 2), "/Artifact" in marked))
+                    points = []
+                elif op in ("n", "f", "F", "f*", "B", "B*", "b", "b*", "re", "h", "c", "v",
+                            "y"):
+                    points = []
+    return found
+
+
 def base_fonts(path):
     """The base font names a PDF's pages and their form XObjects draw with,
     a subset's tag taken off (ABCDEF+LINE10 is LINE10)."""

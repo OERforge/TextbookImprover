@@ -45,6 +45,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -306,19 +307,63 @@ def default_faces(meta):
             + "\\fi\n")
 
 
-def face_warning(lacking, meta):
+def face_warning(lacking, meta, aaa=None):
     """The run's warning that the default's faces gave way to Latin
     Modern (default_faces): the first of the files LaTeX lacked
-    (FACE_MISSING), how many more, and what to do."""
+    (FACE_MISSING), how many more, and what to do; and, on a page meant to
+    meet WCAG 1.4.8 (AAA), aaa, (the average of the text's full lines, the
+    type's size), where they then hold more than the criterion allows."""
     faces, said = latin_modern_said(*defaults_of(meta))
     more = len(lacking) - 1
+    over = ""
+    if aaa:
+        over = (f" On this page, which is meant to meet WCAG 1.4.8 (AAA), the text's full "
+                f"lines then hold about {aaa[0]:.0f} characters, more than the "
+                f"{latexbuild.LINE_MOST} the criterion allows, so the PDF doesn't meet it.")
     return (f"WARNING: TeX lacks the PDF's default faces, {faces}, so {said}: LaTeX found "
             f"no {lacking[0]}" + (f", nor {more} more of their files" if more else "")
-            + ". TeX Live's plex package has them: for TinyTeX or TeX Live from tug.org, "
-            + latexbuild.tlmgr_command("install plex")
+            + "." + over + " TeX Live's plex package has them: for TinyTeX or TeX Live from "
+            "tug.org, " + latexbuild.tlmgr_command("install plex")
             + ", and for Debian's or Ubuntu's texlive packages, sudo apt install "
             "texlive-fonts-extra. To keep Latin Modern without this warning, name Latin "
-            "Modern's faces in the pdf.metadata file (docs/configuration.md, \"The faces\").")
+            "Modern's faces in the pdf.metadata file (docs/configuration.md, \"The faces\")"
+            + (f", and set fontsize: {size_for(*aaa)}pt there" if aaa else "") + ".")
+
+
+def size_for(average, size):
+    """The type's size, to the half point above, at which full lines that
+    average average characters at size would hold no more than
+    latexbuild.LINE_MOST, as a string: 13.5 for 86 at 12.5."""
+    half = math.ceil(size * average / latexbuild.LINE_MOST * 2 - 1e-9) / 2
+    return f"{half:g}"
+
+
+def faces_said(lacking, meta, aaa, finished):
+    """The run's warnings of the faces and of the lines: that the default's
+    faces gave way to Latin Modern, where TeX lacked a file of theirs
+    (lacking), and, on a page meant to meet WCAG 1.4.8 (AAA) whose full
+    lines hold more than the criterion allows (aaa), that the PDF doesn't
+    meet it: in the fallback's warning where the text's face is one that
+    gave way, and otherwise in a warning of its own (line_warning), where
+    LaTeX finished, since then the book's own face set the lines. A
+    review found the fallback of a book's monospaced type blamed for the
+    lines of a text face the book named."""
+    text = any(field == "mainfont" for field, *_rest in defaults_of(meta)[0])
+    said = [face_warning(lacking, meta, aaa if text else None)] if lacking else []
+    if aaa and finished and not (lacking and text):
+        said.append(line_warning(aaa))
+    return said
+
+
+def line_warning(aaa):
+    """The run's warning that a page meant to meet WCAG 1.4.8 (AAA) holds
+    more to a full line than the criterion allows, aaa (the average, the
+    type's size), its faces being TeX's: a face a book names, say."""
+    return (f"WARNING: The PDF's page is meant to meet WCAG 1.4.8 (AAA), but the text's "
+            f"full lines hold about {aaa[0]:.0f} characters, more than the "
+            f"{latexbuild.LINE_MOST} the criterion allows: at {size_for(*aaa)} points "
+            f"(fontsize: {size_for(*aaa)}pt in the pdf.metadata file) they'd hold no more "
+            f"than {latexbuild.LINE_MOST} (docs/configuration.md, \"WCAG 1.4.8 (AAA)\").")
 
 
 def rescaled(options):
@@ -764,8 +809,11 @@ def book_metadata(project, resolved, base, numbered):
     claimed = meta.get("pdfstandard")
     claimed = [meta_plain(c) for c in claimed["c"]] if claimed and claimed.get("t") == "MetaList" \
         else ([meta_plain(claimed)] if claimed else [])
+    # How far a block of code too wide for its line is set smaller before
+    # its lines wrap (code_wrap), for the fit macros in HEADER.
     ours = ("\\ifdefined\\tagpdfsetup\n  \\tagpdfsetup{math/setup={%s}}\n\\fi\n"
-            % math_setup(claimed, str(resolved["pdf.ua1_math"]))) + HEADER
+            % math_setup(claimed, str(resolved["pdf.ua1_math"]))) \
+        + latexbuild.code_wrap_latex(resolved["code_wrap"]) + HEADER
     # Picture mode in LaTeX's own fonts, where picture_paths is off: pict2e
     # only for a struck-out term (latexbuild.PICTURE_PATHS).
     if str(resolved["picture_paths"]) != "on":
@@ -795,6 +843,11 @@ def book_metadata(project, resolved, base, numbered):
     # says false.
     if meta_truth(meta.pop("ragged-right", None)):
         ours += RAGGED_RIGHT
+    # A page meant to meet WCAG 1.4.8 (AAA), as the metadata file says
+    # (wcag-aaa, bin/pdf-layout-wcag-aaa.yaml): its lines measured
+    # (latexbuild.LINE_LENGTH), and the run warns where they're too long.
+    if meta_truth(meta.get("wcag-aaa")):
+        ours += latexbuild.LINE_LENGTH
     # The footer setting at the foot of every page, its words alone
     # (pagefooter: LaTeX's tagging marks the foot an artifact).
     ours += pagefooter.latex_preamble(resolved["footer"], base)
@@ -1271,8 +1324,13 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # The default's faces given way to Latin Modern (default_faces),
         # whether LaTeX went on to finish or not.
         lacking = list(dict.fromkeys(FACE_MISSING.findall(said)))
-        if lacking:
-            print(face_warning(lacking, meta), file=sys.stderr)
+        # On a page meant to meet WCAG 1.4.8 (AAA), full lines too long:
+        # (their average, the type's size), where enough are measured.
+        measured = latexbuild.line_length(said) if meta_truth(meta.get("wcag-aaa")) else None
+        aaa = measured[1:] if measured and measured[0] >= 20 \
+            and measured[1] > latexbuild.LINE_MOST else None
+        for warning in faces_said(lacking, meta, aaa, result.returncode == 0):
+            print(warning, file=sys.stderr)
         if result.returncode == 0:
             owners = {page_id(stem): stem for stem, _t, _d in assembly.pages}
             # What was fitted to its line, and what's still wider than it.

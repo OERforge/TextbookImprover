@@ -68,6 +68,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
 import difflib
+import math
 import os
 import re
 import sys
@@ -151,7 +152,7 @@ class Node:
 
     __slots__ = ("name", "path", "description", "type", "default", "values",
                  "item", "target_only", "book_level", "default_from_target", "keys",
-                 "stage")
+                 "stage", "minimum", "maximum")
 
     def __init__(self, name, path, raw, stage=None):
         self.name = name
@@ -162,6 +163,9 @@ class Node:
         self.default = None
         self.values = None
         self.item = None
+        # The least and the most a number may be, where the schema says.
+        self.minimum = raw.get("minimum")
+        self.maximum = raw.get("maximum")
         self.target_only = bool(raw.get("target_only", False))
         self.book_level = bool(raw.get("book_level", False))
         self.default_from_target = bool(raw.get("default_from_target", False))
@@ -469,11 +473,27 @@ def _coerce(node, value, where, problems):
                             f"{str(value).lower()}")
             return node.default
         try:
-            return caster(value)
+            number = caster(value)
         except (TypeError, ValueError):
             problems.append(f"{where}: {node.path} should be a number, not "
                             f"{value!r}")
             return node.default
+        # YAML's .nan and .inf are floats, and no comparison refuses .nan:
+        # it passed its bounds and became code_wrap's least (a review).
+        if not math.isfinite(number):
+            problems.append(f"{where}: {node.path} should be a number, not "
+                            f"{value!r}")
+            return node.default
+        if (node.minimum is not None and number < node.minimum) or \
+                (node.maximum is not None and number > node.maximum):
+            bounds = (f"from {node.minimum} to {node.maximum}"
+                      if node.minimum is not None and node.maximum is not None
+                      else f"at least {node.minimum}" if node.minimum is not None
+                      else f"at most {node.maximum}")
+            problems.append(f"{where}: {node.path} should be a number {bounds}, "
+                            f"not {value!r}")
+            return node.default
+        return number
 
     if kind == "date":
         if isinstance(value, datetime.datetime):

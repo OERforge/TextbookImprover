@@ -1,0 +1,4 @@
+# A bounded number at its least is taken.
+target: pdf
+expect:
+  code_wrap: 0.5

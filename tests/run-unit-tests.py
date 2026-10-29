@@ -2603,7 +2603,9 @@ def check_code_fit_report():
     and so is a line of text after it; and the fit report names a block as
     code running into the margin, warns of a block too wide for the
     paper with the tables and formulas, and says where a block's lines
-    wrap."""
+    wrap, at the part of its size code_wrap sets it at or its own. The
+    fit wraps a block's lines now before they'd run into the margin, but
+    LaTeX's report of a block that does is still read."""
     import latexbuild
     source = "\n".join(["\\label{page-code}", "Words one.", "", "Words two.", "",
                         "\\OERFitCode{1}", "", "\\begin{verbatim}", "Marginline",
@@ -2651,16 +2653,26 @@ def check_code_fit_report():
              "TextbookImprover fit wide: c 0.0 6 0.75 0 1 0\n", source, owners)
          == ["Fitted 1 table(s), formula(s), and block(s) of code too wide for their lines "
              "to them: 1 in smaller type, the smallest at 75% of its size."]),
-        ("a block of code whose lines wrap, too long for the paper even at half its size, is "
-         "said to be, where it is, and not warned of",
+        ("a block of code whose lines wrap, too long for its line even at the part of its "
+         "size code_wrap sets it at, is said to be, at that size, where it is, and not warned "
+         "of",
          lambda: latexbuild.fit_report(
              "TextbookImprover fit: run 2, 0 narrowed, 1 smaller, smallest 0.75\n"
              "TextbookImprover fit wrapped: 6 0.75 0\n", source, owners)
          == ["Fitted 1 table(s), formula(s), and block(s) of code too wide for their lines "
              "to them: 1 in smaller type, the smallest at 75% of its size.",
-             "1 block(s) of code with a line too long for the paper even at half its size is "
-             "set at 75% of its size, each line too long for its line wrapped where it reaches "
-             "the line's end: on code."]),
+             "1 block(s) of code with a line too long for its line even at 75% of its size is "
+             "set at 75%, each line too long for its line wrapped where it reaches the line's "
+             "end: on code."]),
+        # code_wrap 1: the block is set at its own size, which isn't smaller.
+        ("and blocks wrapped at their own size are said to be, and not counted as set "
+         "smaller",
+         lambda: latexbuild.fit_report(
+             "TextbookImprover fit: run 2, 0 narrowed, 0 smaller, smallest 1\n"
+             "TextbookImprover fit wrapped: 6 1 0\n"
+             "TextbookImprover fit wrapped: 12 1 0\n", source, owners)
+         == ["2 block(s) of code with a line too long for its line have each such line "
+             "wrapped where it reaches the line's end: on code."]),
         ("a block of highlighted code with a line too long for a page even wrapped, which "
          "runs off its page's foot, is warned of",
          lambda: latexbuild.fit_report(
@@ -2725,6 +2737,50 @@ def check_default_page():
         ("which sets every field the default does, on the default's paper and margins",
          lambda: set(fields) <= set(aaa_fields)
          and all(aaa_fields[k] == fields[k] for k in ("papersize", "geometry"))),
+    ]
+
+
+def check_aaa_line_length():
+    """The page for WCAG 1.4.8 (AAA) measures its full lines as LaTeX sets
+    them (latexbuild.LINE_LENGTH), and build-pdf.py reads the last run's
+    count and warns of lines that hold more than the criterion allows,
+    naming the size, to the half point above, at which they'd hold no more:
+    13.5 points for Latin Modern's 86 characters at 12.5."""
+    import latexbuild
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    said = ("TextbookImprover line: 10 900 819200\nOther words.\n"
+            "TextbookImprover line: 40 3440 819200\n")
+    return [
+        ("the run reads the last run's count, its lines, their average, and the type's size",
+         lambda: latexbuild.line_length(said) == (40, 86.0, 12.5)
+         and latexbuild.line_length("No count.") is None),
+        ("and names the size, to the half point above, at which they'd hold no more than 80",
+         lambda: [build_pdf.size_for(*a) for a in ((86.0, 12.5), (80.0, 12.5), (81.0, 12.0))]
+         == ["13.5", "12.5", "12.5"]),
+        ("its warning says how many a full line holds, the most the criterion allows, and "
+         "that size",
+         lambda: "full lines hold about 86 characters, more than the 80 the criterion allows: "
+         "at 13.5 points (fontsize: 13.5pt in the pdf.metadata file)"
+         in build_pdf.line_warning((86.0, 12.5))),
+        # A review found the fallback of a book's monospaced type blamed for
+        # the lines of the text face the book named.
+        ("where the default's text face gives way to Latin Modern, the fallback's warning "
+         "says the PDF no longer meets the criterion; where the book names its text face, "
+         "the fallback's warning says nothing of it, and a warning of its own does; and "
+         "with nothing lacking, that one alone, where LaTeX finished",
+         lambda: (lambda own, plain: len(plain) == 1
+                  and "On this page, which is meant to meet WCAG 1.4.8 (AAA)" in plain[0]
+                  and len(own) == 2 and "On this page" not in own[0]
+                  and "monospaced type" in own[0]
+                  and own[1] == build_pdf.line_warning((86.0, 12.5)))(
+             build_pdf.faces_said(["IBMPlexMono-Regular.otf"], {"mainfont": {
+                 "t": "MetaString", "c": "Latin Modern Roman"}}, (86.0, 12.5), True),
+             build_pdf.faces_said(["IBMPlexMath-Regular.otf"], {}, (86.0, 12.5), True))
+         and build_pdf.faces_said([], {}, (86.0, 12.5), True)
+         == [build_pdf.line_warning((86.0, 12.5))]
+         and build_pdf.faces_said([], {}, (86.0, 12.5), False) == []
+         and "On this page" not in build_pdf.faces_said(["IBMPlexMath-Regular.otf"], {},
+                                                        None, True)[0]),
     ]
 
 
@@ -5793,6 +5849,7 @@ GROUPS = [
     ("the byte-order mark on every report", check_report_marks),
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
+    ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),
     ("display style in running text, in an HTML source", check_display_style_in_text),
     ("a table whose head holds every row, in an HTML source", check_head_only_tables),

@@ -2065,6 +2065,28 @@ FIT_CODE_MARK = re.compile(r"^[ \t]*\\OERFitCode(?:End)?\{\d+\}[ \t]*\n"
                            r"|\\OERFitCode(?:End)?\{\d+\}", re.M)
 
 
+# The PDF target's group around inline code (pdf-target.lua's mark_code),
+# which marks the code for latexbuild's FIT_MACROS to break: the reader
+# makes a group a span, and every inline code read back was in one.
+INLINE_CODE_MARK = re.compile(r"\{\\OERInlineCode\{\}")
+
+
+def inline_code_marks(text, counter):
+    """The PDF target's group around inline code (INLINE_CODE_MARK) taken
+    out, in code, the code left. Before highlighted_code: the code is
+    \\texttt or Pandoc's \\VERB, whose braces are escaped, where a
+    \\verb made of it holds them as written, which may not pair."""
+    spans = skip_spans(text)
+    found = [m for m in INLINE_CODE_MARK.finditer(text) if not in_spans(m.start(), spans)]
+    for m in reversed(found):
+        close = matching_brace(text, m.start())
+        if close < 0:
+            continue
+        text = text[:m.start()] + text[m.end():close - 1] + text[close:]
+        counter["inline_code_marks"] = counter.get("inline_code_marks", 0) + 1
+    return text
+
+
 def fit_marks(text, counter):
     """The PDF target's groups around a table, a formula, or a block of
     code to fit taken out, in code, with \\OERFitTable, \\OERFitStepsTable,
@@ -2281,6 +2303,7 @@ def repair_text(text, counter, math_macros=(), counters=()):
     counters' names (book_counters)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
+    text = inline_code_marks(text, counter)
     text = highlighted_code(text, counter)
     text = fit_marks(text, counter)
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),

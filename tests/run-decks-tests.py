@@ -2812,7 +2812,9 @@ def case_wide_slide(work):
     its fit numbered from 1, as the deck's are, it had the slide's. And a
     slide whose line of code is too long for it even at half its size,
     set at three quarters and wrapped; and a slide whose paragraph's
-    highlighted code, longer than a line, breaks at its spaces."""
+    highlighted code, longer than a line, breaks at its spaces. And the
+    wide deck again with code_wrap 1, its slide's code too wide for it
+    wrapped at its own size, as a book's is: the setting reaches a deck."""
     real = shutil.which("lualatex")
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
@@ -2829,6 +2831,10 @@ def case_wide_slide(work):
     result = convert(decks_dir, "--quick",
                      env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
     path = os.path.join(decks_dir, "pdf", "wide.pdf")
+    whole_dir = folder(os.path.join(work, "whole"), "targets:\n  pdf:\n    format: pdf\n"
+                       "    code_wrap: 1\n", decks_given={"wide.md": WIDE_SLIDES})
+    convert(whole_dir, "--quick")
+    whole = os.path.join(whole_dir, "pdf", "wide.pdf")
 
     def counts():
         """How many runs each deck's LaTeX had, fewest first, not counting
@@ -2837,7 +2843,7 @@ def case_wide_slide(work):
                    if os.path.basename(f).startswith("deck-pdf")]
         return sorted(folders.count(f) for f in set(folders))
 
-    def inside(slide, least):
+    def inside(slide, least, path=path):
         """Each of the slide's glyphs, least of them at the least, is a
         quarter inch inside its edges, its last column's or its last term's
         among them."""
@@ -2849,16 +2855,16 @@ def case_wide_slide(work):
         return len(boxes) >= least and all(18 <= left and right <= width - 18
                                            for _, _, left, right, _ in boxes)
 
-    def rows(slide):
+    def rows(slide, path=path):
         """The wide deck's slide's lines of text: its baselines."""
         if not os.path.exists(path):
             return []
         return sorted({round(b[1], 1) for b in pdftext.glyph_boxes(path) if b[0] == slide})
 
-    def advance(deck, word):
+    def advance(deck, word, folder_=decks_dir):
         """How wide a glyph of the line of code that opens with word is, on
         average, in the deck's PDF; 0 where there's none."""
-        pdf = os.path.join(decks_dir, "pdf", deck + ".pdf")
+        pdf = os.path.join(folder_, "pdf", deck + ".pdf")
         if not os.path.exists(pdf):
             return 0
         lines = {}
@@ -2882,6 +2888,18 @@ def case_wide_slide(work):
         ("a slide's paragraph's highlighted code longer than a line breaks at its spaces, "
          "every row a quarter inch inside the slide's edges",
          lambda: inside(6, 200) and len(rows(6)) >= 3),
+        # At the default, 0.75, the slide's line of code, too long for it
+        # even at three quarters of its size, is set at three quarters and
+        # wrapped; at 1, at its own size, as wide a character as the short
+        # slide's code, and wrapped.
+        ("with code_wrap 1, a slide's line of code too wide for it is wrapped at the code's "
+         "own size, every part a quarter inch inside the slide's edges, where the default "
+         "sets it at three quarters of its size",
+         lambda: inside(3, 100, whole) and len(rows(3, whole)) >= len(rows(3)) >= 3
+         and advance("wide", "Codeslide", whole_dir) > 0
+         and abs(advance("wide", "Codeslide", whole_dir)
+                 - advance("wide", "Shortslide", whole_dir)) < 0.05
+         and 0 < advance("wide", "Codeslide") < 0.8 * advance("wide", "Shortslide")),
         ("a section's footnote's code that fits is set at its size beside a slide's code set "
          "smaller, as wide a character as where the slide's code fits too",
          lambda: 0 < advance("sections", "Slidecode") < 0.9 * advance("sectionsshort", "Slidecode")

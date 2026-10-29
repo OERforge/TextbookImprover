@@ -1,0 +1,5 @@
+# A bounded number at its most is taken, a whole one read as the number
+# it is.
+target: pdf
+expect:
+  code_wrap: 1

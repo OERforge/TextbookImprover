@@ -1,0 +1,4 @@
+# A number the schema bounds (code_wrap, from 0.5 to 1) is refused
+# outside them, not used as it is.
+target: pdf
+error: should be a number from 0.5 to 1, not 0.3

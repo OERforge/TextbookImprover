@@ -902,7 +902,7 @@ def tidy(path):
 def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               standards=("ua-2",), ua1_math="office", ratio="auto", title=None,
               repair_captions=True, remove_empty_paragraphs=True, env=None,
-              keep=None, trace=None, picture_paths=True):
+              keep=None, trace=None, picture_paths=True, code_wrap=None):
     """One deck's tagged PDF, through ltx-talk: the deck's filtered
     intermediate, its headings renumbered (renumber), written by
     Pandoc's beamer writer with template and filters, talkified, and
@@ -914,7 +914,9 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     empty paragraph elements taken out, as for a book's PDF. title names
     the PDF when the deck has none. keep: a folder the LaTeX is copied
     to. picture_paths: whether picture mode is drawn with pict2e
-    (latexbuild.PICTURE_PATHS). An SVG that can't be made a PDF stops it
+    (latexbuild.PICTURE_PATHS). code_wrap: how far a block of code too
+    wide for its slide is set smaller before its lines wrap, the fit
+    macros' own default where None. An SVG that can't be made a PDF stops it
     before LaTeX, which can't show one. Returns a dict: ok, pages, log
     (the last run's), timeout (LaTeX stopped), unsettled, ratio and why,
     level, frame tag, whether each slide's title was tagged at its own
@@ -951,6 +953,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         tex = os.path.join(work, "deck.tex")
         standards = [str(s).strip() for s in standards if str(s).strip()] or ["ua-2"]
         macros = latexbuild.PDF_MACROS
+        if code_wrap is not None:
+            macros = latexbuild.code_wrap_latex(code_wrap) + macros
         # Picture mode in LaTeX's own fonts, where picture_paths is off.
         if not picture_paths:
             macros += latexbuild.PICTURE_FONTS

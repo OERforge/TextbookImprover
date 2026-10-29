@@ -388,8 +388,8 @@ def math_setup(standards, choice):
 # own verbatim makes one, is a character each, and nothing on the page
 # moves. And inline code with a language, which Pandoc's writer sets as
 # skylighting's \VERB, fancyvrb's \Verb, whose text fancyvrb puts in an
-# \mbox TeX can't break, is marked (\OERInlineCode, FIT_MACROS), so that
-# the box is taken apart in its paragraph and can break there
+# \mbox TeX can't break, is marked (\OERInlineCodeBox, FIT_MACROS), so
+# that the box is taken apart in its paragraph and can break there
 # (oer.inline.code): a span in Introduction to Python Programming's 14.3
 # ran 627 points past the text, 555 of them off the paper. Only where
 # \VERB is as Pandoc's highlighting macros define it, the same in Pandoc
@@ -398,13 +398,109 @@ def math_setup(standards, choice):
 # preamble when it has highlighted code, and by a deck's template.
 CODE_SPACES = r"""\makeatletter
 \fvset{formatcom*={\def\FV@Space{\nobreak\ }}}
-\providecommand\OERInlineCode{}
+\providecommand\OERInlineCodeBox{}
 \def\OER@VERB@pandoc{\Verb[commandchars=\\\{\}]}
 \ifx\VERB\OER@VERB@pandoc
-  \def\VERB{\Verb[commandchars=\\\{\},formatcom*={\OERInlineCode}]}
+  \def\VERB{\Verb[commandchars=\\\{\},formatcom*={\OERInlineCodeBox}]}
 \fi
 \makeatother
 """
+
+
+# A page meant to meet WCAG 1.4.8 (AAA), as bin/pdf-layout-wcag-aaa.yaml
+# says it is (wcag-aaa), has its lines measured as they're set: each full
+# line of the text, a paragraph's lines but its last, of a paragraph as
+# wide as the text and in no list, its characters counted, spaces among
+# them, as the page's own measure was made (77 to a line in IBM Plex
+# Serif at 12.5 points, in Introduction to Sociology 3e's 1.3 and College
+# Algebra 2e's, docs/configuration.md), a ligature as its letters, one
+# TeX could have broken at a hyphen too, where nine in ten of its
+# characters are in the text's face (a footnote's, smaller, are another).
+# Not a line a forced break ends, \\ or a line block's, with its \hfil, or
+# any line that stretchable glue fills: it isn't full, and a review found
+# a poem's four short lines among 42 full ones took Latin Modern's average
+# below 80, and the warning with it. The log says how many lines and their
+# average, at the text's size, which line_length reads and build-pdf.py
+# warns of where it's more than LINE_MOST: Latin Modern holds more to a
+# line at a size, 88 at 12 points, and the default's face gives way to it
+# where TeX lacks Plex. Rob (2026-10-29): "Yes, we should warn whenever a
+# book falls back to Latin Modern, and specifically that it no longer
+# meets AAA when it otherwise would have."
+LINE_LENGTH = r"""\ifdefined\directlua
+\directlua{
+  oerline = { font = nil, width = 0, size = 0, characters = 0, lines = 0 }
+  local HLIST, GLYPH, GLUE, DISC = node.id("hlist"), node.id("glyph"), node.id("glue"), node.id("disc")
+  local EDGES = {}
+  for subtype, name in pairs(node.subtypes("glue")) do
+    if name == "leftskip" or name == "rightskip" or name == "parfillskip" then EDGES[subtype] = true end
+  end
+  local function letters(n)
+    local count = 0
+    if n.components then
+      for c in node.traverse_id(GLYPH, n.components) do count = count + letters(c) end
+    end
+    if count == 0 then return 1 end
+    return count
+  end
+  local function measure(line)
+    local all, ours, spaces, forced = 0, 0, 0, false
+    local function glyph(n)
+      local k = letters(n)
+      all = all + k
+      if n.font == oerline.font then ours = ours + k end
+    end
+    for n in node.traverse(line.head) do
+      if n.id == GLYPH then
+        glyph(n)
+      elseif n.id == DISC then
+        for g in node.traverse_id(GLYPH, n.replace) do glyph(g) end
+      elseif n.id == GLUE and not EDGES[n.subtype] then
+        if n.stretch_order > 0 then forced = true end
+        spaces = spaces + 1
+      end
+    end
+    if all > 0 and ours >= 0.9 * all and not forced then
+      oerline.characters = oerline.characters + all + spaces
+      oerline.lines = oerline.lines + 1
+    end
+  end
+  luatexbase.add_to_callback("post_linebreak_filter", function(head)
+    if oerline.font and not status.output_active and tex.hsize == oerline.width
+        and not (type(tex.parshape) == "table") and tex.hangindent == 0 then
+      local before = nil
+      for line in node.traverse_id(HLIST, head) do
+        if line.subtype == 1 then
+          if before then measure(before) end
+          before = line
+        end
+      end
+    end
+    return true
+  end, "oer.line.length")
+}
+\AddToHook{begindocument/end}{\directlua{
+  oerline.font, oerline.width, oerline.size = font.current(), tex.hsize, \number\dimexpr\csname f@size\endcsname pt\relax}}
+\AddToHook{enddocument/afterlastpage}{\directlua{
+  if oerline.lines > 0 then
+    texio.write_nl("term and log", "TextbookImprover line: " .. oerline.lines .. " " .. oerline.characters .. " " .. oerline.size)
+    texio.write_nl("term and log", "")
+  end}}
+\fi
+"""
+# A full line's characters the criterion allows at most, on average, as
+# W3C's technique for it reads the criterion (C20).
+LINE_MOST = 80
+LINE_MEASURED = re.compile(r"^TextbookImprover line: (\d+) (\d+) (\d+)", re.M)
+
+
+def line_length(said):
+    """(full lines, their average characters, the text's size in points)
+    from what LaTeX's last run said (LINE_LENGTH), or None."""
+    found = LINE_MEASURED.findall(said)
+    if not found:
+        return None
+    lines, characters, size = (int(x) for x in found[-1])
+    return lines, characters / lines, size / 65536
 
 
 # PDF/UA-1 wants a /Contents on every link (7.18.5), LaTeX's own too: a
@@ -588,6 +684,20 @@ PICTURE_FONTS = "\\def\\OERPictureFonts{}\n"
 # inch inside its edge, no smaller than FIT_LEAST.
 FIT_FLOOR = 0.75
 FIT_LEAST = 0.5
+# How far a block of code too wide for its line is set smaller before
+# its lines too long for it wrap, a part of its size (the code_wrap
+# setting's default): Rob (2026-10-29), of letting a setting say it, 1
+# wrapping every line too long and 0.75 wrapping what won't fit at 75
+# percent, "Otherwise, I'd say that 75% is a good compromise."
+CODE_WRAP = 0.75
+
+
+def code_wrap_latex(value):
+    """The LaTeX that gives the fit macros a target's code_wrap (a number
+    from FIT_LEAST to 1, as the configuration's reader checks it), written
+    before them, which otherwise take CODE_WRAP."""
+    value = min(1.0, max(FIT_LEAST, float(value)))
+    return "\\def\\OERFitCodeWrap{%s}\n" % ("%g" % value)
 
 # Something too wide for its line, in a book's PDF (PDF_MACROS), fitted to
 # it as LaTeX measures it.
@@ -678,8 +788,12 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % than its line runs into both margins alike; and one that would come
 % within a quarter inch of the paper's edge even at three quarters of its
 % size is set smaller still, as far as it takes, to half its size at
-% least, but for a block of code that would even at half, whose lines too
-% long for their line wrap (\__oer_fit_wrap:, below). Type set smaller
+% least. A block of code is set smaller to fit its line as far as the
+% code_wrap setting's part of its size (\OERFitCodeWrap, three quarters
+% unless a target says otherwise, half at least), and one too long for its
+% line even then is set at that size, its lines too long for their line
+% wrapped (\__oer_fit_wrap:, below), so that no code runs into the
+% margin. Type set smaller
 % isn't always as much narrower: Latin Modern
 % Roman, the default's face where IBM Plex isn't installed, has designs
 % for sizes from 5 to 17 points, each wider for its size than the next
@@ -728,9 +842,13 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % LaTeX suite reads these macros alone, no run of underscores is a blank.
 % Highlighted inline code, which Pandoc's writer sets as fancyvrb's \Verb
 % (skylighting's \VERB), its text in an \mbox TeX can't break, is marked
-% (\OERInlineCode, from CODE_SPACES), and its box is taken apart in its
-% paragraph before TeX breaks the paragraph or the fit measures it
-% (oer.inline.code, the first of these filters). Whole, a span in
+% (\OERInlineCodeBox, from CODE_SPACES, the attribute's value 1), and its
+% box is taken apart in its paragraph before TeX breaks the paragraph or
+% the fit measures it (oer.inline.code, the first of these filters); and
+% the PDF target marks all its inline code (\OERInlineCode, pdf-target.lua's
+% mark_code, value 2), so that code in no language, which the writer sets
+% as \texttt, which breaks only at its spaces, breaks as the box's text
+% does, a run of marked glyphs at a time. Whole, a span in
 % Introduction to Python Programming's 14.3 ran 627 points past the text,
 % 555 of them off the paper; and a table whose cells hold code is now
 % measured by the code's words, not its spans, so that the same book's
@@ -748,12 +866,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % it. Allowed in any word, a break between letters filled a line flush to
 % both margins, as a trial found ("att" over "ribute_name"), where TeX now
 % breaks after a mark or moves the word.
+\providecommand\OERFitCodeWrap{""" + str(CODE_WRAP) + r"""}
+\providecommand\OERInlineCode{}
+\providecommand\OERInlineCodeBox{}
 \ifdefined\directlua
   \newattribute\OERFitAttribute
   \newattribute\OERFitStepsAttribute
   \newattribute\OERFitWrapAttribute
   \newattribute\OERInlineCodeAttribute
-  \protected\def\OERInlineCode{\setattribute\OERInlineCodeAttribute{1}}
+  \protected\def\OERInlineCodeBox{\setattribute\OERInlineCodeAttribute{1}}
+  \protected\def\OERInlineCode{\setattribute\OERInlineCodeAttribute{2}}
   \directlua{
     local attribute = luatexbase.attributes.OERFitAttribute
     local column = luatexbase.attributes.OERFitStepsAttribute
@@ -781,6 +903,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     local function points(sp)
       return tostring(math.floor(sp / 6553.6 + 0.5) / 10)
+    end
+    local function codewrap()
+      local value = tonumber(token.get_macro("OERFitCodeWrap") or "")
+      if not value then return FLOOR end
+      return math.max(LEAST, math.min(1, value))
     end
     local function smaller(whole, line, room)
       local f = down(AIM * line / whole, 1000)
@@ -992,12 +1119,12 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return width - tex.getglue("leftskip") - tex.getglue("rightskip")
     end
-    local function breaks(head, n, stop, glyph, room)
+    local function breaks(head, n, stop, glyph, room, words)
       local start, last, long = n, nil, not room
       while n and not (n == stop) do
         local after = n.next
         if spacing(n) then
-          if not (spacing(after) or after and after.id == PENALTY and spacing(after.next)) then
+          if not words and not (spacing(after) or after and after.id == PENALTY and spacing(after.next)) then
             head = node.insert_after(head, n, wrap_penalty(glyph or n, 0))
           end
           last = n
@@ -1045,6 +1172,12 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           end
           room = room or narrowest()
           head = breaks(head, first, after, glyph, room)
+        elseif n.id == GLYPH and (node.has_attribute(n, inline) or 0) > 0 then
+          local stop = n.next
+          while stop and (node.has_attribute(stop, inline) or 0) > 0 do stop = stop.next end
+          room = room or narrowest()
+          head = breaks(head, n, stop, nil, room, true)
+          after = stop
         end
         n = after
       end
@@ -1111,7 +1244,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       head = breaks(head, head, nil, first)
       unwrap = { left = { width, stretch, shrink, stretchorder, shrinkorder },
                  right = { tex.getglue("rightskip") }, lines = tex.interlinepenalty,
-                 id = id, boxed = oerfit.boxed }
+                 id = id, boxed = oerfit.boxed, char = char, hang = hang }
       tex.setglue("leftskip", width + hang, stretch, shrink, stretchorder, shrinkorder)
       tex.setglue("rightskip", right - edge, tex.hsize, 0, 0, 0)
       tex.interlinepenalty = 10000
@@ -1124,8 +1257,37 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       head = node.insert_before(head, at, k)
       return head
     end, "oer.fit.wrap")
+    local SP_PER_BP, BP = 65781.76, string.char(37) .. ".3f"
+    local function arrow(char)
+      local function bp(sp) return string.format(BP, sp / SP_PER_BP) end
+      local x0, x1, top, mid, tip = -1.6 * char, -0.45 * char, 0.7 * char, 0.25 * char, 0.3 * char
+      local literal = node.new("whatsit", "pdf_literal")
+      literal.mode = 0
+      literal.data = "q 0 G " .. bp(0.07 * char) .. " w 1 J 1 j "
+        .. bp(x0) .. " " .. bp(top) .. " m " .. bp(x0) .. " " .. bp(mid) .. " l "
+        .. bp(x1) .. " " .. bp(mid) .. " l S "
+        .. bp(x1 - tip) .. " " .. bp(mid + 0.75 * tip) .. " m " .. bp(x1) .. " " .. bp(mid) .. " l "
+        .. bp(x1 - tip) .. " " .. bp(mid - 0.75 * tip) .. " l S Q"
+      local box = node.hpack(literal)
+      box.width = 0
+      return box
+    end
     luatexbase.add_to_callback("post_linebreak_filter", function(head)
       if unwrap then
+        local first = true
+        if unwrap.char > 0 and unwrap.hang >= 1.8 * unwrap.char then
+          for line in node.traverse_id(HLIST, head) do
+            if line.subtype == 1 then
+              if first then
+                first = false
+              else
+                local at = line.head
+                while at and at.id == GLUE and EDGES[at.subtype] do at = at.next end
+                line.head = node.insert_before(line.head, at, arrow(unwrap.char))
+              end
+            end
+          end
+        end
         local id, tall = unwrap.id, 0
         for n in node.traverse(head) do
           if n.id == HLIST then
@@ -1327,14 +1489,19 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       local center, narrow = 0, 1
       if kind == "d" then center = 1 end
       if kind == "c" then narrow = 0 end
+      if kind == "c" then
+        local wrap = codewrap()
+        if s.factor * (line + TOLERANCE) / w >= wrap then
+          return { narrow = 0, factor = math.max(wrap, down(math.min(1, s.factor * line / w * AIM), 1000)),
+                   columns = 1, center = 0 }
+        end
+        return { narrow = 0, factor = wrap, columns = 1, center = 0, wrap = 1 }
+      end
       if not (kind == "t" or kind == "p") then
         local f = math.min(1, s.factor * line / w * AIM)
         if f >= FLOOR then return { narrow = narrow, factor = down(f, 1000), columns = 1, center = center } end
         local least = FLOOR
         if w * FLOOR / s.factor > room then
-          if kind == "c" and w * LEAST / s.factor > room then
-            return { narrow = 0, factor = FLOOR, columns = 1, center = 0, wrap = 1 }
-          end
           least = math.max(LEAST, down(s.factor * room / w * AIM, 1000))
         end
         return { narrow = narrow, factor = least, columns = 1, center = center }
@@ -1825,9 +1992,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             }
         }
     }
-  % A block of code whose lines wrap: one too long for the paper even at
-  % half its size, set at three quarters (oerfit.next), each line too long
-  % for its line broken where it reaches the line's end, the line the fit
+  % A block of code whose lines wrap: one too long for its line even at
+  % the code_wrap setting's part of its size, set at that size
+  % (oerfit.next), each line too long for its line broken where it reaches
+  % the line's end, the line the fit
   % measured it against, the text's or a quotation's, not into the margin.
   % What it holds is marked
   % (\OERFitWrapAttribute), so that TeX may break a paragraph of it: LaTeX's
@@ -1879,7 +2047,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % row ends, the parts after it having no more room.
   % The hang is a left skip that much wider, and a kern taking it back
   % from the first line, which a list's paragraph shape doesn't override,
-  % as it does a hanging indent. Its right skip ends a part at the line's
+  % as it does a hanging indent. In the two characters, oer.fit.unwrap
+  % draws an arrow down and to the right before each part after the first
+  % (arrow()), as fvextra draws a tiny hook there, but a drawing, a PDF
+  % literal in a box of no width, where fvextra's is a character, and one
+  % that Lua makes, carrying none of tagging's attributes, so that tagpdf
+  % puts it in an artifact's marked content: no copy of the code holds it,
+  % and a screen reader passes it by. Rob (2026-10-29): "Can we add an
+  % arrow for a wrapped line in such a way that it wouldn't get read and
+  % also wouldn't get included in a copy/paste of the code? If not, let's
+  % not add it." Its right skip ends a part at the line's
   % end, the fit's line from \OERFitCode (oerfit.right), whatever the
   % paragraph's line: a quotation's line ends inside the text's, where
   % LaTeX's own verbatim sets only a left skip, and latex-lab's a
@@ -1945,17 +2122,27 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % less the glue at its edges, the left one the margin of the list it's
   % in (oer.fit.cells); not a paragraph the output routine sets, a page's
   % footer, while the group is open across a page's break. It's fitted as
-  % a formula in text is: not centered, running on into the margin to the
-  % right of its line, its spaces left as they are, since they're
-  % characters, and its type set smaller, as much as it takes, but to
-  % three quarters of its size at least, and smaller still, to half at
-  % least, where it would come within a quarter inch of the paper's edge on
-  % its right; its lines closer with its type, as a table's are. One that
-  % would come that near even at half is set at three quarters, and its
-  % lines too long for their line wrap (\__oer_fit_wrap:, above), where
-  % it ran off the paper: in OpenStax's books, 7 of 667 blocks of code, 5 of
-  % Principles of Data Science's (a paragraph written as a string, 749
-  % characters) and 2 of Introduction to Python Programming's. One still
+  % a formula in text is, not centered, its spaces left as they are, since
+  % they're characters, and its type set smaller, as much as it takes, but
+  % to the code_wrap setting's part of its size at least (\OERFitCodeWrap,
+  % three quarters by default, oerfit.next), its lines closer with its
+  % type, as a table's are: a block that fits its line at that size, by
+  % the measure's tolerance of half a point, is set as small as it takes,
+  % with the fit's room of 2 percent where there's room for it, where a
+  % line of 86 characters, which three quarters fits, had wrapped for the
+  % want of that room; one that doesn't is set at that size, and its lines
+  % too long for their line wrap (\__oer_fit_wrap:, above). Rob
+  % (2026-10-29), asked how far wrapping should reach: "Would it be simple
+  % to create a config option to control when to wrap code blocks? Let `1`
+  % mean wrap every too-long line and, e.g., `.75` mean wrap when it won't
+  % fit at 75%, etc. Otherwise, I'd say that 75% is a good compromise."
+  % Wrapping had reached only a block
+  % too long for the paper even at half its size, set at three quarters,
+  % in OpenStax's books 7 of 667 blocks of code, 5 of Principles of Data
+  % Science's (a paragraph written as a string, 749 characters) and 2 of
+  % Introduction to Python Programming's; one too long for its line at
+  % three quarters had been set smaller still, to half at least, running
+  % on into the margin on its right, as a formula in text does. One still
   % wider than its line is said to be by how far it runs past the text's
   % edge, none in a quotation's right margin, and one whose lines wrap is
   % said to, and to be too tall where a line of it fancyvrb sets runs
@@ -2011,6 +2198,47 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   \def\OERFitRun#1{}
   \def\OERFitSource#1#2{}
 \fi
+"""
+
+
+# A list's item that opens with fancyvrb's code keeps its label beside
+# the code's first line under tagging (CNX-NOTES, item 103): in every
+# PDF (PDF_MACROS), and in a LaTeX book's tagged copy, which loads
+# fancyvrb itself where the book does (texremediate.tag). In expl3's
+# syntax, which both are read in.
+CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc sets
+% highlighted code (Highlighting), has its label beside the code's first
+% line. LaTeX's tagging code for lists (latex-lab-testphase-block.sty)
+% keeps an item's label in \g__block_labels_box, not \@labels, and sets it
+% when the item's first paragraph begins (the para/begin hook). fancyvrb's
+% lines aren't paragraphs: its list sets \@inlabel false (\FV@ListVSpace)
+% and puts \@labels beside its first line, which the tagging code leaves
+% empty, so the label waited for the next item's paragraph and was set
+% there, over that item's ("2." over "3."); the PDF's structure had it in
+% its own item all the same. Before fancyvrb clears \@inlabel, a label
+% waiting there is moved to \@labels, where fancyvrb sets one, as it did
+% before the tagging code. Only a label that's waiting: a fix of LaTeX's
+% own, which would leave none, isn't undone, and without the tagging code,
+% or with its box named otherwise, nothing is done. LaTeX's own verbatim,
+% as Pandoc sets code in no language, sets each line as a paragraph,
+% which sets the label.
+\cs_if_exist:NT \g__block_labels_box
+  {
+    \AddToHook { package / fancyvrb / after }
+      {
+        \AddToHook { cmd / FV@ListVSpace / before }
+          {
+            \legacy_if:nT { @inlabel }
+              {
+                \box_if_empty:NF \g__block_labels_box
+                  {
+                    \box_gset_eq:cN { @labels } \g__block_labels_box
+                    \box_gclear:N \g__block_labels_box
+                  }
+              }
+          }
+      }
+  }
 """
 
 
@@ -2321,40 +2549,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \legacy_if:nF { @inlabel } { \everypar { } }
       }
   }
-% A list's item that opens with fancyvrb's code, as Pandoc sets
-% highlighted code (Highlighting), has its label beside the code's first
-% line. LaTeX's tagging code for lists (latex-lab-testphase-block.sty)
-% keeps an item's label in \g__block_labels_box, not \@labels, and sets it
-% when the item's first paragraph begins (the para/begin hook). fancyvrb's
-% lines aren't paragraphs: its list sets \@inlabel false (\FV@ListVSpace)
-% and puts \@labels beside its first line, which the tagging code leaves
-% empty, so the label waited for the next item's paragraph and was set
-% there, over that item's ("2." over "3."); the PDF's structure had it in
-% its own item all the same. Before fancyvrb clears \@inlabel, a label
-% waiting there is moved to \@labels, where fancyvrb sets one, as it did
-% before the tagging code. Only a label that's waiting: a fix of LaTeX's
-% own, which would leave none, isn't undone, and without the tagging code,
-% or with its box named otherwise, nothing is done. LaTeX's own verbatim,
-% as Pandoc sets code in no language, sets each line as a paragraph,
-% which sets the label.
-\cs_if_exist:NT \g__block_labels_box
-  {
-    \AddToHook { package / fancyvrb / after }
-      {
-        \AddToHook { cmd / FV@ListVSpace / before }
-          {
-            \legacy_if:nT { @inlabel }
-              {
-                \box_if_empty:NF \g__block_labels_box
-                  {
-                    \box_gset_eq:cN { @labels } \g__block_labels_box
-                    \box_gclear:N \g__block_labels_box
-                  }
-              }
-          }
-      }
-  }
-% A line too wide in the contents, or in a list of figures or tables, is
+""" + CODE_ITEM_LABEL + r"""% A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the
 % build had looked up in the book's LaTeX: Sociology's front matter's page
 % numbers, too wide for the contents' column, were counted as lines of
@@ -2989,17 +3184,21 @@ def fit_report(output, source, pages):
                     + (": on " + page_list(list(dict.fromkeys(w[2] for w in code if w[2])))
                        if any(w[2] for w in code) else "")
                     + ".")
-    # A block of code too long for the paper even at half its size, whose
-    # lines wrap, is on the paper: said, not warned of.
+    # A block of code too long for its line even at the size code_wrap
+    # sets it to, whose lines wrap, is inside its line: said, not warned
+    # of. At its own size (code_wrap 1), it's set at no other.
     wrapped = [(page(line), float(factor)) for line, factor, _columns in FIT_WRAPPED.findall(output)]
     if wrapped:
         pages_wrapped = list(dict.fromkeys(p for p, _f in wrapped if p))
-        said.append(f"{len(wrapped)} block(s) of code with a line too long for the paper even at "
-                    f"half {'its' if len(wrapped) == 1 else 'their'} size "
-                    f"{'is' if len(wrapped) == 1 else 'are'} set at "
-                    f"{round(min(f for _p, f in wrapped) * 100)}% of "
-                    f"{'its' if len(wrapped) == 1 else 'their'} size, each line too long for its "
-                    "line wrapped where it reaches the line's end"
+        one = len(wrapped) == 1
+        least = min(f for _p, f in wrapped)
+        said.append(f"{len(wrapped)} block(s) of code with a line too long for its line "
+                    + (f"{'has' if one else 'have'} each such line"
+                       if least >= 1 else
+                       f"even at {round(least * 100)}% of {'its' if one else 'their'} size "
+                       f"{'is' if one else 'are'} set at {round(least * 100)}%, each line too "
+                       "long for its line")
+                    + " wrapped where it reaches the line's end"
                     + (": on " + page_list(pages_wrapped) if pages_wrapped else "") + ".")
     # Highlighted code's line wrapped is set in a box, as fvextra sets one,
     # which TeX can't break across pages: one taller than the page runs

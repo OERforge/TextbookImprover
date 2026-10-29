@@ -11,7 +11,7 @@ cd ~/books/econ
 python3 $T/bin/convert.py
 ```
 
-A repository can hold several books (a "bundle"); `--list` names them, and `--book` picks one. `unpack-cnx.py` reads the repository and never writes to it. It needs lxml (`sudo apt install python3-lxml`, or `pip install lxml`) and nothing else: not Ruby, not Docker, not OpenStax's own tools. Converting what it writes needs Pandoc 3.9 or later, as every conversion does.
+A repository can hold several books (a "bundle"); `--list` names them, and `--book` picks one. In the Connexions archive, a copy of a book an instructor derived from it is a branch of the book's repository: `git ls-remote --heads` with the repository's address lists them, and `git clone --branch` with a branch's name gets one to unpack. `unpack-cnx.py` reads the repository and never writes to it. It needs lxml (`sudo apt install python3-lxml`, or `pip install lxml`) and nothing else: not Ruby, not Docker, not OpenStax's own tools. Converting what it writes needs Pandoc 3.9 or later, as every conversion does.
 
 ## What's written
 
@@ -69,7 +69,7 @@ A book's source isn't the book a reader sees. OpenStax "bakes" it: numbers its f
 | `chemistry` | *Chemistry*, *Chemistry: Atoms First* |
 | `college-physics`, `college-physics-2e` | *College Physics* |
 | `college-success`, `hs-college-success` | *College Success*, *College Success Concise*, *Preparing for College Success* |
-| `computer-science` | *Introduction to Computer Science* |
+| `computer-science` | *Introduction to Computer Science*, whose source isn't public (checked on cookbook's sample alone) |
 | `contemporary-math` | *Contemporary Mathematics* |
 | `data-science` | *Principles of Data Science* |
 | `dev-math` | *Prealgebra*, *Elementary Algebra*, *Intermediate Algebra* |
@@ -86,7 +86,7 @@ A book's source isn't the book a reader sees. OpenStax "bakes" it: numbers its f
 | `microbiology` | *Microbiology* |
 | `neuroscience` | *Introduction to Behavioral Neuroscience* |
 | `nursing-external` | *Pharmacology for Nurses*, *Nutrition for Nurses*, *Population Health for Nurses* |
-| `nursing-internal` | *Clinical Nursing Skills*, whose source isn't public (checked on cookbook's sample alone) |
+| `nursing-internal` | *Clinical Nursing Skills*, and the other books of its repository by OpenStax's list of its books ([the ABL](https://corgi.ce.openstax.org/api/abl/)), *Fundamentals of Nursing*, *Maternal-Newborn Nursing*, *Medical-Surgical Nursing*, and *Psychiatric-Mental Health Nursing*, whose source isn't public (checked on cookbook's sample alone, which has pages of *Clinical Nursing Skills* and *Psychiatric-Mental Health Nursing*) |
 | `organic-chemistry` | *Organic Chemistry* |
 | `philosophy` | *Introduction to Philosophy* |
 | `pl-economics` | *Mikroekonomia – Podstawy*, *Makroekonomia - Podstawy* (in Polish) |
@@ -180,6 +180,7 @@ An exercise's formulas are TeX in the bank; Pandoc's TeX reader makes them MathM
 | `link-outside-repository` | A link to a module that isn't in the repository at all; it goes to the Connexions archive's address for it. |
 | `link-without-scheme` | A link to a web address written without `https://` (`www.quillproject.net`), which a browser takes for a file of the book's; it's linked with `https://`. |
 | `link-to-nothing`, `link-without-text` | A link whose target isn't in the book; a link nothing gave text, which shows its target's title or address. |
+| `link-with-no-target` | A link that names no target at all, as some of the Connexions archive's do (`<link document=""/>`): it goes nowhere, and with no text of its own it shows the word "link" (`link-without-text`). |
 | `local-interactive` | A frame of the repository's own, a link to the online book now. |
 | `obsolete-media` | Flash, a Java applet, or another kind of media nothing plays now; a link to the file. |
 | `unknown-element` | CNXML this doesn't know, kept as a `div` or `span` with a class naming it. |

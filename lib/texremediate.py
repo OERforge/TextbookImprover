@@ -604,7 +604,7 @@ FLOATS_HERE = (
 # emulation of its own (latex-lab-enumitem, loaded by latex-lab-testphase-
 # block in place of enumitem.sty, LaTeX 2026-06-01). The emulation stops on
 # the settings it lacks ("Some keys specified on the itemize environment
-# are unused") and on * and ! for a computed width ("Missing number",
+# are unknown") and on * and ! for a computed width ("Missing number",
 # FINC 308's 101 lists with leftmargin=*), so each is taken here: a width
 # to compute or a label's indent is left to the emulation's defaults, resume
 # continues the numbering, nolistsep is nosep, and the rest -- code to run

@@ -535,6 +535,38 @@ def svg_images(blocks):
     return found
 
 
+def rendered_originals(blocks, base):
+    """Each image a LaTeX book's reading made an SVG of a PDF or EPS image,
+    rendered/<path>.svg, pointed at the PDF its reading kept beside it,
+    rendered/<path>.pdf (latexsource.convert_graphic), the PDF a LaTeX
+    build of the book includes: its text text, which the SVG makes
+    outlines, and its pictures as they are, which the SVG made into new
+    ones, resampled. Only in a book a LaTeX source wrote, whose rendered/
+    holds the reading's record. Returns how many."""
+    import latexsource
+    if not os.path.isfile(os.path.join(base, latexsource.RENDERED, ".rendered.json")):
+        return 0
+    count = [0]
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "Image":
+                target = node["c"][2]
+                src = target[0]
+                if src.startswith(latexsource.RENDERED + "/") and src.lower().endswith(".svg"):
+                    pdf = src[:-4] + ".pdf"
+                    if os.path.isfile(os.path.join(base, pdf)):
+                        target[0] = pdf
+                        count[0] += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(blocks)
+    return count[0]
+
+
 def latex_problem():
     """Why the LuaLaTeX on the path can't tag a PDF, or None."""
     return latexbuild.latex_problem(lambda m: print(m, file=sys.stderr))
@@ -550,11 +582,19 @@ FILE_MARK = "%%TextbookImproverFile:%s"
 FILE_MARK_LINE = re.compile(r"^%TextbookImproverFile:(\S*)\n", re.M)
 
 
-def split_book(text):
+def split_book(text, own=None):
     """The writer's one file as a master and a file per top-level entry:
     (master, {name: body}). The master keeps the preamble, what stands
     between the entries (division commands, the contents), and an
-    \\include for each file, in its place."""
+    \\include for each file, in its place. A file named as the master,
+    own, is named apart, own-text: a single LaTeX file's page has its
+    name, as the book's identifier does when project.yaml gives none
+    (book.tex's book), and the master was written over it and \\include-d
+    itself."""
+    names = set(FILE_MARK_LINE.findall(text))
+    apart = (own or "") + "-text"
+    while apart in names:
+        apart += "-text"
     files, master, last, current = {}, [], 0, None
     for m in FILE_MARK_LINE.finditer(text):
         piece = text[last:m.start()]
@@ -563,6 +603,8 @@ def split_book(text):
         else:
             master.append(piece)
         current = m.group(1) or None
+        if current and current == own:
+            current = apart
         if current:
             master.append("\\include{%s}\n" % current)
         last = m.end()
@@ -1460,6 +1502,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         print(f"WARNING: PDF/UA-1 has no standard way to tag MathML, so the book's "
               f"{formulas} equation(s) are tagged as formulas {how}. PDF/UA-2 tags "
               "MathML properly.", file=sys.stderr)
+    originals = rendered_originals(assembly.blocks, base)
+    if originals:
+        print(f"{originals} PDF or EPS image(s) of the book's LaTeX set as the PDF its own "
+              "build includes, not the SVG made for its pages.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
     if svgs and not latex_only and shutil.which("rsvg-convert") is None and not as_latex:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "
@@ -1640,8 +1686,8 @@ def write_latex(base, name, resolved, project, document, out_dir):
             return done.returncode
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    master, files = split_book(done.stdout)
     master_name = os.path.splitext(output_name(resolved, project, name))[0] + ".tex"
+    master, files = split_book(done.stdout, os.path.splitext(master_name)[0])
     for stem, body in files.items():
         with open(os.path.join(out_dir, stem + ".tex"), "w", encoding="utf-8") as fh:
             fh.write(body.strip("\n") + "\n")

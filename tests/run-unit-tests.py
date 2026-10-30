@@ -2785,6 +2785,30 @@ def check_aaa_line_length():
     ]
 
 
+def check_latex_split():
+    """The latex target's one file split as a master and a file per entry
+    (build-pdf.py's split_book): a page named as the master, a single
+    LaTeX file's, whose name the book's identifier takes when project.yaml
+    gives none, is named apart, where the master was written over it and
+    \\include-d itself."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    text = ("\\documentclass{book}\n\\begin{document}\n"
+            + build_pdf.FILE_MARK % "book" + "\n\\chapter{One}\nText.\n"
+            + build_pdf.FILE_MARK % "book-text" + "\n\\chapter{Two}\nMore.\n"
+            + build_pdf.FILE_MARK % "" + "\n\\end{document}\n")
+    master, files = build_pdf.split_book(text, "book")
+    other, kept = build_pdf.split_book(text, "shapes")
+    return [
+        ("a page named as the master is written apart from it, and the master "
+         "\\include-s it, not itself",
+         lambda: sorted(files) == ["book-text", "book-text-text"]
+         and "\\include{book-text-text}" in master and "\\include{book}" not in master
+         and "One" in files["book-text-text"] and "Two" in files["book-text"]),
+        ("and pages named otherwise keep their names",
+         lambda: sorted(kept) == ["book", "book-text"] and "\\include{book}" in other),
+    ]
+
+
 def check_ua1_math():
     """A PDF/UA-1 file's formulas get Office's MathML attribute by default,
     which NVDA read as math in Acrobat where it read the TeX alt text
@@ -5865,6 +5889,7 @@ GROUPS = [
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
+    ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),
     ("drawings without the preview package", check_drawings_without_preview),
     ("layout tables", check_layout_tables),

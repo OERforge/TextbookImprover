@@ -1236,6 +1236,8 @@ LATEX_READ_CHANGES = (
     ("image_macro_calls", "call of the book's own macro for an image written out, "
      "so its file is found"),
     ("graphics_converted", "PDF or EPS image made SVG"),
+    ("graphics_embedded", "PDF image written beside its SVG with its fonts embedded, which "
+     "PDF/UA requires, for a PDF from the pages and the latex target"),
     ("graphics_case", "image named in a different case from its file found as macOS and "
      "Windows find it (LaTeX on Linux doesn't)"),
     ("visual_title", "title set as large type read as the page's title, its "
@@ -1545,6 +1547,11 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                        "preamble")
     if changed:
         say("Read from a copy of the LaTeX: " + "; ".join(changed) + ".")
+    if counts.get("graphics_unembedded"):
+        say(f"WARNING: {counts['graphics_unembedded']} PDF image(s) draw text with fonts "
+            "they don't embed, which PDF/UA requires, and couldn't be written with them "
+            "embedded, so a PDF from the pages and the latex target hold them as they are, "
+            f"in {latexsource.RENDERED}/.")
     if counts.get("header_other"):
         say(f"WARNING: {counts['header_other']} table header declaration(s) "
             "for tagging name rows or columns past the first, which the "

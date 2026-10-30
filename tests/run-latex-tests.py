@@ -1024,7 +1024,12 @@ def case_unmade_images(work):
             made_page.append(page_of(made))
         sources = dict((alt, src) for src, alt in re.findall(
             r'<img\b[^>]*?src="([^"]*)"[^>]*?alt="([^"]*)"', made_page[0]))
+        svg = os.path.join(made, "rendered", "img", "diagram.svg")
+        root = re.search(r"<svg\b[^>]*>", open(svg, encoding="utf-8").read()).group(0) \
+            if os.path.exists(svg) else ""
         return "<embed" not in made_page[0] \
+            and 'width="40pt"' in root and 'height="20pt"' in root \
+            and os.path.isfile(os.path.join(made, "rendered", "img", "diagram.pdf")) \
             and sources.get("A logo.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A crest.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A diagram.", "").endswith("rendered/img/diagram.svg") \
@@ -1058,9 +1063,51 @@ def case_unmade_images(work):
          and 'alt="A square."' in failed_page),
         ("pdftocairo is tried once for each image, not at each place the book includes it",
          lambda: len(tried) == 3),
-        ("with pdftocairo, each is made an SVG, in the preamble's \\title and macro too, "
-         "and a macro's that calls the book's own macro for its image",
+        ("with pdftocairo, each is made an SVG, its size in points, the PDF a LaTeX build "
+         "includes kept beside it, in the preamble's \\title and macro too, and a macro's "
+         "that calls the book's own macro for its image",
          made_svg),
+    ]
+
+
+def case_kept_images(work):
+    """A PDF image's PDF kept beside its SVG (latexsource.convert_graphic),
+    read again: one whose fonts couldn't be embedded when it was kept, as
+    without Ghostscript, is tried again and counted, where it had been kept
+    as it was without a word; and a drawing that has taken a PDF image's
+    name has the PDF beside its SVG taken away, which a PDF from the pages
+    had included in the drawing's place (a review). latexsource's own
+    functions, without LaTeX: the drawing as a reading before kept it."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    import latexsource
+    if not shutil.which("pdftocairo"):
+        return [("a kept PDF image is read again",
+                 lambda: skip("no pdftocairo to make a PDF image an SVG (sudo apt install "
+                              "poppler-utils)"))]
+    os.makedirs(os.path.join(work, "figures"))
+    image = os.path.join(work, "figures", "plot.pdf")
+    pdf(image, word="Plotword")
+    record, first, again = {}, {}, {}
+    name, why = latexsource.convert_graphic(work, work, "figures/plot.pdf", record, first)
+    beside = os.path.join(work, "rendered", "figures", "plot.pdf")
+    shutil.copyfile(image, beside)
+    latexsource.convert_graphic(work, work, "figures/plot.pdf", record, again)
+    embedded = latexbuild.unembedded_fonts(beside) == set()
+    tool = latexbuild.embedding_tool()
+    preamble = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n"
+    source = "\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}"
+    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+        json.dump({name: hashlib.sha256((preamble + "\n" + source).encode()).hexdigest()}, fh)
+    kept = latexsource.render(work, work, preamble, [(name, source)], lambda said: None)
+    return [
+        ("a PDF image kept with fonts it couldn't embed, read again, is tried again, and "
+         "counted",
+         lambda: name == "rendered/figures/plot.svg" and why is None
+         and (again == {"graphics_embedded": 1} and embedded if tool
+              else again == {"graphics_unembedded": 1})),
+        ("a drawing that has taken a PDF image's name has no PDF beside its SVG",
+         lambda: kept == [name] and not os.path.exists(beside)),
     ]
 
 
@@ -1575,6 +1622,13 @@ BOOK_CHAPTER = ("\\chapter{One}\nSome text about sets\\index{sets}, where "
                 "\\begin{picture}(20,10)\\put(0,0){x}\\end{picture}\n")
 
 
+# A figure the pages book (case_book_pdf) adds to BOOK_CHAPTER: a PDF R's
+# pdf() device could have drawn, a heat map and a word in Helvetica, which
+# it doesn't embed (raster_pdf).
+PLOT_FIGURE = ("\\begin{figure}[h]\\centering\\includegraphics{plot}"
+               "\\caption{A plot}\\end{figure}\n")
+
+
 def case_book_pdf(work):
     """A LaTeX book's PDF, built from the book's own LaTeX (pdf.from: book):
     its index, which the pages don't have, its figure's alt text from the
@@ -1590,8 +1644,12 @@ def case_book_pdf(work):
             ("book", "", "  pdf:\n    format: pdf\n"),
             # Its preamble gives no layout: parskip's paragraphs, not
             # indented ones, and no size, paper, or margins.
+            # And a PDF figure of R's kind (raster_pdf), set from the PDF
+            # the book's own build includes, in the PDF and the latex
+            # target, where the pages show its SVG.
             ("pages", "\\usepackage{parskip}\n",
-             "  pdf:\n    format: pdf\n    pdf:\n      from: pages\n"),
+             "  pdf:\n    format: pdf\n    pdf:\n      from: pages\n"
+             "  latex:\n    format: latex\n"),
             # Builds with pdfLaTeX, as the conversion reads it, and stops
             # with LuaLaTeX, as the PDF target builds it.
             ("broken", "\\ifdefined\\directlua\\TIQundefined\\fi\n", "  pdf:\n    format: pdf\n")):
@@ -1601,9 +1659,11 @@ def case_book_pdf(work):
         with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write(BOOK_MASTER.replace("\\begin{document}", extra + "\\begin{document}"))
         with open(os.path.join(book, "one.tex"), "w", encoding="utf-8") as fh:
-            fh.write(BOOK_CHAPTER)
+            fh.write(BOOK_CHAPTER + (PLOT_FIGURE if name == "pages" else ""))
+        if name == "pages":
+            raster_pdf(os.path.join(book, "plot.pdf"), word="Plotword")
         with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
-            fh.write("Image,Alt\nsq.png,A gray square\n")
+            fh.write("Image,Alt\nsq.png,A gray square\nrendered/plot.svg,A heat map\n")
         with open(os.path.join(book, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n" + targets)
         result = convert(book)
@@ -1729,6 +1789,62 @@ def case_book_pdf(work):
             page.extract_text(visitor_text=visit)
         return bool(found) and all(abs(size / 9.96 - 1) < 0.03 for size in found)
 
+    def plot_kept():
+        """The PDF figure, set in the PDF from the pages and the latex target
+        as the PDF the book's own build includes, rendered/plot.pdf, its
+        font embedded: its word text, and its picture the figure's own, 128
+        pixels square, stored losslessly and, where Ghostscript embedded the
+        font, not interpolated, where the SVG made the word outlines, and
+        pdftocairo and rsvg-convert make a picture in it a copy, resampled
+        and interpolated; pdftocairo, which embeds it without Ghostscript,
+        marks the picture to be interpolated too (poppler 24.02). The SVG the
+        pages show is the figure's size, 40 points by 48, where poppler 24.02
+        wrote it in pixels, three quarters of it."""
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
+        if not shutil.which("pdftocairo"):
+            return skip("no pdftocairo to make the PDF figure an SVG (sudo apt install "
+                        "poppler-utils)")
+        found = text("pages")
+        if found is None:
+            return skip("no pdftotext to read the PDF")
+        try:
+            import pypdf
+        except ImportError:
+            return skip("no pypdf to read the PDF's images and fonts")
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import latexbuild
+        folder = books["pages"][0]
+        kept = os.path.join(folder, "rendered", "plot.pdf")
+        latex = os.path.join(folder, "latex")
+        tex = "".join(read(folder, "latex", f) for f in os.listdir(latex)
+                      if f.endswith(".tex")) if os.path.isdir(latex) else ""
+        with open(os.path.join(folder, "rendered", "plot.svg"), encoding="utf-8") as fh:
+            root = re.search(r"<svg\b[^>]*>", fh.read()).group(0)
+        images = []
+        for page in pypdf.PdfReader(os.path.join(folder, "pdf", "book.pdf")).pages:
+            for image in page.images:
+                obj = image.indirect_reference.get_object() if image.indirect_reference else {}
+                images.append((obj.get("/Width"), obj.get("/Height"), obj.get("/Filter"),
+                               bool(obj.get("/Interpolate", False))))
+        smoothed = latexbuild.embedding_tool() != "gs"
+        return "Plotword" in found and (128, 128, "/FlateDecode", smoothed) in images \
+            and latexbuild.unembedded_fonts(kept) == set() \
+            and os.path.isfile(os.path.join(latex, "rendered", "plot.pdf")) \
+            and "rendered/plot.pdf" in tex and "plot.svg" not in tex \
+            and 'width="40pt"' in root and 'height="48pt"' in root
+
+    def pages_pass_ua2():
+        verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
+        if not verapdf:
+            return skip("no veraPDF to check the PDF")
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
+        done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
+                               os.path.join(books["pages"][0], "pdf", "book.pdf")],
+                              capture_output=True, text=True)
+        return done.stdout.strip().startswith("PASS")
+
     def struck_out():
         """A term the book strikes out with cancel, in its PDF from its own
         LaTeX and from its pages: two strokes drawn as paths, no glyph of
@@ -1766,6 +1882,11 @@ def case_book_pdf(work):
         ("pdf.from: pages builds it from the pages, which have no index", built_from_pages),
         ("and, its preamble giving no layout, on the book class's own page, not the PDF "
          "target's default: 10pt type", class_page_kept),
+        ("and a PDF figure in it, and in the latex target, is the PDF the book's own build "
+         "includes, its font embedded: its word text and its picture its own, not the "
+         "outlines and the resampled picture of the SVG its pages show, which is the "
+         "figure's size in points", plot_kept),
+        ("and the PDF from the pages passes veraPDF's PDF/UA-2 profile", pages_pass_ua2),
         ("a book that won't build with tagging stops the run, with LaTeX's error and the way out",
          lambda: books["broken"][1] != 0 and "TIQundefined" in books["broken"][2]
          and "wasn't built" in books["broken"][2] and "pdf.from: pages" in books["broken"][2]),
@@ -5937,6 +6058,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
+         ("a PDF image's PDF, kept and read again", case_kept_images),
          ("an SVG picture the latex target can't make a PDF", case_unmade_svg),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),

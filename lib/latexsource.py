@@ -2767,6 +2767,16 @@ def render(base, work, preamble, items, say):
             if record.get(n) != key(s)
             or not os.path.isfile(os.path.join(base, n))]
     done = [n for n, s in items if (n, s) not in todo]
+    for name in done:
+        svg_in_points(os.path.join(base, name))
+    # A drawing's SVG has no PDF beside it: one there was kept beside the
+    # SVG of a PDF image of the same name (convert_graphic), which the
+    # drawing has replaced, and a PDF from the pages would have included it
+    # in the drawing's place (a review).
+    for name, _source in items:
+        stale = os.path.join(base, os.path.splitext(name)[0] + ".pdf")
+        if os.path.isfile(stale):
+            os.remove(stale)
     if not todo:
         return done
     engine = pick_engine(preamble)
@@ -2804,6 +2814,7 @@ def render(base, work, preamble, items, say):
                                    str(page), pdf, out], capture_output=True,
                                   text=True)
             if made.returncode == 0 and os.path.isfile(out):
+                svg_in_points(out)
                 record[name] = key(source)
                 done.append(name)
 
@@ -2896,38 +2907,102 @@ def program_said(program, done):
     return f"{program} said: {line[:200]}"
 
 
-def convert_graphic(base, work, path, record):
+SVG_ROOT = re.compile(rb"<svg\b[^>]*>")
+BARE_SIZE = re.compile(rb'(\s(?:width|height)="[0-9.]+)"')
+
+
+def svg_in_points(path):
+    """The SVG pdftocairo wrote at path given its size in points where it
+    wrote a bare number, which SVG reads as pixels, a 96th of an inch:
+    pdftocairo sizes the SVG as the PDF's page, in points, and with cairo
+    1.17.6 or later, poppler 24.02 (Ubuntu 24.04's) writes the number
+    alone, so a page, rsvg-convert, and Pandoc showed every PDF image and
+    drawing at three quarters of its size; poppler 26.07 writes `pt`
+    (measured; Ubuntu's bug 2127078 asks for poppler's fix in 24.04). The
+    viewBox stays, so what's drawn scales with it."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return
+    root = SVG_ROOT.search(data)
+    if root is None:
+        return
+    fixed = BARE_SIZE.sub(rb'\1pt"', root.group(0))
+    if fixed != root.group(0):
+        with open(path, "wb") as fh:
+            fh.write(data[:root.start()] + fixed + data[root.end():])
+
+
+def keep_pdf(source, dest, counter):
+    """The PDF image at source written to dest as a LaTeX build would
+    include it, for a PDF from the pages and the latex target
+    (convert_graphic): with its fonts embedded where it draws text with
+    fonts it doesn't embed, as R's pdf() device leaves out Helvetica, which
+    PDF/UA requires (latexbuild.embed_fonts), else as it is. counter counts
+    those embedded and those that couldn't be."""
+    import latexbuild
+    if latexbuild.unembedded_fonts(source):
+        tool = latexbuild.embedding_tool()
+        if tool and latexbuild.embed_fonts(source, dest, tool):
+            counter["graphics_embedded"] = counter.get("graphics_embedded", 0) + 1
+            return
+        counter["graphics_unembedded"] = counter.get("graphics_unembedded", 0) + 1
+    shutil.copyfile(source, dest)
+
+
+def convert_graphic(base, work, path, record, counter=None):
     """An SVG of a PDF's first page, or an EPS's, at base/rendered/<path>.svg,
-    made again only when the file has changed. Returns (its name, None), or
-    (None, why) where it can't be made: the programs it needs that aren't
-    installed, a list, or what the one that failed said. An EPS image is
-    made a PDF first, by epstopdf, which runs Ghostscript."""
+    for the pages, its size in points (svg_in_points); and beside it,
+    base/rendered/<path>.pdf, the PDF a LaTeX build includes, which a PDF
+    from the pages and the latex target include in the SVG's place: the
+    PDF image, its fonts embedded where they aren't (keep_pdf), or the PDF
+    epstopdf makes of an EPS, as LaTeX's epstopdf package does, which runs
+    Ghostscript. Made again only when the file has changed. Returns (the
+    SVG's name, None), or (None, why) where it can't be made: the programs
+    it needs that aren't installed, a list, or what the one that failed
+    said."""
+    counter = {} if counter is None else counter
     name = f"{RENDERED}/{os.path.splitext(path)[0]}.svg".replace(os.sep, "/")
     with open(os.path.join(base, path), "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
     out = os.path.join(base, name)
-    if record.get(name) == digest and os.path.isfile(out):
-        return name, None
+    beside = os.path.splitext(out)[0] + ".pdf"
     eps = path.lower().endswith((".eps", ".ps"))
+    if record.get(name) == digest and os.path.isfile(out) and os.path.isfile(beside):
+        svg_in_points(out)
+        # A PDF image kept with fonts it couldn't embed is tried again, as
+        # Ghostscript may be installed since, and counted again where they
+        # still can't be: kept as it was, it went on without a word (a
+        # review).
+        import latexbuild
+        if not eps and latexbuild.unembedded_fonts(beside):
+            keep_pdf(os.path.join(base, path), beside, counter)
+        return name, None
     missing = [program for program in (("epstopdf", "gs", "pdftocairo") if eps
                                        else ("pdftocairo",))
                if not shutil.which(program)]
     if missing:
         return None, missing
     source = os.path.join(base, path)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     if eps:
-        pdf = os.path.join(work, "render", os.path.basename(path) + ".pdf")
-        os.makedirs(os.path.dirname(pdf), exist_ok=True)
-        done = subprocess.run(["epstopdf", source, "--outfile=" + pdf],
+        done = subprocess.run(["epstopdf", source, "--outfile=" + beside],
                               capture_output=True, text=True, errors="replace")
         if done.returncode != 0:
+            if os.path.exists(beside):
+                os.remove(beside)
             return None, program_said("epstopdf", done)
-        source = pdf
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+        source = beside
     done = subprocess.run(["pdftocairo", "-svg", "-f", "1", "-l", "1", source, out],
                           capture_output=True, text=True, errors="replace")
     if done.returncode != 0:
+        if eps and os.path.exists(beside):
+            os.remove(beside)
         return None, program_said("pdftocairo", done)
+    svg_in_points(out)
+    if not eps:
+        keep_pdf(source, beside, counter)
     record[name] = digest
     return name, None
 
@@ -2973,7 +3048,7 @@ def repair_graphics(base, work, text, dirs, record, counter, left_out):
         if path.lower().endswith(CONVERT):
             key = path.replace(os.sep, "/")
             made, why = (None, left_out[key]) if key in left_out \
-                else convert_graphic(base, work, path, record)
+                else convert_graphic(base, work, path, record, counter)
             counter["graphics_converted" if made else "graphics_failed"] = \
                 counter.get("graphics_converted" if made
                             else "graphics_failed", 0) + 1

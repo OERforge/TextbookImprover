@@ -1070,6 +1070,62 @@ def case_unmade_images(work):
     ]
 
 
+def case_scaled_images(work):
+    """An image graphicx scales (scale=), which Pandoc's LaTeX reader drops
+    (mkImage keeps width and height alone, Readers/LaTeX.hs, 3.13), so the
+    pages showed it at its natural size: written as the width graphicx
+    gives it, in inches, a PNG's pixels at its resolution (144 to the
+    inch, by its pHYs) and a PDF's page (pdfinfo's crop box), as LuaLaTeX
+    sets them; one with a width of its own too left as the reader reads
+    it; and the run says how many."""
+    os.makedirs(os.path.join(work, "img"))
+    raw = b"".join(b"\x00" + bytes((90, 90, 90)) * 144 for _ in range(72))
+
+    def chunk(kind, data):
+        body = kind + data
+        return (struct.pack(">I", len(data)) + body
+                + struct.pack(">I", zlib.crc32(body) & 0xffffffff))
+    with open(os.path.join(work, "img", "wide.png"), "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", 144, 72, 8, 2, 0, 0, 0))
+                 + chunk(b"pHYs", struct.pack(">IIB", 5669, 5669, 1))
+                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    pdf(os.path.join(work, "img", "plot.pdf"))
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
+                 "\\section{Scaled}\nHalf: \\includegraphics[scale=.5,alt={A half square.}]"
+                 "{img/wide}. Doubled: \\includegraphics[scale=2, alt={A doubled plot.}]"
+                 "{img/plot.pdf}. Sized: \\includegraphics[width=3cm,scale=.5,"
+                 "alt={A sized square.}]{img/wide.png}.\n\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    path = os.path.join(work, "html", "notes.html")
+    page = read(work, "html", "notes.html") if os.path.exists(path) else ""
+
+    def style(alt):
+        """The style of the page's image described alt, or None."""
+        for tag in re.findall(r"<img\b[^>]*>", page):
+            if 'alt="%s"' % alt in tag:
+                m = re.search(r'style="([^"]*)"', tag)
+                return m.group(1) if m else ""
+        return None
+    pdfs = shutil.which("pdftocairo") and shutil.which("pdfinfo")
+    return [
+        ("a PNG scaled is as wide as graphicx sets it, its pixels at its resolution, in inches",
+         lambda: style("A half square.") == "width:0.5in"),
+        ("a PDF scaled is as wide as graphicx sets its page, in inches",
+         lambda: style("A doubled plot.") == "width:1.1111in" if pdfs
+         else skip("no pdftocairo or pdfinfo to make a PDF image an SVG and read its page "
+                   "(sudo apt install poppler-utils)")),
+        ("one given a width too is as the reader reads it, and the run counts those scaled",
+         lambda: style("A sized square.") == "width:3cm"
+         and re.search(r"\b%d image's scale written as the width it gives the image"
+                       % (2 if pdfs else 1), said) is not None),
+    ]
+
+
 def case_kept_images(work):
     """A PDF image's PDF kept beside its SVG (latexsource.convert_graphic),
     read again: one whose fonts couldn't be embedded when it was kept, as
@@ -6059,6 +6115,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),
+         ("images graphicx scales", case_scaled_images),
          ("an SVG picture the latex target can't make a PDF", case_unmade_svg),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),

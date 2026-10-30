@@ -1236,6 +1236,8 @@ LATEX_READ_CHANGES = (
     ("image_macro_calls", "call of the book's own macro for an image written out, "
      "so its file is found"),
     ("graphics_converted", "PDF or EPS image made SVG"),
+    ("graphics_scaled", "image's scale written as the width it gives the image, where the "
+     "reader dropped it and set the image at its natural size"),
     ("graphics_embedded", "PDF image written beside its SVG with its fonts embedded, which "
      "PDF/UA requires, for a PDF from the pages and the latex target"),
     ("graphics_case", "image named in a different case from its file found as macOS and "

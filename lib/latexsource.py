@@ -63,6 +63,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 
 from names import case_match
@@ -3026,13 +3027,288 @@ def graphics_calls(text):
             yield m.start(), i
 
 
+# --------------------------------------------------------------------------
+# an image's scale
+# --------------------------------------------------------------------------
+
+# graphicx's scale key, which Pandoc's LaTeX reader drops (mkImage keeps
+# width and height alone, Readers/LaTeX.hs, 3.13), so such an image was at
+# its natural size in the pages and a PDF from them: GIAM's photograph of
+# a row of dominoes, which the book sets at a fifth of its size, five
+# times as wide. It's written as the width graphicx gives the image, the
+# scale times the image's natural width (natural_size), in inches, which
+# every writer reads (lengthToDim, Text/Pandoc/ImageSize.hs, 3.13), and
+# LaTeX as graphicx's big points do, 72 to the inch; the height follows.
+# Left as it is where graphicx's size isn't that alone: a width or a
+# height given too, an angle, or a box of the image's own, a page box
+# among them; or where its natural width can't be read.
+SCALE_LEFT = {"width", "height", "totalheight", "angle", "origin", "bb", "bbllx", "bblly",
+              "bburx", "bbury", "natwidth", "natheight", "viewport", "trim", "hiresbb",
+              "pagebox"}
+
+
+def raw_crop_box(path, page):
+    """The page's /CropBox as the file writes it, its own or its parent's,
+    read with pikepdf; None where it has none, or pikepdf isn't installed
+    or can't read it. pdfinfo gives the crop box clipped to the media box,
+    as the PDF reference has a reader show it, where LuaTeX sets an image
+    by the box as it's written: a crop box larger than the media box was
+    given the media box's size (a review)."""
+    try:
+        import pikepdf
+    except ImportError:
+        return None
+    try:
+        with pikepdf.open(path) as pdf:
+            node = pdf.pages[page - 1].obj
+            for _ in range(64):
+                if node is None or not isinstance(node, pikepdf.Dictionary):
+                    return None
+                if "/CropBox" in node:
+                    box = [float(v) for v in node.CropBox]
+                    return box if len(box) == 4 else None
+                node = node.get("/Parent")
+    except Exception:  # noqa: BLE001 -- a PDF pikepdf can't read is pdfinfo's
+        return None
+    return None
+
+
+def pdf_size(path, page=1):
+    """(width, height), in big points, of the PDF's page as graphicx sets
+    it under LuaLaTeX: its crop box as the file writes it (raw_crop_box),
+    which is its media box where it has none, turned as the page is
+    (pdfinfo, poppler-utils)."""
+    done = subprocess.run(["pdfinfo", "-box", "-f", str(page), "-l", str(page), path],
+                          capture_output=True, text=True, errors="replace")
+    box = re.search(r"^Page\s+%d\s+CropBox:\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)" % page,
+                    done.stdout, re.M)
+    if not box:
+        return None
+    x0, y0, x1, y1 = raw_crop_box(path, page) or [float(v) for v in box.groups()]
+    width, height = abs(x1 - x0), abs(y1 - y0)
+    turn = re.search(r"^Page\s+%d\s+rot:\s+(-?\d+)" % page, done.stdout, re.M)
+    if turn and int(turn.group(1)) % 180 == 90:
+        width, height = height, width
+    return width, height
+
+
+def eps_size(data):
+    """(width, height), in big points, of an EPS's %%BoundingBox, the size
+    epstopdf gives the PDF it makes of it without --hires, as LaTeX's
+    epstopdf package runs it; the trailer's where the header's is
+    (atend)."""
+    if data[:4] == b"\xc5\xd0\xd3\xc6":
+        start, length = struct.unpack("<II", data[4:12])
+        data = data[start:start + length]
+    found = re.search(rb"^%%BoundingBox:[ \t]*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)",
+                      data, re.M)
+    if not found:
+        return None
+    llx, lly, urx, ury = (float(v) for v in found.groups())
+    return urx - llx, ury - lly
+
+
+def luatex_resolution(x, y):
+    """(x, y) dots per inch as LuaTeX sets an image by them: 72 for both
+    where either is none, 0, or more than 65,535 (measured, TeX Live 2026's
+    LuaLaTeX: a PNG of 76,200 dots per inch, or of 0 one way and 144 the
+    other, is set at 72 both ways; a review)."""
+    if not x or not y or x > 65535 or y > 65535:
+        return 72, 72
+    return x, y
+
+
+def png_size(data):
+    """(width, height), in big points, of a PNG: its pixels at its pHYs
+    resolution, in dots per inch to the nearest whole one, as LuaTeX
+    reads it (luatex_resolution), or at 72 to the inch where it has none in
+    meters, or one after its image data, which LuaTeX doesn't read."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    width, height = struct.unpack(">II", data[16:24])
+    x, y, at = 0, 0, 8
+    while at + 8 <= len(data):
+        length, kind = struct.unpack(">I4s", data[at:at + 8])
+        if kind == b"pHYs" and length >= 9:
+            per_x, per_y, unit = struct.unpack(">IIB", data[at + 8:at + 17])
+            if unit == 1:
+                x, y = int(per_x * 0.0254 + 0.5), int(per_y * 0.0254 + 0.5)
+            break
+        if kind in (b"IDAT", b"IEND"):
+            break
+        at += 12 + length
+    x, y = luatex_resolution(x, y)
+    return width * 72 / x, height * 72 / y
+
+
+def exif_resolution(tiff):
+    """(x, y) dots per inch of a JPEG's Exif (its TIFF data), or None
+    where it has no resolution, or one in no unit."""
+    order = {b"II": "<", b"MM": ">"}.get(tiff[:2])
+    if not order or len(tiff) < 8:
+        return None
+    ifd = struct.unpack(order + "I", tiff[4:8])[0]
+    if ifd + 2 > len(tiff):
+        return None
+    count = struct.unpack(order + "H", tiff[ifd:ifd + 2])[0]
+    found, unit = {}, 2
+    for k in range(count):
+        entry = tiff[ifd + 2 + 12 * k:ifd + 14 + 12 * k]
+        if len(entry) < 12:
+            break
+        tag, kind = struct.unpack(order + "HH", entry[:4])
+        if tag in (0x011A, 0x011B) and kind == 5:
+            offset = struct.unpack(order + "I", entry[8:12])[0]
+            if offset + 8 <= len(tiff):
+                top, bottom = struct.unpack(order + "II", tiff[offset:offset + 8])
+                if bottom:
+                    found[tag] = top / bottom
+        elif tag == 0x0128 and kind == 3:
+            unit = struct.unpack(order + "H", entry[8:10])[0]
+    x, y = found.get(0x011A), found.get(0x011B)
+    if not (x and y) or unit not in (2, 3):
+        return None
+    scale = 2.54 if unit == 3 else 1
+    return x * scale, y * scale
+
+
+def jpeg_size(data):
+    """(width, height), in big points, of a JPEG: its pixels at its Exif
+    resolution, to the nearest whole dot per inch, which LuaTeX takes over a
+    JFIF one, or its JFIF one, the fraction of one in centimeters made
+    inches dropped, or at 72 to the inch where it has neither
+    (luatex_resolution)."""
+    if data[:2] != b"\xff\xd8":
+        return None
+    at, jfif, exif = 2, None, None
+    while at + 4 <= len(data):
+        if data[at] != 0xFF:
+            return None
+        marker = data[at + 1]
+        if marker == 0xFF:
+            at += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            at += 2
+            continue
+        length = struct.unpack(">H", data[at + 2:at + 4])[0]
+        body = data[at + 4:at + 2 + length]
+        if marker == 0xE0 and body[:5] == b"JFIF\0" and len(body) >= 12:
+            units = body[7]
+            x, y = struct.unpack(">HH", body[8:12])
+            # Dots per centimeter made dots per inch and the fraction
+            # dropped, as LuaTeX does: 118 is 299, not 299.72 (a review).
+            if units in (1, 2) and x and y:
+                jfif = (int(x * 2.54), int(y * 2.54)) if units == 2 else (x, y)
+        elif marker == 0xE1 and body[:6] == b"Exif\0\0":
+            found = exif_resolution(body[6:])
+            exif = (int(found[0] + 0.5), int(found[1] + 0.5)) if found else exif
+        elif 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC) and len(body) >= 5:
+            height, width = struct.unpack(">HH", body[1:5])
+            x, y = luatex_resolution(*(exif or jfif or (0, 0)))
+            return width * 72 / x, height * 72 / y
+        at += 2 + length
+    return None
+
+
+def natural_size(path, page=1):
+    """(width, height), in big points, of the image at path as graphicx
+    sets it at its natural size under LuaLaTeX, or None where it can't be
+    read: a PDF's page (pdf_size), an EPS's bounding box (eps_size), a
+    PNG's pixels or a JPEG's at its resolution (png_size, jpeg_size).
+    Measured against LuaLaTeX's own, TeX Live 2026's graphicx: a PNG with
+    no resolution, one of 300 dots per inch, one of 3,780 dots per meter
+    (96); a JPEG of 300 in its JFIF, 72 and 300 in its JFIF and Exif, 300
+    and 72, 72 and 150 per centimeter, an Exif of no unit and one with
+    none given (inches); a PDF whose crop box is smaller than its media
+    box, one turned 90 degrees, an EPS (2026-10-30)."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".pdf":
+            return pdf_size(path, page)
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except (OSError, ValueError):
+        return None
+    try:
+        if ext in (".eps", ".ps"):
+            return eps_size(data)
+        if ext == ".png":
+            return png_size(data)
+        if ext in (".jpg", ".jpeg"):
+            return jpeg_size(data)
+    except (struct.error, ValueError, ZeroDivisionError):
+        return None
+    return None
+
+
+def option_spans(options):
+    """(start, end) of each of graphicx's key=value entries in options, the
+    text between its brackets: split at each comma outside braces, a
+    character after a backslash taken as it is. Split by a pattern, at
+    each comma with no closing brace ahead of it before an opening one, an
+    alt text's comma before a group of its own, `alt={A plot of $f(x)$,
+    with \\emph{local} maxima}`, had split the text there, and its pieces
+    had been joined without the space after the comma (a review)."""
+    spans, depth, start, i = [], 0, 0, 0
+    while i < len(options):
+        c = options[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth = max(0, depth - 1)
+        elif c == "," and depth == 0:
+            spans.append((start, i))
+            start = i + 1
+        i += 1
+    spans.append((start, len(options)))
+    return spans
+
+
+def scaled_options(head, file_path):
+    """The \\includegraphics call's head (to its file's brace) with its
+    scale key written as the width graphicx gives the image, or None where
+    it's left as it is (SCALE_LEFT), or given twice. The rest of the
+    options are kept as they're written."""
+    open_at = head.find("[")
+    if open_at < 0:
+        return None
+    close = closing_bracket(head, open_at)
+    if close < 0:
+        return None
+    options = head[open_at + 1:close]
+    spans = option_spans(options)
+    entries = [options[a:b] for a, b in spans]
+    keys = [e.split("=", 1)[0].strip() for e in entries]
+    if keys.count("scale") != 1 or SCALE_LEFT & set(keys):
+        return None
+    values = {k: e.split("=", 1)[1].strip() for k, e in zip(keys, entries) if "=" in e}
+    try:
+        scale = float(values["scale"].strip("{}").strip())
+        page = int(values.get("page", "1").strip("{}").strip())
+    except (KeyError, ValueError):
+        return None
+    size = natural_size(file_path, page)
+    if not size or size[0] <= 0 or scale <= 0:
+        return None
+    a, b = spans[keys.index("scale")]
+    entry = options[a:b]
+    width = (entry[:len(entry) - len(entry.lstrip())] + "width=%.4fin" % (scale * size[0] / 72)
+             + entry[len(entry.rstrip()):])
+    return head[:open_at + 1] + options[:a] + width + options[b:] + head[close:]
+
+
 def repair_graphics(base, work, text, dirs, record, counter, left_out):
     """Each \\includegraphics in code pointed at a file a browser shows:
     the extension graphicx would add written in, and a PDF or EPS made
     an SVG. One that can't be made an SVG is left out, as no page can
     show it (a page would embed the PDF, and a Word file hold an image
     Word can't show), and left_out[its file] says why; a file already
-    there is left out again without another try."""
+    there is left out again without another try. A scale key is
+    written as the width it gives the image (scaled_options)."""
     spans = skip_spans(text)
     out, last = [], 0
     for start, brace in graphics_calls(text):
@@ -3045,6 +3321,7 @@ def repair_graphics(base, work, text, dirs, record, counter, left_out):
         path = resolve_graphic(base, name, dirs, counter)
         if path is None:
             continue
+        head = scaled_options(text[start:brace], os.path.join(base, path))
         if path.lower().endswith(CONVERT):
             key = path.replace(os.sep, "/")
             made, why = (None, left_out[key]) if key in left_out \
@@ -3058,7 +3335,11 @@ def repair_graphics(base, work, text, dirs, record, counter, left_out):
                 last = close
                 continue
             path = made
-        if path != name:
+        if head is not None:
+            counter["graphics_scaled"] = counter.get("graphics_scaled", 0) + 1
+            out.append(text[last:start] + head + "{" + path.replace(os.sep, "/"))
+            last = close - 1
+        elif path != name:
             out.append(text[last:brace + 1] + path.replace(os.sep, "/"))
             last = close - 1
     out.append(text[last:])

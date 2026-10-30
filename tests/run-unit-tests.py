@@ -3015,6 +3015,156 @@ def check_measure_report():
     ]
 
 
+def check_natural_sizes():
+    """An image's natural size as graphicx sets it under LuaLaTeX
+    (latexsource.natural_size), in big points, for a scale key, which
+    Pandoc's LaTeX reader drops, written as the width it gives the image
+    (scaled_options): a PNG's pixels at its pHYs resolution, rounded to
+    whole dots per inch, or 72 to the inch; a JPEG's at its Exif
+    resolution, over its JFIF one, in inches or centimeters, or its JFIF
+    one, or 72; an EPS's bounding box, the trailer's where the header
+    defers to it; and the key left where a width or an angle says
+    otherwise, or there's no file to read."""
+    import latexsource
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + b"\0\0\0\0"
+    head = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 144, 72, 8, 2, 0, 0, 0))
+    png = head + chunk(b"IEND", b"")
+    png_dpi = head + chunk(b"pHYs", struct.pack(">IIB", 5669, 5669, 1)) + chunk(b"IEND", b"")
+
+    def jfif(units, x):
+        body = b"JFIF\0\x01\x01" + bytes([units]) + struct.pack(">HH", x, x) + b"\0\0"
+        return b"\xff\xe0" + struct.pack(">H", len(body) + 2) + body
+
+    def exif(x, unit=None):
+        count = 2 if unit is None else 3
+        at = 8 + 2 + 12 * count + 4
+        entries = [(0x011A, 5, 1, at), (0x011B, 5, 1, at + 8)]
+        if unit is not None:
+            entries.append((0x0128, 3, 1, unit))
+        ifd = struct.pack("<H", count) + b"".join(
+            struct.pack("<HHII", *e) for e in entries) + b"\0\0\0\0"
+        tiff = b"II*\0" + struct.pack("<I", 8) + ifd + struct.pack("<IIII", x, 1, x, 1)
+        body = b"Exif\0\0" + tiff
+        return b"\xff\xe1" + struct.pack(">H", len(body) + 2) + body
+    sof = b"\xff\xc0" + struct.pack(">HBHHB", 11, 8, 100, 200, 1) + b"\x01\x11\x00"
+
+    def jpeg(*segments):
+        return b"\xff\xd8" + b"".join(segments) + sof + b"\xff\xd9"
+    folder = tempfile.mkdtemp()
+    with open(os.path.join(folder, "plot.eps"), "wb") as fh:
+        fh.write(b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: (atend)\n%%EndComments\n"
+                 b"showpage\n%%Trailer\n%%BoundingBox: 10 20 210 120\n%%EOF\n")
+    with open(os.path.join(folder, "wide.png"), "wb") as fh:
+        fh.write(png_dpi)
+    sizes = {
+        "PNG, no resolution": (latexsource.png_size(png), (144, 72)),
+        "PNG, 5,669 dots a meter, 144 an inch": (latexsource.png_size(png_dpi), (72, 36)),
+        "JPEG, no resolution": (latexsource.jpeg_size(jpeg()), (200, 100)),
+        "JPEG, JFIF 300 an inch": (latexsource.jpeg_size(jpeg(jfif(1, 300))), (48, 24)),
+        "JPEG, JFIF 300 and Exif 72": (latexsource.jpeg_size(jpeg(jfif(1, 300), exif(72, 2))),
+                                       (200, 100)),
+        "JPEG, Exif 150 a centimeter": (latexsource.jpeg_size(jpeg(jfif(1, 72), exif(150, 3))),
+                                        (200 * 72 / 381, 100 * 72 / 381)),
+        "JPEG, Exif of no unit": (latexsource.jpeg_size(jpeg(jfif(1, 72), exif(200, 1))),
+                                  (200, 100)),
+        "JPEG, Exif with no unit given": (latexsource.jpeg_size(jpeg(exif(200))), (72, 36)),
+        # As LuaTeX takes them, measured (a review): JFIF's 118 a centimeter,
+        # 299.72 an inch, as 299; Exif's as 300; and a resolution of more
+        # than 65,535 an inch, or one that's 0 one way, as 72 both ways.
+        "JPEG, JFIF 118 a centimeter": (latexsource.jpeg_size(jpeg(jfif(2, 118))),
+                                        (200 * 72 / 299, 100 * 72 / 299)),
+        "JPEG, Exif 118 a centimeter": (latexsource.jpeg_size(jpeg(jfif(1, 72), exif(118, 3))),
+                                        (48, 24)),
+        "JPEG, Exif 70,000 an inch": (latexsource.jpeg_size(jpeg(exif(70000, 2))), (200, 100)),
+        "PNG, 76,200 dots an inch": (latexsource.png_size(
+            head + chunk(b"pHYs", struct.pack(">IIB", 3000000, 3000000, 1)) + chunk(b"IEND", b"")),
+            (144, 72)),
+        "PNG, 0 dots an inch one way, 144 the other": (latexsource.png_size(
+            head + chunk(b"pHYs", struct.pack(">IIB", 10, 5669, 1)) + chunk(b"IEND", b"")),
+            (144, 72)),
+        "EPS, its trailer's box": (latexsource.natural_size(os.path.join(folder, "plot.eps")),
+                                   (200, 100)),
+    }
+    wide = os.path.join(folder, "wide.png")
+    # A PDF's page cropped smaller than its media box, and turned a
+    # quarter: graphicx sets its crop box, 200 by 100, turned, 100 by 200.
+    def page_pdf(name, boxes):
+        """A one-page PDF at name, its page's boxes and turn as given."""
+        objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+                   b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                   b"<< /Type /Page /Parent 2 0 R " + boxes + b" >>"]
+        data, offsets = bytearray(b"%PDF-1.7\n"), []
+        for number, body in enumerate(objects, 1):
+            offsets.append(len(data))
+            data += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+        xref = len(data)
+        data += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+        data += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+        data += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+            len(objects) + 1, xref)
+        path = os.path.join(folder, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+    turned = page_pdf("turned.pdf", b"/MediaBox [0 0 400 300] /CropBox [50 50 250 150] /Rotate 90")
+    # And one whose crop box is larger than its media box, which pdfinfo
+    # clips and LuaTeX sets as it's written, 600 by 500 (a review).
+    larger = page_pdf("larger.pdf", b"/MediaBox [0 0 400 300] /CropBox [-100 -100 500 400]")
+
+    def page_size():
+        if not shutil.which("pdfinfo"):
+            print("  skip  no pdfinfo to read a PDF's page (sudo apt install poppler-utils)")
+            return True
+        got = latexsource.natural_size(turned)
+        wide = latexsource.natural_size(larger)
+        # pdfinfo's crop box alone, as without pikepdf.
+        raw = latexsource.raw_crop_box
+        try:
+            latexsource.raw_crop_box = lambda path, page: None
+            alone = latexsource.natural_size(turned)
+        finally:
+            latexsource.raw_crop_box = raw
+        if alone is None or any(abs(a - b) >= 0.001 for a, b in zip(alone, (100, 200))):
+            return False
+        # A pikepdf found that can't be imported is none (the setup that
+        # hides it, Round 34).
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            print("  skip  no pikepdf to read a crop box larger than its media box")
+            wide = (600, 500)
+        return (got is not None and all(abs(a - b) < 0.001 for a, b in zip(got, (100, 200)))
+                and wide is not None and all(abs(a - b) < 0.001 for a, b in zip(wide, (600, 500))))
+    return [
+        ("each image's natural size as LuaLaTeX's graphicx sets it",
+         lambda: [k for k, (got, want) in sizes.items()
+                  if not (got and all(abs(a - b) < 0.001 for a, b in zip(got, want)))] == []),
+        ("a scale written as the width it gives the image, in inches, the other keys kept as "
+         "they're written, an alt text's comma before a group of its own among them, and a "
+         "scale an alt text names, inside its braces, not taken for the key",
+         lambda: latexsource.scaled_options("\\includegraphics[scale=.5, alt={A, b}]", wide)
+         == "\\includegraphics[width=0.5000in, alt={A, b}]"
+         and latexsource.scaled_options(
+             "\\includegraphics[alt={A plot of $f(x)$, with \\emph{local} maxima},scale=2]", wide)
+         == "\\includegraphics[alt={A plot of $f(x)$, with \\emph{local} maxima},width=2.0000in]"
+         and latexsource.scaled_options("\\includegraphics[alt={Its scale, scale=2 here},"
+                                        "scale=.5]", wide)
+         == "\\includegraphics[alt={Its scale, scale=2 here},width=0.5000in]"),
+        ("left as it is beside a width, an angle, a second scale, or a file it can't read",
+         lambda: latexsource.scaled_options("\\includegraphics[width=3cm,scale=.5]", wide) is None
+         and latexsource.scaled_options("\\includegraphics[scale=.5,scale=2]", wide) is None
+         and latexsource.scaled_options("\\includegraphics[scale=.5,angle=90]", wide) is None
+         and latexsource.scaled_options("\\includegraphics[scale=.5]",
+                                        os.path.join(folder, "none.png")) is None),
+        ("a PDF's page set at its crop box, not its media box, turned as the page is, and a "
+         "crop box larger than the media box as it's written",
+         page_size),
+    ]
+
+
 def check_math_words():
     """A word or a unit an HTML page's formula holds as an <mi> of more than
     two letters, or of two set upright or applied as a function, is made an
@@ -5987,6 +6137,7 @@ GROUPS = [
     ("the math font a metadata file names", check_math_font_latex),
     ("the page's measures, their files missing", check_measure_page),
     ("the page's measures, to six places", check_measure_report),
+    ("an image's natural size, for its scale", check_natural_sizes),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),
     ("display style in running text, in an HTML source", check_display_style_in_text),

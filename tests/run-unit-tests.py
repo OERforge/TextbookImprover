@@ -2812,6 +2812,39 @@ def check_ua1_math():
     ]
 
 
+def check_math_font_latex():
+    """The math font a metadata file names, set where TeX has it
+    (build-pdf.py's math_font_latex): a font its options give a Path
+    looked for as a file there, its Path, name, and Extension run together
+    as fontspec runs them, since fontspec's test of a name takes no options
+    and a font in the book's folder was set in Latin Modern Math (a
+    review); Latin Modern Math set where it's missing, so that a range of
+    symbols the metadata's own LaTeX sets has a main math font; and the
+    run's warning where the Path's file isn't there."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    pathed = build_pdf.math_font_latex("BookMath.otf", ["Path=fonts/"])
+    named = build_pdf.math_font_latex("BookMath", ["Extension=.otf", "Scale=1.1"])
+    said = build_pdf.math_font_said(
+        "TextbookImprover math font: no file fonts/BookMath.otf\n",
+        {build_pdf.MATH_NAMED: {"t": "MetaString", "c": "BookMath.otf"}}) or ""
+    return [
+        ("a math font whose options give a Path is looked for as a file there",
+         lambda: pathed.startswith("\\IfFileExists{fonts/BookMath.otf}\n")
+         and "{\\setmathfont[Path=fonts/]{BookMath.otf}}" in pathed),
+        ("any other by its name and its Extension",
+         lambda: named.startswith("\\IfFontExistsTF{BookMath.otf}\n")
+         and "\\setmathfont[Extension=.otf,Scale=1.1]{BookMath}" in named),
+        ("where it's missing, Latin Modern Math is set as unicode-math sets it where nothing "
+         "does",
+         lambda: "\\setmathfont{latinmodern-math.otf}[BoldFont={latinmodern-math.otf}]"
+         in pathed),
+        ("and the run says the file isn't where its Path puts it",
+         lambda: said.startswith("WARNING: The formulas are set in Latin Modern Math, not in "
+                                 "BookMath.otf") and "there's no file fonts/BookMath.otf, where "
+         "its Path option (mathfontoptions) puts it" in said),
+    ]
+
+
 def check_display_style_in_text():
     """lib/mathstyle.py: a formula in running text an HTML page sets in
     display style, where display style changes it, put in a span of class
@@ -5850,6 +5883,7 @@ GROUPS = [
     ("the byte-order mark on every report", check_report_marks),
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
+    ("the math font a metadata file names", check_math_font_latex),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),
     ("display style in running text, in an HTML source", check_display_style_in_text),

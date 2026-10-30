@@ -1038,25 +1038,24 @@ effect="italics">myśli</emphasis></para></meaning></definition>
         ("each book's text is in its design's face, as OpenStax sets it, named by its "
          "four files: cosmos's IBM Plex Serif, with IBM Plex Math for formulas, "
          "carnival's IBM Plex Sans, Organic Chemistry's Plex Serif, and cardboard's and "
-         "corn's Noto Sans, Noto Sans Math left for whoever installs a version with a "
-         "MATH table; a style with no design keeps the default's face",
+         "corn's Noto Sans, with Noto Sans Math, which the build sets formulas in where "
+         "TeX has a version with a MATH table; a style with no design keeps the default's "
+         "face",
          lambda: [(faces[s].get("mainfont"), faces[s].get("mathfont")) for s in
                   ("psychology", "biology", "organic-chemistry", "marketing", "statistics",
                    "otto-book")]
          == [("IBMPlexSerif", "IBMPlexMath-Regular.otf"), ("IBMPlexSans", None),
-             ("IBMPlexSerif", "IBMPlexMath-Regular.otf"), ("NotoSans", None),
-             ("NotoSans", None), (None, None)]
+             ("IBMPlexSerif", "IBMPlexMath-Regular.otf"), ("NotoSans", "NotoSansMath-Regular.ttf"),
+             ("NotoSans", "NotoSansMath-Regular.ttf"), (None, None)]
          and all(faces[s]["mainfontoptions"] == PLEX_SERIF["mainfontoptions"]
                  for s in ("psychology", "biology", "organic-chemistry"))
          and all(faces[s]["mainfontoptions"] == ["Extension=.ttf"]
                  + PLEX_SERIF["mainfontoptions"][1:] for s in ("marketing", "statistics"))
-         and noto.endswith("by from version 3.000 (github.com/notofonts/math), and "
-                           "Debian's and\n# Ubuntu's fonts-noto-core have 2.001. With "
-                           "3.000 or later installed, take\n# the # off the line below.\n"
+         and noto.endswith("they're in\n# Latin Modern Math with no warning.\n"
                            "mainfont: NotoSans\nmainfontoptions:\n  - Extension=.ttf\n"
                            "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n"
                            "  - ItalicFont=*-Italic\n  - BoldItalicFont=*-BoldItalic\n"
-                           "# mathfont: NotoSansMath-Regular.ttf\n")),
+                           "mathfont: NotoSansMath-Regular.ttf\n")),
         ("every style a recipe bakes has an OpenStax design, or none in OpenStax's styles",
          lambda: sorted(style for style in RECIPES if not cnx.project.design_face(style))
          == ["ap-history", "otto-book"]),

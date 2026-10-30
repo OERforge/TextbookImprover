@@ -163,10 +163,15 @@ OWN_FACES = {"organic-chemistry": "IBM Plex Serif"}
 # without a word, as Debian's and Ubuntu's TeX Live has Noto Sans Medium
 # and not its Regular, which fonts-noto-core has. IBM Plex Math's letters
 # are Plex Serif's, and TeX Live's plex has both. IBM Plex has no math
-# font with Plex Sans's letters. Noto Sans Math, which has Noto Sans's,
-# has the MATH table a formula is set by only from version 3.000:
-# Debian's and Ubuntu's fonts-noto-core have 2.001, and unicode-math,
-# given it, sets formulas in Latin Modern Math (2026-10-20).
+# font with Plex Sans's letters. Noto Sans Math, which has Noto Sans's, is
+# named for a book in Noto Sans: its version 3.000 has the MATH table a
+# formula is set by (notofonts' release notes say from 2.539), where
+# Debian's and Ubuntu's fonts-noto-core have 2.001 (2026-10-20), and where
+# TeX has no version with the table, the build sets formulas in Latin
+# Modern Math and says how to install it (build-pdf.math_font_said). Rob,
+# 2026-10-29: "I do think we should use the 3.000 font if it's available,
+# with a warning that includes installation instructions and a fallback
+# if it's not."
 
 
 def face_files(stem, extension):
@@ -183,12 +188,13 @@ FACES = {
                        + ["mathfont: IBMPlexMath-Regular.otf"]),
     "IBM Plex Sans": ("Formulas stay in Latin Modern Math, since IBM Plex has no math "
                       "font with Plex Sans's letters.", face_files("IBMPlexSans", ".otf")),
-    "Noto Sans": ("Formulas stay in Latin Modern Math: Noto Sans Math, whose letters are "
-                  "Noto Sans's, has the table LaTeX sets a formula by from version 3.000 "
-                  "(github.com/notofonts/math), and Debian's and Ubuntu's "
-                  "fonts-noto-core have 2.001. With 3.000 or later installed, take the "
-                  "# off the line below.",
-                  face_files("NotoSans", ".ttf") + ["# mathfont: NotoSansMath-Regular.ttf"]),
+    "Noto Sans": ("Formulas in Noto Sans Math, whose letters are Noto Sans's, where TeX "
+                  "has its version 3.000 (github.com/notofonts/math), which has the table "
+                  "LaTeX sets a formula by: where it has none, or an older one, as the "
+                  "2.001 of Debian's and Ubuntu's fonts-noto-core, they're set in Latin "
+                  "Modern Math, and the build says how to install it. Without the "
+                  "mathfont line, they're in Latin Modern Math with no warning.",
+                  face_files("NotoSans", ".ttf") + ["mathfont: NotoSansMath-Regular.ttf"]),
 }
 
 

@@ -1119,10 +1119,12 @@ def build_fancy(work):
 # tocdepth, which the bookmarks follow, only where it writes the contents,
 # so a page's subsections had bookmarks too. And a math font of its own, a
 # monospaced face with fallbacks of its own, and no face for the text: the
-# template sets each before the default's text face, scaled to Latin
-# Modern's small letters, and build-pdf.py sets each again after it, with a
-# scale, without which fontspec kept the size it had worked out (formulas
-# a sixth smaller than the text).
+# template sets the monospaced face before the default's text face, scaled
+# to Latin Modern's small letters, and build-pdf.py sets it again after it,
+# with a scale, without which fontspec kept the size it had worked out, as
+# it kept a math font the template set (formulas a sixth smaller than the
+# text); the math font build-pdf.py sets itself, after the text's face,
+# with a scale.
 PREAMBLE_META = ("---\ntoc: false\nmathfont: IBMPlexMath-Regular.otf\n"
                  "monofont: Latin Modern Mono\nmonofontfallback:\n"
                  "  - \"IBMPlexMono-Regular.otf:mode=harf;\"\nheader-includes:\n"
@@ -3268,6 +3270,61 @@ LACKING_PLEX = ("import importlib.util, sys\n"
                 "sys.exit(build_pdf.main())\n")
 
 
+# A book whose metadata file names a math font TeX lacks, and one whose
+# file names a font with no math table, Latin Modern Roman's
+# (MATH_FONT_BOOK, build_math_font), each a target of the book's: the
+# template set a math font the file names, and LaTeX stopped where TeX
+# lacked it, fontspec saying it "cannot be found", as a book in Noto Sans
+# named Noto Sans Math 3.000, which the CNX unpacker names now; with no math
+# table, unicode-math set Latin Modern Math and warned in LaTeX's log alone.
+# And three more a review found (MATH_FONT_TARGETS): a file whose own LaTeX
+# sets a range of symbols, script capitals, from Latin Modern Math, after
+# the math font the file names, IBM Plex Math, beside the default's text
+# face, and with no math font named, after the default's, IBM Plex Math
+# again, where LaTeX stopped, since the build set the math font after
+# the file's LaTeX ("No main maths font has been set up yet"); and a file
+# naming a font in the book's own folder, which its options give a Path
+# (fonts/BookMath.otf, a copy of IBM Plex Math), whose formulas were set
+# in Latin Modern Math, the run saying TeX lacked the font, since
+# fontspec's test of a name takes no options.
+MATH_FONT_BOOK = ("# Formulas\n\nA formula, $x^2 + y_1 = z$, and a display:\n\n"
+                  "$$\\sum_{i=1}^n a_i = \\frac{1}{2}$$\n\nA script capital, "
+                  "$\\mathcal{A} + x$.\n")
+MATH_RANGE = "header-includes:\n  - \\setmathfont[range=\\mathcal]{latinmodern-math.otf}\n"
+MATH_FONT_TARGETS = (
+    ("missing", "mathfont: NoSuchMath-Regular.otf\n"),
+    ("textual", "mathfont: lmroman10-regular.otf\n"),
+    ("ranged", "mathfont: IBMPlexMath-Regular.otf\n" + MATH_RANGE),
+    ("defaulted", MATH_RANGE),
+    ("pathed", "mathfont: BookMath.otf\nmathfontoptions:\n  - Path=fonts/\n"))
+
+
+def build_math_font(work):
+    """MATH_FONT_BOOK as a target for each of MATH_FONT_TARGETS, its
+    metadata file the target's: ({target: its PDF's path}, what the run
+    said). The pathed target's font is a copy of IBM Plex Math's file,
+    where TeX finds one."""
+    os.makedirs(os.path.join(work, "fonts"))
+    for name, text in [("formulas.md", MATH_FONT_BOOK)] + [
+            (target + ".yaml", meta) for target, meta in MATH_FONT_TARGETS]:
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    plex = subprocess.run(["kpsewhich", "IBMPlexMath-Regular.otf"], capture_output=True,
+                          text=True, stdin=subprocess.DEVNULL).stdout.strip() \
+        if shutil.which("kpsewhich") else ""
+    if plex:
+        shutil.copyfile(plex, os.path.join(work, "fonts", "BookMath.otf"))
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Formulas\n  identifier: org.example.formulas\n"
+                 "  language: en-US\n  contents:\n    - formulas\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n" + "".join(
+            f"  {target}:\n    format: pdf\n    pdf:\n      metadata: {target}.yaml\n"
+            for target, _meta in MATH_FONT_TARGETS))
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    return ({target: os.path.join(work, target, "org.example.formulas.pdf")
+             for target, _meta in MATH_FONT_TARGETS},
+            converted.stdout + converted.stderr)
 def build_default(work):
     """The book (write_book) on the PDF target's default page, in its
     faces, where its checks measure it on the class's (CLASS_PAGE), in
@@ -4267,6 +4324,70 @@ def sized_checks(sized_path, sized_said):
          lambda: rule_over("Afterthefigure") is not None
          and rule_over("Aftertheparagraph") is not None
          and abs(rule_over("Afterthefigure") - rule_over("Aftertheparagraph")) < 0.5),
+    ]
+
+
+def math_font_checks(paths, said):
+    """The math font book's checks (build_math_font): paths, each target's
+    PDF's."""
+    spec = importlib.util.spec_from_file_location("build_pdf", os.path.join(BIN, "build-pdf.py"))
+    build_pdf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_pdf)
+
+    def fonts(path):
+        return font_names(pypdf.PdfReader(path)) if os.path.exists(path) else set()
+
+    def drawn(path, face):
+        return any(face in name for name in fonts(path))
+
+    def plex_sizes(path):
+        """The sizes the PDF draws IBM Plex Math at, on any page."""
+        if not os.path.exists(path):
+            return set()
+        reader = pypdf.PdfReader(path)
+        return set().union(*(font_sizes(reader, page, "IBMPlexMath")
+                             for page in range(len(reader.pages))))
+
+    def noto(said_):
+        return build_pdf.math_font_said(said_, {build_pdf.MATH_NAMED: {
+            "t": "MetaString", "c": "NotoSansMath-Regular.ttf"}}) or ""
+    return [
+        ("a math font the metadata file names that TeX lacks, or that has no math table, "
+         "gives way to Latin Modern Math, the book built",
+         lambda: all(drawn(paths[target], "LatinModernMath") for target in ("missing", "textual"))
+         and not drawn(paths["textual"], "LMRoman")),
+        ("a range of symbols the metadata file's own LaTeX sets from another font, script "
+         "capitals from Latin Modern Math, comes after the math font it names, and after the "
+         "default's where it names none, IBM Plex Math each, the book built, Plex Math at the "
+         "text's size, scaled to the default's text face as it is without the range",
+         lambda: all(drawn(paths[target], "IBMPlexMath") and drawn(paths[target], "LatinModernMath")
+                     and any(abs(size - 11.96) < 0.05 for size in plex_sizes(paths[target]))
+                     for target in ("ranged", "defaulted"))),
+        ("a math font whose options give a Path, a file in the book's folder, is set from "
+         "there, and the run doesn't warn of it",
+         lambda: drawn(paths["pathed"], "IBMPlexMath")
+         and not drawn(paths["pathed"], "LatinModernMath") and "BookMath" not in said),
+        ("and the run says so, and why, naming the font",
+         lambda: "WARNING: The formulas are set in Latin Modern Math, not in "
+         "NoSuchMath-Regular.otf, the math font the pdf.metadata file names (mathfont): TeX "
+         "has no NoSuchMath-Regular.otf. Install it" in said
+         and "WARNING: The formulas are set in Latin Modern Math, not in "
+         "lmroman10-regular.otf, the math font the pdf.metadata file names (mathfont): the "
+         "copy of lmroman10-regular.otf TeX finds has no math table (OpenType's MATH), which "
+         "LaTeX sets a formula by. Install it" in said
+         and said.count("The formulas are set in Latin Modern Math") == 2),
+        ("for Noto Sans Math, the run says how to install its version 3.000, which has the "
+         "table, where TeX lacks it or finds an older copy, and nothing where it was used",
+         lambda: all("download NotoSansMath-v3.000.zip from "
+                     "https://github.com/notofonts/math/releases, copy "
+                     "NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf from it into "
+                     "~/.local/share/fonts, and run luaotfload-tool --update" in noto(said_)
+                     for said_ in ("TextbookImprover math font: no NotoSansMath-Regular.ttf\n",
+                                   "Package unicode-math Warning: The first font loaded by "
+                                   "unicode-math must be an\n"))
+         and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
+                                       "by unicode-math must be an\n")
+         and noto("") == ""),
     ]
 
 
@@ -5576,16 +5697,17 @@ def fancy_checks(fancy_path, fancy_said):
 # The folders the books are built in, each the main book's (work) with its
 # suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
 # preamble, AAA, fit, two-column, evaluation bar's, languages, rules,
-# code, code margins, and code tall books are built beside it (build_ua1 to
-# build_code), and the default book's copy, built again where TeX lacks a
-# file of IBM Plex's (build_default). The cleanup removes them and --keep names them, from
-# this one list, and a check sees that no build leaves another: the
-# languages book's folder was left in the temporary directory by every
-# run, when the cleanup and the message each had a list of their own.
+# code, code margins, code tall, and math font books are built beside it
+# (build_ua1 to build_math_font), and the default book's copy, built again
+# where TeX lacks a file of IBM Plex's (build_default). The cleanup removes
+# them and --keep names them, from this one list, and a check sees that no
+# build leaves another: the languages book's folder was left in the
+# temporary directory by every run, when the cleanup and the message each
+# had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
-                "-code-margins", "-code-tall", "-code-wrap")
+                "-code-margins", "-code-tall", "-code-wrap", "-mathfont")
 
 
 def checks(work, jobs=1):
@@ -5609,6 +5731,7 @@ def checks(work, jobs=1):
             spoken = pool.submit(build_languages, work + "-languages")
             ruled = pool.submit(build_rules, work + "-rules")
             coded = pool.submit(build_code, work + "-code")
+            mathed = pool.submit(build_math_font, work + "-mathfont")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -5627,6 +5750,7 @@ def checks(work, jobs=1):
             rules_path = ruled.result()
             (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
              tall_said, wrap_paths, wrap_said) = coded.result()
+            math_paths, math_said = mathed.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -5647,6 +5771,7 @@ def checks(work, jobs=1):
         rules_path = build_rules(work + "-rules")
         (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
          tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
+        math_paths, math_said = build_math_font(work + "-mathfont")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -6410,6 +6535,7 @@ def checks(work, jobs=1):
     items += sized_checks(sized_path, sized_said)
     items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path, default_said, lacking_path, lacking_said)
+    items += math_font_checks(math_paths, math_said)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
                         aaa_lacking_said)

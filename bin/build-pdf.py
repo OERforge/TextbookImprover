@@ -174,6 +174,10 @@ OWN_GEOMETRY = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*
 OWN_SPACING = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*"
                          r"\{[^}]*\bsetspace\b|\\(?:linespread|setstretch|onehalfspacing"
                          r"|doublespacing|singlespacing)(?![A-Za-z@])")
+# And one that sets a math font, as a range of symbols from another font
+# is set (\setmathfont[range=...]), which unicode-math takes only after a
+# main math font (book_metadata).
+OWN_MATH_FONT = re.compile(r"\\setmathfont(?![A-Za-z@])")
 
 # A character its font lacks is drawn blank (.notdef): gone from the page
 # and from the text a screen reader gets. Latin Modern, the template's
@@ -240,6 +244,23 @@ PLEX_MATH = "IBMPlexMath-Regular.otf"
 PLEX_SHAPES = (("UprightFont", "Regular"), ("BoldFont", "Bold"), ("ItalicFont", "Italic"),
                ("BoldItalicFont", "BoldItalic"))
 FACE_MISSING = re.compile(r"^TextbookImprover face: no (\S+)$", re.M)
+# A math font the metadata file names (mathfont) is set by the build, not
+# the template (math_font_latex), where TeX has it: where it hasn't, LaTeX
+# writes a line (MATH_MISSING), and where its font has no math table,
+# unicode-math warns (NOT_MATH); either way formulas are set in Latin
+# Modern Math, unicode-math's own, and the run says why (math_font_said).
+# The metadata's field is kept under MATH_NAMED, which the template
+# doesn't read, for the warnings. Noto Sans Math, the CNX unpacker's for a
+# book in Noto Sans, has the table from notofonts' 3.000 (their release
+# notes say from 2.539), where Debian's and Ubuntu's fonts-noto-core have
+# 2.001: LuaTeX finds a copy the user installs in place of the system's
+# only once luaotfload-tool --update has listed it (measured 2026-10-29).
+# MATH_MISSING's first group is "file " for a font its options give a Path.
+MATH_MISSING = re.compile(r"^TextbookImprover math font: no (file )?(.+)$", re.M)
+NOT_MATH = re.compile(r"Package unicode-math Warning: The first font loaded by unicode-math "
+                      r"must\s+be")
+MATH_NAMED = "textbookimprover-mathfont"
+NOTO_MATH = "NotoSansMath-Regular.ttf"
 
 
 def named(meta, field):
@@ -253,9 +274,11 @@ def named(meta, field):
 def defaults_of(meta):
     """(FAMILIES' entries for the families the metadata (meta) doesn't
     name, whether the formulas are the default's too: where it names
-    neither them nor the text's face)."""
+    neither them nor the text's face). A math font it names is one the
+    build has taken from it to set itself (MATH_NAMED) too."""
     return ([f for f in FAMILIES if not named(meta, f[0])],
-            not named(meta, "mainfont") and not named(meta, "mathfont"))
+            not named(meta, "mainfont") and not named(meta, "mathfont")
+            and not named(meta, MATH_NAMED))
 
 
 def latin_modern_said(families, math):
@@ -305,6 +328,79 @@ def default_faces(meta):
             + f"  \\PackageWarningNoLine{{TextbookImprover}}{{TeX lacks the default's faces, "
               f"{faces},\\MessageBreak so {said}}}\n"
             + "\\fi\n")
+
+
+def math_font_latex(name, options):
+    """The LaTeX that sets the math font the metadata file names, name,
+    with its options (a list of strings), where TeX has it: for a font its
+    options give a Path, where the file is, its Path, name, and Extension
+    run together, as fontspec runs them together to load it, since
+    fontspec's test of a name takes no options, and a font in the book's
+    own folder was set in Latin Modern Math with a warning that TeX lacked
+    it (a review); for any other, the name with its Extension. Where TeX
+    hasn't it, a line in LaTeX's log (MATH_MISSING), and a warning for one
+    who builds the LaTeX by hand, the formulas set in Latin Modern Math,
+    unicode-math's own, as unicode-math sets it where nothing does, so that
+    a range of symbols the metadata's own LaTeX sets from another font
+    still has a main math font to add to (book_metadata)."""
+    def option(key):
+        given = [o.split("=", 1)[1].strip() for o in options
+                 if o.replace(" ", "").lower().startswith(key.lower() + "=")]
+        value = given[-1] if given else ""
+        return value[1:-1] if value.startswith("{") and value.endswith("}") else value
+    path, extension = option("Path"), option("Extension")
+    if path:
+        test, missing = f"\\IfFileExists{{{path}{name}{extension}}}", \
+            f"file {path}{name}{extension}"
+    else:
+        test, missing = f"\\IfFontExistsTF{{{name}{extension}}}", f"{name}{extension}"
+    return (f"{test}\n"
+            f"  {{\\setmathfont[{','.join(options)}]{{{name}}}}}\n"
+            f"  {{\\typeout{{TextbookImprover math font: no {missing}}}%\n"
+            "   \\setmathfont{latinmodern-math.otf}[BoldFont={latinmodern-math.otf}]%\n"
+            f"   \\PackageWarningNoLine{{TextbookImprover}}{{TeX lacks the math font {name},"
+            f"\\MessageBreak so formulas are set in Latin Modern Math}}}}\n")
+
+
+def math_font_said(said, meta):
+    """The run's warning that the math font the metadata file names gave
+    way to Latin Modern Math, from what LaTeX said (said): where TeX lacks
+    it (MATH_MISSING), or a font its options give a Path isn't there, or
+    the copy TeX finds has no math table (NOT_MATH); for Noto Sans Math,
+    how to install the version with the table. None where it didn't give
+    way, or none is named."""
+    name = meta_plain(meta.get(MATH_NAMED))
+    if not name:
+        return None
+    missing = MATH_MISSING.search(said)
+    if missing and missing.group(1):
+        return (f"WARNING: The formulas are set in Latin Modern Math, not in {name}, the math "
+                f"font the pdf.metadata file names (mathfont): there's no file "
+                f"{missing.group(2)}, where its Path option (mathfontoptions) puts it. Put the "
+                "font's file there, or correct the Path.")
+    if missing:
+        found = f"TeX has no {missing.group(2)}"
+    elif NOT_MATH.search(said):
+        found = (f"the copy of {name} TeX finds has no math table (OpenType's MATH), which "
+                 "LaTeX sets a formula by")
+    else:
+        return None
+    if name == NOTO_MATH:
+        older = "" if MATH_MISSING.search(said) else \
+            ": it's an older version, as the 2.001 of Debian's and Ubuntu's fonts-noto-core is"
+        return (f"WARNING: The formulas are set in Latin Modern Math, not in the Noto Sans "
+                f"Math the pdf.metadata file names (mathfont), whose letters are Noto Sans's: "
+                f"{found}{older}. Its version 3.000 has the table: download "
+                "NotoSansMath-v3.000.zip from https://github.com/notofonts/math/releases, copy "
+                "NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf from it into "
+                "~/.local/share/fonts, and run luaotfload-tool --update, without which "
+                "LuaTeX keeps finding an older copy (docs/installation.md, \"Noto Sans "
+                "Math\"). To keep Latin Modern Math without this warning, take the mathfont "
+                "line out of the file.")
+    return (f"WARNING: The formulas are set in Latin Modern Math, not in {name}, the math "
+            f"font the pdf.metadata file names (mathfont): {found}. Install it, or a "
+            "version with the table, and run luaotfload-tool --update, which LuaTeX needs "
+            "to find a font installed since it last looked; or name another.")
 
 
 def face_warning(lacking, meta, aaa=None):
@@ -793,6 +889,7 @@ def book_metadata(project, resolved, base, numbered):
         includes = {"t": "MetaList", "c": []}
     elif includes.get("t") != "MetaList":
         includes = {"t": "MetaList", "c": [includes]}
+    authors = len(includes["c"])
     # The bookmarks go as deep as LaTeX's tocdepth when each is written
     # (hyperref's bookmarksdepth, unset), and Pandoc's template sets it
     # only where it writes the contents, inside $if(toc)$, as build-pdf's
@@ -894,17 +991,36 @@ def book_metadata(project, resolved, base, numbered):
             options = ",".join(rescaled(given(field))
                                + [f"RawFeature={{fallback={field}fallback}}"])
             faces.append(f"{command}{{{name}}}[{options}]\n")
-    if named(meta, "mathfont") and not named(meta, "mainfont"):
-        # The template sets a face the file names before the default's
-        # text face, which default_faces sets, and Pandoc's template scales
-        # each to the text's small letters as they are then, lmodern's
-        # Latin Modern: IBM Plex Math named alone was set a sixth smaller
-        # than Plex Serif (9.99 points to 11.96, a separate review's
-        # measure). Set again after it, with its scale (rescaled), it's
-        # scaled to the text's.
-        faces.append(f"\\setmathfont[{','.join(rescaled(given('mathfont')))}]"
-                     f"{{{meta_plain(meta['mathfont'])}}}\n")
-    if any(faces):
+    if named(meta, "mathfont"):
+        # A math font the file names is set here, not by the template,
+        # whose \setmathfont stops LaTeX where TeX lacks the font, so that
+        # TeX can be asked whether it has it first (math_font_latex); where
+        # it hasn't, or the font has no math table, formulas are set in
+        # Latin Modern Math, as where the file names none, and the run says
+        # why (math_font_said). The template would also set it before the
+        # default's text face, which default_faces sets, scaled to the
+        # text's small letters as they are then, lmodern's Latin Modern:
+        # IBM Plex Math named alone was set a sixth smaller than Plex Serif
+        # (9.99 points to 11.96, a separate review's measure). After it,
+        # with its scale (rescaled), it's scaled to the text's.
+        options = given("mathfont")
+        if not named(meta, "mainfont"):
+            options = rescaled(options)
+        name = meta_plain(meta.pop("mathfont"))
+        meta.pop("mathfontoptions", None)
+        meta[MATH_NAMED] = meta_string(name)
+        faces.append(math_font_latex(name, options))
+    if any(faces) and OWN_MATH_FONT.search(own_tex):
+        # Ahead of the metadata file's own LaTeX where it sets a math font,
+        # as a range of symbols from another font, which unicode-math takes
+        # only after the main math font: after it, the main math font, the
+        # one the file names, which the template had set before it, or the
+        # default's, LaTeX stopped ("No main maths font has been set up
+        # yet", a review), and a main math font it set was replaced. The
+        # faces with it, since it's scaled to the text's.
+        includes["c"].insert(len(includes["c"]) - authors, {"t": "MetaBlocks", "c": [
+            raw_latex(FALLBACK + "".join(faces))]})
+    elif any(faces):
         ours += FALLBACK + "".join(faces)
     if document_class(meta) in FRONTMATTER_CLASSES:
         meta["has-frontmatter"] = meta_bool(False)
@@ -1330,6 +1446,9 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         aaa = measured[1:] if measured and measured[0] >= 20 \
             and measured[1] > latexbuild.LINE_MOST else None
         for warning in faces_said(lacking, meta, aaa, result.returncode == 0):
+            print(warning, file=sys.stderr)
+        warning = math_font_said(said, meta)
+        if warning:
             print(warning, file=sys.stderr)
         if result.returncode == 0:
             owners = {page_id(stem): stem for stem, _t, _d in assembly.pages}

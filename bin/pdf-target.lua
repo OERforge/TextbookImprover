@@ -467,7 +467,7 @@ local function flatten_nested(tbl)
           local width = nested_width(inner)
           local tabular = as_tabular(inner, layout)
           if tabular then
-            local mark = WIDTH_MARK .. width .. '\n'
+            local mark = WIDTH_MARK .. string.format('%.1f', width) .. '\n'
             if tabular.t == 'RawBlock' then
               tabular.text = mark .. tabular.text
             else
@@ -509,7 +509,8 @@ end
 -- line's width; the space between two columns, \tabcolsep on either side;
 -- the text face's printable ASCII characters, each its own width, its
 -- small letters, each as often as in English, for any other character,
--- and its space; a character of code; and the width of each of a list
+-- and its space; a character of code; a list's margins in a table's
+-- cell, at each of its depths (list_room); and the width of each of a list
 -- of formulas (count-formulas.txt) as LaTeX sets it, whose counts below
 -- give what an em is of a formula's count (math_scales). Elsewhere,
 -- as for a deck's footnotes, a count is in characters, every character
@@ -532,11 +533,20 @@ do
     numbers[key] = tonumber(found[key])
     ok = ok and numbers[key] ~= nil and numbers[key] > 0
   end
-  local widths, chars = {}, {}
+  local widths, chars, lists, bold = {}, {}, {}, {}
   for value in (found.math or ''):gmatch('[^,]+') do widths[#widths + 1] = tonumber(value) end
   for value in (found.chars or ''):gmatch('[^,]+') do chars[#chars + 1] = tonumber(value) end
-  if ok and #widths > 0 and #chars == 95 then
-    numbers.math, numbers.chars = widths, chars
+  for value in (found.lists or ''):gmatch('[^,]+') do lists[#lists + 1] = tonumber(value) end
+  for value in (found.bold or ''):gmatch('[^,]+') do bold[#bold + 1] = tonumber(value) end
+  numbers.labelsep = tonumber(found.labelsep)
+  ok = ok and numbers.labelsep ~= nil
+  if ok and #widths > 0 and #chars == 95 and #lists == 6 and #bold == 95 then
+    numbers.math, numbers.chars, numbers.lists, numbers.bold = widths, chars, lists, bold
+    -- A character outside ASCII in bold: a small letter's average, made
+    -- as much wider as bold's small letters are.
+    local regular, heavy = 0, 0
+    for code = 97, 122 do regular, heavy = regular + chars[code - 31], heavy + bold[code - 31] end
+    numbers.boldlower = numbers.lower * (regular > 0 and heavy / regular or 1)
     MEASURES = numbers
   end
 end
@@ -977,9 +987,9 @@ end
 -- percent narrower than Latin Modern sets it, and its column left it too
 -- little room.
 local FILLER, UNIT = utf8.codepoint('\u{E000}'), MEASURES and 0.1 or 1
-local function text_width(s)
+local function text_width(s, bold)
   if not MEASURES then return utf8.len(s) or #s end
-  local width, chars = 0, MEASURES.chars
+  local width, chars = 0, bold and MEASURES.bold or MEASURES.chars
   for _, code in utf8.codes(s) do
     if code == FILLER then
       width = width + UNIT
@@ -988,7 +998,7 @@ local function text_width(s)
     elseif code == 9 or code == 10 or code == 13 or code == 160 then
       width = width + chars[1]
     else
-      width = width + MEASURES.lower
+      width = width + (bold and MEASURES.boldlower or MEASURES.lower)
     end
   end
   return width
@@ -1058,14 +1068,136 @@ nested_width = function(tbl)
       for j = first, first + span - 1 do widths[j] = (widths[j] or 0) + (length - sum) / span end
     end
   end
-  local total = 0
+  -- The tabular's own edges too, \tabcolsep at each (as_tabular writes no
+  -- @{}), so a GAP more than the spaces between its columns: without it, a
+  -- table in a cell was counted 2\tabcolsep narrower than it's set, and
+  -- only rounding up to a whole em, in a count in ems, had made up for
+  -- it. Rounded up to the counts' unit, a tenth of an em or a character.
+  local total = GAP * math.max(1, count)
   for j = 1, count do total = total + (widths[j] or 0) end
-  return math.ceil(total + GAP * math.max(0, count - 1))
+  return math.ceil(total / UNIT - 1e-9) * UNIT
 end
 
-cell_size = function(cell)
-  local length, longest = 0, 0
-  local counted = {
+-- The width a WIDTH_MARK gives, or nil.
+local WIDTH_PATTERN = '^' .. WIDTH_MARK:gsub('%%', '%%%%'):gsub('%-', '%%-') .. '([%d%.]+)'
+local function mark_width(text)
+  return tonumber(text:match(WIDTH_PATTERN))
+end
+
+-- What a list's items have less room than the line the list is in, at
+-- a depth, in the counts' units: its left and right margins, and those of
+-- the lists it's in. In a table's cell, which the writer sets in a minipage
+-- where it holds a list, LaTeX counts a list's depth from the first again.
+-- Measured where the page is (MEASURES.lists); counted in characters, the
+-- book class's left margins (\leftmargini to \leftmarginvi: 2.5em, 2.2em,
+-- 1.87em, 1.7em, .5em, .5em), at 70 characters to its line of 34.5 ems.
+-- Not counted, a list in a cell had each of its words its column's whole
+-- width, where LaTeX gives it the list's line, 2.5 ems narrower at the
+-- first depth, and a word that filled the column ran past it or broke.
+local BOOK_MARGINS = { 2.5, 2.2, 1.87, 1.7, 0.5, 0.5 }
+local function list_room(depth)
+  if depth <= 0 then return 0 end
+  if MEASURES then return MEASURES.lists[math.min(depth, #MEASURES.lists)] end
+  local ems = 0
+  for d = 1, math.min(depth, #BOOK_MARGINS) do ems = ems + BOOK_MARGINS[d] end
+  return ems * 70 / 34.5
+end
+
+-- A paragraph's line every character of which is code, which
+-- oer.inline.code hangs (latexbuild.FIT_MACROS): each part after its
+-- first is set the line's indentation and two characters further in, the
+-- arrow before it, but no further than leaves a part ROOM characters of
+-- code (HANG_ROOM). So a word of code that may open such a part needs
+-- that much more room than its own: in a column only as wide as the word,
+-- the part's room was the word's less two characters, and TeX broke the
+-- word (Introduction to Python Programming's Table 14.2, in Round 33). A
+-- word of ROOM characters or fewer fits in a column as wide as it, the
+-- hang there no wider than leaves it ROOM. The line's first word opens
+-- its first row, where the indentation is all there is before it.
+-- What's code is what oer.inline.code takes for code (code_lines): a
+-- paragraph whose every glyph at its own level is code, so that what the
+-- writer sets in a box of its own, a superscript or a subscript, a note's
+-- mark, a picture, or underlined text, doesn't make it other than code,
+-- nor a no-break space outside the code, which is space, and raw TeX is
+-- taken for code (where it's text, the count gives a column more room than
+-- it needs, not less). Taken for text, a footnote's mark after the code, a
+-- subscript, a picture, or no-break spaces before it had left a hung row's
+-- word without the hang LaTeX gave it, and it broke (a review). The hang
+-- is in characters of code: the indentation, spaces and no-break spaces,
+-- as OpenStax indents code, and two more; nil where the line isn't code.
+local HANG_ROOM = 20
+local BOXED = { Superscript = true, Subscript = true, Note = true, Image = true,
+                Underline = true }
+
+local function leading(text)
+  local count = 0
+  for _, c in utf8.codes(text) do
+    if c == 32 or c == 9 or c == 160 then count = count + 1 else break end
+  end
+  return count
+end
+
+local function code_hang(inlines)
+  local code, other, lead, before = false, false, nil, 0
+  local function scan(list)
+    for _, inline in ipairs(list) do
+      local t = inline.t
+      if t == 'Code' then
+        if lead == nil then lead = leading(inline.text) end
+        if inline.text:find('%S') then code = true end
+      elseif t == 'Str' then
+        if inline.text:gsub('\u{00A0}', ''):find('%S') then
+          other = true
+        elseif lead == nil then
+          -- No-break spaces before the code, the text's, which LaTeX
+          -- takes for the line's indentation as it takes the code's own.
+          before = before + text_width(inline.text)
+        end
+      elseif t == 'Math' or t == 'Quoted' then
+        other = true
+      elseif not BOXED[t] and inline.content and t ~= 'Note' then
+        scan(inline.content)
+      end
+    end
+  end
+  scan(inlines)
+  if code and not other then
+    return lead + 2 + before / (MEASURES and MEASURES.mono or 1)
+  end
+  return nil
+end
+
+-- What cell_size counts a line of a cell's text by: a formula by its
+-- pieces; a picture, which the writer scales to its column, as a line
+-- and no word; a line break as one. And inline code: in ems, a character
+-- of code each (MEASURES.mono), as a block's lines are, each word with
+-- the spaces after it, a word to TeX, less the text's space that stands
+-- between two (text_width); counted in the text's face, as stringify gives
+-- it, os.path.join(base,name) in a column of its own was given 11.3 ems,
+-- which Plex Mono sets in 13.8, and TeX broke it (a review). Counted in
+-- characters, as stringify gives it. hang, a line of code's (code_hang),
+-- where its words are counted: each word without the spaces after it,
+-- which a row it breaks at takes back (latexbuild's hang_lines puts a
+-- kern of minus their width before the break), the line's first with its
+-- indentation, and a word after it that's longer than HANG_ROOM with the
+-- hang's characters of code more. Counted with the spaces, as a word of
+-- code in a line of text is, a hung line's word that filled its column,
+-- its first among them, had a space's width more than it needed. hung,
+-- where the line's first word may open a hung row too (a definition's,
+-- whose row its term opens: cell_size). And bold text, measured, in
+-- bold's widths (MEASURES.bold), which a count in the text's had given too
+-- little room: IBM Plex Serif's bold is about 4.5 percent wider.
+local function counting(hang, hung)
+  local first = not hung
+  return {
+    Strong = MEASURES and function(strong)
+      return strong.content:walk{ Str = function(str)
+        if str.text:find(utf8.char(FILLER), 1, true) then return nil end
+        return pandoc.Str((str.text:gsub('%S+', function(word)
+          return filler(text_width(word, true))
+        end)))
+      end }
+    end or nil,
     Math = function(math_)
       local words = {}
       for _, piece in ipairs(formula_pieces(math_.text)) do
@@ -1074,56 +1206,229 @@ cell_size = function(cell)
       end
       return pandoc.Str(#words > 0 and table.concat(words, ' ') or filler(UNIT))
     end,
-    -- Inline code, in ems, a character of code each (MEASURES.mono), as a
-    -- block's lines are: each word with the spaces after it, which stay
-    -- at the end of a row it breaks at, a word to TeX, less the text's
-    -- space that stands between two (text_width). Counted in the text's
-    -- face, as stringify gives it, os.path.join(base,name) in a column
-    -- of its own was given 11.3 ems, which Plex Mono sets in 13.8, and TeX
-    -- broke it (a review).
-    Code = MEASURES and function(code)
-      local text, pieces = code.text, {}
-      local lead = #text:match('^%s*')
-      for word, spaces in text:gmatch('(%S+)(%s*)') do
-        pieces[#pieces + 1] = (utf8.len(word) or #word) + #spaces + lead
-        lead = 0
+    Code = function(code)
+      local text = code.text
+      if MEASURES then
+        local pieces = {}
+        local lead = #text:match('^%s*')
+        for word, spaces in text:gmatch('(%S+)(%s*)') do
+          pieces[#pieces + 1] = { utf8.len(word) or #word, #spaces, lead }
+          lead = 0
+        end
+        for k, piece in ipairs(pieces) do
+          local count, spaces, indent = piece[1], piece[2], piece[3]
+          local width
+          if hang then
+            width = (count + indent) * MEASURES.mono
+            if count > HANG_ROOM and not (first and k == 1) then
+              width = width + hang * MEASURES.mono
+            end
+          else
+            width = (count + spaces + indent) * MEASURES.mono
+              - (k < #pieces and MEASURES.chars[1] or 0)
+          end
+          pieces[k] = filler(width)
+        end
+        if #pieces > 0 then first = false end
+        return pandoc.Str(table.concat(pieces, ' '))
       end
-      for k, count in ipairs(pieces) do
-        pieces[k] = filler(count * MEASURES.mono - (k < #pieces and MEASURES.chars[1] or 0))
-      end
-      return pandoc.Str(table.concat(pieces, ' '))
-    end or nil,
+      if not hang then return nil end
+      local k = 0
+      local hung = text:gsub('%S+', function(word)
+        k = k + 1
+        if (utf8.len(word) or #word) > HANG_ROOM and not (first and k == 1) then
+          return filler(hang) .. word
+        end
+      end)
+      if k > 0 then first = false end
+      return pandoc.Str(hung)
+    end,
     Image = function() return pandoc.Str(blank_line(LINE)) end,
     LineBreak = function() return pandoc.Str('\n') end,
+    -- A note's mark, which stringify gives nothing for, as wide as two
+    -- digits in a superscript's type, about 0.8 of an em (one is 0.39 in
+    -- IBM Plex Serif at 12 points), joined to the word before it, which
+    -- TeX doesn't break from it: counted as nothing, a line of code's word
+    -- before one was its mark's width too narrow, and broke (a review's
+    -- probe, again with its hang counted).
+    Note = function() return pandoc.Str(filler(MEASURES and 0.8 or 2)) end,
   }
-  for _, block in ipairs(cell.contents) do
-    local text = stringify(pandoc.Blocks{ block }:walk(counted))
-    for line in (text .. '\n'):gmatch('(.-)\n') do
-      length = math.max(length, text_width(line))
-    end
-    -- A block of code's lines, which stringify doesn't give (a block's
-    -- text is its inlines'), each set whole, as it's written: in a cell,
-    -- a line doesn't wrap, so it's a word, as wide as the line, the block
-    -- the cell's or one inside a div in it (a review). Counted as nothing,
-    -- a cell of code, as Introduction to Python Programming's Table 8.2
-    -- has a program and its output, left its column the share the reader
-    -- gives every column, and the code ran into the next.
-    pandoc.Blocks{ block }:walk{ CodeBlock = function(code)
-      for line in (code.text .. '\n'):gmatch('(.-)\n') do
-        local size = (utf8.len(line) or #line) * (MEASURES and MEASURES.mono or 1)
-        length, longest = math.max(length, size), math.max(longest, size)
+end
+
+-- A paragraph's inlines line by line, as its line breaks end them: in a
+-- cell, which the writer sets in a minipage where it has line breaks, each
+-- ends a paragraph (\\ is \par there, ragged right), so each line of code
+-- is hung, or not, by itself. A line break inside emphasis or a link ends
+-- its line too, the emphasis or link split around it: left one line, a
+-- later line more deeply indented had been counted with the first's hang
+-- (a review).
+local function lines_of(inlines)
+  local lines = { pandoc.Inlines{} }
+  for _, inline in ipairs(inlines) do
+    if inline.t == 'LineBreak' then
+      lines[#lines + 1] = pandoc.Inlines{}
+    elseif inline.content and inline.t ~= 'Note' and not BOXED[inline.t] then
+      for k, part in ipairs(lines_of(inline.content)) do
+        if k > 1 then lines[#lines + 1] = pandoc.Inlines{} end
+        local copy = inline:clone()
+        copy.content = part
+        lines[#lines]:insert(copy)
       end
-    end }
-    for word in stringify(blanks_counted(block):walk(counted)):gmatch('%S+') do
-      longest = math.max(longest, text_width(word))
+    else
+      lines[#lines]:insert(inline)
     end
-    local function marked(raw)
-      local width = tonumber(raw.text:match('^' .. WIDTH_MARK:gsub('%%', '%%%%'):gsub('%-', '%%-') .. '(%d+)'))
-      if width then longest, length = math.max(longest, width), math.max(length, width) end
-    end
-    pandoc.Blocks{ block }:walk{ RawBlock = marked, RawInline = marked }
   end
+  return lines
+end
+
+-- A cell's length and its longest word, in the counts' units: a formula
+-- as many as its TeX shows, and two more for each operator or relation,
+-- which TeX sets with space around it; a picture, which the writer scales
+-- to its column, a line, and no word. A formula's words are the pieces
+-- TeX can't break it into (formula_pieces). A fill-in blank, a run of four
+-- or more underscores, is three in a word, as PDF_MACROS draws one too long
+-- for its line shorter, to three at the least: counted whole, a long
+-- blank's column took the line from the next column's longest word, and
+-- the table was set smaller for it.
+--
+-- Block by block, a list's items each by itself, as LaTeX sets them, at
+-- the room its depth leaves (list_room) and its line's indentation added
+-- to each line and word; a description list's term a word at its list's
+-- margin, which TeX sets in a box (the item's label) and doesn't break, its
+-- definition the list's items' room in, where its rows after the first
+-- start; and a div's blocks each by itself. Counted as one text, a list's
+-- items ran together: its whole text was a line, and an item's last word
+-- and the next's first one word (stringify joins the items' text with
+-- nothing between), so that a column was set wider than its words needed
+-- and its table smaller, where a word of a list nested in another, whose
+-- margins none of it counted, ran past its column or broke.
+cell_size = function(cell)
+  local length, longest = 0, 0
+  local function both(width)
+    length, longest = math.max(length, width), math.max(longest, width)
+  end
+  local function marked(raw)
+    local width = mark_width(raw.text)
+    return width
+  end
+  local function count_line(inlines, indent, label)
+    local hang = code_hang(inlines)
+    local plain = pandoc.Plain(inlines)
+    local text = stringify(pandoc.Blocks{ plain }:walk(counting()))
+    for line in (text .. '\n'):gmatch('(.-)\n') do
+      length = math.max(length, indent + text_width(line))
+    end
+    for word in stringify(blanks_counted(plain):walk(counting(hang, label))):gmatch('%S+') do
+      longest = math.max(longest, indent + text_width(word))
+    end
+    pandoc.Blocks{ plain }:walk{ RawInline = function(raw)
+      local width = marked(raw)
+      if width then both(indent + width) end
+    end }
+  end
+  local function count_blocks(blocks, depth, label)
+    local indent = list_room(depth)
+    for k, block in ipairs(blocks) do
+      local t = block.t
+      if t == 'Para' or t == 'Plain' then
+        for j, inlines in ipairs(lines_of(block.content)) do
+          count_line(inlines, indent, k == 1 and j == 1 and label or nil)
+        end
+      elseif t == 'LineBlock' then
+        -- As the writer sets it: a paragraph, its lines ended by line breaks.
+        for _, inlines in ipairs(block.content) do count_line(inlines, indent) end
+      elseif t == 'BulletList' or t == 'OrderedList' then
+        for _, item in ipairs(block.content) do count_blocks(item, depth + 1) end
+      elseif t == 'DefinitionList' then
+        -- The term is set in bold, in a box TeX doesn't break, at the
+        -- list's edge, and the list's label space after it (\labelsep,
+        -- MEASURES.labelsep), both in the box, which sticks out of the
+        -- definition's margin by as much as they reach past it: counted in
+        -- the text's widths and without the space, a long term's table was
+        -- set smaller than it needed to fit it (a review). The first row of
+        -- the definition follows it, and TeX may break between the term
+        -- and the definition, so a line of code there, which LaTeX hangs
+        -- from the definition's margin (oer.inline.code, which doesn't take
+        -- the term's box for the line's indentation), may open a hung row
+        -- with its first word too (count_line's label).
+        local labelsep = MEASURES and MEASURES.labelsep or (0.5 * 70 / 34.5)
+        for _, item in ipairs(block.content) do
+          local term = stringify(pandoc.Blocks{ pandoc.Plain(item[1]) }:walk(counting()))
+          both(indent + text_width((term:gsub('\n', ' ')), true) + labelsep)
+          for d, definition in ipairs(item[2]) do
+            count_blocks(definition, depth + 1, d == 1 or nil)
+          end
+        end
+      elseif t == 'Div' then
+        count_blocks(block.content, depth)
+      elseif t == 'CodeBlock' then
+        -- A block of code's lines, which stringify doesn't give (a block's
+        -- text is its inlines'), each set whole, as it's written: in a
+        -- cell, a line doesn't wrap, so it's a word, as wide as the line
+        -- (a review). Counted as nothing, a cell of code, as Introduction
+        -- to Python Programming's Table 8.2 has a program and its output,
+        -- left its column the share the reader gives every column, and the
+        -- code ran into the next.
+        for line in (block.text .. '\n'):gmatch('(.-)\n') do
+          both(indent + (utf8.len(line) or #line) * (MEASURES and MEASURES.mono or 1))
+        end
+      elseif t == 'RawBlock' then
+        local width = marked(block)
+        if width then both(indent + width) end
+      else
+        -- A figure, a rule, or anything else, as its text gives it.
+        local text = stringify(pandoc.Blocks{ block }:walk(counting()))
+        for line in (text .. '\n'):gmatch('(.-)\n') do
+          length = math.max(length, indent + text_width(line))
+        end
+        for word in stringify(blanks_counted(block):walk(counting())):gmatch('%S+') do
+          longest = math.max(longest, indent + text_width(word))
+        end
+        pandoc.Blocks{ block }:walk{
+          CodeBlock = function(code)
+            for line in (code.text .. '\n'):gmatch('(.-)\n') do
+              both(indent + (utf8.len(line) or #line) * (MEASURES and MEASURES.mono or 1))
+            end
+          end,
+          RawBlock = function(raw) local width = marked(raw); if width then both(indent + width) end end,
+          RawInline = function(raw) local width = marked(raw); if width then both(indent + width) end end,
+        }
+      end
+    end
+  end
+  count_blocks(cell.contents, 0)
   return length, longest
+end
+
+-- A part of the line, n ten-thousandths, as TeX takes it, in 65,536ths:
+-- the writer writes a column's part to four places (\real{%0.4f},
+-- Writers/LaTeX/Table.hs, 3.13), and TeX, multiplying the line by it
+-- (calc's \real, a factor before a length), reads it to the nearest
+-- 65,536th as round_decimals does (tex.web, part 7), each digit's step
+-- divided and truncated, and drops the product's fraction of a scaled
+-- point.
+local function tex_part(n)
+  local a, fraction = 0, n % 10000
+  for _ = 1, 4 do
+    a = (a + fraction % 10 * 131072) // 10
+    fraction = fraction // 10
+  end
+  return n // 10000 * 65536 + (a + 1) // 2
+end
+
+-- A column's part of the line held at what its longest word needs: the
+-- least of four places that TeX takes as no less than it (tex_part), and
+-- a millionth more for the measures' own rounding, to six places.
+-- Rounded to the nearest of four places, a column held at a word of code,
+-- which is as wide as its count, monospaced, was a few scaled points too
+-- narrow for it, and TeX broke the word; rounded up to four places, it
+-- still was where TeX's 65,536ths fell short of them (a line of code after
+-- a line of text in a cell, in the PDF suite's measured book, Round 34).
+local function held_part(part)
+  local least = math.ceil(part * (1 + 1e-6) * 65536 - 1e-9)
+  local n = math.ceil(part * 10000 - 1e-6)
+  while tex_part(n) < least do n = n + 1 end
+  return n / 10000
 end
 
 -- A table with widths, its source's or ones its reader gave it (Pandoc's
@@ -1141,7 +1446,7 @@ local function widen_to_words(tbl, word)
   local room = LINE - GAP * (count - 1)
   local least, sum, short = {}, 0, false
   for j = 1, count do
-    least[j] = word[j] / room
+    least[j] = held_part(word[j] / room)
     sum = sum + least[j]
     if least[j] > tbl.colspecs[j][2] then short = true end
   end
@@ -1293,6 +1598,29 @@ local function steps_columns(tbl)
   return formulas, rows
 end
 
+-- A worked example's columns' parts of the line, share[j] of room each:
+-- a column of words held at its word (holds[j]) given its part as TeX
+-- reads it (held_part), what that adds taken from the columns not held,
+-- as their parts are. Held at its word's part to the nearest of four
+-- places, a column of words could be a little narrower than its word (a
+-- review), as a column of another table had been (widen_to_words).
+local function hold_shares(tbl, share, room, holds)
+  local parts, extra, free = {}, 0, 0
+  for j = 1, #share do
+    parts[j] = share[j] / room
+    if holds[j] then
+      local part = held_part(parts[j])
+      extra, parts[j] = extra + part - parts[j], part
+    else
+      free = free + parts[j]
+    end
+  end
+  for j = 1, #share do
+    if not holds[j] and free > 0 then parts[j] = parts[j] - extra * parts[j] / free end
+    tbl.colspecs[j] = { tbl.colspecs[j][1], parts[j] }
+  end
+end
+
 local function steps_widths(tbl)
   local count = #tbl.colspecs
   local formulas, rows = steps_columns(tbl)
@@ -1331,7 +1659,8 @@ local function steps_widths(tbl)
   if maths + least > room then
     -- part is of the formulas' counts given MATH_ROOM.
     local part = (room - least) / maths
-    if part * MATH_ROOM >= FIT_FLOOR then
+    local whole = part * MATH_ROOM >= FIT_FLOOR
+    if whole then
       for j = 1, count do
         share[j] = formulas[j] and need[j] * part or word[j]
       end
@@ -1363,9 +1692,11 @@ local function steps_widths(tbl)
         share[j] = formulas[j] and need[j] * part or (held[j] and long[j] or reach[j] * part)
       end
     end
+    local holds = {}
     for j = 1, count do
-      tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] / room }
+      holds[j] = not formulas[j] and (whole or held[j]) or false
     end
+    hold_shares(tbl, share, room, holds)
     return true
   end
   -- What's left shared among the columns of words by need, one whose
@@ -1390,9 +1721,9 @@ local function steps_widths(tbl)
       end
     end
   until not again
-  for j = 1, count do
-    tbl.colspecs[j] = { tbl.colspecs[j][1], share[j] / room }
-  end
+  local holds = {}
+  for j = 1, count do holds[j] = held[j] or false end
+  hold_shares(tbl, share, room, holds)
   return true
 end
 
@@ -1451,7 +1782,7 @@ local function fit_to_line(tbl)
   if total <= room then return end
   local least, sum = {}, 0
   for j = 1, count do
-    least[j] = word[j] / room
+    least[j] = held_part(word[j] / room)
     sum = sum + least[j]
   end
   if sum > 1 then
@@ -2656,11 +2987,14 @@ end
 -- before the deck's first, a blank page.
 local function counted(doc)
   if (os.getenv('OER_MEASURES') or '') == '' then return nil end
+  local lists = {}
+  for depth = 1, 6 do lists[depth] = string.format('%.4f', list_room(depth)) end
   local said = MEASURES and string.format(
     'ems of the text\'s type: line %.4f, gap %.4f, lower %.4f, space %.4f, mono %.4f, '
-    .. 'math length %.4f, math width %.4f',
-    LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, MATH_LENGTH, MATH_WIDTH)
-    or 'characters, 70 to a line'
+    .. 'math length %.4f, math width %.4f, lists %s',
+    LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, MATH_LENGTH, MATH_WIDTH,
+    table.concat(lists, ' '))
+    or 'characters, 70 to a line, lists ' .. table.concat(lists, ' ')
   doc.blocks:insert(1, pandoc.RawBlock('latex', '% TextbookImprover\'s table counts, in ' .. said))
   return doc
 end

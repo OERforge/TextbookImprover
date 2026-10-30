@@ -897,7 +897,22 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % each line after an empty box, so that TeX keeps its indentation at a
 % row's start, where it had taken it out after a line break. A line's
 % parts are kept on one page unless they'd take more than half of it
-% (oer.code.lines), as a block's are.
+% (oer.code.lines), as a block's are. A word of such a line in a column of
+% a table LaTeX lays out (\OERFitStepsTable) is measured with the room a
+% part has (oerfit.paragraph, from the lines oer.inline.code found,
+% oerfit.code_paragraph): the line's first word with its indentation, and
+% a word after it longer than twenty characters with the part's hang
+% added, as pdf-target.lua counts it for a table whose columns it lays
+% out. Measured without it, a word that opened a hung row had the hang's
+% two characters less room than its column, and TeX broke it, as the
+% counts had left one in a table whose columns' widths are given
+% (Introduction to Python Programming's Table 14.2, Round 33). A box before
+% a line's code that isn't its paragraph's indentation (labels), the label
+% a description list's term is set in, which sticks out of the list's
+% margin by as much as the term and its label space reach past it, isn't
+% the line's indentation either: the line's later parts are hung from the
+% definition's margin, where they had been hung past the term, each of them
+% the term's width narrower (a review).
 \providecommand\OERFitCodeWrap{""" + str(CODE_WRAP) + r"""}
 \providecommand\OERInlineCode{}
 \providecommand\OERInlineCodeBox{}
@@ -1029,27 +1044,46 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return true
     end, "oer.fit.cells")
-    function oerfit.paragraph(head)
+    function oerfit.paragraph(head, lines)
       local line, piece, longest, bit, most, inmath, blanks = 0, 0, 0, 0, 0, false, 0
       local low, before, whole, three, joined, state, tied = 0, 0, 0, 0, 0, 0, false
+      local k, nth, x = 1, 0, 0
       local function close()
         local least = math.max(before + three + joined, 3 * (before + joined))
         low = math.max(low, math.min(before + whole + joined, least))
         before, whole, three, joined, state = 0, 0, 0, 0, 0
       end
+      local function take()
+        local code, need = lines and lines[k], piece
+        if code and code.text and code.full and piece > 0 then
+          nth = nth + 1
+          if nth == 1 then
+            need = x
+          elseif piece > code.least then
+            need = piece + code.full
+          end
+          if need > most then most = need end
+        end
+        if need > longest then longest = need end
+        if bit > most then most = bit end
+      end
       for n in node.traverse(head) do
         if n.id == MATH then inmath = n.subtype == 0 end
         if n.id == KERN and blank and node.has_attribute(n, blank, 2) then
           line = line + 0
+        elseif lines and n.id == PENALTY and n.penalty <= -10000 then
+          take()
+          piece, bit, blanks = 0, 0, 0
+          k, nth, x = k + 1, 0, 0
         elseif n.id == GLUE then
           line = line + n.width
           if inmath then
             piece, bit = piece + n.width, bit + n.width
           else
-            if piece > longest then longest = piece end
-            if bit > most then most = bit end
+            take()
             piece, bit, blanks = 0, 0, 0
           end
+          x = x + n.width
           if inmath or tied then
             if state > 0 then state, joined = 2, joined + n.width else before = before + n.width end
           elseif state > 0 then
@@ -1062,7 +1096,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
           bit = 0
         elseif not (n.id == VLIST and math.abs(n.width - tex.hsize) <= 1) then
           local w = node.dimensions(n, n.next)
-          line = line + w
+          line, x = line + w, x + w
           if n.id == GLYPH and n.char == 95 and blank and node.has_attribute(n, blank) then
             blanks = blanks + 1
             if blanks <= 3 then piece, bit = piece + w, bit + w end
@@ -1083,8 +1117,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
         tied = n.id == PENALTY and n.penalty >= 10000
       end
       if state > 0 then close() else low = math.max(low, before) end
-      if piece > longest then longest = piece end
-      if bit > most then most = bit end
+      take()
       return line, low, longest, most
     end
     local inline = luatexbase.attributes.OERInlineCodeAttribute
@@ -1210,6 +1243,20 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return code
     end
+    local INDENT = 3
+    for number, name in pairs(node.subtypes("hlist")) do
+      if name == "indent" then INDENT = number end
+    end
+    local function labels(a, b)
+      local width, n = 0, a
+      while n and not (n == b) do
+        if n.id == VLIST or (n.id == HLIST and not (n.subtype == INDENT)) then
+          width = width + n.width
+        end
+        n = n.next
+      end
+      return width
+    end
     local function lines_of(head, room)
       local lines, count, start = {}, 0, head
       while start do
@@ -1231,8 +1278,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             head, line.start = node.insert_before(head, start, keep), keep
           end
           if line.char > 0 then
-            line.hang = math.max(0, math.min(node.dimensions(line.start, text) + 2 * line.char,
-                                             room - ROOM * line.char))
+            line.full = node.dimensions(line.start, text) - labels(line.start, text)
+              + 2 * line.char
+            line.least = ROOM * line.char
+            line.hang = math.max(0, math.min(line.full, room - line.least))
           end
         end
         count = count + 1
@@ -1304,6 +1353,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end
     local hung = false
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+      oerfit.code_paragraph = nil
       local n, runs, count = head, {}, 0
       while n do
         local after = n.next
@@ -1337,6 +1387,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       local room, lines, total = narrowest(), nil, 0
       if code_lines(head) then
         head, lines, total = lines_of(head, room)
+        oerfit.code_paragraph = lines
         local r, k = 1, 1
         for m in node.traverse(head) do
           if r > count then break end
@@ -1408,8 +1459,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
     end, "oer.code.lines")
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
       local id, j = current(), tex.getattribute(column)
+      local lines = oerfit.code_paragraph
+      oerfit.code_paragraph = nil
       if id and oerfit.kind[id] == "s" and j and j > 0 then
-        local line, low, longest, most = oerfit.paragraph(head)
+        local line, low, longest, most = oerfit.paragraph(head, lines)
         local nat, long, bits = oerfit.natural[id] or {}, oerfit.longest[id] or {}, oerfit.pieces[id] or {}
         oerfit.natural[id], oerfit.longest[id], oerfit.pieces[id] = nat, long, bits
         local lows = oerfit.low[id] or {}

@@ -2951,7 +2951,31 @@ def check_measure_page():
                                           dict(os.environ), ROOT)
     finally:
         build_pdf.COUNT_FORMULAS = saved
+    # OER_MEASURES set before the run: as an earlier version wrote it, with
+    # no bold widths or label space, which the filter would have taken for
+    # none, without a word (a review); as this one writes it; and none.
+    earlier = ("line=39.146278;gap=1.000000;lower=0.520000;space=0.232000;points=469.755000;"
+               "mono=0.600000;lists=2.5,4.7,6.57,8.27,9.27,10.27;chars=" + ",".join(["0.5"] * 95)
+               + ";math=0.48")
+    current = earlier + ";labelsep=0.500000;bold=" + ",".join(["0.52"] * 95)
+    given = {}
+    held = os.environ.get("OER_MEASURES")
+    try:
+        for name, value in (("earlier", earlier), ("current", current), ("none", "none")):
+            os.environ["OER_MEASURES"] = value
+            given[name] = build_pdf.given_measures()
+    finally:
+        if held is None:
+            os.environ.pop("OER_MEASURES", None)
+        else:
+            os.environ["OER_MEASURES"] = held
     return [
+        ("measures set before the run that the filter can't read whole are none, and why, "
+         "measures it can are used, and none is none, without a word",
+         lambda: given["earlier"] == (None, "OER_MEASURES, set before the run, doesn't give "
+                                      "all of the widths of the text face's characters and of "
+                                      "its bold")
+         and given["current"] == (current, None) and given["none"] == (None, None)),
         ("the page's measures without their files: none, and why",
          lambda: measured == (None, "its files, bin/measure-page.lua and "
                               "bin/count-formulas.txt, aren't both installed")),
@@ -2960,6 +2984,34 @@ def check_measure_page():
              "WARNING: The book's page and faces couldn't be measured for its tables, so their "
              "columns are counted in characters") and build_pdf.unmeasured_warning(
                  "why").endswith(": why.")),
+    ]
+
+
+def check_measure_report():
+    """measure-page.lua's report, which build-pdf.py reads and passes to
+    the PDF filter: the line, the space between two columns, a character of
+    code, and a list's margins to six places, which a column held at a word
+    of code is as wide as to the scaled point (pdf-target.lua's held_part).
+    To four, a character of code of 1,200/2,048 of an em was 0.5859, a
+    word of forty such characters counted a fiftieth of a point narrower
+    than it is."""
+    out = os.path.join(tempfile.mkdtemp(), "report.txt")
+    script = ("dofile(%s) oer_measure.text_ = {line = 39.1462775, gap = 1, lower = 0.52, "
+              "space = 0.232, points = 469.755} oer_measure.mono_ = 1200 / 2048 "
+              "oer_measure.lists_ = {2.5, 4.7} oer_measure.chars = {'0.2320'} "
+              "oer_measure.report(%s)" % (json.dumps(os.path.join(ROOT, "bin", "measure-page.lua")),
+                                          json.dumps(out)))
+    ran = subprocess.run(["pandoc", "lua", "-e", script], capture_output=True, text=True)
+    said = ""
+    if ran.returncode == 0 and os.path.exists(out):
+        with open(out, encoding="utf-8") as fh:
+            said = fh.read().strip()
+    shutil.rmtree(os.path.dirname(out), ignore_errors=True)
+    return [
+        ("the page's measures reported to six places: the line, a character of code, and a "
+         "list's margins at each depth",
+         lambda: said.startswith("line=39.146277;gap=1.000000;")
+         and ";mono=0.585938;lists=2.500000,4.700000;" in said),
     ]
 
 
@@ -5934,6 +5986,7 @@ GROUPS = [
     ("PDF/UA-1's math", check_ua1_math),
     ("the math font a metadata file names", check_math_font_latex),
     ("the page's measures, their files missing", check_measure_page),
+    ("the page's measures, to six places", check_measure_report),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),
     ("display style in running text, in an HTML source", check_display_style_in_text),

@@ -1300,6 +1300,10 @@ def fit_steps(first, relation, second, reason):
             '</tr></table>\n\n' % (first, relation, second, reason, relation))
 
 
+# A word of a line of code that opens its hung row, as MEASURED_GIVEN, in
+# a book counted in characters: oer.inline.code hangs it two characters of
+# code further in than its line's first row.
+FIT_HUNG = "open(c:/projects/code/chars/output.txt)"
 FIT_ONE = (
     "# Fitting\n\nLeadpara, a paragraph whose lines run on before a display formula in it too "
     "wide for its line, the lines spaced as the text's are whatever the formula's type, with "
@@ -1493,7 +1497,7 @@ FIT_ONE = (
     "they're wide:\n\n"
     + fit_steps("1313 + \\frac{2424}{3535} + \\frac{4646}{5757}", "=",
                 "\\frac{68686}{7979} + \\frac{8080}{9191} + 1414",
-                "Unbreakableformulasreasonlongestword is the longest word of this reason.")
+                "Unbreakableformulasreasonlonges is the longest word of this reason.")
     + "Steps whose relations are TeX's commands, set across the line:\n\n"
     + fit_steps("1515 + \\frac{2626}{3737}", "\\leq", "\\frac{48484}{5959} + 6161",
                 "Leqreason: collect the terms, and the inequality holds as it did, in words "
@@ -1638,7 +1642,11 @@ FIT_ONE = (
     "A table whose cell holds a table with a row across its columns:\n\n<table><tbody><tr>"
     "<td><table><tbody><tr><td colspan=\"2\">Nestedspan words that run across both of the "
     "columns</td></tr><tr><td>Na</td><td>Nb</td></tr></tbody></table></td><td><p>Besidespan, "
-    "words that wrap in what the table leaves of the line.</p></td></tr></tbody></table>\n")
+    "words that wrap in what the table leaves of the line.</p></td></tr></tbody></table>\n\n"
+    "A line of code in a column too narrow for it, its table's widths given:\n\n<table>"
+    '<colgroup><col style="width: 20%"/><col style="width: 80%"/></colgroup><tbody><tr><td>'
+    "<code>fileobj = " + FIT_HUNG + "</code></td><td>Besidehung, words in the wider "
+    "column.</td></tr></tbody></table>\n")
 
 
 def build_fit(work):
@@ -3356,6 +3364,109 @@ def build_math_font(work):
 # file in the book's folder (\\input), where LaTeX measuring the page in a
 # folder of its own stopped, and the tables were counted in characters.
 MEASURED_INLINE = "os.path.join(base,name)"
+# And content a table's cell hangs or indents (MEASURED_HUNG), each in a
+# column its table gives too little room: a line of code, which hangs its
+# parts after the first two characters further in, in a table whose
+# columns' widths are given (as Introduction to Python Programming's Table
+# 14.2), and in one whose columns LaTeX lays out, whose word of code
+# opening a hung row had two characters less room than it was counted
+# (Round 33); a word of a list nested in another, two depths' margins in,
+# where the counts gave a list's words the column's whole width and its
+# items' text as one, an item's last word and the next's first one word;
+# and a word of a description list's definition, whose rows after the
+# first are indented by the list's margin; a line of code after a line of
+# text in its cell, a paragraph of its own there, which the writer sets in
+# a minipage, where a line break ends one, hung by itself; an indented
+# line of code, whose hung rows are set its indentation further in; a line
+# of code whose first word is its longest, which opens its first row, and
+# needs no hang; and what the round's review found: a line of code with a
+# superscript or a note after it, or after no-break spaces of the text's,
+# which LaTeX hangs as any line of code, the note's mark beside its last
+# word, the spaces its indentation; lines in emphasis,
+# a line break between them, each hung by itself; a description list's
+# definition that is a line of code, which LaTeX had hung past its term,
+# and hangs from the definition's margin, its first word opening a hung
+# row; a term, which LaTeX sets in bold in a box it doesn't break, the
+# label space after it; and a word in bold.
+# (No quotation marks or backslashes: the reader takes those in a raw HTML
+# table's code as the Markdown's, curling the one and escaping with the
+# other.)
+MEASURED_GIVEN = "open(c:/projects/code/given/output.txt)"
+MEASURED_STEPS = "open(c:/projects/code/steps/output.txt)"
+MEASURED_LISTCODE = "compute_everything_at_once(first_argument)"
+MEASURED_LEAD = "first_word_of_an_indented_line(x)"
+MEASURED_INNER = "Antidisestablishmentarianism"
+MEASURED_NESTED = "Pneumonoultramicroscopicsilicovolcanoconiosis"
+MEASURED_DEFINED = "Supercalifragilisticexpialidocious"
+MEASURED_AFTER = "measure_every_column_twice.py"
+MEASURED_DEEP = "compute_the_indented_result(x)"
+MEASURED_OPENS = "open_the_first_word_of_its_line(x)"
+MEASURED_SUP = "compute_with_a_superscript_after(arg)"
+MEASURED_NOTE = "compute_with_a_note_after_it(arg)"
+MEASURED_SPACED = "compute_after_spaces_outside_it(arg)"
+MEASURED_EMPH = "compute_inside_the_emphasis_here(arg)"
+MEASURED_DEFCODE = "compute_in_the_definition_here(arg)"
+MEASURED_TERM = "Hippopotomonstrosesquippedaliophobia"
+MEASURED_BOLD = "Incomprehensibilities"
+NARROW_COLUMNS = '<colgroup><col style="width: 20%"/><col style="width: 80%"/></colgroup>'
+MEASURED_HUNG = (
+    "\nA line of code in a column too narrow for it, its table's widths given:\n\n<table>"
+    + NARROW_COLUMNS + "<tbody><tr><td><code>fileobj = " + MEASURED_GIVEN + "</code></td>"
+    "<td>Besidegiven, words in the wider column.</td></tr></tbody></table>\n\n"
+    "And in a table whose columns LaTeX lays out:\n\n<table><tbody><tr><td><code>fileobj = "
+    + MEASURED_STEPS + "</code></td><td>Besidesteps " + " ".join(
+        ["words that fill the second column and then some more of them"] * 8)
+    + ".</td></tr></tbody></table>\n\nA list nested in another in a column too narrow for "
+    "it:\n\n<table>" + NARROW_COLUMNS + "<tbody><tr><td><ul><li>Outerlist<ul><li>Nestedlist "
+    + MEASURED_NESTED + "</li><li>Seconditem</li></ul></li></ul></td>"
+    "<td>Besidelist, words in the wider column.</td></tr></tbody></table>\n\n"
+    "A description list in a column too narrow for it:\n\n<table>" + NARROW_COLUMNS
+    + "<tbody><tr><td><dl><dt>Termword</dt><dd>Definedword " + MEASURED_DEFINED
+    + "</dd></dl></td><td>Besideterm, words in the wider column.</td></tr></tbody></table>\n\n"
+    "A list's item of a line of code in a column too narrow for it, its part of the line "
+    "rounded down to four places a few scaled points narrower than its word:\n\n<table>"
+    + NARROW_COLUMNS + "<tbody><tr><td><ul><li><code>total = " + MEASURED_LISTCODE
+    + "</code></li></ul></td><td>Besidelistcode, words in the wider column.</td></tr>"
+    "</tbody></table>\n\nA line of code indented with no-break spaces, its first word long, "
+    "in a table whose columns LaTeX lays out:\n\n<table><tbody><tr><td><code>"
+    + "\u00a0" * 4 + MEASURED_LEAD + " = 1</code></td><td>Besidelead " + " ".join(
+        ["words that fill the second column and then some more of them"] * 8)
+    + ".</td></tr></tbody></table>\n\nA table in a column too narrow for it:\n\n<table>"
+    + NARROW_COLUMNS + "<tbody><tr><td><table><tbody><tr><td>Innerword</td><td>"
+    + MEASURED_INNER + "</td></tr></tbody></table></td><td>Besideinner, words in the wider "
+    "column.</td></tr></tbody></table>\n\nA line of code after a line of text in its cell, "
+    "in a column too narrow for it, its table's widths given:\n\n<table>" + NARROW_COLUMNS
+    + "<tbody><tr><td>Runit:<br/><code>python3 " + MEASURED_AFTER + "</code></td><td>"
+    "Besideafter, words in the wider column.</td></tr></tbody></table>\n\nAn indented line "
+    "of code, a word after its first long, in a column too narrow for it, its table's widths "
+    "given:\n\n<table>" + NARROW_COLUMNS + "<tbody><tr><td><code>" + "\u00a0" * 4
+    + "deepvalue = " + MEASURED_DEEP + "</code></td><td>Besidedeep, words in the wider "
+    "column.</td></tr></tbody></table>\n\nA line of code whose first word is its longest, in a "
+    "column too narrow for it, its table's widths given:\n\n<table>" + NARROW_COLUMNS
+    + "<tbody><tr><td><code>" + MEASURED_OPENS + " = 1</code></td><td>Besideopens, words in "
+    "the wider column.</td></tr></tbody></table>\n" + "".join(
+        "\n" + intro + ", in a column too narrow for it, its table's widths given:\n\n<table>"
+        + NARROW_COLUMNS + "<tbody><tr><td>" + cell + "</td><td>" + beside
+        + ", words in the wider column.</td></tr></tbody></table>\n" for intro, cell, beside in (
+            ("A line of code with a superscript after it",
+             "<code>x = " + MEASURED_SUP + "</code><sup>i</sup>", "Besidesup"),
+            ("A line of code after no-break spaces of the text's",
+             "\u00a0" * 6 + "<code>x = " + MEASURED_SPACED + "</code>", "Besidespaced"),
+            ("Lines of code in emphasis, a line break between them, the second indented",
+             "<em><code>a = 1</code><br/><code>" + "\u00a0" * 8 + "x = " + MEASURED_EMPH
+             + "</code></em>", "Besideemph"),
+            ("A description list's definition that is a line of code, after a long term",
+             "<dl><dt>Averyveryverylongterm</dt><dd><code>" + MEASURED_DEFCODE
+             + " = 1</code></dd></dl>", "Besidedefcode"),
+            ("A description list whose term is its longest word",
+             "<dl><dt>" + MEASURED_TERM + "</dt><dd>short words here</dd></dl>", "Besideterm2"),
+            ("A word in bold, its cell's longest",
+             "Some <strong>" + MEASURED_BOLD + "</strong> words", "Besidebold")))
+    # A pipe table, since the reader ends a raw HTML table at a note.
+    + "\nA line of code with a note after it, in a column too narrow for it, its table's "
+    "widths given:\n\n| Code | Prose |\n|--|" + "-" * 60 + "|\n| `x = " + MEASURED_NOTE
+    + "`[^hung] | Besidenote, words in the wider column, and then some more of them to fill "
+    "it. |\n\n[^hung]: A note on a line of code.\n")
 MEASURED_CODE = "Cellmeter = [" + ", ".join(str(i) for i in range(10, 19)) + "]"
 MEASURED_WORDS = ("Counterrevolutionaries", "Uncharacteristically", "Intellectualistic",
                   "Indivisibility")
@@ -3372,7 +3483,7 @@ MEASURED_BOOK = (
     + "\nInline code in a column whose table gives it too little room:\n\n+" + "-" * 27 + "+"
     + "-" * 63 + "+\n| " + ("`" + MEASURED_INLINE + "`").ljust(25) + " | "
     + "Besideinline, words in the wider column.".ljust(61) + " |\n+" + "-" * 27 + "+" + "-" * 63
-    + "+\n")
+    + "+\n" + MEASURED_HUNG)
 
 
 def build_measured(work):
@@ -3499,20 +3610,23 @@ def code_advance(path, words):
 def table_counts(source):
     """The PDF filter's counts as the comment its LaTeX opens with gives
     them (pdf-target.lua's counted): {"unit", "line", "gap", "mono",
-    "math"}, the line and the space between two columns in the counts'
-    unit, ems of the text's type where the build measured the book's page
-    and faces, else characters, 70 to a line, 3 between two columns; a
-    character of code; and a formula's width for each character
-    formula_width counts. None where the LaTeX has no such comment."""
+    "math", "lists"}, the line and the space between two columns in the
+    counts' unit, ems of the text's type where the build measured the
+    book's page and faces, else characters, 70 to a line, 3 between two
+    columns; a character of code; a formula's width for each character
+    formula_width counts; and a list's margins in a table's cell at each
+    depth. None where the LaTeX has no such comment."""
     m = re.search(r"^% TextbookImprover's table counts, in (?:ems of the text's type: "
                   r"line ([\d.]+), gap ([\d.]+), .*mono ([\d.]+), .*math width ([\d.]+)"
-                  r"|characters, 70 to a line)$", source, re.M)
+                  r"|characters, 70 to a line), lists ([\d. ]+)$", source, re.M)
     if not m:
         return None
+    lists = [float(v) for v in m.group(5).split()]
     if m.group(1) is None:
-        return {"unit": "characters", "line": 70.0, "gap": 3.0, "mono": 1.0, "math": 1.0}
+        return {"unit": "characters", "line": 70.0, "gap": 3.0, "mono": 1.0, "math": 1.0,
+                "lists": lists}
     return {"unit": "ems", "line": float(m.group(1)), "gap": float(m.group(2)),
-            "mono": float(m.group(3)), "math": float(m.group(4))}
+            "mono": float(m.group(3)), "math": float(m.group(4)), "lists": lists}
 
 
 def head_of(source, words):
@@ -4476,16 +4590,59 @@ def measured_checks(measured_path, measured_said, measured_source):
         return None
     reals = [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
                                           head_of(measured_source, MEASURED_WORDS[0]))]
+    rows_found = []
+
+    def rows():
+        """[(left of the row's first glyph, its text, its glyphs)], each row of
+        glyphs on a baseline, read once."""
+        if not rows_found and os.path.exists(measured_path):
+            found = {}
+            for page, baseline, left, right, char in pdftext.glyph_boxes(measured_path):
+                found.setdefault((page, baseline), []).append((left, right, char))
+            rows_found.extend(("".join(g[2] for g in glyphs), glyphs)
+                              for glyphs in found.values())
+        return rows_found
+
+    def word_on_row(word):
+        """(where word begins, where it ends) on a row that holds it whole, or None."""
+        for text, glyphs in rows():
+            at = text.find(word)
+            if at >= 0:
+                return glyphs[at][0], glyphs[at + len(word) - 1][1]
+        return None
+
+    def hung(word, beside):
+        """(how far the hung row holding word whole begins right of its cell's
+        first row, where the word ends, where the next column's word begins),
+        or None."""
+        found, first, next_column = word_on_row(word), None, None
+        for text, glyphs in rows():
+            if text.startswith("fileobj = ") and beside in text:
+                first, next_column = glyphs[0][0], glyphs[text.index(beside)][0]
+        if found is None or first is None:
+            return None
+        return found[0] - first, found[1], next_column
+
+    def beside(word, other):
+        """(where word, whole on its row, ends, where the next column's word,
+        other, begins), or None."""
+        found, starts = word_on_row(word), word_on_row(other)
+        return None if found is None or starts is None else (found[1], starts[0])
     return [
         ("measured on the default page in its faces, the metadata file's LaTeX reading a file "
          "in the book's folder, the LaTeX opens with the counts in ems of the text's type: a "
          "line of 39.15, 469.76 points at 12 points, a space of 1 between two columns, twice "
-         "\\tabcolsep's 6 points, a character of code 0.6, IBM Plex Mono's, and a formula's "
+         "\\tabcolsep's 6 points, a character of code 0.6, IBM Plex Mono's, a formula's "
          "width about 0.48 of an em to a character formula_width counts, "
-         "count-formulas.txt's third quartile in IBM Plex Math",
+         "count-formulas.txt's third quartile in IBM Plex Math, and a list's margins in a "
+         "table's cell at its six depths, the book class's 2.5 ems, 2.2, 1.87, 1.7, and .5 "
+         "twice, added up",
          lambda: counts is not None and counts["unit"] == "ems"
          and abs(counts["line"] - 469.755 / 12) < 0.001 and abs(counts["gap"] - 1) < 0.001
          and abs(counts["mono"] - 0.6) < 0.001 and 0.45 < counts["math"] < 0.5
+         and len(counts["lists"]) == 6
+         and all(abs(a - b) < 0.001 for a, b in zip(counts["lists"],
+                                                     (2.5, 4.7, 6.57, 8.27, 9.27, 10.27)))
          and "couldn't be measured" not in measured_said),
         ("inline code in a column its table gives too little room for it is given the code's "
          "width, a character of code each, whole on its row, ending before the next column's "
@@ -4506,6 +4663,78 @@ def measured_checks(measured_path, measured_said, measured_source):
          "face sets each of its letters, whole on its line, ending before the next column's "
          "words",
          lambda: (lambda found: found is not None and found[0] < found[1] - 1)(wide_row())),
+        ("a line of code in a column too narrow for it, its table's widths given, the word "
+         "that opens its hung row whole there, two characters of code in from the cell's "
+         "first row, ending before the next column's words",
+         lambda: (lambda found: found is not None and abs(found[0] - 2 * plex) < 0.5
+                  and found[1] < found[2] - 1)(hung(MEASURED_GIVEN, "Besidegiven"))),
+        ("and in a table whose columns LaTeX lays out, by what it measures of them",
+         lambda: (lambda found: found is not None and abs(found[0] - 2 * plex) < 0.5
+                  and found[1] < found[2] - 1)(hung(MEASURED_STEPS, "Besidesteps"))),
+        ("a word of a list nested in another is whole on its row, two depths' margins in, "
+         "ending before the next column's words, the column no wider than the word needs: "
+         "its item's last word and the next item's first counted apart",
+         lambda: (lambda found: found is not None and found[0] < found[1] - 1
+                  and found[1] - found[0] < 12 * 11.955 / 12 + 6)(
+                      beside(MEASURED_NESTED, "Besidelist"))),
+        ("a word of a description list's definition is whole on its row, ending before the "
+         "next column's words",
+         lambda: (lambda found: found is not None and found[0] < found[1] - 1)(
+             beside(MEASURED_DEFINED, "Besideterm"))),
+        ("a word of code in a list's item that opens its hung row is whole there, its "
+         "column's part of the line rounded up, ending before the next column's words",
+         lambda: (lambda found: found is not None and found[0] < found[1] - 1)(
+             beside(MEASURED_LISTCODE, "Besidelistcode"))),
+        ("a line of code's long first word, after its indentation, is whole on its first row "
+         "in a table whose columns LaTeX lays out, by what it measures of them",
+         lambda: (lambda found, row: found is not None and row is not None
+                  and abs(found[0] - row - 4 * plex) < 0.5)(
+                      word_on_row(MEASURED_LEAD),
+                      next((glyphs[0][0] for text, glyphs in rows()
+                            if "Besidelead" in text), None))),
+        ("a table in a cell, its own edges' space counted, ends inside its column, before the "
+         "space before the next column's words",
+         lambda: (lambda found: found is not None
+                  and found[0] + 0.5 * 11.955 < found[1] - 11.955 + 0.5)(
+                      beside(MEASURED_INNER, "Besideinner"))),
+        ("a line of code after a line of text in its cell, hung by itself, has the word that "
+         "opens its hung row whole there, two characters of code in from its first row, "
+         "ending before the next column's words",
+         lambda: (lambda found, row, ends: found is not None and row is not None
+                  and abs(found[0] - row[0] - 2 * plex) < 0.5 and found[1] < ends[1] - 1)(
+                      word_on_row(MEASURED_AFTER), word_on_row("python3"),
+                      beside(MEASURED_AFTER, "Besideafter") or (0, 0))),
+        ("an indented line of code has the word that opens its hung row whole there, its "
+         "indentation and two characters of code in, ending before the next column's words",
+         lambda: (lambda found, row, ends: found is not None and row is not None
+                  and abs(found[0] - row - 6 * plex) < 0.5 and found[1] < ends[1] - 1)(
+                      word_on_row(MEASURED_DEEP),
+                      next((glyphs[0][0] for text, glyphs in rows() if "deepvalue" in text),
+                           None),
+                      beside(MEASURED_DEEP, "Besidedeep") or (0, 0))),
+        ("a line of code whose first word is its longest has its column as wide as the word, "
+         "no hang counted for it: the next column's words begin the space between two "
+         "columns after it",
+         lambda: (lambda found: found is not None
+                  and 12 - 0.5 < found[1] - found[0] < 12 + 0.5 * plex)(
+                      beside(MEASURED_OPENS, "Besideopens"))),
+    ] + [
+        ("%s: its word whole on its row, ending before the next column's words" % what,
+         lambda word=word, other=other: (lambda found: found is not None
+                                         and found[0] < found[1] - 1)(beside(word, other)))
+        for what, word, other in (
+            ("a line of code with a superscript after it, hung", MEASURED_SUP, "Besidesup"),
+            ("a line of code with a note after it, hung, its mark beside its last word",
+             MEASURED_NOTE, "Besidenote"),
+            ("a line of code after no-break spaces of the text's, hung", MEASURED_SPACED,
+             "Besidespaced"),
+            ("an indented line of code after a line break in emphasis, hung by itself",
+             MEASURED_EMPH, "Besideemph"),
+            ("a description list's definition that is a line of code, its first word long, "
+             "after a long term, hung from the definition's margin", MEASURED_DEFCODE,
+             "Besidedefcode"),
+            ("a description list's term, set in bold in a box", MEASURED_TERM, "Besideterm2"),
+            ("a word in bold", MEASURED_BOLD, "Besidebold"))
     ]
 
 
@@ -5355,13 +5584,16 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         # line is shared as above whatever the formulas are left: the
         # word's column as wide as the word, the formulas sharing what's
         # left by their counts, their part found again once the word's
-        # column is held at it.
+        # column is held at it; the word's part no less as TeX reads it,
+        # which a word of 31 of 61 characters, rounded to the nearest of
+        # four places, isn't (a review).
         ("in the LaTeX, the counts give a worked example's steps whose reason's longest word leaves their formulas "
-         "less of the line than they're wide a column of words as wide as the word, the "
-         "formulas sharing what's left by their counts",
+         "less of the line than they're wide a column of words as wide as the word, no "
+         "narrower as TeX reads its part, the formulas sharing what's left by their counts",
          lambda: (lambda reals, w: len(reals) == 4 and len(w) == 3 and all(
-             abs(reals[j] - w[j] * (61 - 36) / sum(w) / 61) < 0.0001 for j in range(3))
-             and abs(reals[3] - 36 / 61) < 0.0001)(
+             abs(reals[j] - w[j] * (61 - 31) / sum(w) / 61) < 0.0001 for j in range(3))
+             and 0 <= reals[3] - 31 / 61 < 0.0002
+             and int(reals[3] * 65536 + 0.5) / 65536 >= 31 / 61)(
              [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
                                            head_of(fit_source, "Unbreakableformulas"))],
              formula_widths(["1313 + \\frac{2424}{3535} + \\frac{4646}{5757}", "=",
@@ -5493,6 +5725,19 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: (lambda reals: len(reals) == 4 and min(reals) > 0)(
              [float(r) for r in re.findall(r"\\real\{(-?[\d.]+)\}",
                                            head_of(fit_source, "Longestwordofthis"))])),
+        # A line of code's word that opens its hung row, counted in
+        # characters, its column held at it and the hang's two characters,
+        # of the line less the space between two columns, 67: no less as
+        # TeX reads the writer's four places, to the nearest 65,536th, and
+        # less than two ten-thousandths more.
+        ("a line of code's word that opens its hung row, counted in characters, has its "
+         "column the word's share of the line and the hang's two characters more, no less "
+         "as TeX reads it",
+         lambda: (lambda reals, need: len(reals) == 2
+                  and int(reals[0] * 65536 + 0.5) / 65536 >= need and reals[0] < need + 0.0002)(
+             [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
+                                           head_of(fit_source, "Besidehung"))],
+             (len(FIT_HUNG) + 2) / 67)),
         # latexbuild.FIT_MACROS' \OERFitStepsTable: steps whose counts set
         # them across the line, their words wrapped, are set at their own
         # width where LaTeX finds them narrower than it, their spaces as they
@@ -5517,8 +5762,8 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          "line than they're wide, which LaTeX finds fit it, are set in the text's type, their "
          "formulas whole, within the line",
          lambda: whole("2424", "4646") and whole("68686", "8080")
-         and at("Unbreakableformulasreasonlongestword", 1)
-         and within("Unbreakableformulasreasonlongestword")),
+         and at("Unbreakableformulasreasonlonges", 1)
+         and within("Unbreakableformulasreasonlonges")),
         ("and steps whose reason holds a formula wider than the line the counts leave their "
          "words, and steps whose reason's formula leaves their formulas less than three "
          "quarters of their counts, are set in the text's type, their formulas whole",

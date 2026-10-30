@@ -1345,6 +1345,10 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 # characters, and the run warns why (unmeasured_warning).
 COUNT_FORMULAS = os.path.join(HERE, "count-formulas.txt")
 MEASURE_PAGE = os.path.join(HERE, "measure-page.lua")
+# The lists measured, one inside another, in a minipage, as the writer sets
+# a table's cell that holds a list: their margins at each depth LaTeX
+# allows, itemize's four and then enumerate's.
+LIST_DEPTHS = ("itemize",) * 4 + ("enumerate",) * 2
 
 
 def measure_page(document, filters, environment, base):
@@ -1368,6 +1372,14 @@ def measure_page(document, filters, environment, base):
             "{\\normalfont\\directlua{oer_measure.text(\\number\\linewidth, "
             "\\number\\tabcolsep)}}\n"
             "{\\normalfont\\ttfamily\\directlua{oer_measure.mono()}}\n"
+            "{\\normalfont\\bfseries\\directlua{oer_measure.bold()}}\n"
+            "{\\normalfont\\begin{minipage}{\\linewidth}"
+            "\\begin{description}\\item[]\\directlua{oer_measure.labelsep(\\number\\labelsep)}"
+            "\\end{description}"
+            + "".join("\\begin{" + name + "}\\item\\directlua{oer_measure.list(\\number\\hsize, "
+                      "\\number\\linewidth)}" for name in LIST_DEPTHS)
+            + "".join("\\end{" + name + "}" for name in reversed(LIST_DEPTHS))
+            + "\\end{minipage}}\n"
             + "".join("\\setbox0\\hbox{\\(" + tex + "\\)}"
                       "\\directlua{oer_measure.formula(\\number\\wd0)}\n" for tex in formulas)
             + "\\directlua{oer_measure.report(os.getenv(\"OER_MEASURE_OUT\"))}\n")
@@ -1409,12 +1421,54 @@ def measure_page(document, filters, environment, base):
             return None, (f"{ENGINE} stopped on a document of the book's metadata and "
                           "preamble: " + (errors[0].splitlines()[0] if errors
                                           else "it said nothing of why"))
-        widths = re.search(r"(?:^|;)math=([^;]*)", said)
-        if not widths or len(widths.group(1).split(",")) != len(formulas):
-            return None, f"{ENGINE} measured some of count-formulas.txt's formulas, not all"
+        problem = measures_problem(said, len(formulas))
+        if problem:
+            return None, f"{ENGINE} didn't measure all of {problem}"
         return said, None
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def measures_problem(said, formulas=None):
+    """What OER_MEASURES, said, doesn't give all of that the PDF filter
+    reads, or None: the page's measures, each a number more than none; 95
+    characters' widths, and in bold; a list's margins at each of its
+    depths, and its label space; and the formulas' widths, as many as
+    count-formulas.txt has where formulas says so. The filter, given less,
+    counts in characters, without a word: OER_MEASURES set before the run,
+    as an earlier version of the measuring wrote it, had done that (a
+    review)."""
+    found = dict(part.split("=", 1) for part in said.split(";") if "=" in part)
+
+    def numbers(key):
+        try:
+            return [float(v) for v in found.get(key, "").split(",") if v.strip()]
+        except ValueError:
+            return []
+    if not all(len(numbers(key)) == 1 and numbers(key)[0] > 0
+               for key in ("line", "gap", "lower", "space", "mono", "points")):
+        return "the page's line, its space between columns, and its faces' widths"
+    if len(numbers("chars")) != 95 or len(numbers("bold")) != 95:
+        return "the widths of the text face's characters and of its bold"
+    if len(numbers("lists")) != len(LIST_DEPTHS) or len(numbers("labelsep")) != 1:
+        return "a list's margins at its depths and its label space"
+    widths = numbers("math")
+    if not widths or (formulas is not None and len(widths) != formulas):
+        return "count-formulas.txt's formulas"
+    return None
+
+
+def given_measures():
+    """(OER_MEASURES as set before the run, None), where it's none or
+    holds what the PDF filter reads; else (None, why not), which the run
+    warns of."""
+    given = os.environ["OER_MEASURES"]
+    if given == "none":
+        return None, None
+    problem = measures_problem(given)
+    if problem:
+        return None, f"OER_MEASURES, set before the run, doesn't give all of {problem}"
+    return given, None
 
 
 def unmeasured_warning(why):
@@ -1549,10 +1603,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]),
                            **label_prefixes(resolved))
-        measures, why = (os.environ["OER_MEASURES"], None) if os.environ.get("OER_MEASURES") \
+        measures, why = given_measures() if os.environ.get("OER_MEASURES") \
             else measure_page(document, filters, environment, base)
         environment["OER_MEASURES"] = measures or "none"
-        if not measures:
+        if not measures and why:
             print(unmeasured_warning(why), file=sys.stderr)
         if keep or latex_only:
             # The LaTeX as the PDF was made from it, for reading when
@@ -1666,7 +1720,7 @@ def write_latex(base, name, resolved, project, document, out_dir):
                        "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
                        "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
         if os.environ.get("OER_MEASURES"):
-            measures, why = os.environ["OER_MEASURES"], None
+            measures, why = given_measures()
         elif shutil.which(ENGINE):
             measures, why = measure_page(document, pdf_filters, environment, base)
         else:

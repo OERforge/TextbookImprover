@@ -2,11 +2,13 @@
 -- and faces, in LuaLaTeX, for the PDF filter's counts (pdf-target.lua's
 -- MEASURES): the line's width and the space between two of a table's
 -- columns, in ems of the text's type; the width of each of the text face's
--- printable ASCII characters, its space the first; its small letters, each
--- as often as in English, for a character outside ASCII; its space; a
--- character of code; and the width of each formula count-formulas.txt
--- lists. Loaded by the document measure_page writes, which calls each
--- function in turn and reads the line report writes.
+-- printable ASCII characters, its space the first, and in bold; its small
+-- letters, each as often as in English, for a character outside ASCII; its
+-- space; a character of code; a list's margins in a table's cell, at each
+-- depth, and its label space; and the width of each formula
+-- count-formulas.txt lists. Loaded by the
+-- document measure_page writes, which calls each function in turn and
+-- reads the line report writes.
 
 oer_measure = { widths = {} }
 
@@ -55,6 +57,37 @@ function oer_measure.mono()
   oer_measure.mono_ = width(current(), "x", oer_measure.size)
 end
 
+-- The text face in bold, set when this is called: each printable ASCII
+-- character's width, in ems of the text's size, its space the first, for
+-- bold text in a table's cell and a description list's term, which LaTeX
+-- sets in bold.
+function oer_measure.bold()
+  local f = current()
+  local chars = {}
+  for code = 32, 126 do
+    chars[#chars + 1] = string.format("%.4f", code == 32 and f.parameters.space / oer_measure.size
+                                                or width(f, string.char(code), oer_measure.size))
+  end
+  oer_measure.bold_ = chars
+end
+
+-- A list's label space, \labelsep, called with it, in scaled points: what
+-- separates a description list's term from its definition.
+function oer_measure.labelsep(sep)
+  oer_measure.labelsep_ = sep / oer_measure.size
+end
+
+-- How much narrower a list's line is than the line it's in, its margins
+-- together, at each depth a table's cell can hold, called inside the list
+-- with \hsize and \linewidth: in a minipage, as the writer sets a cell
+-- that holds a list, where LaTeX counts a list's depth from the first
+-- again. Called at each depth in turn, from the first.
+function oer_measure.list(hsize, linewidth)
+  local lists = oer_measure.lists_ or {}
+  lists[#lists + 1] = (hsize - linewidth) / oer_measure.size
+  oer_measure.lists_ = lists
+end
+
 -- A formula's width, in scaled points, as LaTeX set it in text style.
 function oer_measure.formula(w)
   local widths = oer_measure.widths
@@ -64,15 +97,25 @@ end
 -- The line build-pdf.py reads, written to the file named: key=value
 -- pairs, separated by semicolons, the formulas' widths after math=,
 -- separated by commas. To a file, since TeX would break a line this long
--- in its log.
+-- in its log. The line, the space between two columns, a character of
+-- code, and a list's margins to six places, which a column held at a word
+-- of code is as wide as to the scaled point (pdf-target.lua's held_part):
+-- to four, a face whose character of code is a fraction of an em with
+-- more places, rounded down, had a word of forty such characters counted
+-- a fiftieth of a point narrower than it is.
 function oer_measure.report(name)
   local t = oer_measure.text_
   local parts = {}
   for _, key in ipairs({ "line", "gap", "lower", "space", "points" }) do
-    parts[#parts + 1] = key .. "=" .. string.format("%.4f", t[key])
+    parts[#parts + 1] = key .. "=" .. string.format("%.6f", t[key])
   end
-  parts[#parts + 1] = "mono=" .. string.format("%.4f", oer_measure.mono_ or 0)
+  parts[#parts + 1] = "mono=" .. string.format("%.6f", oer_measure.mono_ or 0)
+  local lists = {}
+  for i, w in ipairs(oer_measure.lists_ or {}) do lists[i] = string.format("%.6f", w) end
+  parts[#parts + 1] = "lists=" .. table.concat(lists, ",")
+  parts[#parts + 1] = "labelsep=" .. string.format("%.6f", oer_measure.labelsep_ or 0)
   parts[#parts + 1] = "chars=" .. table.concat(oer_measure.chars, ",")
+  parts[#parts + 1] = "bold=" .. table.concat(oer_measure.bold_ or {}, ",")
   local widths = {}
   for i, w in ipairs(oer_measure.widths) do widths[i] = string.format("%.4f", w) end
   parts[#parts + 1] = "math=" .. table.concat(widths, ",")

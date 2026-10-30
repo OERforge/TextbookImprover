@@ -1,0 +1,48 @@
+n\lambda = 2d\ \text{sin}\ \theta
+5\times2=10
+n_{1}=3
+6 \cdot 4 = 24
+{}_{19}^{40}\text{K}
+Z_{c} = \frac{p' - p_{0}}{\sqrt{\frac{p_{0}q_{0}}{n}}}
+\frac{1}{\lbrack A\rbrack_{t}}\mspace{2mu} = kt + \ \frac{1}{\lbrack A\rbrack_{0}},
+b \pm \left\lbrack t_{n - 2,\alpha/2}S_{b} \right\rbrack
+\text{MnO}_{4}{}^{-} + 8\text{H}^{+} + 5\text{e}^{-}\longrightarrow\text{Mn}^{2+} + 4\text{H}_{2}\text{O}
+\text{Li}^{\text{+}}(aq) + \text{e}^{\text{−}}\ \longrightarrow\ \text{Li}(s)
+P = \ \frac{F}{A}
+{}_{\mspace{9mu} 94}^{239}\text{Pu}
+\left\lbrack \text{Ag}{(\text{CN})}_{2} \right\rbrack^{-} + \text{e}^{-}\ \longrightarrow\ \text{Ag} + 2\text{CN}^{-}
+E_{\text{cell}} = {E{^\circ}}_{\text{cell}} - \ \frac{0.0592\ V}{n}\ \text{log}\ Q\mspace{90mu}(\text{at 298.15}\ K)
+\text{CdS} + 2\text{e}^{-}\ \longrightarrow\ \text{Cd} + \text{S}^{2-}
+s_{1}^{2}
+\text{O}_{2} + \text{2H}_{2}\text{O} + \text{4e}^{-}\ \longrightarrow\ \text{4OH}^{-}
+\frac{3}{100}=0.03
+P(x) = \frac{e^{-\mu}\mu^{x}}{x!}
+{}_{10}^{22}\text{Ne}
+\text{H}_{2}(g) + \mspace{2mu}\frac{1}{2}\mspace{2mu}\text{O}_{2}(g)\ \longrightarrow\ \text{H}_{2}\text{O}(l)
+\overset{\delta\text{−}}{\text{C}}\text{−}\overset{\delta\text{+}}{\text{H}}
+X_{A} = \ \frac{n_{A}}{n_{Total}}
+\text{ClO}^{-} + \text{H}_{2}\text{O} + 2\text{e}^{-}\ \longrightarrow\ \text{Cl}^{-} + 2\text{OH}^{-}
+{}_{10}^{20}\text{Ne}
+\text{SnS} + \text{2e}^{-}\ \longrightarrow\ \text{Sn} + \text{S}^{2-}
+\text{H}_{3}\text{O}^{+}
+\text{Cr}^{3+}(aq) + \text{3e}^{\text{−}}\ \longrightarrow\ \text{Cr}(s)
+\left. \chi_{c}^{2} = \Sigma\frac{{(O - E)}^{2}}{E} \right.
+\text{Percent by mass} = \ \frac{\text{mass of solute}}{\text{mass of solution}}\  \times \ 100
+z = \frac{x\  - \ \mu}{\sigma}
+\text{Mg}^{2+} + \text{2e}^{-}\ \longrightarrow\ \text{Mg}
+\mu_{\bar{x}}
+{}_{\mspace{9mu} 86}^{222}\text{Rn}
+\text{S} + \text{2e}^{-}\ \longrightarrow\ \text{S}^{2-}
+\text{MH or MH}_{2}\ \longrightarrow\ \text{MOH or M}{(\text{OH})}_{2} + \text{H}_{2}
+1\times5=5
+{}_{3}^{7}\text{Li}
+ΔG=0
+\text{O}_{2} + 4\text{H}^{+} + 4\text{e}^{-}\longrightarrow 2\text{H}_{2}\text{O}
+\frac{1}{\lbrack A\rbrack}\mspace{2mu} = kt + \left( \frac{1}{\lbrack A\rbrack_{0}} \right)
+{}_{\mspace{9mu} 8}^{16}\text{O}
+\text{Zn(OH)}_{2}(s) + \text{2e}^{\text{−}}\ \longrightarrow\ \text{Zn}(s) + \text{2OH}^{\text{−}}(aq)
+\mu_{\overline{x}}\quad\text{and E}\left( \mu_{\overline{x}} \right) = \mu
+{}_{\mspace{9mu} 82}^{214}\text{Pb}
+\overset{\delta\text{+}}{\text{C}}\text{−}\overset{\delta\text{−}}{\text{N}}
+^{-1}K^{-1}=8.314510
+\text{Ba}^{2+} + 2\text{e}^{-}\ \longrightarrow\ \text{Ba}

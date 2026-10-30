@@ -2915,6 +2915,30 @@ def check_display_style_in_text():
     ]
 
 
+def check_measure_page():
+    """The page's measures where their files are missing (build-pdf.py's
+    measure_page): none, and why, the counts in characters and the run
+    warning, where a missing file had stopped the run (a review)."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    saved = build_pdf.COUNT_FORMULAS
+    build_pdf.COUNT_FORMULAS = os.path.join(tempfile.mkdtemp(), "count-formulas.txt")
+    try:
+        measured = build_pdf.measure_page({"pandoc-api-version": [1, 23], "meta": {}}, [],
+                                          dict(os.environ), ROOT)
+    finally:
+        build_pdf.COUNT_FORMULAS = saved
+    return [
+        ("the page's measures without their files: none, and why",
+         lambda: measured == (None, "its files, bin/measure-page.lua and "
+                              "bin/count-formulas.txt, aren't both installed")),
+        ("and the run's warning says the counts are in characters, and why",
+         lambda: build_pdf.unmeasured_warning("why").startswith(
+             "WARNING: The book's page and faces couldn't be measured for its tables, so their "
+             "columns are counted in characters") and build_pdf.unmeasured_warning(
+                 "why").endswith(": why.")),
+    ]
+
+
 def check_math_words():
     """A word or a unit an HTML page's formula holds as an <mi> of more than
     two letters, or of two set upright or applied as a function, is made an
@@ -5884,6 +5908,7 @@ GROUPS = [
     ("the PDF target's default page", check_default_page),
     ("PDF/UA-1's math", check_ua1_math),
     ("the math font a metadata file names", check_math_font_latex),
+    ("the page's measures, their files missing", check_measure_page),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),
     ("display style in running text, in an HTML source", check_display_style_in_text),

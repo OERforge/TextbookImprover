@@ -1642,7 +1642,9 @@ FIT_ONE = (
 
 
 def build_fit(work):
-    """FIT_ONE on the default page, in Latin Modern (LATIN_MODERN): (the
+    """FIT_ONE on the default page, in Latin Modern (LATIN_MODERN), its
+    tables counted in characters (OER_MEASURES none), as its cases are set
+    for them, where a build counts in what it measures of the page: (the
     PDF's path, what the run said,
     its LaTeX, and LuaLaTeX's log of its LaTeX run as a third run would
     be, the aux saying two had gone before and fitted nothing)."""
@@ -1656,10 +1658,11 @@ def build_fit(work):
         fh.write(LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
+    characters = dict(os.environ, OER_MEASURES="none")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
-                               stdin=subprocess.DEVNULL)
-    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
+                               stdin=subprocess.DEVNULL, env=characters)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, characters)
     tex = os.path.join(work, "pdf", "book.tex")
     source = third = ""
     if os.path.exists(tex):
@@ -2257,7 +2260,12 @@ CODE_FOOTER = ("This footer runs to two lines, the first wider than a list's ite
 def build_code(work):
     """FIT_CODE on the default page, in the default's faces, and again in
     Latin Modern (LATIN_MODERN), whose smallest designs of Latin Modern
-    Mono are wider for their size, each a target of its own; and
+    Mono are wider for their size, each a target of its own, its tables
+    counted in characters (OER_MEASURES none), as its cases of code in a
+    table's cell are set for them: a character of code a character of the
+    text, so that the cell's column is narrower than its code, which LaTeX
+    fits to it (measured in ems, a cell's code is given its own width,
+    MEASURED_BOOK); and
     FIT_CODE_MARGINS on CODE_MARGINS' page, with CODE_FOOTER, in the folder
     beside it ending -margins, and untagged, without it, in its folder
     untagged; FIT_CODE_TALL on CODE_TALL_PAGE's page, in the folder beside
@@ -2277,7 +2285,8 @@ def build_code(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n  latin:\n    format: pdf\n"
                  "    pdf:\n      metadata: meta.yaml\n")
-    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work,
+                    dict(os.environ, OER_MEASURES="none"))
     margins = work + "-margins"
     os.makedirs(margins)
     with open(os.path.join(margins, "margins.md"), "w", encoding="utf-8") as fh:
@@ -3325,6 +3334,76 @@ def build_math_font(work):
     return ({target: os.path.join(work, target, "org.example.formulas.pdf")
              for target, _meta in MATH_FONT_TARGETS},
             converted.stdout + converted.stderr)
+
+
+# A book on the default page, in its faces, its tables counted in ems of
+# the text's type as the build measures the page and faces
+# (build_measured): code in a table's cell, as the code book has it
+# (CODE_CELL), which counted in characters, a character of code a
+# character of the text, got a column narrower than its code and was set
+# at 94 percent of its size to fit it; a table whose longest words, 73
+# characters, a count of 70 to a line finds too wide for it, so that
+# LaTeX narrowed its spaces to fit it, where measured its words take 34
+# ems of the line's 39; and a word of wide letters, a capital M and 21
+# small m's, in a column its table gives 3 percent of the line, which is
+# widened to the word: counted as the face sets each of its letters, 20.9
+# ems in IBM Plex Serif, where counted by a small letter's average width,
+# as a letter outside ASCII is, the word was given 11.4 ems, and TeX broke
+# it at a hyphen. And two a review found: inline code in a column of a
+# table whose widths are given, 30 and 70 percent (MEASURED_INLINE),
+# which counted in the text's face got 11.3 ems where Plex Mono sets it in
+# 13.8, and TeX broke it; and the book's metadata file's LaTeX reading a
+# file in the book's folder (\\input), where LaTeX measuring the page in a
+# folder of its own stopped, and the tables were counted in characters.
+MEASURED_INLINE = "os.path.join(base,name)"
+MEASURED_CODE = "Cellmeter = [" + ", ".join(str(i) for i in range(10, 19)) + "]"
+MEASURED_WORDS = ("Counterrevolutionaries", "Uncharacteristically", "Intellectualistic",
+                  "Indivisibility")
+MEASURED_WIDE = "M" + "m" * 21
+MEASURED_BOOK = (
+    "# Measured\n\nCode in a table's cell:\n\n+" + "-" * 50 + "+" + "-" * 16
+    + "+\n| ```" + " " * 45 + " | Besidemeter" + " " * 4 + "|\n| " + MEASURED_CODE.ljust(48)
+    + " |" + " " * 16 + "|\n| ```" + " " * 45 + " |" + " " * 16 + "|\n+" + "-" * 50 + "+"
+    + "-" * 16 + "+\n\nWords a count of characters finds too wide for the line:\n\n| "
+    + " | ".join(MEASURED_WORDS) + " |\n|" + "---|" * 4 + "\n| one | two | three | four |\n"
+    + "\nA word of wide letters in a narrow column:\n\n| Wide | Prose |\n|--|" + "-" * 60
+    + "|\n| " + MEASURED_WIDE + " | Besidewide, words that wrap in what the wide word leaves "
+    "of the line, and then some more of them to fill it. |\n"
+    + "\nInline code in a column whose table gives it too little room:\n\n+" + "-" * 27 + "+"
+    + "-" * 63 + "+\n| " + ("`" + MEASURED_INLINE + "`").ljust(25) + " | "
+    + "Besideinline, words in the wider column.".ljust(61) + " |\n+" + "-" * 27 + "+" + "-" * 63
+    + "+\n")
+
+
+def build_measured(work):
+    """MEASURED_BOOK on the default page, in its faces, its tables counted
+    in what the build measures of them, whatever OER_MEASURES the suite
+    was run with, its metadata file's LaTeX reading a file in the book's
+    folder: (the PDF's path, what the run said, its LaTeX)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "measured.md"), "w", encoding="utf-8") as fh:
+        fh.write(MEASURED_BOOK)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Measured\n  identifier: org.example.measured\n"
+                 "  language: en-US\n  contents:\n    - measured\n")
+    with open(os.path.join(work, "measured-meta.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("header-includes:\n  - \\input{measured-macros.tex}\n")
+    with open(os.path.join(work, "measured-macros.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\newcommand\\Measuredmacro{A macro of the book's own.}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: measured-meta.yaml\n")
+    measuring = {key: value for key, value in os.environ.items() if key != "OER_MEASURES"}
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work, measuring)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, measuring)
+    tex = os.path.join(work, "pdf", "book.tex")
+    source = ""
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return (os.path.join(work, "pdf", "org.example.measured.pdf"),
+            converted.stdout + converted.stderr, source)
+
+
 def build_default(work):
     """The book (write_book) on the PDF target's default page, in its
     faces, where its checks measure it on the class's (CLASS_PAGE), in
@@ -3415,6 +3494,25 @@ def code_advance(path, words):
         if words in "".join(g[2] for g in glyphs):
             return (glyphs[-1][1] - glyphs[0][0]) / len(glyphs)
     return None
+
+
+def table_counts(source):
+    """The PDF filter's counts as the comment its LaTeX opens with gives
+    them (pdf-target.lua's counted): {"unit", "line", "gap", "mono",
+    "math"}, the line and the space between two columns in the counts'
+    unit, ems of the text's type where the build measured the book's page
+    and faces, else characters, 70 to a line, 3 between two columns; a
+    character of code; and a formula's width for each character
+    formula_width counts. None where the LaTeX has no such comment."""
+    m = re.search(r"^% TextbookImprover's table counts, in (?:ems of the text's type: "
+                  r"line ([\d.]+), gap ([\d.]+), .*mono ([\d.]+), .*math width ([\d.]+)"
+                  r"|characters, 70 to a line)$", source, re.M)
+    if not m:
+        return None
+    if m.group(1) is None:
+        return {"unit": "characters", "line": 70.0, "gap": 3.0, "mono": 1.0, "math": 1.0}
+    return {"unit": "ems", "line": float(m.group(1)), "gap": float(m.group(2)),
+            "mono": float(m.group(3)), "math": float(m.group(4))}
 
 
 def head_of(source, words):
@@ -4324,6 +4422,90 @@ def sized_checks(sized_path, sized_said):
          lambda: rule_over("Afterthefigure") is not None
          and rule_over("Aftertheparagraph") is not None
          and abs(rule_over("Afterthefigure") - rule_over("Aftertheparagraph")) < 0.5),
+    ]
+
+
+def measured_checks(measured_path, measured_said, measured_source):
+    """The measured book's checks (build_measured). The default page's text
+    is 6.5 inches wide, 469.76 TeX points, its type 12 points, 11.955 of
+    the PDF's, a character of IBM Plex Mono 0.6 of an em."""
+    counts = table_counts(measured_source)
+    plex = 0.6 * 11.955
+
+    def code_row():
+        """(where the cell's code starts, where it ends, where the next
+        column's word starts) on their row, or None."""
+        if not os.path.exists(measured_path):
+            return None
+        rows = {}
+        for page, baseline, left, right, char in pdftext.glyph_boxes(measured_path):
+            rows.setdefault((page, baseline), []).append((left, right, char))
+        for glyphs in rows.values():
+            text = "".join(g[2] for g in glyphs)
+            if text.startswith(MEASURED_CODE) and "Besidemeter" in text:
+                return (glyphs[0][0], glyphs[len(MEASURED_CODE) - 1][1],
+                        glyphs[text.index("Besidemeter")][0])
+        return None
+    def wide_row():
+        """(where the wide word ends, where the next column's word begins)
+        on their row, the word whole on it, or None."""
+        if not os.path.exists(measured_path):
+            return None
+        rows = {}
+        for page, baseline, left, right, char in pdftext.glyph_boxes(measured_path):
+            rows.setdefault((page, baseline), []).append((left, right, char))
+        for glyphs in rows.values():
+            text = "".join(g[2] for g in glyphs)
+            if text.startswith(MEASURED_WIDE) and "Besidewide" in text:
+                return (glyphs[len(MEASURED_WIDE) - 1][1],
+                        glyphs[text.index("Besidewide")][0])
+        return None
+    def inline_row():
+        """(where the cell's inline code ends, where the next column's
+        word begins) on their row, the code whole on it, or None."""
+        if not os.path.exists(measured_path):
+            return None
+        rows = {}
+        for page, baseline, left, right, char in pdftext.glyph_boxes(measured_path):
+            rows.setdefault((page, baseline), []).append((left, right, char))
+        for glyphs in rows.values():
+            text = "".join(g[2] for g in glyphs)
+            if text.startswith(MEASURED_INLINE) and "Besideinline" in text:
+                return (glyphs[len(MEASURED_INLINE) - 1][1],
+                        glyphs[text.index("Besideinline")][0])
+        return None
+    reals = [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
+                                          head_of(measured_source, MEASURED_WORDS[0]))]
+    return [
+        ("measured on the default page in its faces, the metadata file's LaTeX reading a file "
+         "in the book's folder, the LaTeX opens with the counts in ems of the text's type: a "
+         "line of 39.15, 469.76 points at 12 points, a space of 1 between two columns, twice "
+         "\\tabcolsep's 6 points, a character of code 0.6, IBM Plex Mono's, and a formula's "
+         "width about 0.48 of an em to a character formula_width counts, "
+         "count-formulas.txt's third quartile in IBM Plex Math",
+         lambda: counts is not None and counts["unit"] == "ems"
+         and abs(counts["line"] - 469.755 / 12) < 0.001 and abs(counts["gap"] - 1) < 0.001
+         and abs(counts["mono"] - 0.6) < 0.001 and 0.45 < counts["math"] < 0.5
+         and "couldn't be measured" not in measured_said),
+        ("inline code in a column its table gives too little room for it is given the code's "
+         "width, a character of code each, whole on its row, ending before the next column's "
+         "words",
+         lambda: (lambda found: found is not None and found[0] < found[1] - 1)(inline_row())),
+        ("code in a table's cell, its column given the code's width, is set in the text's "
+         "type, ending before the next column's word, where counted in characters it was "
+         "set smaller (the code book's)",
+         lambda: (lambda found: found is not None
+                  and abs((found[1] - found[0]) / len(MEASURED_CODE) - plex) < 0.02
+                  and found[1] < found[2] - 1)(code_row())),
+        ("a table whose longest words, 73 characters, a count of 70 to a line finds too wide "
+         "for it, measured fits it, its columns' shares of the line no more than the line, "
+         "and the build fits nothing in the book",
+         lambda: len(reals) == 4 and sum(reals) <= 1.0001
+         and os.path.exists(measured_path) and "Fitted" not in measured_said),
+        ("a word of wide letters in a column too narrow for it is given its width as the "
+         "face sets each of its letters, whole on its line, ending before the next column's "
+         "words",
+         lambda: (lambda found: found is not None and found[0] < found[1] - 1)(wide_row())),
     ]
 
 
@@ -5697,17 +5879,17 @@ def fancy_checks(fancy_path, fancy_said):
 # The folders the books are built in, each the main book's (work) with its
 # suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
 # preamble, AAA, fit, two-column, evaluation bar's, languages, rules,
-# code, code margins, code tall, and math font books are built beside it
-# (build_ua1 to build_math_font), and the default book's copy, built again
-# where TeX lacks a file of IBM Plex's (build_default). The cleanup removes
-# them and --keep names them, from this one list, and a check sees that no
-# build leaves another: the languages book's folder was left in the
-# temporary directory by every run, when the cleanup and the message each
-# had a list of their own.
+# code, code margins, code tall, math font, and measured books are built
+# beside it (build_ua1 to build_measured), and the default book's copy,
+# built again where TeX lacks a file of IBM Plex's (build_default). The
+# cleanup removes them and --keep names them, from this one list, and a
+# check sees that no build leaves another: the languages book's folder was
+# left in the temporary directory by every run, when the cleanup and the
+# message each had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
-                "-code-margins", "-code-tall", "-code-wrap", "-mathfont")
+                "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured")
 
 
 def checks(work, jobs=1):
@@ -5732,6 +5914,7 @@ def checks(work, jobs=1):
             ruled = pool.submit(build_rules, work + "-rules")
             coded = pool.submit(build_code, work + "-code")
             mathed = pool.submit(build_math_font, work + "-mathfont")
+            measured = pool.submit(build_measured, work + "-measured")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -5751,6 +5934,7 @@ def checks(work, jobs=1):
             (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
              tall_said, wrap_paths, wrap_said) = coded.result()
             math_paths, math_said = mathed.result()
+            measured_path, measured_said, measured_source = measured.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -5772,6 +5956,7 @@ def checks(work, jobs=1):
         (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
          tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
         math_paths, math_said = build_math_font(work + "-mathfont")
+        measured_path, measured_said, measured_source = build_measured(work + "-measured")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -6262,14 +6447,22 @@ def checks(work, jobs=1):
                              "\\underset{x}{\\text{lim}}", "\\text{lim}",
                              "x\\overset{?}{=}5", "x = 5", "x\\underset{a}{\\leq}5", "x \\leq 5",
                              "x\\stackrel{a}{b}y", "x = y"]))),
+        # In the counts' unit (table_counts): the notes book's are
+        # measured, in ems of Latin Modern at 10 points, where a formula's
+        # width is formula_width's count times the measure's math width.
         ("and in the LaTeX, steps set across the line give each column of math a tenth more "
-         "than its widest formula, so counted",
-         lambda: (lambda reals, w: len(reals) == 4 and len(w) == 3 and all(
-             abs(reals[j] - 1.1 * w[j] / 61) < 0.0001 for j in range(3)))(
+         "than its widest formula, so counted, in ems of the text's type, as the build "
+         "measured the book's page",
+         lambda: (lambda reals, w, counts: counts is not None and counts["unit"] == "ems"
+                  and len(reals) == 4 and len(w) == 3 and all(
+                      abs(reals[j] - 1.1 * w[j] * counts["math"]
+                          / (counts["line"] - 3 * counts["gap"])) < 0.0002
+                      for j in range(3)))(
              [float(r) for r in re.findall(r"\\real\{([\d.]+)\}",
                                            head_of(notes_source, "\\frac{5678}{9012}"))],
              formula_widths(["1234 + \\frac{5678}{9012} + \\frac{3456}{7890}", "=",
-                             "\\frac{15924}{2468} + \\frac{1357}{2468} + 1111"]))),
+                             "\\frac{15924}{2468} + \\frac{1357}{2468} + 1111"]),
+             table_counts(notes_source))),
         # pdf-target.lua: a heading where the writer's sectioning command
         # opened a section LaTeX's tagging couldn't close, every section
         # after a list's tagged inside the list.
@@ -6536,6 +6729,7 @@ def checks(work, jobs=1):
     items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path, default_said, lacking_path, lacking_said)
     items += math_font_checks(math_paths, math_said)
+    items += measured_checks(measured_path, measured_said, measured_source)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
                         aaa_lacking_said)

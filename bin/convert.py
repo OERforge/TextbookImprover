@@ -4238,6 +4238,9 @@ def deck_pdfs(target, stems, names, base, language):
     env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
                DOWNSAMPLED=DOWNSAMPLED.get(target.name, ""),
                **latexbuild.label_prefixes(target.resolved))
+    # A deck's tables are counted in characters, and its LaTeX says
+    # nothing of it (pdf-target.lua's counted).
+    env.pop("OER_MEASURES", None)
     os.makedirs(target.output_dir, exist_ok=True)
 
     def one(stem):

@@ -1285,6 +1285,105 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
+# The PDF filter lays a table out by counts (pdf-target.lua): of each
+# column's longest word and longest line, and of the line. They're reckoned
+# in ems of the book's own page and faces where LuaLaTeX can measure them
+# (measure_page): a document of the book's metadata, its preamble the
+# book's, which sets nothing but bin/measure-page.lua's measures of the
+# line, the faces, and count-formulas.txt's formulas, whose widths the
+# filter divides its counts of them by. The counts had been in characters
+# of the book class's page, 70 to a line of 10-point type, where the
+# default's page, 12-point IBM Plex Serif on 6.5 inches, holds about 84:
+# a table whose longest words fit its line was taken for one wider than
+# it, and set smaller to fit (Rob, 2026-10-29: "We don't want to make
+# tables or anything else smaller than it needs to be, which works against
+# accessibility"). OER_MEASURES set before the run is used as it is, and
+# none counts in characters, as the PDF suite's fit book does, whose cases
+# are set for them. Where the page can't be measured, the counts are in
+# characters, and the run warns why (unmeasured_warning).
+COUNT_FORMULAS = os.path.join(HERE, "count-formulas.txt")
+MEASURE_PAGE = os.path.join(HERE, "measure-page.lua")
+
+
+def measure_page(document, filters, environment, base):
+    """(OER_MEASURES for the PDF filter, as bin/measure-page.lua writes it,
+    None): the book's page and faces, measured by LuaLaTeX on a document of
+    the book's metadata (document's) that sets count-formulas.txt's
+    formulas, run in the book's folder, base, as Pandoc runs LaTeX, so that
+    a file the metadata's LaTeX reads, a font its options give a Path, or
+    the footer's picture is found; or (None, why they couldn't be
+    measured), and the filter counts in characters, as before. Run in a
+    folder of its own, the measuring stopped where the book's PDF built,
+    on a header-includes' \\input{macros.tex} (a review)."""
+    if not (os.path.isfile(COUNT_FORMULAS) and os.path.isfile(MEASURE_PAGE)):
+        return None, ("its files, bin/measure-page.lua and bin/count-formulas.txt, aren't "
+                      "both installed")
+    with open(COUNT_FORMULAS, encoding="utf-8") as fh:
+        formulas = [line.strip() for line in fh if line.strip()]
+    # The script and where it writes, by the environment, so that a path
+    # isn't read as TeX.
+    body = ("\\directlua{dofile(os.getenv(\"OER_MEASURE_LUA\"))}\n"
+            "{\\normalfont\\directlua{oer_measure.text(\\number\\linewidth, "
+            "\\number\\tabcolsep)}}\n"
+            "{\\normalfont\\ttfamily\\directlua{oer_measure.mono()}}\n"
+            + "".join("\\setbox0\\hbox{\\(" + tex + "\\)}"
+                      "\\directlua{oer_measure.formula(\\number\\wd0)}\n" for tex in formulas)
+            + "\\directlua{oer_measure.report(os.getenv(\"OER_MEASURE_OUT\"))}\n")
+    meta = {key: value for key, value in document["meta"].items()
+            if key not in ("title", "title-meta", "author", "date", "subtitle")}
+    meta["toc"] = meta_bool(False)
+    probe = {"pandoc-api-version": document["pandoc-api-version"], "meta": meta,
+             "blocks": [{"t": "RawBlock", "c": ["latex", body]}]}
+    work = tempfile.mkdtemp(prefix="measure-page-")
+    try:
+        source = os.path.join(work, "measure.json")
+        with open(source, "w", encoding="utf-8") as fh:
+            json.dump(probe, fh)
+        latex = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", source,
+                                "-o", os.path.join(work, "measure.tex")] + filters,
+                               cwd=base, env=environment, capture_output=True, text=True)
+        if latex.returncode:
+            return None, "Pandoc couldn't write its LaTeX: " + (
+                latex.stderr.strip().splitlines() or ["no reason given"])[-1]
+        shutil.copy(MEASURE_PAGE, work)
+        out = os.path.join(work, "measure-page.txt")
+        try:
+            done = subprocess.run(
+                [ENGINE, "-interaction=nonstopmode", "-halt-on-error", "-output-directory",
+                 work, os.path.join(work, "measure.tex")],
+                cwd=base, env=dict(environment, OER_MEASURE_LUA=os.path.join(
+                    work, "measure-page.lua"), OER_MEASURE_OUT=out),
+                capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL,
+                timeout=600)
+        except OSError:
+            return None, f"{ENGINE} isn't installed"
+        except subprocess.TimeoutExpired:
+            return None, f"{ENGINE} took more than ten minutes"
+        try:
+            with open(out, encoding="utf-8") as fh:
+                said = fh.read().strip()
+        except OSError:
+            errors = latexbuild.first_errors(done.stdout, 1)
+            return None, (f"{ENGINE} stopped on a document of the book's metadata and "
+                          "preamble: " + (errors[0].splitlines()[0] if errors
+                                          else "it said nothing of why"))
+        widths = re.search(r"(?:^|;)math=([^;]*)", said)
+        if not widths or len(widths.group(1).split(",")) != len(formulas):
+            return None, f"{ENGINE} measured some of count-formulas.txt's formulas, not all"
+        return said, None
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def unmeasured_warning(why):
+    """The run's warning that the book's page and faces couldn't be
+    measured (measure_page), and why."""
+    return ("WARNING: The book's page and faces couldn't be measured for its tables, so "
+            "their columns are counted in characters, 70 to a line, as for the book class's "
+            "10-point type, which can set a table smaller than it needs to be: "
+            + why.rstrip(".") + ".")
+
+
 def latex_said(log_path):
     """(what LaTeX's last run said, the LaTeX it read) from Pandoc's JSON
     log of a PDF build (--log), its makePDF messages; empty when the log
@@ -1404,6 +1503,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]),
                            **label_prefixes(resolved))
+        measures, why = (os.environ["OER_MEASURES"], None) if os.environ.get("OER_MEASURES") \
+            else measure_page(document, filters, environment, base)
+        environment["OER_MEASURES"] = measures or "none"
+        if not measures:
+            print(unmeasured_warning(why), file=sys.stderr)
         if keep or latex_only:
             # The LaTeX as the PDF was made from it, for reading when
             # something needs explaining; not needed to build.
@@ -1508,6 +1612,26 @@ def write_latex(base, name, resolved, project, document, out_dir):
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]),
                            **label_prefixes(resolved))
+        # Measured as the PDF target measures its page, where TeX is here,
+        # so that its tables are laid out alike; where it isn't, counted in
+        # characters, as the LaTeX's opening comment says, and the run says
+        # so. Measuring had fallen back without a word (a review).
+        pdf_filters = ["--lua-filter", os.path.join(HERE, "target-blocks.lua"),
+                       "--lua-filter", os.path.join(HERE, "footnote-code.lua"),
+                       "--lua-filter", os.path.join(HERE, "pdf-target.lua")] + highlighting.ARGS
+        if os.environ.get("OER_MEASURES"):
+            measures, why = os.environ["OER_MEASURES"], None
+        elif shutil.which(ENGINE):
+            measures, why = measure_page(document, pdf_filters, environment, base)
+        else:
+            measures, why = None, None
+            print(f"{ENGINE} isn't installed here to measure the book's page and faces, so the "
+                  "LaTeX's tables are counted in characters, 70 to a line, as for the book "
+                  "class's 10-point type, where a PDF built here would have them measured.",
+                  file=sys.stderr)
+        environment["OER_MEASURES"] = measures or "none"
+        if why:
+            print(unmeasured_warning(why), file=sys.stderr)
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
                               + filters, cwd=base, env=environment,
                               capture_output=True, text=True)
@@ -1550,7 +1674,8 @@ def main():
                         help="leave book.json and book.tex beside the PDF")
     parser.add_argument("--latex-only", action="store_true",
                         help="write book.json and book.tex beside where the "
-                             "PDF would go, and don't run LaTeX")
+                             "PDF would go, and don't make the PDF (LuaLaTeX "
+                             "still measures the page, where it's installed)")
     parser.add_argument("--latex-target", action="store_true",
                         help="build the latex targets (format: latex): the "
                              "book's LaTeX as a master and a file per chapter")

@@ -503,8 +503,45 @@ end
 -- \footnotesize for it from the characters it counted, which a table of
 -- numbers outran in 12-point type (Introductory Business Statistics 2e's
 -- F tables, up to 172 points too wide in \footnotesize).
-local LINE = 70   -- characters in a line of the book class's 10pt type, about
-local GAP = 3     -- the space between two columns, in characters
+--
+-- The counts are in ems of the text's type where build-pdf.py has
+-- measured the book's page and faces (OER_MEASURES, its measure_page): the
+-- line's width; the space between two columns, \tabcolsep on either side;
+-- the text face's printable ASCII characters, each its own width, its
+-- small letters, each as often as in English, for any other character,
+-- and its space; a character of code; and the width of each of a list
+-- of formulas (count-formulas.txt) as LaTeX sets it, whose counts below
+-- give what an em is of a formula's count (math_scales). Elsewhere,
+-- as for a deck's footnotes, a count is in characters, every character
+-- one, of a line of the book class's 10pt type, 70 or so, which the
+-- default's page, 12-point IBM Plex Serif on 6.5 inches, overcounted: its
+-- line holds about 84 characters of English, and a formula in IBM Plex
+-- Math is narrower than the characters counted it, by about a quarter at
+-- the median and 15 percent at the third quartile, so that a table whose
+-- words fit its line was taken for one whose longest words were wider
+-- than its line, set as narrow as can be and so wider than its line, and
+-- set smaller to fit: 29 of Introductory Business Statistics 2e's tables,
+-- by the filter's own reckoning, where measured, 14 are.
+local MEASURES = nil
+do
+  local given = os.getenv('OER_MEASURES') or ''
+  local found = {}
+  for key, value in given:gmatch('(%a+)=([^;]*)') do found[key] = value end
+  local numbers, ok = {}, given ~= ''
+  for _, key in ipairs({ 'line', 'gap', 'lower', 'space', 'mono', 'points' }) do
+    numbers[key] = tonumber(found[key])
+    ok = ok and numbers[key] ~= nil and numbers[key] > 0
+  end
+  local widths, chars = {}, {}
+  for value in (found.math or ''):gmatch('[^,]+') do widths[#widths + 1] = tonumber(value) end
+  for value in (found.chars or ''):gmatch('[^,]+') do chars[#chars + 1] = tonumber(value) end
+  if ok and #widths > 0 and #chars == 95 then
+    numbers.math, numbers.chars = widths, chars
+    MEASURES = numbers
+  end
+end
+local LINE = MEASURES and MEASURES.line or 70
+local GAP = MEASURES and MEASURES.gap or 3
 
 local function simple_cell(cell)
   local blocks = cell.contents
@@ -895,6 +932,81 @@ local function formula_width(tex)
   return math.ceil(width_of(tex, 1, false, tex:find('\\displaystyle', 1, true) ~= nil))
 end
 
+-- What an em is of a formula's count, of formula_length's and of
+-- formula_width's, in the book's math face beside its text face (MEASURES):
+-- of each formula count-formulas.txt lists, as LaTeX sets it in text style,
+-- the third quartile of its width over its count, so that a count gives a
+-- formula a little wider than most are, as it did in characters. Measured
+-- on 749 formulas of tables in Introductory Business Statistics 2e,
+-- Chemistry 2e, and Principles of Financial Accounting, and on the 48 the
+-- list keeps, alike within 1 percent: 0.47 of an em to a character of
+-- either count in IBM Plex Math beside Plex Serif, 0.53 in Latin Modern
+-- Math scaled to Plex Sans's small letters, 0.55 scaled to Noto Sans's,
+-- 0.44 in Noto Sans Math 3.000, and 0.47 in Latin Modern Math beside Latin
+-- Modern Roman. 1 for both where the counts are in characters.
+local function math_scales()
+  if not MEASURES then return 1, 1 end
+  local list = io.open(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                          'count-formulas.txt' }))
+  if not list then return nil end
+  local lengths, widths, i = {}, {}, 0
+  for tex in list:lines() do
+    if tex:match('%S') then
+      i = i + 1
+      local w = MEASURES.math[i]
+      if not w then break end
+      lengths[i], widths[i] = w / formula_length(tex), w / formula_width(tex)
+    end
+  end
+  list:close()
+  if i ~= #MEASURES.math or i == 0 then return nil end
+  table.sort(lengths)
+  table.sort(widths)
+  local at = math.floor(0.75 * (i - 1)) + 1
+  return lengths[at], widths[at]
+end
+local MATH_LENGTH, MATH_WIDTH = math_scales()
+if not MATH_LENGTH then
+  MEASURES, LINE, GAP, MATH_LENGTH, MATH_WIDTH = nil, 70, 3, 1, 1
+end
+
+-- A string's width as the counts reckon it (MEASURES): an ASCII
+-- character its own width, any other a small letter's, on average, and
+-- FILLER UNIT; or each character one. Reckoned by the average of its class,
+-- a word of 36 letters, Hippopotomonstrosesquippedaliophobia, was counted 4
+-- percent narrower than Latin Modern sets it, and its column left it too
+-- little room.
+local FILLER, UNIT = utf8.codepoint('\u{E000}'), MEASURES and 0.1 or 1
+local function text_width(s)
+  if not MEASURES then return utf8.len(s) or #s end
+  local width, chars = 0, MEASURES.chars
+  for _, code in utf8.codes(s) do
+    if code == FILLER then
+      width = width + UNIT
+    elseif code >= 32 and code <= 126 then
+      width = width + chars[code - 31]
+    elseif code == 9 or code == 10 or code == 13 or code == 160 then
+      width = width + chars[1]
+    else
+      width = width + MEASURES.lower
+    end
+  end
+  return width
+end
+
+-- A word as wide as width, of FILLER; spaces as wide, which no word is.
+local function filler(width)
+  return utf8.char(FILLER):rep(math.max(1, math.ceil(width / UNIT - 1e-9)))
+end
+local function blank_line(width)
+  return (' '):rep(math.ceil(width / (MEASURES and MEASURES.space or 1) - 1e-9))
+end
+
+-- A formula's width as formula_width counts it, in the counts' units.
+local function formula_measure(tex)
+  return formula_width(tex) * MATH_WIDTH
+end
+
 -- A fill-in blank, a run of four or more underscores the blank pass
 -- marks (blanks, below), counts as three in a cell's longest word, the
 -- shortest LaTeX draws it to fit its column, and whole in the cell's
@@ -958,17 +1070,36 @@ cell_size = function(cell)
       local words = {}
       for _, piece in ipairs(formula_pieces(math_.text)) do
         local size = formula_length(piece)
-        if size > 0 then words[#words + 1] = ('m'):rep(size) end
+        if size > 0 then words[#words + 1] = filler(size * MATH_LENGTH) end
       end
-      return pandoc.Str(#words > 0 and table.concat(words, ' ') or 'm')
+      return pandoc.Str(#words > 0 and table.concat(words, ' ') or filler(UNIT))
     end,
-    Image = function() return pandoc.Str((' '):rep(LINE)) end,
+    -- Inline code, in ems, a character of code each (MEASURES.mono), as a
+    -- block's lines are: each word with the spaces after it, which stay
+    -- at the end of a row it breaks at, a word to TeX, less the text's
+    -- space that stands between two (text_width). Counted in the text's
+    -- face, as stringify gives it, os.path.join(base,name) in a column
+    -- of its own was given 11.3 ems, which Plex Mono sets in 13.8, and TeX
+    -- broke it (a review).
+    Code = MEASURES and function(code)
+      local text, pieces = code.text, {}
+      local lead = #text:match('^%s*')
+      for word, spaces in text:gmatch('(%S+)(%s*)') do
+        pieces[#pieces + 1] = (utf8.len(word) or #word) + #spaces + lead
+        lead = 0
+      end
+      for k, count in ipairs(pieces) do
+        pieces[k] = filler(count * MEASURES.mono - (k < #pieces and MEASURES.chars[1] or 0))
+      end
+      return pandoc.Str(table.concat(pieces, ' '))
+    end or nil,
+    Image = function() return pandoc.Str(blank_line(LINE)) end,
     LineBreak = function() return pandoc.Str('\n') end,
   }
   for _, block in ipairs(cell.contents) do
     local text = stringify(pandoc.Blocks{ block }:walk(counted))
     for line in (text .. '\n'):gmatch('(.-)\n') do
-      length = math.max(length, utf8.len(line) or #line)
+      length = math.max(length, text_width(line))
     end
     -- A block of code's lines, which stringify doesn't give (a block's
     -- text is its inlines'), each set whole, as it's written: in a cell,
@@ -979,12 +1110,12 @@ cell_size = function(cell)
     -- gives every column, and the code ran into the next.
     pandoc.Blocks{ block }:walk{ CodeBlock = function(code)
       for line in (code.text .. '\n'):gmatch('(.-)\n') do
-        local size = utf8.len(line) or #line
+        local size = (utf8.len(line) or #line) * (MEASURES and MEASURES.mono or 1)
         length, longest = math.max(length, size), math.max(longest, size)
       end
     end }
     for word in stringify(blanks_counted(block):walk(counted)):gmatch('%S+') do
-      longest = math.max(longest, utf8.len(word) or #word)
+      longest = math.max(longest, text_width(word))
     end
     local function marked(raw)
       local width = tonumber(raw.text:match('^' .. WIDTH_MARK:gsub('%%', '%%%%'):gsub('%-', '%%-') .. '(%d+)'))
@@ -1068,7 +1199,7 @@ end
 local function widest_formula(cell)
   local widest = 0
   pandoc.Blocks(cell.contents):walk({ Math = function(math_)
-    widest = math.max(widest, formula_width(math_.text))
+    widest = math.max(widest, formula_measure(math_.text))
   end })
   return widest
 end
@@ -1121,16 +1252,19 @@ end
 -- as cell_size counts it, a function's name a character, would fit.
 --
 -- MATH_ROOM is the part of its count a formula is given, in a column of
--- math or among the words: a tenth more. Pandoc's template scales Latin
+-- math or among the words: a tenth more. Measured in ems, a count is of
+-- the book's own math face, at the third quartile (math_scales), so a
+-- quarter of formulas are wider than it gives them. Counted in
+-- characters, it was Latin Modern's, and Pandoc's template scales Latin
 -- Modern Math, a formula's face where a book names a face for its text
 -- and none for formulas, to the height of the text's small letters, and
 -- Noto Sans's, the face of OpenStax's math books, are 24 percent taller
--- than Latin Modern's, so a formula is set wider than the count, which
--- is Latin Modern's: in College Algebra 2e's first chapter, in Noto Sans,
--- without it 10 of its 51 tables of steps would have had a formula wider
--- than its column, 9 set smaller to fit it (FIT_MACROS); with it, 4 had,
--- 3 set smaller, which were wider than the line even in columns as wide
--- as LaTeX measures their widest formula or word.
+-- than Latin Modern's, so a formula was set wider than the count: in
+-- College Algebra 2e's first chapter, in Noto Sans, without it 10 of its
+-- 51 tables of steps would have had a formula wider than its column, 9
+-- set smaller to fit it (FIT_MACROS); with it, 4 had, 3 set smaller,
+-- which were wider than the line even in columns as wide as LaTeX
+-- measures their widest formula or word.
 local MATH_ROOM = 1.1
 
 -- The least part of its size FIT_MACROS sets a table in to fit its line
@@ -1169,7 +1303,7 @@ local function steps_widths(tbl)
     for j, cell in ipairs(row.cells) do
       if formulas[j] then
         local formula = lone_formula(cell)
-        if formula then need[j] = math.max(need[j], formula_width(formula)) end
+        if formula then need[j] = math.max(need[j], formula_measure(formula)) end
       else
         local length, longest = cell_size(cell)
         need[j] = math.max(need[j], length)
@@ -1789,7 +1923,7 @@ end
 -- draw them in a row too (page.css). With a caption of their own, they
 -- stand one under another, each caption under its picture.
 local ROW_GAP = 4         -- percent of the line between two pictures
-local LINE_POINTS = 345   -- the book class's line at 10pt, in points
+local LINE_POINTS = MEASURES and MEASURES.points or 345   -- the line, in points
 local POINTS = { px = 0.75, pt = 1, ['in'] = 72, inch = 72, cm = 72 / 2.54,
                  mm = 72 / 25.4, pc = 12 }
 
@@ -2515,6 +2649,22 @@ local function fit_code(doc)
   return doc
 end
 
+-- What the counts were in, a comment the LaTeX opens with: the measures
+-- in ems, or characters. Only where build-pdf.py says which (OER_MEASURES,
+-- none for characters), as for a book's PDF and its latex target: a
+-- deck's PDF, through ltx-talk, made the comment a slide of its own
+-- before the deck's first, a blank page.
+local function counted(doc)
+  if (os.getenv('OER_MEASURES') or '') == '' then return nil end
+  local said = MEASURES and string.format(
+    'ems of the text\'s type: line %.4f, gap %.4f, lower %.4f, space %.4f, mono %.4f, '
+    .. 'math length %.4f, math width %.4f',
+    LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, MATH_LENGTH, MATH_WIDTH)
+    or 'characters, 70 to a line'
+  doc.blocks:insert(1, pandoc.RawBlock('latex', '% TextbookImprover\'s table counts, in ' .. said))
+  return doc
+end
+
 return {
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
@@ -2541,4 +2691,5 @@ return {
   { Pandoc = fit_formulas },
   { Pandoc = fit_code },
   { DefinitionList = term_braces },
+  { Pandoc = counted },
 }

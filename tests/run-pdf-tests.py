@@ -1626,6 +1626,9 @@ FIT_ONE = (
     + "A worked example's steps, an array in text:\n\n"
     "1. $\\begin{array}{lll} \\text{Arraysmaller} & = & " + fit_terms(11)
     + " \\\\ & = & b \\end{array}$\n\n"
+    "And an array inside delimiters: $\\left( \\begin{array}{cl} \\text{Arraydelimited} & "
+    "2 \\end{array} \\right)$, and between delimiters that don't stretch, as texmath writes "
+    "them: $\\lbrack\\begin{array}{cl} \\text{Arrayplain} & 2 \\end{array}\\rbrack$.\n\n"
     "A table whose cell holds a table:\n\n<table><tbody><tr><td><table><tbody><tr>"
     "<td>Nestedone</td><td>Nestedtwo</td><td>Nestedthree</td><td>Nestedfour</td></tr>"
     "</tbody></table></td><td><p>Besidenest, words that wrap in what the table leaves of "
@@ -2069,6 +2072,57 @@ INLINE_CODE = (
     "seven characters wide, in a table whose columns have no widths</td><td><code "
     "class=\"python\">" + INLINE_CELL.replace(">", "&gt;") + "</code></td></tr></tbody>"
     "</table>\n\n")
+# Paragraphs of code line by line, as Introduction to Python Programming
+# sets help()'s output, each line of code ended by a line break
+# (LINES_CODE): highlighted, and in no language, whose no-break spaces
+# the writer sets as LaTeX's ~, which TeX took out at a row's start after
+# a line break, so that a line lost its indentation. In each, lines too
+# long for their line, indented two characters and four, wrapped, each
+# part after its first its line's indentation and two characters further
+# in, the arrow before it; a line indented 30 characters whose word of 45
+# fits a line but not a part after the first; a line indented deeper
+# than leaves twenty characters to a part, whose first word doesn't fit
+# after its indentation in Plex Mono; and a line whose words fill a row in
+# Plex Mono, 65 characters, but for the space after them, which TeX drops
+# at a break in code in no language. And the paragraph's first lines again
+# at a page's foot, set where its wrapped line's rows run across the
+# page's break but for keeping them together.
+LINES_WORDS = " ".join("word%02d" % i for i in range(15))
+
+
+def lines_of_code(name, nbsp="\u00a0"):
+    """A paragraph of code line by line's lines, each opening with name,
+    indented with nbsp."""
+    return [name + "head = 1", nbsp * 2 + name + "first - " + LINES_WORDS,
+            nbsp * 4 + name + "second " + LINES_WORDS, nbsp * 30 + name + "long " + "L" * 45,
+            nbsp * 60 + name + "cap " + LINES_WORDS, name + "fill" + " wwww" * 11 + " and more",
+            name + "end = 1"]
+
+
+def lines_paragraph(lines, attributes):
+    """lines as a paragraph of inline code, each ended by a line break but
+    the last."""
+    return "\\\n".join("`" + line + "`" + attributes for line in lines) + "\n\n"
+
+
+# And a table's cell of such lines, a row in no language and one
+# highlighted (LINES_CELL): the writer sets a cell that has line breaks
+# ragged right in a minipage, where a line break ends a paragraph, so each
+# line was a paragraph of its own, and its wrapped parts started at the
+# cell's edge (a review).
+LINES_CELL = (
+    "<table><thead><tr><th>Celled code</th></tr></thead><tbody>"
+    + "".join("<tr><td>" + "<br/>".join(
+        "<code" + attributes + ">" + line.replace("&", "&amp;").replace("<", "&lt;")
+        + "</code>" for line in lines_of_code(name)[:4]) + "</td></tr>"
+        for name, attributes in (("Hangcell", ""), ("Hangcellpy", " class=\"python\"")))
+    + "</tbody></table>\n\n")
+LINES_CODE = (
+    "```{=latex}\n\\clearpage\n```\n\n## Lines\n\nHighlighted:\n\n"
+    + lines_paragraph(lines_of_code("Hangpy"), "{.python}") + "In no language:\n\n"
+    + lines_paragraph(lines_of_code("Hangtt"), "") + "In a table's cell:\n\n" + LINES_CELL
+    + "```{=latex}\n\\clearpage\n\\vspace*{\\dimexpr\\textheight-5\\baselineskip\\relax}\n"
+    "```\n\n" + lines_paragraph(lines_of_code("Hangtie")[:3], "{.python}"))
 FIT_CODE = (
     "# Code\n\nA block whose lines fit theirs:\n\n```python\ndef shortline(p):\n    return p\n"
     "```\n\nA highlighted line too long for its line:\n\n```python\n" + CODE_LONG
@@ -2117,7 +2171,7 @@ FIT_CODE = (
     + "-" * 12 + "+\n\nA footnote whose code is too long for its line even at three quarters of its "
     "size.[^wide]\n\nA footnote whose words are too wide for its line and whose last block is "
     "code.[^words]\n\n```{=latex}\n\\clearpage\n\\vspace*{\\dimexpr\\textheight-4\\baselineskip"
-    "\\relax}\n```\n\n```\nPagefoot = " + FOOT_WORDS + "\n```\n\n" + INLINE_CODE
+    "\\relax}\n```\n\n```\nPagefoot = " + FOOT_WORDS + "\n```\n\n" + INLINE_CODE + LINES_CODE
     + "[^code]: Its code:\n\n    ```python\n    Noteline = \"" + "z" * 70
     + "\"\n    ```\n\n[^cell]: Its code:\n\n    ```python\n    Cellnote = \"" + "c" * 87
     + "\"\n    ```\n\n[^wide]: Its code:\n\n    ```\n    Notewide = \"" + "n" * 106
@@ -2704,6 +2758,81 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                     return False
         return True
 
+    def hung(path, name, nbsp):
+        """The paragraph of code line by line whose lines open with name
+        (lines_of_code), indented with nbsp as the PDF's text has it: each
+        of its rows inside the text's width, and its lines indented two
+        characters, four, and 30 wrapped, each with a hook before each part
+        after its first (hooked)."""
+        lines = lines_of_code(name, nbsp)
+        rows = inline_rows(path, lines[0], lines[-1])
+        return len(rows) > len(lines) and all(inside(glyphs) for _p, _b, glyphs in rows) \
+            and hooked(path, [(lines[k][:indent + len(name) + 4], indent)
+                              for k, indent in ((1, 2), (2, 4), (3, 30))])
+
+    def capped(path, name, nbsp):
+        """The paragraph's line indented 60 characters, deeper than leaves
+        twenty to a part (lines_of_code): its rows after its first twenty
+        characters from the text's edge, on its page, holding the line as
+        written."""
+        whole = lines_of_code(name, nbsp)[4]
+        rows = glyph_rows(path)
+        for i, (page, _baseline, glyphs) in enumerate(rows):
+            text = "".join(g[2] for g in glyphs)
+            if text == whole[:60] or text.startswith(whole[:64 + len(name)]):
+                step, found = advance_of(glyphs), [rows[i]]
+                for later in rows[i + 1:]:
+                    if later[0] != page or abs(later[2][0][0] - (540 - 20 * step)) > 0.5:
+                        break
+                    found.append(later)
+                return len(found) >= 3 \
+                    and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == whole
+        return False
+
+    def indented(path, name):
+        """Each line of the paragraph whose lines open with name opens its
+        row at its own indentation: the line indented four characters' text
+        four characters from the row's start, the text's edge."""
+        for _page, _baseline, glyphs in glyph_rows(path):
+            text = "".join(g[2] for g in glyphs)
+            if name + "second" in text:
+                at = text.index(name + "second")
+                return abs(glyphs[at][0] - 72 - 4 * advance_of(glyphs)) < 0.5
+        return False
+
+    def lines_text(path, name, nbsp):
+        """The paragraph's text in the PDF's structure holds each of its
+        lines as written, no arrow among them."""
+        found = [text for text in pdftext.element_texts(path, "/text") if name + "head" in text] \
+            if os.path.exists(path) else []
+        return len(found) == 1 and "\u21b3" not in found[0] \
+            and all(line_ in found[0] for line_ in lines_of_code(name, nbsp))
+
+    def filled(path):
+        """In the paragraph of code in no language, the line whose words
+        fill a row but for the space after them (lines_of_code's fill line)
+        has them all on its first row, in Plex Mono: TeX drops a space it
+        breaks code in no language at, and a break that kept it, at the
+        row's end, had moved the last word to the next row."""
+        whole = lines_of_code("Hangtt", " ")[5]
+        for _page, _baseline, glyphs in glyph_rows(path):
+            text = "".join(g[2] for g in glyphs)
+            if text.startswith(whole[:10]):
+                return text.rstrip() == whole[:65]
+        return False
+
+    def tied(path, crossing):
+        """The paragraph at a page's foot: its wrapped line's parts all on
+        one page, holding the line as written; and where crossing, that page
+        the next after the paragraph's first row's, where the line's first
+        part would have been."""
+        lines = lines_of_code("Hangtie")
+        found = parts(path, lines[1][:16], 2)
+        head = page_of(path, lines[0])
+        return len(found) >= 2 and head is not None \
+            and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == lines[1] \
+            and (not crossing or found[0][0] == head + 1)
+
     def item_word(path):
         """The margins book's list's item's word of code (ITEM_WORD), longer
         than the item's line but not the text's: broken between its letters,
@@ -2941,6 +3070,41 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         ("the paragraphs' text in the PDF's structure is as written, the code's spaces one "
          "each where a row ends, and none where a word breaks",
          lambda: inline_texts(code_path) == INLINE_TEXTS + [INLINE_CELL]),
+        # A paragraph of code line by line had wrapped its lines at the
+        # text's edge, each part after a line's first at the left margin,
+        # as if it were a line of its own.
+        ("a paragraph of code line by line, highlighted and in no language: each line too "
+         "long for its line wrapped, each part after its first set its line's indentation "
+         "and two characters further in, a hook before it, an artifact; a word too long for "
+         "such a part but not for the line broken between its letters, every row inside the "
+         "text's width; and a line indented deeper than leaves twenty characters to a part, "
+         "its parts after its first twenty characters from the text's edge; in Plex Mono and "
+         "in Latin Modern Mono",
+         lambda: all(hung(path, name, nbsp) and capped(path, name, nbsp)
+                     for path in (code_path, latin_path)
+                     for name, nbsp in (("Hangpy", "\u00a0"), ("Hangtt", " ")))),
+        ("each line of such a paragraph opens its row at its own indentation, in no language "
+         "too, where TeX had taken out the indentation a line break left at a row's start",
+         lambda: all(indented(path, name) for path in (code_path, latin_path)
+                     for name in ("Hangpy", "Hangtt"))),
+        ("such lines in a table's cell, each a paragraph of its own, highlighted and in no "
+         "language, are wrapped alike, each part after a line's first its indentation and two "
+         "characters further in, a hook before it",
+         lambda: all(hooked(path, [(lines[k][:indent + len(name) + 4], indent)
+                                   for k, indent in ((1, 2), (2, 4), (3, 30))])
+                     for path in (code_path, latin_path)
+                     for name, nbsp in (("Hangcellpy", "\u00a0"), ("Hangcell", " "))
+                     for lines in [lines_of_code(name, nbsp)])),
+        ("such a paragraph's text in the PDF's structure holds each of its lines as written, "
+         "one space where a row ends after one, and no arrow",
+         lambda: all(lines_text(code_path, name, nbsp)
+                     for name, nbsp in (("Hangpy", "\u00a0"), ("Hangtt", " ")))),
+        ("a wrapped line of such a paragraph has its parts on one page, at a page's foot "
+         "moved to the next page whole",
+         lambda: tied(code_path, True) and tied(latin_path, False)),
+        ("a line of such a paragraph in no language whose words fill a row but for the "
+         "space after them has them all on the row, the space dropped at the break",
+         lambda: filled(code_path)),
         # Set at three quarters, the display would come within a quarter
         # inch of the paper's edge if its margin were the left one, and
         # would be set smaller, the smallest then less than 75 percent; TeX
@@ -2990,7 +3154,8 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
          "where it's measured; a line in no language taller than half the page wrapped "
          "breaks across pages, each part inside the page's text",
          lambda: "WARNING: 1 block(s) of code in a language has a line too long for a page "
-         "even wrapped, which runs off its page's foot: on tall." in tall_said
+         "even wrapped, which runs off its page's foot: on tall. Break the line into shorter "
+         "ones in the book's files to fix it." in tall_said
          and os.path.exists(tall_path)
          and pdftext.code_lines(tall_path) == ["Tallcode = \"" + TALL_WORDS + "\"",
                                               "Tallplain = " + TALL_WORDS]
@@ -5178,6 +5343,13 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
         ("a worked example's steps, an array in text, are set smaller to fit their line, "
          "and fitted again on the second run",
          lambda: 0.75 * body < size("Arraysmaller") < 0.8 * body),
+        # LaTeX's array sets \arraycolsep before its first column and after
+        # its last, which FIT_MACROS measured as the formula's width.
+        ("an array's padding at its edges is taken away, but right after a delimiter, which "
+         "it keeps the array's cells off, inside \\left and \\right, or after one alone",
+         lambda: "\\begin{array}{@{}lll@{}} \\text{Arraysmaller}" in fit_source
+         and "\\left( \\begin{array}{cl} \\text{Arraydelimited}" in fit_source
+         and "\\lbrack\\begin{array}{cl} \\text{Arrayplain}" in fit_source),
         ("a table whose cell holds a table, which Pandoc's HTML reader gives equal widths, "
          "has that cell's column widened to the table in it, set in the text's type, ending "
          "before the next column's words",
@@ -5232,13 +5404,14 @@ def columns_checks(columns_path, columns_said, wrapped_path):
          "fleqn sets it, in the text's type, and named among the lines too wide",
          lambda: abs(size("Columndisplay") - 11.96) < 0.03
          and re.search(r"WARNING: [^\n]*: 1 display formula\(s\)", columns_said)),
-        # Its smaller type's forms are wider for their size, so that it's
-        # still a few points too wide.
+        # The array's padding before its first column and after its last,
+        # which LaTeX's array sets, had left it a few points past the
+        # column, and counted among what's too wide for it.
         ("on a page of two columns, a worked example's steps too wide for their column even "
-         "at three quarters of their type are set smaller still for it, a few points past "
-         "it, and not let run a margin's width into the other column",
+         "at three quarters of their type are set smaller still to fit it, and not let run "
+         "a margin's width into the other column",
          lambda: 0 < size("Columnarray") < 0.75 * 11.96 - 0.1
-         and 71.5 <= ends("Columnarray")[0] and 0 < ends("Columnarray")[1] <= 307),
+         and 71.5 <= ends("Columnarray")[0] and 0 < ends("Columnarray")[1] <= 301.5),
         ("with code_wrap 0.5, a line of code too wide for its column even at three quarters "
          "of its size is set smaller still, to fit it, and fitted again on the second run, "
          "where Latin Modern Mono's design for its smaller size leaves it a little too wide",
@@ -5247,7 +5420,7 @@ def columns_checks(columns_path, columns_said, wrapped_path):
               or (310.5 <= left and right <= 540.5))(*ends("Columncode"))),
         ("and the build warns of what's too wide for its column even in smaller type, as "
          "too wide for the column, not for the paper",
-         lambda: re.search(r"WARNING: 2 table\(s\), formula\(s\), or block\(s\) of code on "
+         lambda: re.search(r"WARNING: 1 table\(s\), formula\(s\), or block\(s\) of code on "
                            r"pages of two columns are too wide for their column even in "
                            r"smaller type, the smallest "
                            r"at 50% of its size, and run past it, the widest \d+ points wider "

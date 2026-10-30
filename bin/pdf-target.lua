@@ -2042,9 +2042,56 @@ end
 -- matrix's end makes no row, so the bar's upper limit sat low. The empty
 -- line is an empty group, {}, which makes the row; another empty line,
 -- which texmath doesn't write, is the line end TeX would read.
+--
+-- And a bare array's outer padding: LaTeX's array sets \arraycolsep before
+-- its first column and after its last, blank, and texmath writes an array
+-- for an mtable that's no matrix, its columns aligned otherwise than
+-- centered, as a worked example's steps are. FIT_MACROS measures the
+-- padding as the formula's, so that College Algebra 2e's Example 12 (e) was
+-- measured 0.6 points wider than its line, its ink 1.4 points inside it,
+-- and reported too wide, and a formula as wide as its line less the
+-- padding was set smaller. Each edge of an array with no rule at it has
+-- none (@{}), as amsmath's matrices, which texmath writes for a centered
+-- mtable, have none; but for an array right after a delimiter, whose
+-- padding keeps the array's cells off it, inside \left and \right, as
+-- texmath writes an array between delimiters, or after one alone, as it
+-- writes one between delimiters MathML doesn't stretch (\lbrack\begin{array},
+-- whose padding the filter had taken away, a review); and one inside
+-- another's cell, and an array whose columns aren't written as texmath
+-- writes them, l, c, r, and rules.
+local DELIMITERS = { lbrack = true, lbrace = true, langle = true, lvert = true, lVert = true,
+                     lfloor = true, lceil = true, lgroup = true, vert = true, Vert = true }
+local function unpadded(tex)
+  local out, at, depth = {}, 1, 0
+  while true do
+    local b1, b2, spec = tex:find('\\begin%s*{array}%s*(%b{})', at)
+    local e1, e2 = tex:find('\\end%s*{array}', at)
+    if not (b1 or e1) then break end
+    if e1 and not (b1 and b1 < e1) then
+      out[#out + 1] = tex:sub(at, e2)
+      depth, at = math.max(0, depth - 1), e2 + 1
+    else
+      local columns = spec:sub(2, -2)
+      local before = tex:sub(1, b1 - 1)
+      local delimited = before:match('\\left%s*\\%a+%s*$')
+        or before:match('\\left%s*\\?[^%a%s]%s*$')
+        or before:match('[%(%[|]%s*$') or before:match('\\[{|]%s*$')
+        or DELIMITERS[before:match('\\(%a+)%s*$') or '']
+      if depth == 0 and not delimited and columns:match('^[lcr|%s]+$') then
+        if not columns:match('^%s*|') then columns = '@{}' .. columns end
+        if not columns:match('|%s*$') then columns = columns .. '@{}' end
+      end
+      out[#out + 1] = tex:sub(at, b2 - #spec) .. '{' .. columns .. '}'
+      depth, at = depth + 1, b2 + 1
+    end
+  end
+  out[#out + 1] = tex:sub(at)
+  return table.concat(out)
+end
+
 local function Math(math)
-  local text = math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
-    :gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n')
+  local text = unpadded(math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
+    :gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n'))
   if math.mathtype == 'DisplayMath' and text:match('^%s*\\begin%s*{eqnarray%*}') then
     return pandoc.RawInline('latex', text)
   end

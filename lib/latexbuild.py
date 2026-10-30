@@ -866,6 +866,38 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % it. Allowed in any word, a break between letters filled a line flush to
 % both margins, as a trial found ("att" over "ribute_name"), where TeX now
 % breaks after a mark or moves the word.
+% A paragraph every character of which is code, line by line, each line
+% of code ended by a line break, as Introduction to Python Programming
+% sets help()'s output, or one line of code, has each part of a line after
+% its first set the line's indentation and two characters further in, the
+% arrow before it, as a block's wrapped line has (oer.inline.code's
+% hang_lines): its parts had started at the margin, as if each were a line
+% of its own. A table's cell that has line breaks sets each of its lines
+% as a paragraph, the writer setting it ragged right in a minipage, where a
+% line break ends a paragraph, and a cell's wrapped line of code had
+% started at the cell's edge where only lines ended by line breaks were
+% so set (a review).
+% Each place such a line may break is a discretionary break whose text
+% after the break is a box as wide as that, the arrow drawn at its end, so
+% that TeX measures each part with it and breaks the paragraph where it
+% would have; a paragraph shape from a first breaking, tried first, moved
+% the breaks of the ragged paragraph, a line breaking after its first word.
+% A break at a space between words of code in no language, which is glue,
+% comes after the space, which stays at the line's end, a kern before the
+% break taking its width back, as TeX takes a space it breaks at away: kept,
+% it had moved a row's last word to the next row (1.9's summary). The break
+% has a glyph's attributes: LuaTeX gives a break's attributes to the right
+% skip after it, and tagpdf writes a space wherever a space's attribute
+% is, so the space's gave two. A line isn't broken in its
+% indentation, but right after it, which TeX takes only where its first
+% word doesn't fit there, as a line indented deeper than leaves twenty
+% characters to a part; a word longer than a part's room but not the line's
+% may break between its letters (breaks, the room less the indentation).
+% Code in no language, whose no-break spaces the writer sets as ~, starts
+% each line after an empty box, so that TeX keeps its indentation at a
+% row's start, where it had taken it out after a line break. A line's
+% parts are kept on one page unless they'd take more than half of it
+% (oer.code.lines), as a block's are.
 \providecommand\OERFitCodeWrap{""" + str(CODE_WRAP) + r"""}
 \providecommand\OERInlineCode{}
 \providecommand\OERInlineCodeBox{}
@@ -1151,8 +1183,128 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       return false
     end
+    local SP_PER_BP, BP = 65781.76, string.char(37) .. ".3f"
+    local function arrow(char)
+      local function bp(sp) return string.format(BP, sp / SP_PER_BP) end
+      local x0, x1, top, mid, tip = -1.6 * char, -0.45 * char, 0.7 * char, 0.25 * char, 0.3 * char
+      local literal = node.new("whatsit", "pdf_literal")
+      literal.mode = 0
+      literal.data = "q 0 G " .. bp(0.07 * char) .. " w 1 J 1 j "
+        .. bp(x0) .. " " .. bp(top) .. " m " .. bp(x0) .. " " .. bp(mid) .. " l "
+        .. bp(x1) .. " " .. bp(mid) .. " l S "
+        .. bp(x1 - tip) .. " " .. bp(mid + 0.75 * tip) .. " m " .. bp(x1) .. " " .. bp(mid) .. " l "
+        .. bp(x1 - tip) .. " " .. bp(mid - 0.75 * tip) .. " l S Q"
+      local box = node.hpack(literal)
+      box.width = 0
+      return box
+    end
+    local ROOM = 20
+    local function forced(n)
+      return n.id == PENALTY and n.penalty <= -10000
+    end
+    local function code_lines(head)
+      local code = false
+      for n in node.traverse_id(GLYPH, head) do
+        if (node.has_attribute(n, inline) or 0) == 0 then return false end
+        code = true
+      end
+      return code
+    end
+    local function lines_of(head, room)
+      local lines, count, start = {}, 0, head
+      while start do
+        local stop = start
+        while stop and not forced(stop) do stop = stop.next end
+        local text = start
+        while text and not (text == stop) and not (text.id == GLYPH and not blank(text.char)) do
+          text = text.next
+        end
+        local line = { start = start, stop = stop, hang = 0, char = 0 }
+        if text and not (text == stop) then
+          local g = text
+          while g and not (g == stop) and not (g.id == GLYPH and g.width > 0) do g = g.next end
+          if g and not (g == stop) then line.char = g.width end
+          line.text = text
+          if count > 0 and (start.id == GLUE or start.id == PENALTY or start.id == KERN
+                            or start.id == MATH) then
+            local keep = node.new(HLIST)
+            head, line.start = node.insert_before(head, start, keep), keep
+          end
+          if line.char > 0 then
+            line.hang = math.max(0, math.min(node.dimensions(line.start, text) + 2 * line.char,
+                                             room - ROOM * line.char))
+          end
+        end
+        count = count + 1
+        lines[count] = line
+        start = stop and stop.next
+      end
+      return head, lines, count
+    end
+    local function hanger(line)
+      local k = node.new(KERN)
+      k.kern = line.hang
+      if line.hang >= 1.8 * line.char then
+        local a = arrow(line.char)
+        k.next, a.prev = a, k
+      end
+      local box = node.hpack(k, line.hang, "exactly")
+      node.set_attribute(box, inline, 3)
+      return box
+    end
+    local function hang_lines(head, lines, count)
+      for i = 1, count do
+        local line = lines[i]
+        if line.text and line.hang > 0 then
+          local n = line.start
+          while not (n == line.text) do
+            if n.id == PENALTY and n.penalty < 10000 then n.penalty = 10000 end
+            n = n.next
+          end
+          if node.dimensions(line.start, line.text) > 0 then
+            local d = node.new(DISC)
+            d.penalty, d.post, d.attr = 0, hanger(line), line.text.attr
+            head = node.insert_before(head, line.text, d)
+          end
+          while n and not (n == line.stop) do
+            local after, value = n.next, nil
+            if n.id == PENALTY and n.penalty < 10000 and n.penalty > -10000 then
+              value, n.penalty = n.penalty, 10000
+            elseif n.id == GLUE and not EDGES[n.subtype] and not (n.prev and n.prev.id == PENALTY) then
+              value, after = 0, n
+              head = node.insert_before(head, n, wrap_penalty(n, 10000))
+            elseif n.id == DISC then
+              local box, post = hanger(line), n.post
+              if post then box.next, post.prev = post, box end
+              n.post = box
+            end
+            if value then
+              local spaces = 0
+              while after and after.id == GLUE and not EDGES[after.subtype] do
+                spaces, after = spaces + after.width, after.next
+              end
+              local d = node.new(DISC)
+              d.penalty, d.post, d.attr = value, hanger(line), line.text.attr
+              if spaces > 0 then
+                local k = node.new(KERN)
+                k.kern = -spaces
+                d.pre = k
+              end
+              if after then
+                head = node.insert_before(head, after, d)
+              else
+                head = node.insert_after(head, node.tail(head), d)
+              end
+            end
+            n = after
+          end
+        end
+      end
+      return head
+    end
+    local hung = false
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
-      local n, room = head, nil
+      local n, runs, count = head, {}, 0
       while n do
         local after = n.next
         if code_box(n) then
@@ -1170,19 +1322,90 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
             glyph = g
             break
           end
-          room = room or narrowest()
-          head = breaks(head, first, after, glyph, room)
+          count = count + 1
+          runs[count] = { first = first, stop = after, glyph = glyph }
         elseif n.id == GLYPH and (node.has_attribute(n, inline) or 0) > 0 then
           local stop = n.next
           while stop and (node.has_attribute(stop, inline) or 0) > 0 do stop = stop.next end
-          room = room or narrowest()
-          head = breaks(head, n, stop, nil, room, true)
+          count = count + 1
+          runs[count] = { first = n, stop = stop, words = true }
           after = stop
         end
         n = after
       end
+      if count == 0 then return head end
+      local room, lines, total = narrowest(), nil, 0
+      if code_lines(head) then
+        head, lines, total = lines_of(head, room)
+        local r, k = 1, 1
+        for m in node.traverse(head) do
+          if r > count then break end
+          if m == runs[r].first then
+            runs[r].hang, r = lines[k].hang, r + 1
+          end
+          if forced(m) then k = k + 1 end
+        end
+      end
+      for i = 1, count do
+        local run = runs[i]
+        head = breaks(head, run.first, run.stop, run.glyph, room - (run.hang or 0), run.words)
+      end
+      if lines then head, hung = hang_lines(head, lines, total), true end
       return head
     end, "oer.inline.code")
+    local LOCALPAR = node.id("local_par")
+    luatexbase.add_to_callback("post_linebreak_filter", function(head)
+      if not hung then return true end
+      hung = false
+      local rows, count = {}, 0
+      for line in node.traverse_id(HLIST, head) do
+        if line.subtype == 1 then
+          local at = line.head
+          while at and (at.id == GLUE and EDGES[at.subtype] or at.id == LOCALPAR or at.id == DIR) do
+            at = at.next
+          end
+          count = count + 1
+          rows[count] = { line = line, part = at and at.id == HLIST and node.has_attribute(at, inline) == 3 }
+        end
+      end
+      local i = 1
+      while i <= count do
+        local j = i
+        while j < count and rows[j + 1].part do j = j + 1 end
+        local tall, n = 0, rows[i].line
+        while n and j > i do
+          if n.id == HLIST then
+            tall = tall + n.height + n.depth
+          elseif n.id == GLUE then
+            tall = tall + n.width
+          elseif n.id == KERN then
+            tall = tall + n.kern
+          end
+          if n == rows[j].line then break end
+          n = n.next
+        end
+        if j > i and tall <= tex.vsize / 2 then
+          for k = i + 1, j do rows[k].tie = true end
+        end
+        i = j + 1
+      end
+      local last, k, n = nil, 0, head
+      while n do
+        if n.id == HLIST and n.subtype == 1 then
+          k = k + 1
+          if rows[k].tie and last then
+            if last.id == PENALTY then
+              if last.penalty < 10000 then last.penalty = 10000 end
+            else
+              head = node.insert_after(head, last, wrap_penalty(last, 10000))
+            end
+          end
+        end
+        if not (n.id == GLUE or n.id == KERN) then last = n end
+        n = n.next
+      end
+      return head
+    end, "oer.code.lines")
     luatexbase.add_to_callback("pre_linebreak_filter", function(head)
       local id, j = current(), tex.getattribute(column)
       if id and oerfit.kind[id] == "s" and j and j > 0 then
@@ -1199,8 +1422,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       return true
     end, "oer.fit.steps")
     local wrapping = luatexbase.attributes.OERFitWrapAttribute
-    local LOCALPAR = node.id("local_par")
-    local INDENT, ROOM = 3, 20
+    local INDENT = 3
     for subtype, name in pairs(node.subtypes("hlist")) do
       if name == "indent" then INDENT = subtype end
     end
@@ -1257,21 +1479,6 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       head = node.insert_before(head, at, k)
       return head
     end, "oer.fit.wrap")
-    local SP_PER_BP, BP = 65781.76, string.char(37) .. ".3f"
-    local function arrow(char)
-      local function bp(sp) return string.format(BP, sp / SP_PER_BP) end
-      local x0, x1, top, mid, tip = -1.6 * char, -0.45 * char, 0.7 * char, 0.25 * char, 0.3 * char
-      local literal = node.new("whatsit", "pdf_literal")
-      literal.mode = 0
-      literal.data = "q 0 G " .. bp(0.07 * char) .. " w 1 J 1 j "
-        .. bp(x0) .. " " .. bp(top) .. " m " .. bp(x0) .. " " .. bp(mid) .. " l "
-        .. bp(x1) .. " " .. bp(mid) .. " l S "
-        .. bp(x1 - tip) .. " " .. bp(mid + 0.75 * tip) .. " m " .. bp(x1) .. " " .. bp(mid) .. " l "
-        .. bp(x1 - tip) .. " " .. bp(mid - 0.75 * tip) .. " l S Q"
-      local box = node.hpack(literal)
-      box.width = 0
-      return box
-    end
     luatexbase.add_to_callback("post_linebreak_filter", function(head)
       if unwrap then
         local first = true
@@ -3202,14 +3409,18 @@ def fit_report(output, source, pages):
                     + (": on " + page_list(pages_wrapped) if pages_wrapped else "") + ".")
     # Highlighted code's line wrapped is set in a box, as fvextra sets one,
     # which TeX can't break across pages: one taller than the page runs
-    # off its foot.
+    # off its foot. Rare enough (some 4,000 characters on one line) that
+    # the fix is the book's, by hand.
     tall = [page(line) for line in FIT_TALL.findall(output)]
     if tall:
+        one = len(tall) == 1
         said.append(f"WARNING: {len(tall)} block(s) of code in a language "
-                    f"{'has' if len(tall) == 1 else 'have'} a line too long for a page even "
+                    f"{'has' if one else 'have'} a line too long for a page even "
                     "wrapped, which runs off its page's foot"
                     + (": on " + page_list(list(dict.fromkeys(p for p in tall if p)))
-                       if any(tall) else "") + ".")
+                       if any(tall) else "")
+                    + f". Break {'the' if one else 'each such'} line into shorter ones in "
+                    f"the book's files to fix {'it' if one else 'them'}.")
     if middle:
         tables = sum(1 for w in middle if w[1] in "tps")
         said.append(f"{len(middle)} of them, still wider than the text, "

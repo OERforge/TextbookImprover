@@ -2680,7 +2680,8 @@ def check_code_fit_report():
              "TextbookImprover fit wrapped: 6 0.75 0\n"
              "TextbookImprover fit tall: 6\n", source, owners)[2:]
          == ["WARNING: 1 block(s) of code in a language has a line too long for a page even "
-             "wrapped, which runs off its page's foot: on code."]),
+             "wrapped, which runs off its page's foot: on code. Break the line into shorter "
+             "ones in the book's files to fix it."]),
     ]
 
 

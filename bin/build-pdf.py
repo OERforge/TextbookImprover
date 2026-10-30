@@ -537,9 +537,10 @@ def svg_images(blocks):
 
 def rendered_originals(blocks, base):
     """Each image a LaTeX book's reading made an SVG of a PDF or EPS image,
-    rendered/<path>.svg, pointed at the PDF its reading kept beside it,
-    rendered/<path>.pdf (latexsource.convert_graphic), the PDF a LaTeX
-    build of the book includes: its text text, which the SVG makes
+    or of a drawing, rendered/<path>.svg, pointed at the PDF its reading
+    kept beside it, rendered/<path>.pdf (latexsource.convert_graphic and
+    latexsource.render), the PDF a LaTeX build of the book includes, or
+    the page LaTeX made of the drawing: its text text, which the SVG makes
     outlines, and its pictures as they are, which the SVG made into new
     ones, resampled. Only in a book a LaTeX source wrote, whose rendered/
     holds the reading's record. Returns how many."""
@@ -1558,8 +1559,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
               "MathML properly.", file=sys.stderr)
     originals = rendered_originals(assembly.blocks, base)
     if originals:
-        print(f"{originals} PDF or EPS image(s) of the book's LaTeX set as the PDF its own "
-              "build includes, not the SVG made for its pages.", file=sys.stderr)
+        print(f"{originals} PDF or EPS image(s) and drawing(s) of the book's LaTeX set as the "
+              "PDF its own build includes, not the SVG made for its pages.", file=sys.stderr)
     svgs = svg_images(assembly.blocks)
     if svgs and not latex_only and shutil.which("rsvg-convert") is None and not as_latex:
         sys.exit(f"The book has {len(svgs)} SVG image(s) ({svgs[0]} first), and a PDF "

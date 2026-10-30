@@ -1240,6 +1240,9 @@ LATEX_READ_CHANGES = (
      "reader dropped it and set the image at its natural size"),
     ("graphics_embedded", "PDF image written beside its SVG with its fonts embedded, which "
      "PDF/UA requires, for a PDF from the pages and the latex target"),
+    ("graphics_glyphs", "figure's PDF, a PDF or EPS image's or a drawing's, with the glyphs "
+     "its fonts name and map to no text given the text their names give them, which PDF/UA "
+     "requires"),
     ("graphics_case", "image named in a different case from its file found as macOS and "
      "Windows find it (LaTeX on Linux doesn't)"),
     ("visual_title", "title set as large type read as the page's title, its "
@@ -1540,9 +1543,16 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 f"titled {how}: " + ", ".join(f"{s} as \"{t}\"" for s, t in titled[:5])
                 + (", ..." if len(titled) > 5 else "") + ".")
     if counts.get("drawings"):
-        say(f"{counts.get('drawings_made', 0)} of {counts['drawings']} "
-            "drawing(s) made images by LaTeX, in "
-            f"{latexsource.RENDERED}/.")
+        made = counts.get("drawings_made", 0)
+        kept = counts.get("drawings_pdf", 0)
+        detail = ""
+        if made:
+            detail = (", each an SVG for the pages and the PDF LaTeX made of it, which a PDF "
+                      "from the pages and the latex target include" if kept == made else
+                      f", {kept} with the PDF LaTeX made of it, which a PDF from the pages and "
+                      "the latex target include, the rest an SVG alone")
+        say(f"{made} of {counts['drawings']} drawing(s) made images by LaTeX, in "
+            f"{latexsource.RENDERED}/{detail}.")
     changed = [f"{counts[k]} {what}" for k, what in LATEX_READ_CHANGES if counts.get(k)]
     if counts.get("macros_file"):
         changed.append(f"the definitions in {LATEX_MACROS} read after the "

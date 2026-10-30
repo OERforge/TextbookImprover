@@ -2455,6 +2455,12 @@ def check_drawings_without_preview():
         lines = []
         path = os.environ.get("PATH", "")
         os.environ["PATH"] = tools + os.pathsep + path
+        # And without pdfseparate, as where poppler isn't installed, whose
+        # warning that the drawings are SVGs alone isn't said of drawings
+        # LaTeX left out (Round 34's suites without poppler).
+        which = latexsource.shutil.which
+        latexsource.shutil.which = lambda name, *args, **kwargs: (
+            None if name == "pdfseparate" else which(name, *args, **kwargs))
         try:
             latexsource.render(os.path.join(work, "book"), os.path.join(work, "w"),
                                "\\documentclass{article}\n\\begin{document}",
@@ -2463,6 +2469,7 @@ def check_drawings_without_preview():
                                lines.append)
         finally:
             os.environ["PATH"] = path
+            latexsource.shutil.which = which
         return "\n".join(lines)
     missing = said("! LaTeX Error: File `preview.sty' not found.")
     other = said("! Undefined control sequence.")
@@ -3012,6 +3019,158 @@ def check_measure_report():
          "list's margins at each depth",
          lambda: said.startswith("line=39.146277;gap=1.000000;")
          and ";mono=0.585938;lists=2.500000,4.700000;" in said),
+    ]
+
+
+def check_glyph_names():
+    """A figure's glyphs given the text their names give them, where its PDF
+    names them and maps them to none (pdfglyphs): each name as the Adobe
+    Glyph List's specification maps it, a suffix after a period dropped,
+    ligatures' parts, uniXXXX, uXXXX, and the rest to nothing; and a PDF
+    whose Type 3 fonts name minus.case, as Ghostscript leaves matplotlib's
+    EPS (Round 33), given ToUnicode entries for that font's glyphs, one in
+    a form XObject too, its own entries kept in another, and a font whose
+    names are all the list's left as it is; once, the second run finding
+    nothing to do."""
+    import pdfglyphs
+    names = {"minus.case": "\u2212", "zero": "0", "f_f_i": "ffi", "uni2212": "\u2212",
+             "uni00410042": "AB", "u1D400": "\U0001D400", "a.sc": "a",
+             "A_uni0301": "A\u0301", "uniD800": "", "u110000": "", "glyph1": "",
+             ".notdef": "", "afii10017": "\u0410"}
+    checks = [("each glyph name as the Adobe Glyph List's specification maps it",
+               lambda: all(pdfglyphs.to_unicode(n) == u for n, u in names.items()))]
+    if pdfglyphs.pikepdf is None:
+        return checks + [("a PDF's unmapped glyph names mapped",
+                          lambda: print("  skip  no pikepdf to write a PDF") or True)]
+    import pikepdf
+    path = os.path.join(tempfile.mkdtemp(), "glyphs.pdf")
+    pdf = pikepdf.new()
+
+    def type3(names, cmap=None):
+        procs = pikepdf.Dictionary({"/" + n: pdf.make_stream(b"500 0 0 0 400 600 d1 0 0 400 600 re f")
+                                    for n in names})
+        font = pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type3,
+            FontBBox=[0, 0, 500, 600], FontMatrix=[0.001, 0, 0, 0.001, 0, 0],
+            CharProcs=procs, FirstChar=0, LastChar=len(names) - 1, Widths=[500] * len(names),
+            Encoding=pikepdf.Dictionary(Type=pikepdf.Name.Encoding,
+                                        Differences=[0] + [pikepdf.Name("/" + n) for n in names]))
+        if cmap:
+            font.ToUnicode = pdf.make_stream(cmap)
+        return pdf.make_indirect(font)
+    own = (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap "
+           b"1 begincodespacerange <00> <FF> endcodespacerange "
+           b"1 beginbfchar <00> <0041> endbfchar endcmap end end")
+    form = pdf.make_stream(b"BT /F4 10 Tf (\\000) Tj ET")
+    form.Type, form.Subtype, form.BBox = pikepdf.Name.XObject, pikepdf.Name.Form, [0, 0, 100, 100]
+    form.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F4=type3(["a.sc"])))
+    pdf.add_blank_page(page_size=(200, 200))
+    page = pdf.pages[0]
+    page.Resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=type3(["minus.case", "zero"]), F2=type3(["zero", "one"]),
+                                F3=type3(["A", "f_f_i"], own)),
+        XObject=pikepdf.Dictionary(X1=form))
+    page.Contents = pdf.make_stream(b"BT /F1 10 Tf (\\000\\001) Tj /F2 10 Tf (\\000) Tj "
+                                    b"/F3 10 Tf (\\000\\001) Tj ET /X1 Do")
+    pdf.save(path)
+    first = pdfglyphs.map_glyph_names(path)
+    again = pdfglyphs.map_glyph_names(path)
+
+    def maps():
+        """{font's name: its ToUnicode's entries, None where it has none}."""
+        with pikepdf.open(path) as done:
+            fonts = dict(done.pages[0].Resources.Font.items())
+            fonts["/F4"] = done.pages[0].Resources.XObject.X1.Resources.Font.F4
+            return {name: pdfglyphs.cmap_entries(font.ToUnicode.read_bytes())
+                    if "/ToUnicode" in font else None for name, font in fonts.items()}
+    found = maps()
+    # Pages and forms whose resources are direct dictionaries, as GIAM's
+    # drawings' pages have them: pikepdf's wrapper of each is freed after
+    # it's read, and one told apart by id() had taken a freed one's for its
+    # own, and been skipped (a review).
+    direct = os.path.join(os.path.dirname(path), "direct.pdf")
+    pdf = pikepdf.new()
+    for k in range(3):
+        pdf.add_blank_page(page_size=(200, 200))
+        forms = {}
+        for j in range(2):
+            form = pdf.make_stream(b"BT /F1 10 Tf (\\000) Tj ET")
+            form.Type, form.Subtype, form.BBox = (pikepdf.Name.XObject, pikepdf.Name.Form,
+                                                  [0, 0, 100, 100])
+            form.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=type3(["minus.case"])))
+            forms["/X%d" % j] = form
+        pdf.pages[k].obj.Resources = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=type3(["minus.case"])), XObject=pikepdf.Dictionary(forms))
+        pdf.pages[k].Contents = pdf.make_stream(b"BT /F1 10 Tf (\\000) Tj ET /X0 Do /X1 Do")
+    pdf.save(direct)
+    directs = pdfglyphs.map_glyph_names(direct)
+    # And fonts that aren't as the PDF reference has them, beside one that
+    # is: a string among a font's Differences, a font's /Font an array, an
+    # encoding a name: none stops the run, and the good font is mended.
+    broken = os.path.join(os.path.dirname(path), "broken.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    odd = type3(["minus.case"])
+    odd.Encoding.Differences = pikepdf.Array([0, pikepdf.String("x"), pikepdf.Name("/minus.case")])
+    named = type3(["minus.case"])
+    named.Encoding = pikepdf.Name.WinAnsiEncoding
+    form = pdf.make_stream(b"")
+    form.Type, form.Subtype, form.BBox = pikepdf.Name.XObject, pikepdf.Name.Form, [0, 0, 1, 1]
+    form.Resources = pikepdf.Dictionary(Font=pikepdf.Array([type3(["minus.case"])]))
+    pdf.pages[0].obj.Resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=odd, F2=named, F3=type3(["minus.case"])),
+        XObject=pikepdf.Dictionary(X1=form))
+    pdf.save(broken)
+    try:
+        brokens = pdfglyphs.map_glyph_names(broken)
+    except Exception as exc:  # noqa: BLE001 -- what the check reports
+        brokens = exc
+    # And a font that raises as it's read, whatever it is: passed over, the
+    # fonts beside it mended.
+    raising = os.path.join(os.path.dirname(path), "raising.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    pdf.pages[0].obj.Resources = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(F1=type3(["minus.case"]), F2=type3(["minus.case"])))
+    pdf.save(raising)
+    real_map = pdfglyphs.map_font
+    calls = []
+
+    def map_once(pdf, font, agl):
+        calls.append(font)
+        if len(calls) == 1:
+            raise TypeError("a font that isn't one")
+        return real_map(pdf, font, agl)
+    try:
+        pdfglyphs.map_font = map_once
+        raised = pdfglyphs.map_glyph_names(raising)
+    except Exception as exc:  # noqa: BLE001 -- what the check reports
+        raised = exc
+    finally:
+        pdfglyphs.map_font = real_map
+
+    def mapped_all(name):
+        """Every font of the PDF given ToUnicode entries, from fonts()'s list."""
+        with pikepdf.open(name) as done:
+            listed = pdfglyphs.fonts(done)
+            return len(listed), all("/ToUnicode" in font for font in listed)
+    return checks + [
+        ("a PDF whose fonts name glyphs the list doesn't hold but its specification maps "
+         "gets ToUnicode entries for those fonts' glyphs, a form XObject's font's too, and "
+         "a second run has nothing to do",
+         lambda: first == 4 and again == 0
+         and found["/F1"] == {0: "2212", 1: "0030"} and found["/F4"] == {0: "0061"}),
+        ("a font's own entries are kept beside those added",
+         lambda: found["/F3"] == {0: "0041", 1: "006600660069"}),
+        ("a font whose names are all the list's is left as it is",
+         lambda: found["/F2"] is None),
+        ("every page's and every form's fonts are mended, their resources direct "
+         "dictionaries, not the first's alone",
+         lambda: directs == 9 and mapped_all(direct) == (9, True)),
+        ("a font whose Differences hold a string, or whose resources' /Font is an array, "
+         "doesn't stop the run, and the fonts beside it are mended, and so does a font that "
+         "raises as it's read",
+         lambda: brokens == 2 and raised == 1),
     ]
 
 
@@ -6137,6 +6296,7 @@ GROUPS = [
     ("the math font a metadata file names", check_math_font_latex),
     ("the page's measures, their files missing", check_measure_page),
     ("the page's measures, to six places", check_measure_report),
+    ("a figure's glyph names given their text", check_glyph_names),
     ("an image's natural size, for its scale", check_natural_sizes),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),

@@ -281,6 +281,35 @@ def pdf(path, word=None):
         fh.write(out)
 
 
+def type3_pdf(path, glyph="minus.case"):
+    """A one-page PDF whose text is a Type 3 font's glyph known by its name
+    alone, glyph, in its encoding's Differences, with no ToUnicode entry, as
+    Ghostscript writes matplotlib's EPS's minus sign, written by hand."""
+    stream = b"BT /F1 12 Tf 4 4 Td (\\000) Tj ET\n"
+    proc = b"500 0 0 0 400 600 d1 0 250 400 100 re f\n"
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> >> >>",
+               b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream",
+               b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 600] "
+               b"/FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /%s 6 0 R >> "
+               b"/Encoding << /Type /Encoding /Differences [0 /%s] >> /FirstChar 0 "
+               b"/LastChar 0 /Widths [500] >>" % (glyph.encode(), glyph.encode()),
+               b"<< /Length %d >>\nstream\n" % len(proc) + proc + b"endstream"]
+    out, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref)
+    with open(path, "wb") as fh:
+        fh.write(out)
+
+
 def raster_pdf(path, word="Map", size=128):
     """A one-page PDF holding a smooth raster of size by size pixels, stored
     losslessly (Flate), and a word drawn in Helvetica, which the PDF
@@ -1131,9 +1160,12 @@ def case_kept_images(work):
     read again: one whose fonts couldn't be embedded when it was kept, as
     without Ghostscript, is tried again and counted, where it had been kept
     as it was without a word; and a drawing that has taken a PDF image's
-    name has the PDF beside its SVG taken away, which a PDF from the pages
-    had included in the drawing's place (a review). latexsource's own
-    functions, without LaTeX: the drawing as a reading before kept it."""
+    name, its SVG made before a drawing's PDF was kept, has the image's PDF
+    beside its SVG taken away, which a PDF from the pages had included in
+    the drawing's place (a review), and is made again, its own PDF beside
+    its SVG, where LaTeX can make it (why_no_drawings), or else its SVG
+    kept as it was, alone. latexsource's own functions: the drawing as a
+    reading before kept it."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import latexsource
@@ -1156,14 +1188,145 @@ def case_kept_images(work):
     with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
         json.dump({name: hashlib.sha256((preamble + "\n" + source).encode()).hexdigest()}, fh)
     kept = latexsource.render(work, work, preamble, [(name, source)], lambda said: None)
+    drawn = why_no_drawings() is None
+    def mapped(path):
+        """Each font's ToUnicode entries in the PDF at path, read with
+        pikepdf, those of a form XObject's fonts too; None without pikepdf,
+        found or not: one that can't be imported is none (the setup that
+        hides it, Round 34)."""
+        try:
+            import pikepdf
+        except ImportError:
+            return None
+        import pdfglyphs
+        with pikepdf.open(path) as done:
+            return [pdfglyphs.cmap_entries(font.ToUnicode.read_bytes())
+                    if "/ToUnicode" in font else None for font in pdfglyphs.fonts(done)]
+    # A PDF image whose Type 3 font names its glyph minus.case and maps it
+    # to nothing, as Ghostscript leaves matplotlib's EPS.
+    type3_pdf(os.path.join(work, "figures", "minus.pdf"))
+    glyphs = {}
+    latexsource.convert_graphic(work, work, "figures/minus.pdf", record, glyphs)
+    minus = os.path.join(work, "rendered", "figures", "minus.pdf")
+    first_mapped = mapped(minus)
+    # Read again, its PDF one kept before glyphs were given their text, as
+    # a book read before this was: given them now.
+    shutil.copyfile(os.path.join(work, "figures", "minus.pdf"), minus)
+    glyphs_again = {}
+    latexsource.convert_graphic(work, work, "figures/minus.pdf", record, glyphs_again)
+    # A drawing that includes it, as a figure's drawing may: the page LaTeX
+    # makes of it has the image's font, its glyph given its text too.
+    holding = "\\begin{tikzpicture}\\node{\\includegraphics{figures/minus.pdf}};\\end{tikzpicture}"
+    drew = {}
+    latexsource.render(work, work, preamble, [("rendered/figures/holding.svg", holding)],
+                       lambda said: None, drew)
+    # And a drawing LaTeX can't make, its SVG made before and recorded, a
+    # PDF image's PDF beside it under its name: its SVG kept, alone.
+    broken = "\\begin{tikzpicture}\\undefinedcommandhere\\end{tikzpicture}"
+    old_svg = os.path.join(work, "rendered", "figures", "broken.svg")
+    shutil.copyfile(os.path.join(work, "rendered", "figures", "minus.svg"), old_svg)
+    stale = os.path.join(work, "rendered", "figures", "broken.pdf")
+    shutil.copyfile(image, stale)
+    with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+        recorded = json.load(fh)
+    recorded["rendered/figures/broken.svg"] = hashlib.sha256(
+        (preamble + "\n" + broken).encode()).hexdigest()
+    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+        json.dump(recorded, fh)
+    said = []
+    kept_svg = latexsource.render(work, work, preamble, [("rendered/figures/broken.svg", broken)],
+                                  said.append)
+    # Without pdfseparate: a drawing whose SVG is current isn't made again
+    # for a PDF it can't have, which had made every drawing again on every
+    # run (a review), a PDF image's PDF under its name taken away all the
+    # same, and the run says so; and where pdfseparate fails, having
+    # written part of a page, the drawing is its SVG alone, the part gone.
+    plain = "\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}"
+    circle = "rendered/figures/circle.svg"
+    shutil.copyfile(os.path.join(work, "rendered", "figures", "minus.svg"),
+                    os.path.join(work, circle))
+    with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+        recorded = json.load(fh)
+    recorded[circle] = hashlib.sha256((preamble + "\n" + plain).encode()).hexdigest()
+    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+        json.dump(recorded, fh)
+    taken = os.path.join(work, "rendered", "figures", "circle.pdf")
+    shutil.copyfile(image, taken)
+    before = os.path.getmtime(os.path.join(work, circle))
+    which, run = latexsource.shutil.which, latexsource.subprocess.run
+    unseparated = []
+    try:
+        latexsource.shutil.which = lambda name: None if name == "pdfseparate" else which(name)
+        alone = latexsource.render(work, work, preamble, [(circle, plain)], unseparated.append)
+    finally:
+        latexsource.shutil.which = which
+    unmade = os.path.getmtime(os.path.join(work, circle)) == before
+    gone = not os.path.exists(taken)
+
+    def failing(command, *args, **kwargs):
+        """pdfseparate writing part of the first page, and failing."""
+        if command[0] == "pdfseparate":
+            with open(command[2] % 1, "wb") as fh:
+                fh.write(b"%PDF-1.7\n")
+            return subprocess.CompletedProcess(command, 1, "", "Syntax Error")
+        return run(command, *args, **kwargs)
+    square = "\\begin{tikzpicture}\\draw (0,0) rectangle (1,1);\\end{tikzpicture}"
+    try:
+        latexsource.subprocess.run = failing
+        partly = latexsource.render(work, work, preamble, [("rendered/figures/square.svg",
+                                                           square)], lambda said: None)
+    finally:
+        latexsource.subprocess.run = run
+    leftovers = [f for f in os.listdir(os.path.join(work, "render")) if "-page-" in f] \
+        if os.path.isdir(os.path.join(work, "render")) else []
+
+    def own_pdf():
+        if not os.path.exists(beside):
+            return False
+        text = subprocess.run(["pdftotext", beside, "-"], capture_output=True, text=True).stdout
+        with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+            record = json.load(fh)
+        return "Plotword" not in text and record.get("rendered/figures/plot.pdf") == record.get(name)
     return [
         ("a PDF image kept with fonts it couldn't embed, read again, is tried again, and "
          "counted",
          lambda: name == "rendered/figures/plot.svg" and why is None
          and (again == {"graphics_embedded": 1} and embedded if tool
               else again == {"graphics_unembedded": 1})),
-        ("a drawing that has taken a PDF image's name has no PDF beside its SVG",
-         lambda: kept == [name] and not os.path.exists(beside)),
+        ("a drawing that has taken a PDF image's name has the drawing's own PDF beside its "
+         "SVG, made again, where LaTeX can make it, and else no PDF, its SVG kept as it was",
+         # A LaTeX too old for the suite's builds (tex_unready) may draw it
+         # all the same: its own PDF then, and never the image's.
+         lambda: kept == [name] and (own_pdf() if drawn
+                                     else own_pdf() or not os.path.exists(beside))),
+        ("a drawing LaTeX can't make again has its SVG made before kept, alone, the PDF "
+         "beside it under its name taken away, and the run says so",
+         lambda: kept_svg == ["rendered/figures/broken.svg"] and not os.path.exists(stale)
+         and (not drawn or any("kept as the SVGs made of them before, without their PDFs"
+                               in line for line in said))),
+        ("a PDF image whose Type 3 font names its glyph minus.case, mapped to nothing, is "
+         "kept with the glyph given its text, U+2212, and counted",
+         lambda: (glyphs.get("graphics_glyphs") == 1 and first_mapped == [{0: "2212"}])
+         if first_mapped is not None else skip("no pikepdf to read the PDF")),
+        ("and read again, its PDF kept before glyphs were given their text, is given them now",
+         lambda: (glyphs_again == {"graphics_glyphs": 1} and mapped(minus) == [{0: "2212"}])
+         if first_mapped is not None else skip("no pikepdf to read the PDF")),
+        ("without pdfseparate, a drawing whose SVG is current isn't made again, a PDF image's "
+         "PDF under its name is taken away all the same, and the run says the drawings are "
+         "SVGs alone",
+         lambda: alone == [circle] and unmade and gone
+         and any("pdfseparate (poppler-utils) isn't installed" in line for line in unseparated)),
+        ("where pdfseparate fails, having written part of a page, the drawing is its SVG alone, "
+         "and no part of a page is left",
+         lambda: skip("no LaTeX to make drawings") if not drawn
+         else partly == ["rendered/figures/square.svg"] and not leftovers
+         and not os.path.exists(os.path.join(work, "rendered", "figures", "square.pdf"))),
+        ("a drawing that includes it has the image's glyph given its text in the page LaTeX "
+         "made of it",
+         lambda: skip("no pikepdf to read the PDF") if first_mapped is None
+         else skip("no LaTeX to make drawings") if not drawn
+         else drew.get("graphics_glyphs") == 1 and {0: "2212"} in mapped(
+             os.path.join(work, "rendered", "figures", "holding.pdf"))),
     ]
 
 
@@ -1675,7 +1838,7 @@ BOOK_CHAPTER = ("\\chapter{One}\nSome text about sets\\index{sets}, where "
                 "\\end{tabular}\n\n"
                 "\\[ \\sum_{i=1}^n i = \\frac{n(n+1)}{2} \\]\n\n"
                 "A drawing with no description: "
-                "\\begin{picture}(20,10)\\put(0,0){x}\\end{picture}\n")
+                "\\begin{picture}(60,12)\\put(0,0){Drawword}\\end{picture}\n")
 
 
 # A figure the pages book (case_book_pdf) adds to BOOK_CHAPTER: a PDF R's
@@ -1890,6 +2053,30 @@ def case_book_pdf(work):
             and "rendered/plot.pdf" in tex and "plot.svg" not in tex \
             and 'width="40pt"' in root and 'height="48pt"' in root
 
+    def drawing_kept():
+        """The drawing, set in the PDF from the pages and the latex target
+        as the page LaTeX made of it, rendered/one-1.pdf beside the SVG its
+        pages show: its word text, where the SVG made it outlines, as it
+        made a PDF image's before Round 33 and a drawing's before Round 34."""
+        if pages_unbuilt():
+            return skip(pages_unbuilt())
+        if why_no_drawings():
+            return skip(why_no_drawings())
+        found = text("pages")
+        if found is None:
+            return skip("no pdftotext to read the PDF")
+        folder = books["pages"][0]
+        latex = os.path.join(folder, "latex")
+        tex = "".join(read(folder, "latex", f) for f in os.listdir(latex)
+                      if f.endswith(".tex")) if os.path.isdir(latex) else ""
+        kept = os.path.join(folder, "rendered", "one-1.pdf")
+        own = subprocess.run(["pdftotext", kept, "-"], capture_output=True,
+                             text=True).stdout if os.path.isfile(kept) else ""
+        return "Drawword" in own and "Drawword" in found \
+            and os.path.isfile(os.path.join(folder, "rendered", "one-1.svg")) \
+            and os.path.isfile(os.path.join(latex, "rendered", "one-1.pdf")) \
+            and "rendered/one-1.pdf" in tex and "one-1.svg" not in tex
+
     def pages_pass_ua2():
         verapdf = os.environ.get("VERAPDF") or shutil.which("verapdf")
         if not verapdf:
@@ -1942,6 +2129,8 @@ def case_book_pdf(work):
          "includes, its font embedded: its word text and its picture its own, not the "
          "outlines and the resampled picture of the SVG its pages show, which is the "
          "figure's size in points", plot_kept),
+        ("and its drawing, in both, the page LaTeX made of it, its word text, not the outlines "
+         "of the SVG its pages show", drawing_kept),
         ("and the PDF from the pages passes veraPDF's PDF/UA-2 profile", pages_pass_ua2),
         ("a book that won't build with tagging stops the run, with LaTeX's error and the way out",
          lambda: books["broken"][1] != 0 and "TIQundefined" in books["broken"][2]

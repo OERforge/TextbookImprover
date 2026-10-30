@@ -2749,11 +2749,23 @@ def pick_engine(preamble):
     return "pdflatex"
 
 
-def render(base, work, preamble, items, say):
+def beside_pdf(name):
+    """The PDF kept beside a rendered SVG, rendered/<path>.pdf."""
+    return os.path.splitext(name)[0] + ".pdf"
+
+
+def render(base, work, preamble, items, say, counter=None):
     """Each drawing, (name, source), as an SVG at base/name, by LaTeX
-    with the book's preamble, one page a drawing, and pdftocairo. A
-    drawing whose SVG is there and was made from the same source and
-    preamble isn't made again. Returns the names made or kept."""
+    with the book's preamble, one page a drawing, and pdftocairo; and
+    beside it the page itself, base/<name>.pdf, which a PDF from the pages
+    and the latex target include in the SVG's place, as an image's PDF is
+    (convert_graphic): its text is text, where the SVG makes it outlines,
+    which can't be searched or copied, and what it draws is as LaTeX drew
+    it. A drawing whose SVG and PDF are there and were made from the same
+    source and preamble isn't made again. Returns the names made or kept;
+    counter counts the PDFs whose glyphs were given their text
+    (map_glyphs)."""
+    counter = {} if counter is None else counter
     record_path = os.path.join(base, RENDERED, ".rendered.json")
     try:
         with open(record_path, encoding="utf-8") as fh:
@@ -2764,28 +2776,57 @@ def render(base, work, preamble, items, say):
     def key(source):
         return hashlib.sha256((preamble + "\n" + source).encode(
             "utf-8", "surrogateescape")).hexdigest()
+    def current(name, source):
+        return record.get(name) == key(source) and os.path.isfile(os.path.join(base, name))
+    # The PDF's record too: a PDF beside a drawing's SVG that the drawing
+    # didn't make is a PDF image's of the same name (convert_graphic),
+    # which a PDF from the pages would include in the drawing's place (a
+    # review), and is taken away, and the drawing made again, as one whose
+    # PDF is missing is, a drawing made before its PDF was kept among them.
+    # Where it can't be made again, its SVG is kept, as it was, alone; and
+    # without pdfseparate, which copies the page, a drawing whose SVG is
+    # current isn't made again for a PDF it can't have, which had made every
+    # drawing again on every run (a review), and the run says so.
+    separate = shutil.which("pdfseparate")
     todo = [(n, s) for n, s in items
-            if record.get(n) != key(s)
-            or not os.path.isfile(os.path.join(base, n))]
+            if not current(n, s) or (separate and not current(beside_pdf(n), s))]
     done = [n for n, s in items if (n, s) not in todo]
+    for name, source in items:
+        stale = os.path.join(base, beside_pdf(name))
+        if os.path.isfile(stale) and not current(beside_pdf(name), source):
+            os.remove(stale)
     for name in done:
         svg_in_points(os.path.join(base, name))
-    # A drawing's SVG has no PDF beside it: one there was kept beside the
-    # SVG of a PDF image of the same name (convert_graphic), which the
-    # drawing has replaced, and a PDF from the pages would have included it
-    # in the drawing's place (a review).
-    for name, _source in items:
-        stale = os.path.join(base, os.path.splitext(name)[0] + ".pdf")
-        if os.path.isfile(stale):
-            os.remove(stale)
-    if not todo:
+        map_glyphs(os.path.join(base, beside_pdf(name)), counter)
+    # Said last, of the drawings the pages have, made or kept: said first,
+    # of every drawing, it called drawings SVGs that LaTeX then left out,
+    # where LaTeX lacked the preview package, beside the warning that says
+    # so (the unit suite, without poppler).
+    def finish():
+        if not separate and done:
+            some = "" if len(done) == len(items) else f"{len(done)} of "
+            say(f"WARNING: {some}the book's {len(items)} drawing(s) are SVGs alone, without "
+                "the PDF LaTeX makes of each, since pdfseparate (poppler-utils) isn't "
+                "installed, so a PDF from the pages and the latex target set them with their "
+                "text as outlines, which can't be searched or copied.")
         return done
+    if not todo:
+        return finish()
+
+    def keep_svgs():
+        for name, source in todo:
+            if name not in done and current(name, source):
+                svg_in_points(os.path.join(base, name))
+                done.append(name)
     engine = pick_engine(preamble)
     if not shutil.which(engine) or not shutil.which("pdftocairo"):
-        say(f"WARNING: {len(todo)} drawing(s) need {engine} and pdftocairo "
-            "(poppler-utils) to become images, and one isn't installed; "
-            "they're left out of the pages.")
-        return done
+        keep_svgs()
+        left = len(items) - len(done)
+        if left:
+            say(f"WARNING: {left} drawing(s) need {engine} and pdftocairo "
+                "(poppler-utils) to become images, and one isn't installed; "
+                "they're left out of the pages.")
+        return finish()
     head, _, _ = preamble.rpartition("\\begin")
     rdir = os.path.join(work, "render")
     os.makedirs(rdir, exist_ok=True)
@@ -2807,17 +2848,37 @@ def render(base, work, preamble, items, say):
             return None, result.stdout[-800:]
         return pdf, ""
 
+    # Each page the drawing's PDF by pdfseparate, poppler's, which copies
+    # the page as LaTeX wrote it, its fonts embedded, every page in one run;
+    # where it can't, the SVG alone, which a PDF from the pages includes as
+    # before, and no page of a run that failed is kept, whole or not.
     def split(batch, pdf):
+        pattern = os.path.splitext(pdf)[0] + "-page-%d.pdf"
+        pages = False
+        if separate:
+            try:
+                pages = subprocess.run(["pdfseparate", pdf, pattern], capture_output=True,
+                                       text=True).returncode == 0
+            except OSError:
+                pages = False
         for page, (name, source) in enumerate(batch, start=1):
             out = os.path.join(base, name)
             os.makedirs(os.path.dirname(out), exist_ok=True)
             made = subprocess.run(["pdftocairo", "-svg", "-f", str(page), "-l",
                                    str(page), pdf, out], capture_output=True,
                                   text=True)
+            one = pattern % page
             if made.returncode == 0 and os.path.isfile(out):
                 svg_in_points(out)
                 record[name] = key(source)
                 done.append(name)
+                if pages and os.path.isfile(one):
+                    kept = os.path.join(base, beside_pdf(name))
+                    os.replace(one, kept)
+                    map_glyphs(kept, counter)
+                    record[beside_pdf(name)] = key(source)
+            if os.path.isfile(one):
+                os.remove(one)
 
     # All at once; when that fails, one at a time, so a drawing LaTeX
     # can't make costs only itself.
@@ -2833,23 +2894,32 @@ def render(base, work, preamble, items, say):
             else:
                 failed.append(item[0])
                 log = why
+        keep_svgs()
+        lost = len([name for name in failed if name not in done])
+        before = len(failed) - lost
+        fate = ("they're left out of the pages" if not before
+                else "they're kept as the SVGs made of them before, without their PDFs"
+                if not lost else f"{lost} {'is' if lost == 1 else 'are'} left out of the pages "
+                f"and {before} {'is' if before == 1 else 'are'} kept as "
+                + ("the SVG made of it before, without its PDF" if before == 1
+                   else "the SVGs made of them before, without their PDFs"))
         # Each drawing is a page of the preview package's, which TinyTeX's
         # smaller bundle (TinyTeX-1) doesn't have; without it every drawing
         # fails alike, so it's said as what to install.
         if len(failed) == len(todo) and re.search(r"preview\.sty'? not found", log):
             import latexbuild
-            say(f"WARNING: the book's {len(todo)} drawing(s) need LaTeX's preview "
-                "package to become images, which isn't installed: "
+            say(f"WARNING: {len(todo)} of the book's {len(items)} drawing(s) need LaTeX's "
+                "preview package to become images, which isn't installed: "
                 f"`{latexbuild.tlmgr_command('install preview')}` on TeX Live or "
-                "TinyTeX, or MiKTeX's package manager. They're left out of the pages.")
+                f"TinyTeX, or MiKTeX's package manager, so {fate}.")
         elif failed:
             say(f"WARNING: {engine} couldn't render {len(failed)} of the "
-                f"book's {len(todo)} drawing(s) with its own preamble, so "
-                "they're left out of the pages: " + ", ".join(failed[:5])
-                + (", ..." if len(failed) > 5 else "")
+                f"book's {len(items)} drawing(s) with its own preamble, so {fate}: "
+                + ", ".join(failed[:5]) + (", ..." if len(failed) > 5 else "")
                 + ". The end of its output for the last:\n" + log)
+    keep_svgs()
     write_text(record_path, json.dumps(record, indent=1, sort_keys=True))
-    return done
+    return finish()
 
 
 # --------------------------------------------------------------------------
@@ -2952,6 +3022,18 @@ def keep_pdf(source, dest, counter):
     shutil.copyfile(source, dest)
 
 
+def map_glyphs(path, counter):
+    """The PDF image at path, kept for a PDF from the pages and the latex
+    target, with each glyph its fonts name and map to no text given the
+    text its name gives it, where its name isn't the Adobe Glyph List's
+    own (pdfglyphs.map_glyph_names): Ghostscript leaves a name with a
+    suffix unmapped, minus.case in matplotlib's EPS, which PDF/UA fails.
+    counter counts the images so mended."""
+    import pdfglyphs
+    if pdfglyphs.map_glyph_names(path):
+        counter["graphics_glyphs"] = counter.get("graphics_glyphs", 0) + 1
+
+
 def convert_graphic(base, work, path, record, counter=None):
     """An SVG of a PDF's first page, or an EPS's, at base/rendered/<path>.svg,
     for the pages, its size in points (svg_in_points); and beside it,
@@ -2959,7 +3041,9 @@ def convert_graphic(base, work, path, record, counter=None):
     from the pages and the latex target include in the SVG's place: the
     PDF image, its fonts embedded where they aren't (keep_pdf), or the PDF
     epstopdf makes of an EPS, as LaTeX's epstopdf package does, which runs
-    Ghostscript. Made again only when the file has changed. Returns (the
+    Ghostscript; either with each glyph its fonts name and map to no text
+    given the text its name gives it (map_glyphs). Made again only when the
+    file has changed. Returns (the
     SVG's name, None), or (None, why) where it can't be made: the programs
     it needs that aren't installed, a list, or what the one that failed
     said."""
@@ -2979,6 +3063,7 @@ def convert_graphic(base, work, path, record, counter=None):
         import latexbuild
         if not eps and latexbuild.unembedded_fonts(beside):
             keep_pdf(os.path.join(base, path), beside, counter)
+        map_glyphs(beside, counter)
         return name, None
     missing = [program for program in (("epstopdf", "gs", "pdftocairo") if eps
                                        else ("pdftocairo",))
@@ -3004,6 +3089,7 @@ def convert_graphic(base, work, path, record, counter=None):
     svg_in_points(out)
     if not eps:
         keep_pdf(source, beside, counter)
+    map_glyphs(beside, counter)
     record[name] = digest
     return name, None
 
@@ -6663,9 +6749,11 @@ def prepare(base, work, master, say, macros=""):
             places.setdefault(name, []).append((start, end, alt, dname))
             items.append((dname, text[start:end]))
     made = set(render(base, work, split_master(read_text(
-        os.path.join(base, master)))[0], items, say)) if items else set()
+        os.path.join(base, master)))[0], items, say, counts)) if items else set()
     counts["drawings"] = len(items)
     counts["drawings_made"] = len(made)
+    counts["drawings_pdf"] = sum(1 for dname in made
+                                 if os.path.isfile(os.path.join(base, beside_pdf(dname))))
     for name, found in places.items():
         text = texts[name]
         for start, end, alt, dname in reversed(found):

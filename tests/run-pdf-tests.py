@@ -3387,10 +3387,11 @@ MEASURED_INLINE = "os.path.join(base,name)"
 # definition that is a line of code, which LaTeX had hung past its term,
 # and hangs from the definition's margin, its first word opening a hung
 # row; a term, which LaTeX sets in bold in a box it doesn't break, the
-# label space after it; and a word in bold.
-# (No quotation marks or backslashes: the reader takes those in a raw HTML
-# table's code as the Markdown's, curling the one and escaping with the
-# other.)
+# label space after it; and a word in bold. And raw code as written, in a
+# paragraph and in a raw table's cell, its quotation marks and backslashes
+# as they are, which the Markdown reader had curled and taken for escapes
+# (markdown-reader.lua), and a raw <pre>, a code block now, which the PDF
+# had left out (markdown-html.lua): MEASURED_RAW.
 MEASURED_GIVEN = "open(c:/projects/code/given/output.txt)"
 MEASURED_STEPS = "open(c:/projects/code/steps/output.txt)"
 MEASURED_LISTCODE = "compute_everything_at_once(first_argument)"
@@ -3409,6 +3410,13 @@ MEASURED_DEFCODE = "compute_in_the_definition_here(arg)"
 MEASURED_TERM = "Hippopotomonstrosesquippedaliophobia"
 MEASURED_BOLD = "Incomprehensibilities"
 NARROW_COLUMNS = '<colgroup><col style="width: 20%"/><col style="width: 80%"/></colgroup>'
+MEASURED_RAW_PATH = 'open("c:\\\\raw\\\\code")'
+MEASURED_RAW_CELL = 'cell("c:\\\\raw")'
+MEASURED_RAW = (
+    "\nRaw code as written: <code>" + MEASURED_RAW_PATH + "</code> and "
+    "<code>--rawflag ...</code>.\n\n<table><tbody><tr><td><code>" + MEASURED_RAW_CELL
+    + "</code></td><td>Besideraw</td></tr></tbody></table>\n\n"
+    "<pre>Rawpre \"line\" -- one\n  Rawpre two</pre>\n")
 MEASURED_HUNG = (
     "\nA line of code in a column too narrow for it, its table's widths given:\n\n<table>"
     + NARROW_COLUMNS + "<tbody><tr><td><code>fileobj = " + MEASURED_GIVEN + "</code></td>"
@@ -3466,7 +3474,7 @@ MEASURED_HUNG = (
     + "\nA line of code with a note after it, in a column too narrow for it, its table's "
     "widths given:\n\n| Code | Prose |\n|--|" + "-" * 60 + "|\n| `x = " + MEASURED_NOTE
     + "`[^hung] | Besidenote, words in the wider column, and then some more of them to fill "
-    "it. |\n\n[^hung]: A note on a line of code.\n")
+    "it. |\n" + MEASURED_RAW + "\n[^hung]: A note on a line of code.\n")
 MEASURED_CODE = "Cellmeter = [" + ", ".join(str(i) for i in range(10, 19)) + "]"
 MEASURED_WORDS = ("Counterrevolutionaries", "Uncharacteristically", "Intellectualistic",
                   "Indivisibility")
@@ -4718,6 +4726,19 @@ def measured_checks(measured_path, measured_said, measured_source):
          lambda: (lambda found: found is not None
                   and 12 - 0.5 < found[1] - found[0] < 12 + 0.5 * plex)(
                       beside(MEASURED_OPENS, "Besideopens"))),
+        ("raw code in a Markdown page is in the PDF as written, in a paragraph and in a raw "
+         "HTML table's cell: its quotation marks straight, two backslashes two, and its "
+         "dashes and dots as they are",
+         lambda: any(MEASURED_RAW_PATH in text and "--rawflag ..." in text
+                     for text, _ in rows())
+         and any(MEASURED_RAW_CELL in text and "Besideraw" in text for text, _ in rows())),
+        ("a raw <pre> is in the PDF, a block of code, its lines as written, the second's "
+         "indentation kept, each character a character of code",
+         lambda: (lambda lines: len(lines) == 2 and all(
+             abs((glyphs[-1][0] - glyphs[0][0]) / (len(glyphs) - 1) - plex) < 0.05
+             for _, glyphs in lines))(
+                 [(text, glyphs) for text, glyphs in rows()
+                  if text in ('Rawpre "line" -- one', '  Rawpre two')])),
     ] + [
         ("%s: its word whole on its row, ending before the next column's words" % what,
          lambda word=word, other=other: (lambda found: found is not None

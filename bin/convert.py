@@ -133,6 +133,9 @@ DECK_TEMPLATE = os.path.join(HERE, "ltx-talk.latex")
 PDF_TARGET_FILTER = os.path.join(HERE, "pdf-target.lua")
 MARKDOWN_FILTER = os.path.join(HERE, "markdown-source.lua")
 MARKDOWN_HTML_FILTER = os.path.join(HERE, "markdown-html.lua")
+# Pandoc's markdown, a raw <code>, <kbd>, <samp>, <var>, or <tt> taken as
+# written, as an HTML book's is, not read as Markdown (its own comment).
+MARKDOWN_READER = os.path.join(HERE, "markdown-reader.lua")
 HTML_SOURCE_FILTER = os.path.join(HERE, "html-source.lua")
 HTML_RAW_FILTER = os.path.join(HERE, "html-raw.lua")
 ASCIIDOC_FILTER = os.path.join(HERE, "asciidoc-source.lua")
@@ -2107,7 +2110,7 @@ def read_markdown_to_json(base, docs, env, decks=False):
         # cartridge's, the EPUB's, an LMS's. "01 BigPicture.md" is the
         # page 01-BigPicture.
         stem = safe_stem(os.path.basename(name)[:-3])
-        run(["pandoc", "-f", "markdown", "-t", "json", name,
+        run(["pandoc", "-f", MARKDOWN_READER, "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
              "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
@@ -2513,7 +2516,7 @@ def read_variants(base, target, work, env):
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             portable_media_paths(out, base, name)
         else:
-            run(["pandoc", "-f", "markdown", "-t", "json", path, "-o", out,
+            run(["pandoc", "-f", MARKDOWN_READER, "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             settle_markdown(out, base, name, DECK_RUN, report=False)

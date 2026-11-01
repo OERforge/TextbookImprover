@@ -61,7 +61,7 @@ Two repairs change what reading a Word file means, and each is a setting, decide
 
 **What it becomes**
 
-- **HTML: TESTED**, on the economics book, the 33-chapter Markdown textbook, and the suite. HTML written into the Markdown is read as HTML and cleaned the way an HTML source is.
+- **HTML: TESTED**, on the economics book, the 33-chapter Markdown textbook, and the suite. HTML written into the Markdown is read as HTML and cleaned the way an HTML source is, the code in it taken as written ([Raw HTML](markdown.md#raw-html)).
 - **EPUB: TESTED.** The economics book's 34 pages build an EPUB epubcheck passes without an error or a warning.
 - **Markdown (round trip): TESTED**, by the suite and on the economics book: the second write equals the third.
 - **AsciiDoc: TESTED**, on the economics book and the suite: read back, 31 of the book's 34 pages are identical to the book converted directly. The other three hold a footnote with a list or a quotation inside, which an AsciiDoc footnote can't keep; the words stay.

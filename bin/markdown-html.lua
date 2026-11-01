@@ -23,12 +23,20 @@ their own files, so there is one set of rules. An unmatched tag is left
 for html-raw.lua, which drops it and keeps what it wrapped, as it does
 for an HTML source.
 
+A raw <pre> the Markdown reader keeps whole, as it does one that opens a
+block, is read the same way, a CodeBlock: kept as raw HTML, it was in
+the pages and the EPUB and nowhere else, gone from a PDF. A raw <code>,
+<kbd>, <samp>, <var>, or <tt> comes here read already, as written, by
+markdown-reader.lua; one it leaves to Pandoc's reader, over more than a
+line, say, is read as HTML like the rest, its text as Markdown read it,
+so that it's code in a PDF too, where its tags were dropped.
+
 Never touched: code, which is a Code or CodeBlock element and holds no
-raw HTML to find; a raw <pre>, <code>, <script>, <style>, or <math>,
-whose contents are verbatim; and comments, which the filter drops. Nor
-is anything outside raw HTML changed, except an href on a <span> or
-<div> (RDFa, usually), which the Markdown reader made an attribute and
-XHTML allows on neither.
+raw HTML to find; a <pre> in pieces, and a raw <script>, <style>,
+<textarea>, or <math>, whose contents are verbatim; and comments, which
+the filter drops. Nor is anything outside raw HTML changed, except an
+href on a <span> or <div> (RDFa, usually), which the Markdown reader
+made an attribute and XHTML allows on neither.
 
 Copyright 2026 Robert Szarka
 
@@ -67,8 +75,8 @@ local SOURCE = handlers('html-source.lua', { 'Table', 'Div', 'Span', 'Header',
 local VOID = { area = true, br = true, col = true, embed = true, hr = true,
                img = true, input = true, source = true, track = true,
                wbr = true }
-local VERBATIM = { pre = true, code = true, script = true, style = true,
-                   math = true, textarea = true }
+local VERBATIM = { pre = true, script = true, style = true, math = true,
+                   textarea = true }
 local reread = 0
 
 -- The tag a raw fragment opens or closes: (name, closing?, self-closed?)
@@ -79,7 +87,7 @@ local function tag_of(el)
   local slash, name = text:match('^%s*<(/?)%s*([%w:-]+)')
   if not name then return nil end
   name = name:lower()
-  local whole = text:match('^%s*<.-</%s*' .. name .. '%s*>%s*$') ~= nil
+  local whole = text:lower():match('^%s*<.-</%s*' .. name .. '%s*>%s*$') ~= nil
   return name, slash == '/', text:match('/%s*>%s*$') ~= nil or whole
 end
 
@@ -114,6 +122,54 @@ local function as_html(list, inline)
   return pandoc.write(pandoc.Pandoc(blocks), 'html')
 end
 
+-- A whole <pre> as a code block, its text inside a <code> where it has
+-- none: the HTML reader makes one without a <code> paragraphs in the
+-- text's face, its spaces no-break spaces, since 3.11 (#11810), and a code
+-- block in 3.9, TI's minimum (PANDOC-NOTES, the HTML reader), where the
+-- raw <pre> the pages had shown was set as code. The start tag ends at a
+-- '>' outside quotes (<pre data-prompt=">>>">), and a line end right after
+-- it, which HTML drops from a <pre>, is dropped: inside a <code> it would
+-- be the code's first line, blank, and before a <code> the HTML reader
+-- takes it for the <pre>'s text, and the <code> for inline code (a review
+-- of Round 35).
+local function code_pre(text)
+  local quote, open_end = nil, nil
+  for p = 1, #text do
+    local c = text:sub(p, p)
+    if quote then
+      if c == quote then quote = nil end
+    elseif c == '"' or c == "'" then
+      quote = c
+    elseif c == '>' then
+      open_end = p
+      break
+    end
+  end
+  local close = text:lower():match('.*()</%s*pre')
+  if not open_end or not close or close <= open_end then return text end
+  local inner = text:sub(open_end + 1, close - 1):gsub('^\r?\n', '', 1)
+  if inner:lower():match('^<code[%s>]') then
+    return text:sub(1, open_end) .. inner .. text:sub(close)
+  end
+  return text:sub(1, open_end) .. '<code>' .. inner .. '</code>' .. text:sub(close)
+end
+
+local function whole_pre(el)
+  local name, closing, alone = tag_of(el)
+  return name == 'pre' and not closing and alone
+end
+
+-- list ready to go through HTML: a whole <pre> in it given its <code>
+-- (code_pre).
+local function for_html(list, inline)
+  local filter = {
+    RawBlock = function(raw)
+      if whole_pre(raw) then return pandoc.RawBlock('html', code_pre(raw.text)) end
+    end,
+  }
+  return inline and pandoc.Inlines(list):walk(filter) or pandoc.Blocks(list):walk(filter)
+end
+
 local function balance(list, inline)
   local out = inline and pandoc.Inlines({}) or pandoc.Blocks({})
   local i, changed = 1, false
@@ -122,9 +178,10 @@ local function balance(list, inline)
     local name, closing, alone = nil, nil, nil
     if is_raw(el) then name, closing, alone = tag_of(el) end
     local done = false
-    if name and not closing and not VERBATIM[name] then
+    local pre = not inline and is_raw(el) and whole_pre(el)
+    if name and not closing and (not VERBATIM[name] or pre) then
       if alone or VOID[name] then
-        local new = read_html(el.text, inline)
+        local new = read_html(pre and code_pre(el.text) or el.text, inline)
         if new then out:extend(new); done, changed = true, true end
       else
         local depth, j = 1, i + 1
@@ -161,6 +218,7 @@ local function balance(list, inline)
         if not done and j <= #list then
           local middle = {}
           for k = i + 1, j - 1 do middle[#middle + 1] = list[k] end
+          middle = for_html(middle, inline)
           local html = el.text .. as_html(middle, inline) .. list[j].text
           local new = read_html(html, inline)
           if new then

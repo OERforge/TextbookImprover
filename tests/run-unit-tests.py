@@ -3022,6 +3022,181 @@ def check_measure_report():
     ]
 
 
+def check_markdown_reader():
+    """markdown-reader.lua: a raw <code> and its kin taken as written where
+    the Markdown reader reads raw HTML, an attribute's quoted '<' and '/>'
+    and an element of the same name inside it, and its name in capitals among
+    them; and left to Pandoc's reader where a backslash escapes its '<', in
+    a YAML metadata block, whose strings have escapes of their own, self-
+    closed, a closing tag after it no element's, and over two lines; smart
+    punctuation outside it as before. Outside quotes, the attribute's '<'
+    would end the tag, and its '/>' close it."""
+    text = ('---\ntitle: "Using <code>open(\\"x\\")</code>"\n---\n\n'
+            'Escaped: \\<code>"esc"</code>.\n\n'
+            'Quoted attribute: <code title="a < b /> c">"q"</code>.\n\n'
+            'Nested: <code>a <code>"b"</code> c</code>.\n\n'
+            'Self-closing: <code /> and "smart" </code>.\n\n'
+            'Upper: <CODE>"up"</CODE>.\n\n'
+            'Own: <tv0-1>a tag of the reader\'s name</tv0-1>.\n\n'
+            'Two lines: <code>"one\ntwo"</code>.\n')
+    done = subprocess.run(["pandoc", "-f", os.path.join(ROOT, "bin", "markdown-reader.lua"),
+                           "-t", "json", "-s"], input=text, capture_output=True, text=True)
+    doc = json.loads(done.stdout) if done.returncode == 0 else {"blocks": [], "meta": {}}
+    paras = {}
+    for block in doc["blocks"]:
+        if block["t"] == "Para" and block["c"] and block["c"][0]["t"] == "Str":
+            paras[block["c"][0]["c"]] = block["c"]
+
+    def codes(key):
+        return [i["c"][1] for i in paras.get(key, []) if i["t"] == "Code"]
+
+    def kinds(key):
+        return [i["t"] for i in paras.get(key, [])]
+    title = doc["meta"].get("title", {}).get("c", [])
+    # Simple tables, whose columns are where their lines put them: the words
+    # after the element run past the first column's edge, so a tag narrower
+    # or wider than Pandoc counts the element would move them. Pandoc counts
+    # each of 漢字 two columns, as the reader does, and ⌚ two, which the
+    # reader's ranges leave out.
+    tables = {}
+    for name, chars in (("cjk", "漢字"), ("watch", "\u231a\u231a")):
+        table = ("  " + "Code".ljust(30) + "  Says\n  " + "-" * 30 + "  ------\n  <code>" + chars
+                 + '"k"</code>     and words  b\n')
+        read = subprocess.run(["pandoc", "-f", os.path.join(ROOT, "bin", "markdown-reader.lua"),
+                               "-t", "plain"], input=table, capture_output=True, text=True)
+        tables[name] = (read.stdout.splitlines()[2:3] or [""])[0].split(), read.stderr
+    return [
+        ("a raw code element taken as written: an attribute's quoted '<' and '/>' and all, "
+         "one inside another, and one named in capitals, and the run says how many",
+         lambda: codes("Quoted") == ['"q"'] and "".join(codes("Nested:")) == 'a "b" c'
+         and codes("Upper:") == ['"up"']
+         and "[markdown-reader] -: 3 raw code element(s) taken as written" in done.stderr),
+        ("and left to Pandoc's reader where a backslash escapes it, in YAML, self-closed, or "
+         "over two lines, smart punctuation outside it as before",
+         lambda: "Quoted" in kinds("Escaped:") and "Code" not in kinds("Escaped:")
+         and any(i["t"] == "Quoted" for i in title)
+         and "RawInline" in kinds("Self-closing:") and "Quoted" in kinds("Self-closing:")
+         and "Quoted" in kinds("Two") and "Code" not in kinds("Two")),
+        ("a tag of the source's own with the reader's name is kept as it is, the reader's "
+         "named otherwise",
+         lambda: kinds("Own:").count("RawInline") == 2 and "Code" not in kinds("Own:")),
+        ("in a simple table, each row's words where Pandoc's reading puts them: a wide "
+         "character counted two columns, as Pandoc counts it, the code taken as written; and "
+         "where the reader counts one narrower than Pandoc, the words that moved found and "
+         "the page read as Pandoc reads it, the run saying so",
+         lambda: tables["cjk"][0] == ['漢字"k"', "and", "wor", "ds", "b"]
+         and "1 raw code element(s) taken as written" in tables["cjk"][1]
+         and tables["watch"][0][1:] == ["and", "wor", "ds", "b"]),
+    ]
+
+
+def check_markdown_reader_contexts():
+    """markdown-reader.lua where Pandoc repeats, pairs, or escapes what's
+    around raw code, as a review of Round 35 found it: two code spans
+    holding an element's tags are two spans still, where the element was
+    taken whole and the spans made one; an element in an image's
+    description is in its figure's caption and its alt, and one in a code
+    span there put back in both, where the second copy kept the reader's
+    mark; a note referenced twice has it in both; in a pipe table, an
+    element holding the table's \\| escape is Pandoc's reading, and the
+    table's widths are; a link to a heading by its text, and a reference
+    by an element, go where Pandoc's reading has them go; a raw <pre> is a
+    code block of its lines, where its text starting on the line after its
+    tag had made a blank first line, and a quoted '>' in its tag had ended
+    the tag; and a YAML block right after a fenced code block, a div, or
+    raw HTML is left to Pandoc, its backslash YAML's escape."""
+    reader = os.path.join(ROOT, "bin", "markdown-reader.lua")
+    pre = subprocess.run(["pandoc", "-f", reader, "--lua-filter",
+                          os.path.join(ROOT, "bin", "markdown-html.lua"), "-t", "json"],
+                         input='<pre>\nline 1\nline 2\n</pre>\n\n'
+                               '<pre data-prompt=">>>">print(1)</pre>\n\n'
+                               '<pre>\n<code>kept</code></pre>\n\n'
+                               '<pre><code class="language-python">x = 1</code></pre>\n',
+                         capture_output=True, text=True)
+    try:
+        pre_blocks = [(b["t"], b["c"][0][1] + b["c"][0][2], b["c"][1]) if b["t"] == "CodeBlock"
+                      else (b["t"],) for b in json.loads(pre.stdout)["blocks"]]
+    except (ValueError, KeyError, IndexError, TypeError):
+        pre_blocks = []
+
+    def html(text, reader=reader):
+        done = subprocess.run(["pandoc", "-f", reader, "-t", "html", "--wrap=none"],
+                              input=text, capture_output=True, text=True)
+        return done.stdout
+
+    def meta(text, reader=reader):
+        done = subprocess.run(["pandoc", "-f", reader, "-t", "json"], input=text,
+                              capture_output=True, text=True)
+        try:
+            return json.loads(done.stdout)["meta"]
+        except ValueError:
+            return {}
+    spans = html("Wrap code in `<code>` and end it with `</code>` tags.\n")
+    repeated = html("![The <code>open()</code> call](a.png)\n\n"
+                    "![The `<code>q</code>` element](b.png)\n\n"
+                    "A[^1] and B[^1].\n\n[^1]: Note with <code>\"n\"</code>.\n")
+    pipe = ("| Operator | Meaning |\n|---|---|\n| <code>a \\|\\| b</code> | logical or |\n"
+            "| <code>\"x\"</code> | A short cell beside it, long enough here to pass the "
+            "columns |\n")
+    heading = html('# Using <code>open("f")</code>\n\nSee [Using <code>open("f")</code>] for '
+                   'files.\n')
+    # A link the element's text would end: Pandoc's link from "[a" to "](y)",
+    # and another after it, whose target taken in order would be the first's.
+    broken = html("See [a <code>x](y)</code> and [b](z).\n")
+    # A simple table whose last column's head is the element alone, flush
+    # with its rule's end, right-aligned: Pandoc counts the watch two
+    # columns, the reader one, so the head is a column short of the end, and
+    # nothing but the column's alignment tells.
+    right = ("  " + "A".ljust(12) + "  <code>\u231a</code>\n  " + "-" * 10 + "  " + "-" * 17
+             + "\n  " + "x".ljust(12) + "y\n")
+    aligned = re.findall(r'<th(?: style="text-align: (\w+);")?>', html(right))
+    reference = html('Call [<code>open("f")</code>] to open one.\n\n'
+                     '[<code>open("f")</code>]: https://example.org/open\n')
+    yaml = {}
+    for name, before in (("fence", "~~~\ncode\n~~~"), ("div", "::: box\nIn it.\n:::"),
+                         ("html", "<div>\n</div>")):
+        text = before + "\n---\nsubtitle: \"<code>c:\\\\x</code>\"\n---\n\nBody.\n"
+        yaml[name] = (meta(text).get("subtitle"), meta(text, "markdown").get("subtitle"))
+    return [
+        ("two code spans holding an element's tags stay two spans",
+         lambda: "<code>&lt;code&gt;</code> and end it with <code>&lt;/code&gt;</code>" in spans),
+        ("an element in an image's description in its caption and its alt, one in a code span "
+         "there as written in both, and a note referenced twice holding it in both",
+         lambda: 'alt="The open() call"' in repeated
+         and "The <code>open()</code> call</figcaption>" in repeated
+         and 'alt="The &lt;code&gt;q&lt;/code&gt; element"' in repeated
+         and "verbatim" not in repeated and "tv0" not in repeated
+         and repeated.count('Note with <code>"n"</code>') == 2),
+        ("in a pipe table, an element holding the table's escaped bar Pandoc's reading, the "
+         "table's widths Pandoc's too",
+         lambda: "<td><code>a || b</code></td>" in html(pipe)
+         and '<td><code>"x"</code></td>' in html(pipe)
+         and html(pipe).count("<col ") == subprocess.run(
+             ["pandoc", "-f", "markdown", "-t", "html"], input=pipe, capture_output=True,
+             text=True).stdout.count("<col ")),
+        ("a link to a heading by its text and a reference by an element go where Pandoc's "
+         "reading has them go",
+         lambda: '<h1 id="using-openf">' in heading
+         and '<a href="#using-openf">Using <code>open("f")</code></a>' in heading
+         and '<a href="https://example.org/open"><code>open("f")</code></a>' in reference),
+        ("a link the element's text would end read as Pandoc reads it, the link after it its "
+         "own target; and a column's alignment its own where only it would change",
+         lambda: '<a href="y">a <code>x</a></code> and <a href="z">b</a>' in broken
+         and aligned == ["left", "right"]),
+        ("a raw <pre> whose text starts on the line after its tag, whose tag holds a quoted "
+         "'>', or with a <code> on the line after it, a code block of its lines, its "
+         "attribute kept, and one whose <code> names a language that language's",
+         lambda: pre_blocks == [("CodeBlock", [], "line 1\nline 2"),
+                                ("CodeBlock", [["data-prompt", ">>>"]], "print(1)"),
+                                ("CodeBlock", [], "kept"),
+                                ("CodeBlock", ["python"], "x = 1")]),
+        ("a YAML block right after a fenced code block, a div, or raw HTML left to Pandoc, "
+         "its backslash YAML's escape",
+         lambda: len(yaml) == 3 and all(ours is not None and ours == pandocs
+                                        for ours, pandocs in yaml.values())),
+    ]
+
+
 def check_glyph_names():
     """A figure's glyphs given the text their names give them, where its PDF
     names them and maps them to none (pdfglyphs): each name as the Adobe
@@ -6296,6 +6471,9 @@ GROUPS = [
     ("the math font a metadata file names", check_math_font_latex),
     ("the page's measures, their files missing", check_measure_page),
     ("the page's measures, to six places", check_measure_report),
+    ("raw code in Markdown, as written", check_markdown_reader),
+    ("raw code in Markdown, where Pandoc repeats, pairs, or escapes it",
+     check_markdown_reader_contexts),
     ("a figure's glyph names given their text", check_glyph_names),
     ("an image's natural size, for its scale", check_natural_sizes),
     ("the AAA page's measure of its lines", check_aaa_line_length),

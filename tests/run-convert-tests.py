@@ -1943,6 +1943,118 @@ def case_markdown_html(work):
     ]
 
 
+# Raw code in a Markdown page (markdown-reader.lua): elements on a line of
+# their own, their quotation marks, backslashes, dashes, and dots as
+# written, in a paragraph, a raw HTML table's cell, and a heading; and as
+# Markdown's own code, where an element is text. A raw HTML table whose
+# cell holds a note, and a raw <pre> (markdown-html.lua). And a grid table
+# holding an element, which taking it as written would leave no table.
+RAW_CODE_MD = r"""# Raw code
+
+A path: <code>open("c:\\projects")</code>, a flag: <code>--flag ...</code>, keys:
+<kbd>Ctrl-"</kbd>, output: <samp>"out"</samp>.
+
+<table>
+<tr><th>Code</th><th>Says</th></tr>
+<tr><td><code>x = 'a' -- b</code></td><td>Beside it.</td></tr>
+</table>
+
+## Using <code>open("x")</code> here
+
+As written: `<code>"lit"</code>`, and
+
+```
+<td><code>"block"</code></td>
+```
+
+<pre>line one
+  "two" -- x</pre>
+
+<table>
+<tr><td>
+<pre>cell "pre"
+  two</pre>
+</td><td>Beside the pre.</td></tr>
+</table>
+
+<PRE>upper "pre"</PRE>
+
+Over two lines: <code>first "q"
+second</code>.
+
+"""
+RAW_GRID_MD = ("""# Grid
+
++--------------------+-----+
+| <code>"g"</code>   | b   |
++--------------------+-----+
+
+""" + "  " + "Code".ljust(60) + "  Says\n  " + "-" * 60 + "  ------\n  "
+               + '<code>"s"</code> and then some more words up to here'.ljust(60) + "  b\n  "
+               + "plain".ljust(60) + "  c\n")
+RAW_PIPE_MD = """# Pipe
+
+| A | B |
+|---|---|
+| <code>a|b</code> | c |
+"""
+
+
+def case_markdown_raw_code(work):
+    """Raw code in a Markdown source taken as written, as an HTML source's
+    is, where Pandoc's reader read it as Markdown, its quotation marks
+    curled and a backslash taken for an escape; a raw <pre> a code block,
+    which only the pages and the EPUB had; and one over two
+    lines, which Pandoc's reader reads, read as HTML, as code, its tags
+    gone from a PDF where they were left as raw HTML."""
+    os.makedirs(work)
+    for name, text in (("code.md", RAW_CODE_MD), ("grid.md", RAW_GRID_MD),
+                       ("pipe.md", RAW_PIPE_MD)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  md:\n    format: markdown\n", fixtures=())
+    said = result.stdout + result.stderr
+    page = read(work, "html", "code.html") if exists(work, "html", "code.html") else ""
+    grid = read(work, "html", "grid.html") if exists(work, "html", "grid.html") else ""
+    pipe = read(work, "html", "pipe.html") if exists(work, "html", "pipe.html") else ""
+    markdown = read(work, "md", "code.md") if exists(work, "md", "code.md") else ""
+    return [
+        ("raw code is taken as written: its quotation marks straight, two backslashes two, "
+         "its dashes and dots as they are, in a <kbd> and a <samp> too, and the run says how "
+         "many it took",
+         lambda: result.returncode == 0 and '<code>open("c:\\\\projects")</code>' in page
+         and "<code>--flag ...</code>" in page and '<kbd>Ctrl-"</kbd>' in page
+         and '<samp>"out"</samp>' in page
+         and "[markdown-reader] code.md: 6 raw code element(s) taken as written" in said),
+        ("a heading holding raw code keeps the id the source gives it",
+         lambda: '<h2 id="using-openx-here">Using <code>open("x")</code> here</h2>' in page),
+        ("raw code written as Markdown's code is left as written",
+         lambda: "<code>&lt;code&gt;\"lit\"&lt;/code&gt;</code>" in page
+         and "&lt;td&gt;&lt;code&gt;&quot;block&quot;&lt;/code&gt;&lt;/td&gt;" in page),
+        ("a raw <pre> is a code block, its lines and spaces as written, in a raw table's "
+         "cell too, and one named in capitals",
+         lambda: "<pre><code>line one\n  &quot;two&quot; -- x</code></pre>" in page
+         and "    line one\n      \"two\" -- x" in markdown
+         and "<td><pre><code>cell &quot;pre&quot;\n  two</code></pre></td>" in page
+         and "<pre><code>upper &quot;pre&quot;</code></pre>" in page),
+        ("raw code over two lines, left to Pandoc's reader, is read as HTML with the rest, "
+         "code in the Markdown target, its text as Markdown read it",
+         lambda: "`first \u201cq\u201d second`" in markdown),
+        ("in a grid table and a simple table, whose columns are where their lines put them, "
+         "raw code is taken as written, a row's words in their columns",
+         lambda: '<td><code>"g"</code></td>' in grid
+         and re.search(r'<code>"s"</code> and then some more words\s+up to here</td>\s*'
+                       r'<td[^>]*>b</td>', grid)
+         and "[markdown-reader] grid.md: 2 raw code element(s) taken as written" in said),
+        ("where taking it as written would change how the page's blocks are read, a pipe "
+         "table's cells split at a | inside the element, the page is read as Pandoc reads "
+         "it, and the run says so",
+         lambda: "<table" in pipe
+         and "[markdown-reader] pipe.md: its 1 raw code element(s) are read as Markdown" in said),
+    ]
+
+
 BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 <body><main><h1>Bands</h1>
 <table><tr><td colspan="3"><b>The Message Triangle</b></td></tr>
@@ -8331,6 +8443,7 @@ CASES = [
     ("a menu for pages posted as a site", case_menu),
     ("the footer on every page of every format", case_page_footer),
     ("raw HTML in a Markdown source", case_markdown_html),
+    ("raw code in a Markdown source, as written", case_markdown_raw_code),
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
     ("a heading's id from its words gives way", case_heading_ids),

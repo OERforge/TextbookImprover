@@ -1350,6 +1350,22 @@ MEASURE_PAGE = os.path.join(HERE, "measure-page.lua")
 # a table's cell that holds a list: their margins at each depth LaTeX
 # allows, itemize's four and then enumerate's.
 LIST_DEPTHS = ("itemize",) * 4 + ("enumerate",) * 2
+# A note's mark as LaTeX sets it, \@makefnmark, \@thefnmark set as
+# \footnotemark sets it: for each of the first nine notes as the book
+# numbers them, \thefootnote, and for each digit alone and twice, a
+# digit's advance in a mark of more. The counts had taken a mark for two
+# digits of IBM Plex Serif at 12 points, 0.8 of an em, in any face, and
+# for any number of digits or symbols.
+NOTE_MARKS = (
+    "\\makeatletter{\\normalfont"
+    + "".join("\\setcounter{footnote}{%d}\\protected@xdef\\@thefnmark{\\thefootnote}"
+              "\\setbox0\\hbox{\\@makefnmark}\\directlua{oer_measure.note(\\number\\wd0)}"
+              % n for n in range(1, 10))
+    + "".join("\\gdef\\@thefnmark{%d}\\setbox0\\hbox{\\@makefnmark}"
+              "\\gdef\\@thefnmark{%d%d}\\setbox2\\hbox{\\@makefnmark}"
+              "\\directlua{oer_measure.notedigit(\\number\\wd0, \\number\\wd2)}"
+              % (d, d, d) for d in range(10))
+    + "\\setcounter{footnote}{0}}\\makeatother\n")
 
 
 def measure_page(document, filters, environment, base):
@@ -1381,6 +1397,7 @@ def measure_page(document, filters, environment, base):
                       "\\number\\linewidth)}" for name in LIST_DEPTHS)
             + "".join("\\end{" + name + "}" for name in reversed(LIST_DEPTHS))
             + "\\end{minipage}}\n"
+            + NOTE_MARKS
             + "".join("\\setbox0\\hbox{\\(" + tex + "\\)}"
                       "\\directlua{oer_measure.formula(\\number\\wd0)}\n" for tex in formulas)
             + "\\directlua{oer_measure.report(os.getenv(\"OER_MEASURE_OUT\"))}\n")
@@ -1434,7 +1451,9 @@ def measures_problem(said, formulas=None):
     """What OER_MEASURES, said, doesn't give all of that the PDF filter
     reads, or None: the page's measures, each a number more than none; 95
     characters' widths, and in bold; a list's margins at each of its
-    depths, and its label space; and the formulas' widths, as many as
+    depths, and its label space; a note's mark, more than none, and a
+    digit's advance in it, none or more (a book's own \\@makefnmark can set
+    every mark in a box of one width); and the formulas' widths, as many as
     count-formulas.txt has where formulas says so. The filter, given less,
     counts in characters, without a word: OER_MEASURES set before the run,
     as an earlier version of the measuring wrote it, had done that (a
@@ -1453,6 +1472,9 @@ def measures_problem(said, formulas=None):
         return "the widths of the text face's characters and of its bold"
     if len(numbers("lists")) != len(LIST_DEPTHS) or len(numbers("labelsep")) != 1:
         return "a list's margins at its depths and its label space"
+    note = numbers("note")
+    if len(note) != 2 or note[0] <= 0 or note[1] < 0:
+        return "a note's mark"
     widths = numbers("math")
     if not widths or (formulas is not None and len(widths) != formulas):
         return "count-formulas.txt's formulas"

@@ -5,7 +5,7 @@
 -- printable ASCII characters, its space the first, and in bold; its small
 -- letters, each as often as in English, for a character outside ASCII; its
 -- space; a character of code; a list's margins in a table's cell, at each
--- depth, and its label space; and the width of each formula
+-- depth, and its label space; a note's mark; and the width of each formula
 -- count-formulas.txt lists. Loaded by the
 -- document measure_page writes, which calls each function in turn and
 -- reads the line report writes.
@@ -88,6 +88,25 @@ function oer_measure.list(hsize, linewidth)
   oer_measure.lists_ = lists
 end
 
+-- A note's mark as LaTeX sets it (\@makefnmark: the note's number in a
+-- superscript's type, raised, \scriptspace after it), called with its
+-- width, in scaled points, for each of the first nine notes as the book
+-- numbers them (\thefootnote: a number, a letter, or a symbol, as
+-- \fnsymbol's doubled ones from the seventh).
+function oer_measure.note(w)
+  oer_measure.note_ = math.max(oer_measure.note_ or 0, w / oer_measure.size)
+end
+
+-- A mark of a digit and of two of it, called with their widths, in
+-- scaled points, for each digit in turn: a digit's advance in a mark, the
+-- widest, for a mark of more digits, and the widest mark of one, which
+-- the first nine's may be narrower than.
+function oer_measure.notedigit(one, two)
+  local size = oer_measure.size
+  oer_measure.notedigit_ = math.max(oer_measure.notedigit_ or 0, (two - one) / size)
+  oer_measure.noteone_ = math.max(oer_measure.noteone_ or 0, one / size)
+end
+
 -- A formula's width, in scaled points, as LaTeX set it in text style.
 function oer_measure.formula(w)
   local widths = oer_measure.widths
@@ -114,6 +133,11 @@ function oer_measure.report(name)
   for i, w in ipairs(oer_measure.lists_ or {}) do lists[i] = string.format("%.6f", w) end
   parts[#parts + 1] = "lists=" .. table.concat(lists, ",")
   parts[#parts + 1] = "labelsep=" .. string.format("%.6f", oer_measure.labelsep_ or 0)
+  -- A note's mark of one digit, the widest of the first nine's as the
+  -- book numbers them and of a digit's, and a digit's advance in a mark,
+  -- which a mark of more digits is wider by for each: "(9)", then "(99)".
+  parts[#parts + 1] = "note=" .. string.format("%.6f,%.6f",
+    math.max(oer_measure.note_ or 0, oer_measure.noteone_ or 0), oer_measure.notedigit_ or 0)
   parts[#parts + 1] = "chars=" .. table.concat(oer_measure.chars, ",")
   parts[#parts + 1] = "bold=" .. table.concat(oer_measure.bold_ or {}, ",")
   local widths = {}

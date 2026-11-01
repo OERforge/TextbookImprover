@@ -2960,15 +2960,21 @@ def check_measure_page():
         build_pdf.COUNT_FORMULAS = saved
     # OER_MEASURES set before the run: as an earlier version wrote it, with
     # no bold widths or label space, which the filter would have taken for
-    # none, without a word (a review); as this one writes it; and none.
+    # none, without a word (a review); as Round 34's wrote it, with no
+    # note's mark; as this one writes it; as it writes a book's own mark of
+    # one width whatever its digits, a digit adding nothing to it; and
+    # none.
     earlier = ("line=39.146278;gap=1.000000;lower=0.520000;space=0.232000;points=469.755000;"
                "mono=0.600000;lists=2.5,4.7,6.57,8.27,9.27,10.27;chars=" + ",".join(["0.5"] * 95)
                + ";math=0.48")
-    current = earlier + ";labelsep=0.500000;bold=" + ",".join(["0.52"] * 95)
+    unmarked = earlier + ";labelsep=0.500000;bold=" + ",".join(["0.52"] * 95)
+    current = unmarked + ";note=0.431667,0.390000"
+    boxed = unmarked + ";note=0.833333,0.000000"
     given = {}
     held = os.environ.get("OER_MEASURES")
     try:
-        for name, value in (("earlier", earlier), ("current", current), ("none", "none")):
+        for name, value in (("earlier", earlier), ("unmarked", unmarked), ("current", current),
+                            ("boxed", boxed), ("none", "none")):
             os.environ["OER_MEASURES"] = value
             given[name] = build_pdf.given_measures()
     finally:
@@ -2982,7 +2988,10 @@ def check_measure_page():
          lambda: given["earlier"] == (None, "OER_MEASURES, set before the run, doesn't give "
                                       "all of the widths of the text face's characters and of "
                                       "its bold")
-         and given["current"] == (current, None) and given["none"] == (None, None)),
+         and given["unmarked"] == (None, "OER_MEASURES, set before the run, doesn't give all "
+                                   "of a note's mark")
+         and given["current"] == (current, None) and given["boxed"] == (boxed, None)
+         and given["none"] == (None, None)),
         ("the page's measures without their files: none, and why",
          lambda: measured == (None, "its files, bin/measure-page.lua and "
                               "bin/count-formulas.txt, aren't both installed")),
@@ -3001,24 +3010,109 @@ def check_measure_report():
     of code is as wide as to the scaled point (pdf-target.lua's held_part).
     To four, a character of code of 1,200/2,048 of an em was 0.5859, a
     word of forty such characters counted a fiftieth of a point narrower
-    than it is."""
-    out = os.path.join(tempfile.mkdtemp(), "report.txt")
+    than it is. And a note's mark: the widest of a mark of the first nine
+    notes, as the book numbers them, and of a mark of one digit, a digit's
+    advance the second, which a symbol's mark wider than a digit's is
+    reported as, \\fnsymbol's doubled ones from the seventh."""
+    folder = tempfile.mkdtemp()
+    out, symbols = os.path.join(folder, "report.txt"), os.path.join(folder, "symbols.txt")
+    size = 786432
     script = ("dofile(%s) oer_measure.text_ = {line = 39.1462775, gap = 1, lower = 0.52, "
               "space = 0.232, points = 469.755} oer_measure.mono_ = 1200 / 2048 "
               "oer_measure.lists_ = {2.5, 4.7} oer_measure.chars = {'0.2320'} "
-              "oer_measure.report(%s)" % (json.dumps(os.path.join(ROOT, "bin", "measure-page.lua")),
-                                          json.dumps(out)))
+              "oer_measure.size = %d "
+              "for _, w in ipairs({0.39, 0.40}) do oer_measure.note(w * %d) end "
+              "for d = 0, 9 do oer_measure.notedigit(0.43 * %d, 0.82 * %d) end "
+              "oer_measure.report(%s) oer_measure.note(0.95 * %d) oer_measure.report(%s)"
+              % (json.dumps(os.path.join(ROOT, "bin", "measure-page.lua")), size, size, size,
+                 size, json.dumps(out), size, json.dumps(symbols)))
     ran = subprocess.run(["pandoc", "lua", "-e", script], capture_output=True, text=True)
-    said = ""
-    if ran.returncode == 0 and os.path.exists(out):
+    said, symbol_said = "", ""
+    if ran.returncode == 0 and os.path.exists(out) and os.path.exists(symbols):
         with open(out, encoding="utf-8") as fh:
             said = fh.read().strip()
-    shutil.rmtree(os.path.dirname(out), ignore_errors=True)
+        with open(symbols, encoding="utf-8") as fh:
+            symbol_said = fh.read().strip()
+    shutil.rmtree(folder, ignore_errors=True)
     return [
         ("the page's measures reported to six places: the line, a character of code, and a "
          "list's margins at each depth",
          lambda: said.startswith("line=39.146277;gap=1.000000;")
          and ";mono=0.585938;lists=2.500000,4.700000;" in said),
+        ("a note's mark reported as the widest of the first nine notes' and of one digit, "
+         "and a digit's advance in it, a symbol's wider than a digit its own width",
+         lambda: ";note=0.430000,0.390000;" in said
+         and ";note=0.950000,0.390000;" in symbol_said),
+    ]
+
+
+def check_note_mark():
+    """What pdf-target.lua counts a note's mark as (note_mark): measured,
+    the widest of a mark of the book's first nine notes and of one digit,
+    a digit's advance more for each digit more than one the book's notes
+    need (count_notes); counted in characters, a digit each; and measured
+    where the class sets a mark in a box of its own width, its digit's
+    advance nothing, which is a measure, not a missing one. And the filter
+    run whole on books of 99 and 100 notes, its comment giving the mark as
+    counted, so the notes are counted in its passes."""
+    with open(os.path.join(ROOT, "bin", "pdf-target.lua"), encoding="utf-8") as fh:
+        source = fh.read()
+    cut = source.rfind("\nreturn {")
+    # The script's file the filter's, which it finds count-formulas.txt
+    # beside.
+    script = ("PANDOC_SCRIPT_FILE = %s\n" % json.dumps(os.path.join(ROOT, "bin", "pdf-target.lua"))
+              + source[:cut]) + (
+        "\ncount_notes(pandoc.Pandoc({pandoc.Para({pandoc.Str('a'), pandoc.Note({"
+        "pandoc.Para({pandoc.Str('n')})}), pandoc.Note({pandoc.Para({pandoc.Str('m')})})})}))"
+        "\nprint(NOTES)"
+        "\nfor _, n in ipairs({9, 99, 100, 1000}) do NOTES = n; "
+        "print(string.format('%.6f', note_mark())) end\n")
+    # A width for each formula count-formulas.txt lists, as the filter
+    # takes the measures for none without them.
+    with open(os.path.join(ROOT, "bin", "count-formulas.txt"), encoding="utf-8") as fh:
+        formulas = sum(1 for line in fh if line.strip())
+    measures = ("line=39.146278;gap=1.000000;lower=0.520000;space=0.232000;points=469.755000;"
+                "mono=0.600000;lists=2.5,4.7,6.57,8.27,9.27,10.27;chars="
+                + ",".join(["0.5"] * 95) + ";math=" + ",".join(["4.8"] * formulas)
+                + ";labelsep=0.500000;bold=" + ",".join(["0.52"] * 95)
+                + ";note=0.431667,0.390000")
+    said = {}
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "note-mark.lua")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(script)
+        boxed = measures.replace(";note=0.431667,0.390000", ";note=0.833333,0.000000")
+        for name, value in (("measured", measures), ("boxed", boxed), ("characters", None)):
+            environment = {key: v for key, v in os.environ.items() if key != "OER_MEASURES"}
+            if value:
+                environment["OER_MEASURES"] = value
+            done = subprocess.run(["pandoc", "lua", path], cwd=folder, env=environment,
+                                  capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            said[name] = done.stdout.split() if done.returncode == 0 else []
+        whole = {}
+        for count in (99, 100):
+            book = "".join("Word.[^%d]\n\n[^%d]: Note %d.\n\n" % (k, k, k)
+                           for k in range(1, count + 1))
+            done = subprocess.run(["pandoc", "-f", "markdown", "-t", "latex", "--lua-filter",
+                                   os.path.join(ROOT, "bin", "pdf-target.lua")],
+                                  input=book, cwd=folder, capture_output=True, text=True,
+                                  env=dict(os.environ, OER_MEASURES=measures))
+            found = re.search(r"note mark ([\d.]+),", done.stdout)
+            whole[count] = found.group(1) if found else None
+    return [
+        ("a book's notes counted",
+         lambda: said["measured"][:1] == ["2"]),
+        ("a note's mark measured, one digit's width for up to 9 notes, a digit's advance "
+         "more for each digit more",
+         lambda: said["measured"][1:] == ["0.431667", "0.821667", "1.211667", "1.601667"]),
+        ("and where the class sets it in a box of its own width, its digit's advance "
+         "nothing, as measured, every number of notes the box's width",
+         lambda: said["boxed"][1:] == ["0.833333"] * 4),
+        ("and in characters, a digit each",
+         lambda: said["characters"][1:] == ["1.000000", "2.000000", "3.000000", "4.000000"]),
+        ("the filter run on a book counts its notes: the mark two digits' for 99 notes, three "
+         "digits' for 100, as its LaTeX's comment says",
+         lambda: whole == {99: "0.8217", 100: "1.2117"}),
     ]
 
 
@@ -6480,6 +6574,7 @@ GROUPS = [
     ("the math font a metadata file names", check_math_font_latex),
     ("the page's measures, their files missing", check_measure_page),
     ("the page's measures, to six places", check_measure_report),
+    ("a note's mark, as the counts take it", check_note_mark),
     ("raw code in Markdown, as written", check_markdown_reader),
     ("raw code in Markdown, where Pandoc repeats, pairs, or escapes it",
      check_markdown_reader_contexts),

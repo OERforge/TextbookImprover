@@ -53,6 +53,14 @@ positional argument, and a run on 3.13 printed that warning in the middle
 of convert.py's trace. An interpreter older than 3.13 says nothing, so
 that is checked in the source, always.
 
+And whatever the running interpreter warns of in compiling a file: an
+invalid escape sequence in a string, a docstring's "\\@makefnmark" with
+one backslash, say, which Python 3.12 and later print each time the file
+is compiled, as a script run as a program is on every run, and which a
+later Python is to make an error (3.6 to 3.11 warn too, where warnings of
+deprecation aren't shown). No suite reads a script's warnings, and that
+one went to build-pdf.py's every run (Round 35).
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -78,6 +86,7 @@ import shutil
 import subprocess
 import sys
 import tokenize
+import warnings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -252,6 +261,25 @@ def union_annotations(tree):
     return found
 
 
+def compile_warnings(path):
+    """What the running interpreter warns of in compiling the file, as a
+    line and a message each: an invalid escape sequence in a string, which
+    Python 3.12 and later print on every run of a script."""
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            compile(text, path, "exec", dont_inherit=True)
+        except (SyntaxError, ValueError):
+            return []                        # syntax_tree says why
+    return [(warning.lineno or 0, f"{warning.message}, which Python "
+             f"{sys.version_info[0]}.{sys.version_info[1]} warns of in compiling "
+             "it, on every run of a script")
+            for warning in caught
+            if issubclass(warning.category, (SyntaxWarning, DeprecationWarning))]
+
+
 # Arguments a newer interpreter deprecates passing by position: the
 # number of positional arguments beyond which a call is warned about.
 POSITIONAL_LIMITS = {"split": 2, "sub": 3, "subn": 3}
@@ -305,7 +333,8 @@ def main():
     for path in files:
         tree, problem = syntax_tree(path)
         found = [problem] if problem else (
-            union_annotations(tree) + newer_deprecations(tree))
+            union_annotations(tree) + newer_deprecations(tree)
+            + compile_warnings(path))
         if not interpreter:
             found += fstring_problems(path) + later_syntax(path)
             if tree is not None:

@@ -540,6 +540,12 @@ do
   for value in (found.bold or ''):gmatch('[^,]+') do bold[#bold + 1] = tonumber(value) end
   numbers.labelsep = tonumber(found.labelsep)
   ok = ok and numbers.labelsep ~= nil
+  -- A note's mark, the widest of a mark of the book's first nine notes and
+  -- of two digits, and a digit's advance in one (note_mark).
+  local note = {}
+  for value in (found.note or ''):gmatch('[^,]+') do note[#note + 1] = tonumber(value) end
+  numbers.note, numbers.notedigit = note[1], note[2]
+  ok = ok and #note == 2 and (note[1] or 0) > 0 and (note[2] or -1) >= 0
   if ok and #widths > 0 and #chars == 95 and #lists == 6 and #bold == 95 then
     numbers.math, numbers.chars, numbers.lists, numbers.bold = widths, chars, lists, bold
     -- A character outside ASCII in bold: a small letter's average, made
@@ -1167,6 +1173,41 @@ local function code_hang(inlines)
   return nil
 end
 
+-- How many notes the book has (count_notes), which LaTeX numbers in turn.
+local NOTES = 0
+
+-- A note's mark, as wide as the book's faces set it (MEASURES.note, which
+-- build-pdf.py's measuring takes of LaTeX's \@makefnmark: the widest of a
+-- mark of the book's first nine notes, as it numbers them, a symbol as
+-- \fnsymbol has them among them, and of a mark of one digit), a digit's
+-- advance wider for each digit more than one the book's notes need, so that
+-- a book that numbers its notes "(9)" has "(99)" counted as wide as it is;
+-- in characters, a digit each. Not knowing a note's number, each is counted
+-- as wide as the book's last note's: so it is where the book's chapters
+-- aren't numbered, and the book class numbers its notes through (it starts
+-- them from 1 again at a chapter it numbers, \@chapter stepping the
+-- chapter's counter only then); where they are, a book whose notes need
+-- more digits than a chapter's do gives each mark a digit's advance more
+-- than it needs. It had been 0.8 of an em in any face, two of IBM Plex
+-- Serif's digits at 12 points, where the mark of two is 0.8217, the
+-- \scriptspace after them, half a point, left out, and Latin Modern's
+-- 0.7851 (measured in the book class at 12 points); a third digit, or a
+-- symbol wider than two, was counted narrower than it is; and a book of
+-- nine notes or fewer was given two digits to a mark.
+local function note_mark()
+  local digits = #tostring(math.max(NOTES, 1))
+  if MEASURES then
+    return MEASURES.note + (digits - 1) * MEASURES.notedigit
+  end
+  return digits
+end
+
+local function count_notes(doc)
+  NOTES = 0
+  doc.blocks:walk({ Note = function() NOTES = NOTES + 1 end })
+  return nil
+end
+
 -- What cell_size counts a line of a cell's text by: a formula by its
 -- pieces; a picture, which the writer scales to its column, as a line
 -- and no word; a line break as one. And inline code: in ems, a character
@@ -1245,13 +1286,11 @@ local function counting(hang, hung)
     end,
     Image = function() return pandoc.Str(blank_line(LINE)) end,
     LineBreak = function() return pandoc.Str('\n') end,
-    -- A note's mark, which stringify gives nothing for, as wide as two
-    -- digits in a superscript's type, about 0.8 of an em (one is 0.39 in
-    -- IBM Plex Serif at 12 points), joined to the word before it, which
-    -- TeX doesn't break from it: counted as nothing, a line of code's word
-    -- before one was its mark's width too narrow, and broke (a review's
-    -- probe, again with its hang counted).
-    Note = function() return pandoc.Str(filler(MEASURES and 0.8 or 2)) end,
+    -- A note's mark, which stringify gives nothing for, joined to the word
+    -- before it, which TeX doesn't break from it (note_mark): counted as
+    -- nothing, a line of code's word before one was its mark's width too
+    -- narrow, and broke (a review's probe, again with its hang counted).
+    Note = function() return pandoc.Str(filler(note_mark())) end,
   }
 end
 
@@ -2981,19 +3020,20 @@ local function fit_code(doc)
 end
 
 -- What the counts were in, a comment the LaTeX opens with: the measures
--- in ems, or characters. Only where build-pdf.py says which (OER_MEASURES,
--- none for characters), as for a book's PDF and its latex target: a
--- deck's PDF, through ltx-talk, made the comment a slide of its own
--- before the deck's first, a blank page.
+-- in ems, a note's mark as the book's notes have it counted (note_mark),
+-- or characters. Only where build-pdf.py says which (OER_MEASURES, none
+-- for characters), as for a book's PDF and its latex target: a deck's PDF,
+-- through ltx-talk, made the comment a slide of its own before the deck's
+-- first, a blank page.
 local function counted(doc)
   if (os.getenv('OER_MEASURES') or '') == '' then return nil end
   local lists = {}
   for depth = 1, 6 do lists[depth] = string.format('%.4f', list_room(depth)) end
   local said = MEASURES and string.format(
     'ems of the text\'s type: line %.4f, gap %.4f, lower %.4f, space %.4f, mono %.4f, '
-    .. 'math length %.4f, math width %.4f, lists %s',
-    LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, MATH_LENGTH, MATH_WIDTH,
-    table.concat(lists, ' '))
+    .. 'note mark %.4f, note digit %.4f, math length %.4f, math width %.4f, lists %s',
+    LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, note_mark(),
+    MEASURES.notedigit, MATH_LENGTH, MATH_WIDTH, table.concat(lists, ' '))
     or 'characters, 70 to a line, lists ' .. table.concat(lists, ' ')
   doc.blocks:insert(1, pandoc.RawBlock('latex', '% TextbookImprover\'s table counts, in ' .. said))
   return doc
@@ -3006,6 +3046,7 @@ return {
   { DefinitionList = term_notes },
   { Span = equation },
   { Inlines = lift_display, Header = heading },
+  { Pandoc = count_notes },
   { Table = mark_in_cells },
   { Figure = Figure },
   { Para = line_breaks, Plain = line_breaks },

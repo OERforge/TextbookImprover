@@ -3619,12 +3619,14 @@ def code_advance(path, words):
 def table_counts(source):
     """The PDF filter's counts as the comment its LaTeX opens with gives
     them (pdf-target.lua's counted): {"unit", "line", "gap", "mono",
-    "math", "lists"}, the line and the space between two columns in the
-    counts' unit, ems of the text's type where the build measured the
-    book's page and faces, else characters, 70 to a line, 3 between two
-    columns; a character of code; a formula's width for each character
-    formula_width counts; and a list's margins in a table's cell at each
-    depth. None where the LaTeX has no such comment."""
+    "math", "lists", "note", "notedigit"}, the line and the space between
+    two columns in the counts' unit, ems of the text's type where the build
+    measured the book's page and faces, else characters, 70 to a line, 3
+    between two columns; a character of code; a formula's width for each
+    character formula_width counts; a list's margins in a table's cell at
+    each depth; and a note's mark as the book's notes have it counted and
+    a digit's advance in one, measured, else None. None where the LaTeX has
+    no such comment."""
     m = re.search(r"^% TextbookImprover's table counts, in (?:ems of the text's type: "
                   r"line ([\d.]+), gap ([\d.]+), .*mono ([\d.]+), .*math width ([\d.]+)"
                   r"|characters, 70 to a line), lists ([\d. ]+)$", source, re.M)
@@ -3633,9 +3635,12 @@ def table_counts(source):
     lists = [float(v) for v in m.group(5).split()]
     if m.group(1) is None:
         return {"unit": "characters", "line": 70.0, "gap": 3.0, "mono": 1.0, "math": 1.0,
-                "lists": lists}
+                "lists": lists, "note": None, "notedigit": None}
+    note = re.search(r"note mark ([\d.]+), note digit ([\d.]+)", m.group(0))
     return {"unit": "ems", "line": float(m.group(1)), "gap": float(m.group(2)),
-            "mono": float(m.group(3)), "math": float(m.group(4)), "lists": lists}
+            "mono": float(m.group(3)), "math": float(m.group(4)), "lists": lists,
+            "note": float(note.group(1)) if note else None,
+            "notedigit": float(note.group(2)) if note else None}
 
 
 def head_of(source, words):
@@ -4643,15 +4648,19 @@ def measured_checks(measured_path, measured_said, measured_source):
          "line of 39.15, 469.76 points at 12 points, a space of 1 between two columns, twice "
          "\\tabcolsep's 6 points, a character of code 0.6, IBM Plex Mono's, a formula's "
          "width about 0.48 of an em to a character formula_width counts, "
-         "count-formulas.txt's third quartile in IBM Plex Math, and a list's margins in a "
+         "count-formulas.txt's third quartile in IBM Plex Math, a list's margins in a "
          "table's cell at its six depths, the book class's 2.5 ems, 2.2, 1.87, 1.7, and .5 "
-         "twice, added up",
+         "twice, added up, and a note's mark, the book's one note's, of one digit in IBM Plex "
+         "Serif's superscript's type, 0.39 of an em, and \\scriptspace's half a point after "
+         "it, and a digit's advance of 0.39",
          lambda: counts is not None and counts["unit"] == "ems"
          and abs(counts["line"] - 469.755 / 12) < 0.001 and abs(counts["gap"] - 1) < 0.001
          and abs(counts["mono"] - 0.6) < 0.001 and 0.45 < counts["math"] < 0.5
          and len(counts["lists"]) == 6
          and all(abs(a - b) < 0.001 for a, b in zip(counts["lists"],
                                                      (2.5, 4.7, 6.57, 8.27, 9.27, 10.27)))
+         and counts["note"] is not None and abs(counts["notedigit"] - 0.39) < 0.001
+         and abs(counts["note"] - (0.39 + 0.5 / 12)) < 0.001
          and "couldn't be measured" not in measured_said),
         ("inline code in a column its table gives too little room for it is given the code's "
          "width, a character of code each, whole on its row, ending before the next column's "

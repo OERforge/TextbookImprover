@@ -18,11 +18,17 @@ and counted.
   can't carry a title; counted the same way.
 - **Captions.** A description from the table-captions sidecar, found as
   the filter recorded it (see htmlremediate): a Table: line for a table
-  with none, inside its div if it's in one, or joined to the end of a
-  label paragraph beside it, or of a caption that is the label alone,
-  before any attributes the caption ends with. A table is found as a
-  stretch of lines that Pandoc's Markdown reader reads as exactly that
-  table.
+  with none, inside its div if it's in one, as far in as the table in a
+  list item, a definition, or a block quote, read back as the table's
+  caption or taken out again and counted, or joined to the end of a label
+  paragraph beside it, or of a caption that is the label alone, before
+  any attributes the caption ends with. A table is found as a stretch of
+  lines that Pandoc's Markdown reader reads as exactly that table, by its
+  place among the tables the filter numbers, which a note's table isn't
+  among. A table written in HTML gets none, a raw block holding one, and
+  nor does a table after one: markdown-html.lua reads it into as many
+  tables as its header rows split it into, or none, so the filter's count
+  of the page's tables isn't the file's past it.
 - **Language.** The page's language (lib/languages.py) as lang in the
   front matter, when it has none; and languages.csv's row, when it gives
   another, in place of its own.
@@ -243,15 +249,69 @@ def _shape(node):
     return re.sub(r'\["[^"]*", \[', '["", [', json.dumps(node, sort_keys=True))
 
 
+# A raw HTML table's opening tag, which markdown-html.lua reads into tables,
+# anywhere in a raw block: a <figure> or a <div> written as one block, as
+# the markdown target writes a figure with an id, holds its table.
+HTML_TABLE = re.compile(r"<table[\s>/]", re.I)
+
+
+# A table's rule: a pipe table's line of dashes, a simple or multiline
+# table's, or a grid table's border, after a list item's or a quote's own
+# marks and spaces.
+TABLE_RULE = re.compile(r"^[ \t>]*(?:\+[-=:]|\|[ \t]*:?-|:?-{3,})")
+
+
+def numbered_tables(blocks):
+    """(tables, cut): the tables figures-and-tables.lua numbers, in its
+    order (number_tables: a table, then those in its head's and bodies'
+    cells; a div's, a block quote's, a figure's, a list item's, a
+    definition's), the filter's position of each its index here; up to
+    the first table written in HTML, where cut is True. markdown-html.lua
+    reads that one into as many tables as its header rows split it into,
+    or none (html-source.lua), so the filter's positions past it aren't
+    the reading's. Before, a description for the table after one was
+    written under the table after that (Round 35)."""
+    tables = []
+
+    def walk(blocks):
+        for block in blocks:
+            kind, c = block.get("t"), block.get("c")
+            if kind == "RawBlock" and c[0] in ("html", "html5") and HTML_TABLE.search(c[1]):
+                return True
+            if kind == "Table":
+                tables.append(block)
+                rows = list(c[3][1])
+                for body in c[4]:
+                    rows.extend(body[3])
+                if any(walk(cell[4]) for row in rows for cell in row[1]):
+                    return True
+            elif kind in ("Div", "Figure"):
+                if walk(c[-1]):
+                    return True
+            elif kind == "BlockQuote":
+                if walk(c):
+                    return True
+            elif kind in ("BulletList", "OrderedList"):
+                if any(walk(item) for item in (c if kind == "BulletList" else c[1])):
+                    return True
+            elif kind == "DefinitionList":
+                if any(walk(d) for _, definitions in c for d in definitions):
+                    return True
+        return False
+
+    return tables, walk(blocks)
+
+
 def table_stretches(text, doc):
-    """[(first line, end line, wrapped)] for each table Pandoc reads, in
-    its reading's order, or None where it can't be found: the stretch of
-    lines between blank lines, up to six together, that Pandoc's reader
-    reads as exactly that table, alone or inside one div."""
+    """([(first line, end line, wrapped)] for each table the filter numbers
+    (numbered_tables), in its order, or None where it can't be found: the
+    stretch of lines between blank lines, up to six together, that
+    Pandoc's reader reads as exactly that table, alone or inside one div;
+    and whether a table written in HTML ended the list."""
     lines = text.split("\n")
-    tables = elements(doc["blocks"], "Table")
+    tables, cut = numbered_tables(doc["blocks"])
     if not tables:
-        return []
+        return [], cut
     stretches, start = [], None
     for i, line in enumerate(lines + [""]):
         if line.strip() and start is None:
@@ -302,7 +362,7 @@ def table_stretches(text, doc):
         if chosen:
             used[chosen[:2]] += 1
         out.append(chosen)
-    return out
+    return out, cut
 
 
 # A table's caption line as Pandoc's reader takes one (tableCaption,
@@ -315,24 +375,36 @@ CAPTION_LINE = re.compile(r"^ {0,3}(?:[Tt]able)?:\s*(.*?)\s*(\{[^{}]*\})?\s*$")
 def remediate_captions(text, doc, applied):
     """applied: [(position, how, key, description)] the filter recorded for
     the page. Returns (text, counts)."""
-    counts = {"captions": 0, "labels_joined": 0, "captions_left": 0}
+    counts = {"captions": 0, "labels_joined": 0, "captions_left": 0, "captions_html": 0}
     if not applied:
         return text, counts
-    places = table_stretches(text, doc)
+    places, cut = table_stretches(text, doc)
     lines = text.split("\n")
     inserts = []                      # (line index, lines to insert)
     appends = []                      # (line index, text, where in it or None for the end)
     for position, how, key, description in applied:
         place = places[position] if position < len(places) else None
         if place is None:
-            counts["captions_left"] += 1
+            counts["captions_html" if cut and position >= len(places) else "captions_left"] += 1
             continue
         a, b, wrapped = place
         if how == "position":
-            at = b - 1 if wrapped and re.match(r"^:{3,}\s*$", lines[b - 1]) else b
+            at = b - 1 if wrapped and re.match(r"^[ \t>]*:{3,}\s*$", lines[b - 1]) else b
             # Inside a div, the caption line directly before the closing
-            # fence, as a book written by hand has it.
-            inserts.append((at, ["", "Table: " + description]))
+            # fence, as a book written by hand has it. In a list item, a
+            # definition, or a block quote, as far in as the table's rule
+            # (its last line of dashes, or a grid table's border), which
+            # starts where the table does, the stretch's last table being
+            # the table, and after a quote's own blank line: at
+            # the margin, it was a paragraph after the list or the quote,
+            # its table still without a caption (Round 35). The table's
+            # last line had been the measure, which a lazy line of a quote
+            # or a simple table's right-aligned first cell isn't.
+            rule = next((line for line in reversed(lines[a:at]) if TABLE_RULE.match(line)),
+                        lines[at - 1])
+            prefix = re.match(r"[ \t>]*", rule).group(0)
+            inserts.append((at, [prefix.rstrip() if ">" in prefix else "",
+                                 prefix + "Table: " + description], position, description))
             counts["captions"] += 1
             continue
         if how == "caption":
@@ -373,9 +445,30 @@ def remediate_captions(text, doc, applied):
     for index, extra, at in appends:
         line = lines[index]
         lines[index] = line.rstrip() + extra if at is None else line[:at] + extra + line[at:]
-    for index, block in sorted(inserts, key=lambda i: i[0], reverse=True):
-        lines[index:index] = block
-    return "\n".join(lines), counts
+
+    def written(chosen):
+        out = list(lines)
+        for index, block, _, _ in sorted(chosen, key=lambda i: i[0], reverse=True):
+            out[index:index] = block
+        return "\n".join(out)
+    # Each Table: line read back as its table's caption, or taken out and
+    # counted: where the stretch held more than the table, a div's next
+    # paragraph, the line went after it, and read as a paragraph.
+    tables, _ = numbered_tables(read(written(inserts))["blocks"]) if inserts else ([], False)
+    kept = [i for i in inserts if i[2] < len(tables)
+            and _letters(description_of(tables[i[2]])) == _letters(i[3])]
+    counts["captions"] -= len(inserts) - len(kept)
+    counts["captions_left"] += len(inserts) - len(kept)
+    return written(kept), counts
+
+
+def _letters(text):
+    return re.sub(r"[\W_]+", "", text).lower()
+
+
+def description_of(table):
+    """A table's caption's words, as Pandoc read it."""
+    return " ".join(e["c"] for e in _all(table["c"][1][1], []) if e.get("t") == "Str")
 
 
 # ---------------------------------------------------------------------------

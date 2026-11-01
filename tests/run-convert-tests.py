@@ -4893,6 +4893,96 @@ def case_markdown_source(work):
     ]
 
 
+def case_markdown_table_captions(work):
+    """format: source for a Markdown file: a table's description at its own
+    table, found among the tables the filter numbers as it numbers them, a
+    table in a table's cell after its table, and leaving out a note's; inside
+    a list item, a definition, a block
+    quote, or a div in one, as far in as the table, where Pandoc reads it
+    as the table's caption; and none for a table written in HTML or a
+    table after it, which the pages read the HTML into as many tables as
+    its header rows split it into, or none, so a table's place among the
+    filter's isn't its place in the file. Before, a description went to
+    the table before its own after a note's table, and to the table after
+    it after an HTML one, and in a list item or a quote it was a paragraph
+    after it (Round 35)."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Chapter\n---\n\n"
+                 "| T1 | a |\n|----|---|\n| 1  | 2 |\n\n"
+                 "+-------------------+-------+\n| Outer G           | Side  |\n"
+                 "+===================+=======+\n| | N1 | n |        | x     |\n"
+                 "| |----|---|        |       |\n| | 1  | 2 |        |       |\n"
+                 "+-------------------+-------+\n\n"
+                 "A note.[^n]\n\n[^n]: The note's table:\n\n"
+                 "    | T2 | b |\n    |----|---|\n    | 3  | 4 |\n\n"
+                 "- An item:\n\n  | T3 | c |\n  |----|---|\n  | 5  | 6 |\n\n"
+                 "Term\n:   | T4 | d |\n    |----|---|\n    | 7  | 8 |\n\n"
+                 "> | T5 | e |\n> |----|---|\n> | 9  | 0 |\n\n"
+                 "- Another item:\n\n  ::: box\n  | T6 | f |\n  |----|---|\n  | 1  | 1 |\n"
+                 "  :::\n\n"
+                 "> | TL | l |\n> |----|---|\n| 1  | 2 |\n\n"
+                 "  TR        Left\n  -------   ------\n       12   x\n      123   y\n\n"
+                 "::: box\n| TD | d |\n|----|---|\n| 1  | 2 |\n\nA paragraph after it.\n:::\n\n"
+                 "<table>\n<tr><th>H</th><th>g</th></tr>\n<tr><td>2</td><td>2</td></tr>\n"
+                 "</table>\n\n"
+                 "| T7 | h |\n|----|---|\n| 3  | 3 |\n\nThe end.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
+    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Label,Description\n" + "".join(
+            "ch#table-%d,For %s\n" % (n, name)
+            for n, name in enumerate(("T1", "G", "N1", "T3", "T4", "T5", "T6", "TL", "TR", "TD",
+                                      "H", "T7"), 1)))
+    with open(os.path.join(work, "fig.md"), "w", encoding="utf-8") as fh:
+        fh.write("| F1 | a |\n|----|---|\n| 1  | 2 |\n\n```{=html5}\n<figure id=\"f1\">\n"
+                 "<table><tr><th>FH</th><th>g</th></tr><tr><td>2</td><td>2</td></tr></table>\n"
+                 "<figcaption>A figure</figcaption>\n</figure>\n```\n\n"
+                 "| F3 | c |\n|----|---|\n| 5  | 6 |\n")
+    with open(os.path.join(work, "table-captions.csv"), "a", encoding="utf-8") as fh:
+        fh.write("fig#table-1,For F1\nfig#table-2,For FH\nfig#table-3,For F3\n")
+    done = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+                          cwd=work, capture_output=True, text=True)
+    copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
+    fig = read(work, "mine", "fig.md") if exists(work, "mine", "fig.md") else ""
+    page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
+    back = subprocess.run(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
+                          capture_output=True, text=True).stdout
+
+    def captions(html):
+        return [c.strip() for c in re.findall(r"<caption>(?:<p>)?([^<]*)", html)]
+
+    mine = ["For T1", "For T3", "For T4", "For T5", "For T6", "For TL", "For TR"]
+    return [
+        ("the pages give each table the filter numbers its description, a table in a "
+         "table's cell after its table",
+         lambda: done.returncode in (0, 1)
+         and captions(page) == ["For T1", "For G", "For N1", "For T3", "For T4", "For T5",
+                                "For T6", "For TL", "For TR", "For TD", "For H", "For T7"]),
+        ("the copy, each table before the HTML one its own, after a table in a table's cell "
+         "and a note's, read back as its caption in a list item, a definition, a block "
+         "quote, a div in a list item, a quote whose table's last line is lazy, and a simple "
+         "table whose last row opens deep in",
+         lambda: [c for c in captions(back) if c in mine] == mine
+         and "For N1" not in back and "For H" not in back
+         and "<p>Table:" not in back and "  | 5  | 6 |\n\n  Table: For T3\n" in copy
+         and "> | 9  | 0 |\n>\n> Table: For T5\n" in copy
+         and "| 1  | 2 |\n>\n> Table: For TL\n" in copy
+         and "      123   y\n\n  Table: For TR\n" in copy),
+        ("a line that doesn't read back as its table's caption taken out and counted: a "
+         "table in a div with a paragraph after it, the line after the paragraph",
+         lambda: "For TD" not in copy and "<p>Table:" not in back
+         and "3 table description(s) not written: the table, its caption, or the label "
+             "paragraph beside it isn't what the filter saw" in done.stderr),
+        ("and none for the HTML table or the table after it, nor for a table in a raw HTML "
+         "block that opens with a <figure>, or the table after that, and the run says why",
+         lambda: "For H" not in copy and "For T7" not in copy
+         and "Table: For F1" in fig and "For FH" not in fig and "For F3" not in fig
+         and "4 table description(s) not written into a Markdown file: the table is "
+             "written there in HTML, or comes after one" in done.stderr),
+    ]
+
+
 def adoc_root_reads_back(work):
     """adoc/ch.adoc read back as a source gives the cube root as written:
     the index in brackets, which Pandoc's reader alone loses."""
@@ -8498,6 +8588,8 @@ CASES = [
     ("format: source makes equations of math typed as text in Word", case_word_text_math),
     ("word.tracked_deletions and word.headings", case_word_repairs),
     ("format: source for Markdown", case_markdown_source),
+    ("format: source for Markdown, a description at its own table",
+     case_markdown_table_captions),
     ("fidelity.csv for markdown and asciidoc targets", case_fidelity_writers),
     ("fidelity.csv for an EPUB target", case_fidelity_epub),
     ("a report's quotation cut between characters", case_cut_characters),

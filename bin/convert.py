@@ -3869,6 +3869,11 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
             "the table, its caption, or the label paragraph beside it isn't what the filter "
             "saw.")
+    if totals.get("captions_html"):
+        say(f"{target.name}: {totals['captions_html']} table description(s) not written into "
+            "a Markdown file: the table is written there in HTML, or comes after one, which "
+            "the pages can make more tables of or none, so it can't be told which table in "
+            "the file is the one described.")
     if totals.get("undecided"):
         say(f"{target.name}: {totals['undecided']} table(s) left as they are, with only "
             "the census's guess; adopt their rows from the table_headers_new report "

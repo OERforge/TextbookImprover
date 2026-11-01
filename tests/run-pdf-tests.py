@@ -3387,9 +3387,12 @@ MEASURED_INLINE = "os.path.join(base,name)"
 # definition that is a line of code, which LaTeX had hung past its term,
 # and hangs from the definition's margin, its first word opening a hung
 # row; a term, which LaTeX sets in bold in a box it doesn't break, the
-# label space after it; and a word in bold. And raw code as written, in a
-# paragraph and in a raw table's cell, its quotation marks and backslashes
-# as they are, which the Markdown reader had curled and taken for escapes
+# label space after it; and a word in bold. The note's case a raw HTML
+# table as the rest are, where it had been a pipe table, since a raw HTML
+# table holding a note lost its rows and cells (Round 34; markdown-html.lua
+# holds a note's place now). And raw code as written, in a paragraph and
+# in a raw table's cell, its quotation marks and backslashes as they are,
+# which the Markdown reader had curled and taken for escapes
 # (markdown-reader.lua), and a raw <pre>, a code block now, which the PDF
 # had left out (markdown-html.lua): MEASURED_RAW.
 MEASURED_GIVEN = "open(c:/projects/code/given/output.txt)"
@@ -3469,12 +3472,10 @@ MEASURED_HUNG = (
             ("A description list whose term is its longest word",
              "<dl><dt>" + MEASURED_TERM + "</dt><dd>short words here</dd></dl>", "Besideterm2"),
             ("A word in bold, its cell's longest",
-             "Some <strong>" + MEASURED_BOLD + "</strong> words", "Besidebold")))
-    # A pipe table, since the reader ends a raw HTML table at a note.
-    + "\nA line of code with a note after it, in a column too narrow for it, its table's "
-    "widths given:\n\n| Code | Prose |\n|--|" + "-" * 60 + "|\n| `x = " + MEASURED_NOTE
-    + "`[^hung] | Besidenote, words in the wider column, and then some more of them to fill "
-    "it. |\n" + MEASURED_RAW + "\n[^hung]: A note on a line of code.\n")
+             "Some <strong>" + MEASURED_BOLD + "</strong> words", "Besidebold"),
+            ("A line of code with a note after it",
+             "<code>x = " + MEASURED_NOTE + "</code>[^hung]", "Besidenote")))
+    + MEASURED_RAW + "\n[^hung]: A note on a line of code.\n")
 MEASURED_CODE = "Cellmeter = [" + ", ".join(str(i) for i in range(10, 19)) + "]"
 MEASURED_WORDS = ("Counterrevolutionaries", "Uncharacteristically", "Intellectualistic",
                   "Indivisibility")

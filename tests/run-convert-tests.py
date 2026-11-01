@@ -1956,7 +1956,7 @@ A path: <code>open("c:\\projects")</code>, a flag: <code>--flag ...</code>, keys
 
 <table>
 <tr><th>Code</th><th>Says</th></tr>
-<tr><td><code>x = 'a' -- b</code></td><td>Beside it.</td></tr>
+<tr><td><code>x = 'a' -- b</code>[^cell]</td><td>Beside it.</td></tr>
 </table>
 
 ## Using <code>open("x")</code> here
@@ -1982,6 +1982,7 @@ As written: `<code>"lit"</code>`, and
 Over two lines: <code>first "q"
 second</code>.
 
+[^cell]: A note in a raw table's cell.
 """
 RAW_GRID_MD = ("""# Grid
 
@@ -2003,8 +2004,9 @@ RAW_PIPE_MD = """# Pipe
 def case_markdown_raw_code(work):
     """Raw code in a Markdown source taken as written, as an HTML source's
     is, where Pandoc's reader read it as Markdown, its quotation marks
-    curled and a backslash taken for an escape; a raw <pre> a code block,
-    which only the pages and the EPUB had; and one over two
+    curled and a backslash taken for an escape; a raw HTML table whose cell
+    holds a note a table, which lost its rows and cells; a raw <pre> a
+    code block, which only the pages and the EPUB had; and one over two
     lines, which Pandoc's reader reads, read as HTML, as code, its tags
     gone from a PDF where they were left as raw HTML."""
     os.makedirs(work)
@@ -2027,6 +2029,11 @@ def case_markdown_raw_code(work):
          and "<code>--flag ...</code>" in page and '<kbd>Ctrl-"</kbd>' in page
          and '<samp>"out"</samp>' in page
          and "[markdown-reader] code.md: 6 raw code element(s) taken as written" in said),
+        ("a raw HTML table whose cell holds a note is a table, its note in its cell, and in "
+         "the Markdown target a table too",
+         lambda: re.search(r"<td><code>x = 'a' -- b</code><a href=\"#fn1\"", page)
+         and "A note in a raw table" in page
+         and "| `x = 'a' -- b`[^1]" in markdown),
         ("a heading holding raw code keeps the id the source gives it",
          lambda: '<h2 id="using-openx-here">Using <code>open("x")</code> here</h2>' in page),
         ("raw code written as Markdown's code is left as written",

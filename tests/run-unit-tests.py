@@ -3103,9 +3103,15 @@ def check_markdown_reader_contexts():
     by an element, go where Pandoc's reading has them go; a raw <pre> is a
     code block of its lines, where its text starting on the line after its
     tag had made a blank first line, and a quoted '>' in its tag had ended
-    the tag; and a YAML block right after a fenced code block, a div, or
-    raw HTML is left to Pandoc, its backslash YAML's escape."""
+    the tag; a YAML block right after a fenced code block, a div, or raw
+    HTML is left to Pandoc, its backslash YAML's escape; and a note in an
+    element Pandoc's HTML reader drops what's in, a <head> in the page's
+    body, is kept, markdown-html.lua leaving the element as it was read."""
     reader = os.path.join(ROOT, "bin", "markdown-reader.lua")
+    head = subprocess.run(["pandoc", "-f", reader, "--lua-filter",
+                           os.path.join(ROOT, "bin", "markdown-html.lua"), "-t", "plain"],
+                          input="Inline <head>x[^1]</head> end.\n\n[^1]: The held note.\n",
+                          capture_output=True, text=True).stdout
     pre = subprocess.run(["pandoc", "-f", reader, "--lua-filter",
                           os.path.join(ROOT, "bin", "markdown-html.lua"), "-t", "json"],
                          input='<pre>\nline 1\nline 2\n</pre>\n\n'
@@ -3194,6 +3200,9 @@ def check_markdown_reader_contexts():
          "its backslash YAML's escape",
          lambda: len(yaml) == 3 and all(ours is not None and ours == pandocs
                                         for ours, pandocs in yaml.values())),
+        ("a note in an element whose contents Pandoc's HTML reader drops kept, with the text "
+         "it was in",
+         lambda: "The held note." in head and "x[1]" in head),
     ]
 
 

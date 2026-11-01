@@ -122,6 +122,18 @@ local function as_html(list, inline)
   return pandoc.write(pandoc.Pandoc(blocks), 'html')
 end
 
+-- A note goes through HTML and back as a span holding its place, and is
+-- put back as the Markdown reader made it once the HTML has been read
+-- and cleaned. Written as HTML, a note's text went at the end of what the
+-- writer wrote, a <section> inside the raw element it was in: a <table>
+-- holding one was no table to the HTML reader, which kept its cells' text
+-- and lost its rows and cells (Round 34, a note after a line of code in a
+-- table's cell). The span has text, so the cleaning keeps it, as a
+-- heading's empty anchor isn't kept.
+local NOTE_ID = 'textbookimprover-note-'
+local NOTE_PATTERN = '^' .. (NOTE_ID:gsub('%-', '%%-')) .. '(%d+)$'
+local held = {}
+
 -- A whole <pre> as a code block, its text inside a <code> where it has
 -- none: the HTML reader makes one without a <code> paragraphs in the
 -- text's face, its spaces no-break spaces, since 3.11 (#11810), and a code
@@ -159,15 +171,38 @@ local function whole_pre(el)
   return name == 'pre' and not closing and alone
 end
 
--- list ready to go through HTML: a whole <pre> in it given its <code>
--- (code_pre).
+-- list ready to go through HTML: its notes held, each a span in its
+-- place (put_notes_back), from first to last; and a whole <pre> in it
+-- given its <code> (code_pre).
 local function for_html(list, inline)
+  local first = #held + 1
   local filter = {
+    Note = function(note)
+      held[#held + 1] = note
+      return pandoc.Span({ pandoc.Str('*') }, pandoc.Attr(NOTE_ID .. #held))
+    end,
     RawBlock = function(raw)
       if whole_pre(raw) then return pandoc.RawBlock('html', code_pre(raw.text)) end
     end,
   }
-  return inline and pandoc.Inlines(list):walk(filter) or pandoc.Blocks(list):walk(filter)
+  local out = inline and pandoc.Inlines(list):walk(filter)
+    or pandoc.Blocks(list):walk(filter)
+  return out, first, #held
+end
+
+-- list with each note held from first to last back in its place, or nil
+-- where one isn't there to put back.
+local function put_notes_back(list, first, last)
+  if last < first then return list end
+  local found = 0
+  local out = list:walk({ Span = function(span)
+    local k = tonumber(span.identifier:match(NOTE_PATTERN))
+    if k and k >= first and k <= last then
+      found = found + 1
+      return held[k]
+    end
+  end })
+  return found == last - first + 1 and out or nil
 end
 
 local function balance(list, inline)
@@ -218,9 +253,11 @@ local function balance(list, inline)
         if not done and j <= #list then
           local middle = {}
           for k = i + 1, j - 1 do middle[#middle + 1] = list[k] end
-          middle = for_html(middle, inline)
+          local first, last
+          middle, first, last = for_html(middle, inline)
           local html = el.text .. as_html(middle, inline) .. list[j].text
           local new = read_html(html, inline)
+          if new then new = put_notes_back(new, first, last) end
           if new then
             out:extend(new)
             i, done, changed = j, true, true

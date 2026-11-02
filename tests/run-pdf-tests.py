@@ -979,8 +979,12 @@ FOOTER_ONE = ("# One\n\nThe first chapter opens with a note.[^1]\n\n"
 FOOTER_TWO = "# Two\n\nThe second chapter.\n"
 
 
-# Two lines of a paragraph, and of a caption, with a break between them.
-FOOTER_VERSE = "\nA line of a verse,\\\nand its next line, one paragraph.\n"
+# Two lines of a paragraph, and of a caption, with a break between them;
+# and an address's lines, none ending in punctuation, whose words a
+# screen reader had run together across each break (NVDA 2026.3 in
+# Acrobat: "OpenStaxRice University6100 Main Street").
+FOOTER_VERSE = ("\nA line of a verse,\\\nand its next line, one paragraph.\n"
+                "\nOpenStax\\\nRice University\\\n6100 Main Street\n")
 FOOTER_BREAK = "\\\nAnd a line of its own."
 
 
@@ -2793,7 +2797,7 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         """The paragraph's line indented 60 characters, deeper than leaves
         twenty to a part (lines_of_code): its rows after its first twenty
         characters from the text's edge, on its page, holding the line as
-        written."""
+        written, and the space at the line break after it (as_written)."""
         whole = lines_of_code(name, nbsp)[4]
         rows = glyph_rows(path)
         for i, (page, _baseline, glyphs) in enumerate(rows):
@@ -2805,8 +2809,15 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                         break
                     found.append(later)
                 return len(found) >= 3 \
-                    and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == whole
+                    and as_written("".join(g[2] for _p, _b, glyphs in found for g in glyphs), whole)
         return False
+
+    def as_written(rows, line):
+        """The text of a line's rows, rows, is the line as written, and the
+        space a line break after it leaves, which the PDF's text has
+        (latexbuild.LINE_BREAK_SPACE), as a glyph at its last row's end:
+        none in an untagged PDF, or after a paragraph's last line."""
+        return rows in (line, line + " ")
 
     def indented(path, name):
         """Each line of the paragraph whose lines open with name opens its
@@ -2849,7 +2860,7 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         found = parts(path, lines[1][:16], 2)
         head = page_of(path, lines[0])
         return len(found) >= 2 and head is not None \
-            and "".join(g[2] for _p, _b, glyphs in found for g in glyphs) == lines[1] \
+            and as_written("".join(g[2] for _p, _b, glyphs in found for g in glyphs), lines[1]) \
             and (not crossing or found[0][0] == head + 1)
 
     def item_word(path):
@@ -4458,6 +4469,17 @@ def footer_checks(footer_path):
                      for t in pdftext.element_texts(footer_path, "/text"))
          and "Henceforth.Andalineofitsown." in squeezed(
              footer_reader.pages[captioned].extract_text() or "")),
+        # LaTeX's \\ leaves no space between its lines in a tagged PDF's
+        # text, and tagpdf writes none there (latexbuild.LINE_BREAK_SPACE).
+        ("and a space between its two lines in the text a screen reader gets, where their "
+         "words had run together: an address's lines, a verse's, and a caption's",
+         lambda: os.path.exists(footer_path)
+         and "OpenStax Rice University 6100 Main Street" in pdftext.element_texts(
+             footer_path, "/text")
+         and "A line of a verse, and its next line, one paragraph." in pdftext.element_texts(
+             footer_path, "/text")
+         and any(t.endswith("Henceforth. And a line of its own.")
+                 for t in pdftext.element_texts(footer_path, "/text"))),
     ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the footer book's PDF",

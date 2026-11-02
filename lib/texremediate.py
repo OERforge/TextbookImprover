@@ -1394,6 +1394,45 @@ FANCYVRB_LOADERS = {"fancyvrb", "fvextra", "minted"}
 # A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
 # (tag), counted to say so.
 PICTURE = re.compile(r"\\begin\s*\{picture\}")
+# A line break in a paragraph: \\, \newline, or \linebreak, which leaves
+# no space between its lines in a tagged PDF's text without
+# latexbuild.LINE_BREAK_SPACE.
+LINE_BREAK = re.compile(r"\\\\|\\(?:newline|linebreak)(?![A-Za-z@])")
+# Environments whose \\ ends a table's row or a formula's line, not a
+# paragraph's line (paragraph_breaks).
+ROW_ENVIRONMENTS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "longtable*",
+                    "supertabular", "xtabular", "tabu", "tblr", "longtblr", "NiceTabular",
+                    "array", "NiceArray", "subarray", "align", "align*", "alignat", "alignat*",
+                    "aligned", "alignedat", "flalign", "flalign*", "gather", "gather*",
+                    "gathered", "multline", "multline*", "split", "eqnarray", "eqnarray*",
+                    "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix",
+                    "smallmatrix", "cases", "dcases", "rcases")
+ROW_ENVIRONMENT = re.compile(r"\\(begin|end)\s*\{(%s)\}"
+                             % "|".join(re.escape(name) for name in ROW_ENVIRONMENTS))
+
+
+def paragraph_breaks(text):
+    """LINE_BREAK's matches in text's code that break a paragraph's line:
+    not in a formula, nor in an environment whose \\ ends a table's row or
+    a formula's line (ROW_ENVIRONMENTS), one inside another counted
+    whole."""
+    spans = latexsource.skip_spans(text)
+    rows, depth, start = [], 0, 0
+    for m in latexsource.code_matches(ROW_ENVIRONMENT, text, spans):
+        if m.group(1) == "begin":
+            if depth == 0:
+                start = m.start()
+            depth += 1
+        elif depth > 0:
+            depth -= 1
+            if depth == 0:
+                rows.append((start, m.end()))
+    if depth > 0:
+        rows.append((start, len(text)))
+    maths = latexsource.math_spans(text, spans)
+    return [m for m in latexsource.code_matches(LINE_BREAK, text, spans)
+            if not latexsource.in_spans(m.start(), rows)
+            and not latexsource.in_spans(m.start(), maths)]
 
 
 def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
@@ -1450,6 +1489,16 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             "cmd / FV@ListVSpace / before" in piece for piece in pieces):
         block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"
         counts["code_label"] = 1
+    # A line break's two lines with a space between them in the text a
+    # screen reader gets, as a book's PDF from its pages has them
+    # (latexbuild.LINE_BREAK_SPACE), where the book breaks a paragraph's
+    # line with \\, \newline, or \linebreak (paragraph_breaks: a \\ that
+    # ends a table's row or a formula's line isn't one); not again in a
+    # copy made from a copy.
+    if any(paragraph_breaks(t) for t in texts.values()) and not any(
+            "__oer_spaced_gnewline:w" in piece for piece in pieces):
+        block += "\\ExplSyntaxOn\n" + latexbuild.LINE_BREAK_SPACE + "\\ExplSyntaxOff\n"
+        counts["line_breaks"] = 1
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

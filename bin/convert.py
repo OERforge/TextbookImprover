@@ -3780,6 +3780,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                + ("fancyvrb's lists told to keep a list's item's label beside the code "
                   "that opens the item, which LaTeX's tagging set over the next item's, "
                   if counts.get("tag_code_label") else "")
+               + ("its line breaks (\\\\, \\newline, and \\linebreak) told to leave a space "
+                  "between their lines in the text a screen reader gets, where LaTeX's "
+                  "tagging ran the words on either side together, "
+                  if counts.get("tag_line_breaks") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
                   "them, not gathered at the end of the document, "
                   if counts.get("tag_floats") else "")
@@ -4201,6 +4205,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                "glyphs (picture_paths), " if counts.get("tag_picture") else "")
             + ("a list's item's label kept beside the code that opens the item, "
                if counts.get("tag_code_label") else "")
+            + ("a space between a line break's two lines in the text a screen reader "
+               "gets, " if counts.get("tag_line_breaks") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

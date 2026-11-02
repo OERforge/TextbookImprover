@@ -2502,6 +2502,96 @@ CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc
 """
 
 
+# A line break's two lines with a space between them in a tagged PDF's
+# text: in every PDF (PDF_MACROS), and in a LaTeX book's tagged copy
+# (texremediate.tag). In expl3's syntax, which both are read in.
+LINE_BREAK_SPACE = r"""% A line break, \\ or \newline, leaves a space between its two lines in
+% the text a screen reader gets. In a paragraph both are \@gnewline:
+% \unskip, \nobreak, \hfil, and \break (latex.ltx), and tagpdf writes a
+% space where a line ends only for glue it marked as one between words
+% (markspaces, tagpdf.lua), which none of those is, so the last word of a
+% line and the first of the next ran together in the structure's text:
+% NVDA 2026.3 in Acrobat read an address's lines as "OpenStaxRice
+% University6100 Main Street", each run a word to it. \pdffakespace,
+% tagpdf's command for a space the text has and the page doesn't, which
+% latex-lab's verbatim puts after each of its spaces, is put after the
+% \unskip, a \nobreak before it so that its glue is no place to break:
+% tagpdf writes a space there and moves nothing on the page. A forced
+% \linebreak, \linebreak[4], takes the space before it and puts it after
+% the break, where TeX drops it, so it gets one too, where it had a space
+% to take, as LaTeX puts one back: none inside a word ("self-\linebreak
+% contained"). ragged2e keeps the \@gnewline it found when it loaded, for
+% \justifying to put back, so its copy is given the space too. Only where
+% each is LaTeX 2026-06-01's, so that a LaTeX that writes the space itself
+% isn't given two, and a class's or a package's own is left as it is;
+% and only under LuaLaTeX, with tagpdf's \pdffakespace: pdfTeX's, a
+% primitive, is an error in a DVI and puts its own font into an untagged
+% PDF.
+\cs_set_nopar:Npx \__oer_kernel_gnewline:w #1
+  {
+    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
+    \exp_not:N \else
+      \exp_not:N \unskip \exp_not:c { reserved@e } { \exp_not:c { reserved@f } #1 }
+      \exp_not:N \nobreak \exp_not:N \hfil \exp_not:N \break
+    \exp_not:N \fi
+  }
+\cs_set_nopar:Npx \__oer_spaced_gnewline:w #1
+  {
+    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
+    \exp_not:N \else
+      \exp_not:N \unskip \exp_not:N \nobreak \exp_not:N \pdffakespace
+      \exp_not:c { reserved@e } { \exp_not:c { reserved@f } #1 }
+      \exp_not:N \nobreak \exp_not:N \hfil \exp_not:N \break
+    \exp_not:N \fi
+  }
+\cs_set_nopar:Npx \__oer_kernel_linebreak:w #1 [ #2 ]
+  {
+    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
+    \exp_not:N \else
+      \exp_not:c { @tempskipa } \exp_not:N \lastskip \exp_not:N \unskip
+      \exp_not:N \penalty #1 \exp_not:c { @getpen } { #2 }
+      \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
+        \exp_not:N \hskip \exp_not:c { @tempskipa } \exp_not:N \ignorespaces
+      \exp_not:N \fi
+    \exp_not:N \fi
+  }
+\cs_set_nopar:Npx \__oer_spaced_linebreak:w #1 [ #2 ]
+  {
+    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
+    \exp_not:N \else
+      \exp_not:c { @tempskipa } \exp_not:N \lastskip \exp_not:N \unskip
+      \exp_not:N \ifnum #1 \exp_not:c { @getpen } { #2 } = - \exp_not:c { @M }
+        \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
+          \exp_not:N \nobreak \exp_not:N \pdffakespace
+        \exp_not:N \fi
+      \exp_not:N \fi
+      \exp_not:N \penalty #1 \exp_not:c { @getpen } { #2 }
+      \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
+        \exp_not:N \hskip \exp_not:c { @tempskipa } \exp_not:N \ignorespaces
+      \exp_not:N \fi
+    \exp_not:N \fi
+  }
+\AddToHook { begindocument }
+  {
+    \sys_if_engine_luatex:T
+      {
+        \cs_if_exist:NT \pdffakespace
+          {
+            \cs_if_eq:cNT { @gnewline } \__oer_kernel_gnewline:w
+              { \cs_gset_eq:cN { @gnewline } \__oer_spaced_gnewline:w }
+            \cs_if_exist:cT { @raggedtwoe@saved@gnewline }
+              {
+                \cs_if_eq:cNT { @raggedtwoe@saved@gnewline } \__oer_kernel_gnewline:w
+                  { \cs_gset_eq:cN { @raggedtwoe@saved@gnewline } \__oer_spaced_gnewline:w }
+              }
+            \cs_if_eq:cNT { @no@lnbk } \__oer_kernel_linebreak:w
+              { \cs_gset_eq:cN { @no@lnbk } \__oer_spaced_linebreak:w }
+          }
+      }
+  }
+"""
+
+
 # Written into a tagged PDF's preamble, by build-pdf.py after the metadata
 # file's own header-includes, and by a deck's template (decks.py).
 # math/setup names both forms of MathML luamml makes (it needs
@@ -2809,7 +2899,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \legacy_if:nF { @inlabel } { \everypar { } }
       }
   }
-""" + CODE_ITEM_LABEL + r"""% A line too wide in the contents, or in a list of figures or tables, is
+""" + CODE_ITEM_LABEL + LINE_BREAK_SPACE + r"""% A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the
 % build had looked up in the book's LaTeX: Sociology's front matter's page
 % numbers, too wide for the contents' column, were counted as lines of

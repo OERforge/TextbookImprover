@@ -1394,10 +1394,26 @@ FANCYVRB_LOADERS = {"fancyvrb", "fvextra", "minted"}
 # A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
 # (tag), counted to say so.
 PICTURE = re.compile(r"\\begin\s*\{picture\}")
-# A line break in a paragraph: \\, \newline, or \linebreak, which leaves
-# no space between its lines in a tagged PDF's text without
-# latexbuild.LINE_BREAK_SPACE.
-LINE_BREAK = re.compile(r"\\\\|\\(?:newline|linebreak)(?![A-Za-z@])")
+# A line break in a paragraph: \\, \newline, \linebreak, or \break (and
+# so \hfill\break), which leaves no space between its lines in a tagged
+# PDF's text without latexbuild.LINE_BREAK_SPACE.
+LINE_BREAK = re.compile(r"\\\\|\\(?:newline|linebreak|break)(?![A-Za-z@])")
+# A \break with only a vertical command, or nothing, before it on its
+# line, after a blank one, which breaks a page, not a line (\vfill\break).
+VERTICAL_BEFORE = re.compile(r"\\(?:vfill|vfil|vss|par|newpage|clearpage|cleardoublepage|"
+                             r"pagebreak|bigskip|medskip|smallskip|vspace\*?\s*\{[^{}]*\}|"
+                             r"vskip\s*[^\s\\]+)\s*$")
+# A numbered part or chapter, whose heading the book class, report, and
+# amsbook set as two paragraphs, its number's and its title's, which run
+# together in a tagged PDF's text without latexbuild.LINE_BREAK_SPACE: a
+# call, with its title in braces, not a definition of the command
+# (\renewcommand\chapter{...}) or a starred one; in those classes alone,
+# since memoir's and KOMA-Script's headings aren't tagged so.
+NUMBERED_HEADING = re.compile(r"\\(?:part|chapter)\s*(?:\[[^\]]*\]\s*)?\{")
+DEFINING = re.compile(r"\\(?:renewcommand|newcommand|providecommand|def|gdef|edef|xdef|let|"
+                      r"DeclareRobustCommand|NewDocumentCommand|RenewDocumentCommand|"
+                      r"DeclareDocumentCommand|ProvideDocumentCommand)\*?\s*$")
+HEADING_CLASSES = ("book", "report", "amsbook")
 # Environments whose \\ ends a table's row or a formula's line, not a
 # paragraph's line (paragraph_breaks).
 ROW_ENVIRONMENTS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "longtable*",
@@ -1432,7 +1448,28 @@ def paragraph_breaks(text):
     maths = latexsource.math_spans(text, spans)
     return [m for m in latexsource.code_matches(LINE_BREAK, text, spans)
             if not latexsource.in_spans(m.start(), rows)
-            and not latexsource.in_spans(m.start(), maths)]
+            and not latexsource.in_spans(m.start(), maths)
+            and not (m.group(0) == "\\break" and page_break(text, m.start()))]
+
+
+def page_break(text, at):
+    """Whether the \\break at text's index at breaks a page, not a line:
+    a vertical command before it on its line (VERTICAL_BEFORE), or nothing
+    before it but a blank line."""
+    start = text.rfind("\n", 0, at) + 1
+    before = text[start:at].rstrip()
+    if before:
+        return bool(VERTICAL_BEFORE.search(before))
+    previous = text[:start].rstrip(" \t")
+    return not previous.rstrip("\n") or previous.endswith("\n\n") or \
+        bool(VERTICAL_BEFORE.search(previous.rstrip()))
+
+
+def numbered_headings(text):
+    """NUMBERED_HEADING's matches in text's code that call the command,
+    not define it."""
+    return [m for m in latexsource.code_matches(NUMBERED_HEADING, text)
+            if not DEFINING.search(text[max(0, m.start() - 40):m.start()])]
 
 
 def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
@@ -1490,15 +1527,20 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
         block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"
         counts["code_label"] = 1
     # A line break's two lines with a space between them in the text a
-    # screen reader gets, as a book's PDF from its pages has them
-    # (latexbuild.LINE_BREAK_SPACE), where the book breaks a paragraph's
-    # line with \\, \newline, or \linebreak (paragraph_breaks: a \\ that
-    # ends a table's row or a formula's line isn't one); not again in a
-    # copy made from a copy.
-    if any(paragraph_breaks(t) for t in texts.values()) and not any(
-            "__oer_spaced_gnewline:w" in piece for piece in pieces):
-        block += "\\ExplSyntaxOn\n" + latexbuild.LINE_BREAK_SPACE + "\\ExplSyntaxOff\n"
-        counts["line_breaks"] = 1
+    # screen reader gets, and a heading's number and title, as a book's
+    # PDF from its pages has them (latexbuild.LINE_BREAK_SPACE), where the
+    # book breaks a paragraph's line with \\, \newline, \linebreak, or
+    # \break (paragraph_breaks: a \\ that ends a table's row or a
+    # formula's line isn't one), or numbers a part or a chapter; not again
+    # in a copy made from a copy.
+    breaks = any(paragraph_breaks(t) for t in texts.values())
+    classes = latexsource.code_matches(latexsource.DOCUMENT_CLASS, texts[master])
+    headings = bool(classes) and classes[0].group(1) in HEADING_CLASSES and any(
+        numbered_headings(t) for t in texts.values())
+    if (breaks or headings) and not any("oer.break.space" in piece for piece in pieces):
+        block += latexbuild.LINE_BREAK_SPACE
+        counts["line_breaks"] = int(breaks)
+        counts["heading_lines"] = int(headings)
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

@@ -2502,93 +2502,243 @@ CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc
 """
 
 
-# A line break's two lines with a space between them in a tagged PDF's
-# text: in every PDF (PDF_MACROS), and in a LaTeX book's tagged copy
-# (texremediate.tag). In expl3's syntax, which both are read in.
-LINE_BREAK_SPACE = r"""% A line break, \\ or \newline, leaves a space between its two lines in
-% the text a screen reader gets. In a paragraph both are \@gnewline:
-% \unskip, \nobreak, \hfil, and \break (latex.ltx), and tagpdf writes a
-% space where a line ends only for glue it marked as one between words
-% (markspaces, tagpdf.lua), which none of those is, so the last word of a
-% line and the first of the next ran together in the structure's text:
-% NVDA 2026.3 in Acrobat read an address's lines as "OpenStaxRice
-% University6100 Main Street", each run a word to it. \pdffakespace,
-% tagpdf's command for a space the text has and the page doesn't, which
-% latex-lab's verbatim puts after each of its spaces, is put after the
-% \unskip, a \nobreak before it so that its glue is no place to break:
-% tagpdf writes a space there and moves nothing on the page. A forced
-% \linebreak, \linebreak[4], takes the space before it and puts it after
-% the break, where TeX drops it, so it gets one too, where it had a space
-% to take, as LaTeX puts one back: none inside a word ("self-\linebreak
-% contained"). ragged2e keeps the \@gnewline it found when it loaded, for
-% \justifying to put back, so its copy is given the space too. Only where
-% each is LaTeX 2026-06-01's, so that a LaTeX that writes the space itself
-% isn't given two, and a class's or a package's own is left as it is;
-% and only under LuaLaTeX, with tagpdf's \pdffakespace: pdfTeX's, a
-% primitive, is an error in a DVI and puts its own font into an untagged
-% PDF.
-\cs_set_nopar:Npx \__oer_kernel_gnewline:w #1
+# A space at the end of a line that a line break ends, and between a
+# heading's paragraphs, in a tagged PDF's text: in every PDF (PDF_MACROS)
+# and in a LaTeX book's tagged copy (texremediate.tag). Read in LaTeX's
+# own syntax; it turns expl3's on and off for its own part.
+LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in the text a
+% screen reader gets, as a line TeX broke at a space has. tagpdf writes
+% a space at a line's end only for glue it marked as one between words
+% (markspaces, tagpdf.lua), which TeX makes the line's \rightskip when
+% it breaks the line there, with its marks. A line that ends at a
+% penalty, as \\, \newline, \linebreak, \break, and \hfill\break end
+% one, got none, so its last word and the next line's first ran together
+% in the structure's text: NVDA 2026.3 in Acrobat read an address's
+% lines as "OpenStaxRice University6100 Main Street". Once TeX has
+% broken a paragraph into lines (post_linebreak_filter), a line it broke
+% at a forced break, or at a penalty that a space followed, which TeX
+% drops at the break (\linebreak[1], \allowbreak{} before a space), has
+% its \rightskip marked as tagpdf marks a space: tagpdf writes the space
+% at its end, in the marked content the penalty is in, as LuaTeX gives
+% the \rightskip the penalty's attributes, and nothing on the page
+% moves. In a box, where a line break is no line's end and ends nothing
+% (a caption set on one line, a list's term, \mbox), a glue of no width
+% with those marks goes after the text before a forced break, as Round
+% 36 put a \pdffakespace there (hpack_filter, after tagpdf's markspaces,
+% so the space after the break is marked when it's read). Not where the
+% line ends in a hyphen after a letter ("self-\\contained"; a dash with
+% a space before it, "Paris -\\London", gets its space), nor where it
+% has no text, as a line block's empty line has none, nor where no line
+% after it in the paragraph has text, as after a \\ that ends one, nor
+% where the next line opens with a space of its own, as an indented
+% line's no-break spaces are; nor at a penalty no space follows, as in a
+% URL, nor at a penalty in a formula, which TeX puts after an operator,
+% the operator's space after it. LuaLaTeX's alone: pdfLaTeX's tagged
+% text has no space at the end of any line, a line TeX broke at a space
+% included, since \pdfinterwordspaceon writes one only between the words
+% on a line.
+%
+% A heading's paragraphs are each a Span of its structure, with nothing
+% between them (latex-lab's heading code flattens them): the book class
+% sets a chapter's or a part's number in a paragraph of its own, and its
+% chapter title is \raggedright, where a \\ ends a paragraph, so a heading
+% read "Chapter 1Chapter onesecond line". A paragraph that opens right
+% after one that ended in text, as the next Span of the same structure,
+% starts with tagpdf's \pdffakespace; a P beside another, as a center
+% environment's lines are, is apart already.
+\ifdefined\directlua
+\newattribute\OERBreakSpaceAttribute
+\directlua{
+  oerbreak = {}
+  local GLYPH, GLUE, PENALTY = node.id("glyph"), node.id("glue"), node.id("penalty")
+  local DISC, MATH, KERN = node.id("disc"), node.id("math"), node.id("kern")
+  local HLIST, VLIST = node.id("hlist"), node.id("vlist")
+  local RIGHT = nil
+  for subtype, name in pairs(node.subtypes("glue")) do
+    if name == "rightskip" then RIGHT = subtype end
+  end
+  local HYPHENS = { [45] = true, [8208] = true, [8209] = true }
+  local between = luatexbase.attributes.OERBreakSpaceAttribute
+  local function active()
+    return luatexbase.in_callback("pre_linebreak_filter", "markspaces")
+  end
+  local function space(n)
+    local a = luatexbase.attributes
+    return n.id == GLUE and node.has_attribute(n, a.g__tag_interwordspace_attr, 1)
+      and not node.has_attribute(n, a.g__tag_interwordspaceOff_attr)
+  end
+  local function lettered(head)
+    for n in node.traverse(head) do
+      if n.id == GLYPH or n.id == MATH then return true end
+      if n.id == DISC and n.replace and lettered(n.replace) then return true end
+      if (n.id == HLIST or n.id == VLIST) and n.head and lettered(n.head) then return true end
+    end
+    return false
+  end
+  local function text(n)
+    if n.id == GLYPH or n.id == MATH then return true end
+    if n.id == DISC then return not (n.replace == nil) and lettered(n.replace) end
+    if n.id == HLIST or n.id == VLIST then return not (n.head == nil) and lettered(n.head) end
+    return false
+  end
+  local function letter_before(n)
+    while n and n.id == KERN do n = n.prev end
+    return n and (n.id == GLYPH or n.id == DISC)
+  end
+  local function ending(n)
+    while n do
+      if space(n) then return "space", n end
+      if text(n) then
+        local last = n
+        if n.id == DISC then last = node.tail(n.replace) end
+        if last.id == GLYPH and HYPHENS[last.char] and letter_before(n.prev) then
+          return "hyphen", n
+        end
+        return "text", n
+      end
+      n = n.prev
+    end
+    return nil
+  end
+  local function opening(n)
+    while n do
+      if space(n) then return "space" end
+      if text(n) then return "text" end
+      n = n.next
+    end
+    return nil
+  end
+  local function face(n)
+    while n do
+      if n.id == GLYPH then return n.font end
+      n = n.prev
+    end
+    return font.current()
+  end
+  function oerbreak.text()
+    tex.setcount("l__oer_break_int", active() and ending(tex.nest.top.tail) == "text" and 1 or 0)
+  end
+  luatexbase.add_to_callback("pre_linebreak_filter", function(head)
+    if active() then
+      local inmath = false
+      for n in node.traverse(head) do
+        if n.id == MATH then
+          inmath = n.subtype == 0
+        elseif n.id == PENALTY and not inmath and n.penalty > -10000 and n.next
+            and n.next.id == GLUE and n.next.width > 0 then
+          node.set_attribute(n, between, 1)
+        end
+      end
+    end
+    return true
+  end, "oer.break.space.between")
+  luatexbase.add_to_callback("post_linebreak_filter", function(head)
+    if not active() then return true end
+    local a = luatexbase.attributes
+    local lines, count = {}, 0
+    for line in node.traverse_id(HLIST, head) do
+      if line.subtype == 1 then
+        count = count + 1
+        lines[count] = line
+      end
+    end
+    for i = 1, count do
+      local last = node.tail(lines[i].head)
+      local penalty = last and last.prev
+      if i < count and last.id == GLUE and last.subtype == RIGHT
+          and penalty and penalty.id == PENALTY
+          and (penalty.penalty <= -10000 or node.has_attribute(penalty, between, 1))
+          and ending(penalty.prev) == "text" then
+        local after = nil
+        for j = i + 1, count do
+          after = opening(lines[j].head)
+          if after then break end
+        end
+        if after == "text" then
+          node.set_attribute(last, a.g__tag_interwordspace_attr, 1)
+          node.set_attribute(last, a.g__tag_interwordfont_attr, face(penalty))
+        end
+      end
+    end
+    return true
+  end, "oer.break.space")
+  luatexbase.add_to_callback("hpack_filter", function(head)
+    if not active() then return true end
+    local a = luatexbase.attributes
+    local inmath = false
+    for n in node.traverse(head) do
+      if n.id == MATH then
+        inmath = n.subtype == 0
+      elseif n.id == PENALTY and n.penalty <= -10000 and not inmath then
+        local kind, at = ending(n.prev)
+        if kind == "text" and opening(n.next) == "text" then
+          local g = node.new(GLUE)
+          g.attr = n.attr
+          node.set_attribute(g, a.g__tag_interwordspace_attr, 1)
+          node.set_attribute(g, a.g__tag_interwordfont_attr, face(n))
+          head = node.insert_after(head, at, g)
+        end
+      end
+    end
+    return head
+  end, "oer.break.space.box")
+  luatexbase.declare_callback_rule("hpack_filter", "markspaces", "before", "oer.break.space.box")
+}
+\fi
+\ExplSyntaxOn
+\sys_if_engine_luatex:T
   {
-    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
-    \exp_not:N \else
-      \exp_not:N \unskip \exp_not:c { reserved@e } { \exp_not:c { reserved@f } #1 }
-      \exp_not:N \nobreak \exp_not:N \hfil \exp_not:N \break
-    \exp_not:N \fi
-  }
-\cs_set_nopar:Npx \__oer_spaced_gnewline:w #1
-  {
-    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
-    \exp_not:N \else
-      \exp_not:N \unskip \exp_not:N \nobreak \exp_not:N \pdffakespace
-      \exp_not:c { reserved@e } { \exp_not:c { reserved@f } #1 }
-      \exp_not:N \nobreak \exp_not:N \hfil \exp_not:N \break
-    \exp_not:N \fi
-  }
-\cs_set_nopar:Npx \__oer_kernel_linebreak:w #1 [ #2 ]
-  {
-    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
-    \exp_not:N \else
-      \exp_not:c { @tempskipa } \exp_not:N \lastskip \exp_not:N \unskip
-      \exp_not:N \penalty #1 \exp_not:c { @getpen } { #2 }
-      \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
-        \exp_not:N \hskip \exp_not:c { @tempskipa } \exp_not:N \ignorespaces
-      \exp_not:N \fi
-    \exp_not:N \fi
-  }
-\cs_set_nopar:Npx \__oer_spaced_linebreak:w #1 [ #2 ]
-  {
-    \exp_not:N \ifvmode \exp_not:c { @nolnerr }
-    \exp_not:N \else
-      \exp_not:c { @tempskipa } \exp_not:N \lastskip \exp_not:N \unskip
-      \exp_not:N \ifnum #1 \exp_not:c { @getpen } { #2 } = - \exp_not:c { @M }
-        \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
-          \exp_not:N \nobreak \exp_not:N \pdffakespace
-        \exp_not:N \fi
-      \exp_not:N \fi
-      \exp_not:N \penalty #1 \exp_not:c { @getpen } { #2 }
-      \exp_not:N \ifdim \exp_not:c { @tempskipa } > \exp_not:c { z@ }
-        \exp_not:N \hskip \exp_not:c { @tempskipa } \exp_not:N \ignorespaces
-      \exp_not:N \fi
-    \exp_not:N \fi
-  }
-\AddToHook { begindocument }
-  {
-    \sys_if_engine_luatex:T
+    \int_new:N \l__oer_break_int
+    \bool_new:N \g__oer_heading_space_bool
+    \int_new:N \g__oer_heading_struct_int
+    \cs_new_protected:Npn \__oer_heading_end:
       {
-        \cs_if_exist:NT \pdffakespace
+        \bool_gset_false:N \g__oer_heading_space_bool
+        \bool_lazy_and:nnT { \l__tag_para_bool } { \l__tag_para_flattened_bool }
           {
-            \cs_if_eq:cNT { @gnewline } \__oer_kernel_gnewline:w
-              { \cs_gset_eq:cN { @gnewline } \__oer_spaced_gnewline:w }
-            \cs_if_exist:cT { @raggedtwoe@saved@gnewline }
+            \lua_now:n { oerbreak.text() }
+            \int_compare:nNnT \l__oer_break_int = \c_one_int
               {
-                \cs_if_eq:cNT { @raggedtwoe@saved@gnewline } \__oer_kernel_gnewline:w
-                  { \cs_gset_eq:cN { @raggedtwoe@saved@gnewline } \__oer_spaced_gnewline:w }
+                \bool_gset_true:N \g__oer_heading_space_bool
+                \int_gset:Nn \g__oer_heading_struct_int { \use:c { c@g__tag_struct_abs_int } }
               }
-            \cs_if_eq:cNT { @no@lnbk } \__oer_kernel_linebreak:w
-              { \cs_gset_eq:cN { @no@lnbk } \__oer_spaced_linebreak:w }
+          }
+      }
+    \cs_new_protected:Npn \__oer_heading_begin:
+      {
+        \bool_if:NT \g__oer_heading_space_bool
+          {
+            \bool_gset_false:N \g__oer_heading_space_bool
+            \bool_lazy_and:nnT
+              { \l__tag_para_flattened_bool }
+              {
+                \int_compare_p:nNn { \use:c { c@g__tag_struct_abs_int } }
+                  = { \g__oer_heading_struct_int + 1 }
+              }
+              {
+                \str_if_eq:eeF { \l__tag_para_tag_tl } { \l__tag_para_tag_default_tl }
+                  { \nobreak \pdffakespace }
+              }
+          }
+      }
+    \AddToHook { begindocument }
+      {
+        \bool_lazy_all:nT
+          {
+            { \bool_if_exist_p:N \g__tag_active_space_bool }
+            { \g__tag_active_space_bool }
+            { \bool_if_exist_p:N \l__tag_para_flattened_bool }
+            { \tl_if_exist_p:N \l__tag_para_tag_default_tl }
+            { \cs_if_exist_p:c { c@g__tag_struct_abs_int } }
+          }
+          {
+            \AddToHook { para / end } [ oer / heading ] { \__oer_heading_end: }
+            \AddToHook { para / begin } [ oer / heading ] { \__oer_heading_begin: }
+            \DeclareHookRule { para / begin } { oer / heading } { after } { tagpdf }
           }
       }
   }
+\ExplSyntaxOff
 """
 
 
@@ -2899,7 +3049,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \legacy_if:nF { @inlabel } { \everypar { } }
       }
   }
-""" + CODE_ITEM_LABEL + LINE_BREAK_SPACE + r"""% A line too wide in the contents, or in a list of figures or tables, is
+""" + CODE_ITEM_LABEL + r"""% A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the
 % build had looked up in the book's LaTeX: Sociology's front matter's page
 % numbers, too wide for the contents' column, were counted as lines of
@@ -3248,7 +3398,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \else
   \NewDocumentCommand\OERBlank{m}{\OERBlankSpan{#1}}
 \fi
-""" + FIT_MACROS
+""" + LINE_BREAK_SPACE + FIT_MACROS
 
 
 def missing_characters(lines):

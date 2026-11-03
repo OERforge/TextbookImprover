@@ -962,6 +962,12 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         if ua1:
             macros += latexbuild.UA1_LINKS
         macros += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"
+        # The macros go to Pandoc in a defaults file, which takes a variable
+        # as -V does: as one argument on the command line they had grown
+        # past the 128 KiB Linux takes in one ("Argument list too long").
+        defaults = os.path.join(work, "deck-defaults.yaml")
+        with open(defaults, "w", encoding="utf-8") as fh:
+            json.dump({"variables": {"oer-macros": macros}}, fh)
         command = ["pandoc", "-f", "json", "-t", "beamer", "-s", source, "-o", tex,
                    "--template", template, "--slide-level", str(level),
                    "--extract-media", os.path.join(work, "media"),
@@ -969,7 +975,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
                    "-M", f"lang={language}",
                    "-V", f"aspect-ratio={shape}", "-V", f"frametitle-tag={tag}",
                    "-V", "math-setup=" + latexbuild.math_setup(standards, ua1_math),
-                   "-V", "oer-macros=" + macros, "-V", "code-spaces=" + latexbuild.CODE_SPACES
+                   "-d", defaults, "-V", "code-spaces=" + latexbuild.CODE_SPACES
                    ] + highlighting.ARGS
         for standard in standards:
             command += ["-M", f"pdfstandard={standard}"]

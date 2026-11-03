@@ -2563,8 +2563,9 @@ def check_fitted_blanks():
     lists = latexbuild.overfull_lines(listed, source, {"page-quiz": "quiz"})
     warning = latexbuild.overfull_warning(lists) or ""
     # Each chunk of Lua PDF_MACROS gives \directlua{...} at its own level,
-    # the blanks' and the fitting's, to its closing brace; the calls inside
-    # a macro, \directlua { ... }, hold its arguments (#1).
+    # the blanks', the line breaks', and the fitting's, to its closing
+    # brace; the calls inside a macro, \directlua { ... }, hold its
+    # arguments (#1).
     macros = latexbuild.PDF_MACROS
     chunks = []
     for opening in re.finditer(r"\\directlua\{", macros):
@@ -2592,8 +2593,8 @@ def check_fitted_blanks():
          "the widest is in a list of figures or tables, 12 points too wide; on 1 page(s), "
          "widest first: quiz." in warning),
         ("the Lua has no percent sign, hash, tilde, or backslash, and no comment, the "
-         "blanks' or the fitting's",
-         lambda: len(chunks) == 2 and all(c.strip() for c in chunks)
+         "blanks', the line breaks', or the fitting's",
+         lambda: len(chunks) == 3 and all(c.strip() for c in chunks)
          and not re.search(r"[%#~\\]|--", lua)),
     ]
 

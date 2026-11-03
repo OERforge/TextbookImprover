@@ -980,11 +980,15 @@ FOOTER_TWO = "# Two\n\nThe second chapter.\n"
 
 
 # Two lines of a paragraph, and of a caption, with a break between them;
-# and an address's lines, none ending in punctuation, whose words a
-# screen reader had run together across each break (NVDA 2026.3 in
-# Acrobat: "OpenStaxRice University6100 Main Street").
+# an address's lines, none ending in punctuation, whose words a screen
+# reader had run together across each break (NVDA 2026.3 in Acrobat:
+# "OpenStaxRice University6100 Main Street"); and a line block with an
+# empty line, which Pandoc sets with a \strut, and a line it indents with
+# four no-break spaces after one that ends with a line break.
 FOOTER_VERSE = ("\nA line of a verse,\\\nand its next line, one paragraph.\n"
-                "\nOpenStax\\\nRice University\\\n6100 Main Street\n")
+                "\nOpenStax\\\nRice University\\\n6100 Main Street\n"
+                "\n| A line block, its first line,\n|\n| a line after an empty one,\n"
+                "|     and an indented line.\n")
 FOOTER_BREAK = "\\\nAnd a line of its own."
 
 
@@ -1010,6 +1014,40 @@ def build_footer(work):
     subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return os.path.join(work, "pdf", "org.example.footer.pdf")
+
+
+# A numbered book whose first chapter's title and a section's have a line
+# break, \\ in LaTeX, and run long enough to have running heads. The
+# class sets a chapter's number as a paragraph of its own, and the title
+# \raggedright, where \\ ends a paragraph, each a Span of the heading's
+# with nothing between them: "One<br>its second line" read "Chapter
+# 1Oneits second line".
+HEADINGS_ONE = ("# One<br>its second line\n\n"
+                + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(8))
+                + "## A section<br>its second line\n\n"
+                + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(8)))
+# A caption short enough for one line, which LaTeX sets in a box, as it
+# sets a definition list's term, where \\ is no line break and the space
+# had to come from the box (a review).
+HEADINGS_TWO = ("# Two\n\nThe second chapter.\n\n![Short<br>caption](cc.png)\n\n"
+                "Term<br>two\n:   Its definition.\n")
+
+
+def build_headings(work):
+    """HEADINGS_ONE and HEADINGS_TWO, numbered: the PDF's path."""
+    os.makedirs(work)
+    for name, text in (("one.md", HEADINGS_ONE), ("two.md", HEADINGS_TWO)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    png(os.path.join(work, "cc.png"), (0, 0, 0))
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Headed\n  identifier: org.example.headings\n"
+                 "  language: en-US\n  numbering: true\n  contents:\n    - one\n    - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.headings.pdf")
 
 
 # The default page changed a field at a time: a type size the book class
@@ -4480,12 +4518,71 @@ def footer_checks(footer_path):
              footer_path, "/text")
          and any(t.endswith("Henceforth. And a line of its own.")
                  for t in pdftext.element_texts(footer_path, "/text"))),
+        # The line breaks' spaces had given the empty line a space of its
+        # own, two in all, and the indented line one before its four.
+        ("one space across a line block's empty line, and no more before an indented line "
+         "than its four no-break spaces",
+         lambda: os.path.exists(footer_path)
+         and "A line block, its first line, a line after an empty one,    and an indented line."
+         in pdftext.element_texts(footer_path, "/text")),
     ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the footer book's PDF",
                       lambda: os.path.exists(footer_path) and not pdfcheck.run_verapdf(
                           outputcheck.find_validator("verapdf"), footer_path)))
     return items
+
+
+def heading_texts(path):
+    """[(kind, text)] for each chapter's and section's heading, a caption,
+    and a list's term, its text in its structure's order, its number's
+    and its Spans' with its own."""
+    if not os.path.exists(path):
+        return []
+    texts = pdftext.marked_text(path)
+    pdf = pdfparagraphs.pikepdf.open(path)
+    pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+    found = []
+
+    def text_of(element):
+        kids = element.get("/K")
+        kids = list(kids) if isinstance(kids, pdfparagraphs.pikepdf.Array) else [kids]
+        page, text = element.get("/Pg"), ""
+        for kid in kids:
+            if pdfparagraphs.is_struct_elem(kid):
+                text += text_of(kid)
+            elif isinstance(kid, pdfparagraphs.pikepdf.Dictionary) and "/MCID" in kid:
+                where = kid.get("/Pg") or page
+                text += texts.get((pages[where.objgen], int(kid.MCID)), "")
+            elif isinstance(kid, int) and page is not None:
+                text += texts.get((pages[page.objgen], kid), "")
+        return text
+
+    def walk(element):
+        if not pdfparagraphs.is_struct_elem(element):
+            return
+        if str(element["/S"]) in ("/chapter", "/section", "/Caption", "/itemlabel"):
+            found.append((str(element["/S"]), text_of(element)))
+        for kid in pdfparagraphs.kids_of(element):
+            walk(kid)
+    for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+        walk(kid)
+    return found
+
+
+def headings_checks(headings_path):
+    """The headings book's checks (build_headings): a heading's number and
+    its lines apart in the text a screen reader gets."""
+    found = heading_texts(headings_path)
+    return [
+        ("a numbered chapter's heading reads its number, a space, and its title's lines with "
+         "a space between them, as a numbered section's does",
+         lambda: ("/chapter", "Chapter 1 One its second line") in found
+         and ("/section", "1.1 A section its second line") in found),
+        ("a one-line caption's line break and a definition list's term's have a space too",
+         lambda: any(kind == "/Caption" and text.endswith("Short caption") for kind, text in found)
+         and ("/itemlabel", "Term two") in found),
+    ]
 
 
 def sized_checks(sized_path, sized_said):
@@ -6175,7 +6272,7 @@ def fancy_checks(fancy_path, fancy_said):
 
 
 # The folders the books are built in, each the main book's (work) with its
-# suffix: the PDF/UA-1, untagged, notes, footer, sized, fancy, default,
+# suffix: the PDF/UA-1, untagged, notes, footer, headings, sized, fancy, default,
 # preamble, AAA, fit, two-column, evaluation bar's, languages, rules,
 # code, code margins, code tall, math font, and measured books are built
 # beside it (build_ua1 to build_measured), and the default book's copy,
@@ -6184,7 +6281,7 @@ def fancy_checks(fancy_path, fancy_said):
 # check sees that no build leaves another: the languages book's folder was
 # left in the temporary directory by every run, when the cleanup and the
 # message each had a list of their own.
-BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-sized", "-fancy",
+BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
                 "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured")
@@ -6200,6 +6297,7 @@ def checks(work, jobs=1):
             plain = pool.submit(build_untagged, work + "-untagged")
             noted = pool.submit(build_notes, work + "-notes")
             footed = pool.submit(build_footer, work + "-footer")
+            headed = pool.submit(build_headings, work + "-headings")
             sized = pool.submit(build_sized, work + "-sized")
             fancied = pool.submit(build_fancy, work + "-fancy")
             defaulted = pool.submit(build_default, work + "-default")
@@ -6218,6 +6316,7 @@ def checks(work, jobs=1):
             untagged_path, untagged_said = plain.result()
             notes_path, notes_plain, notes_said, notes_source = noted.result()
             footer_path = footed.result()
+            headings_path = headed.result()
             sized_path, sized_said = sized.result()
             fancy_path, fancy_said = fancied.result()
             default_path, default_said, lacking_path, lacking_said = defaulted.result()
@@ -6239,6 +6338,7 @@ def checks(work, jobs=1):
         untagged_path, untagged_said = build_untagged(work + "-untagged")
         notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
         footer_path = build_footer(work + "-footer")
+        headings_path = build_headings(work + "-headings")
         sized_path, sized_said = build_sized(work + "-sized")
         fancy_path, fancy_said = build_fancy(work + "-fancy")
         default_path, default_said, lacking_path, lacking_said = build_default(
@@ -7023,6 +7123,7 @@ def checks(work, jobs=1):
     ]
 
     items += footer_checks(footer_path)
+    items += headings_checks(headings_path)
     items += sized_checks(sized_path, sized_said)
     items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path, default_said, lacking_path, lacking_said)

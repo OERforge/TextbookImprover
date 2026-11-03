@@ -2412,35 +2412,56 @@ def case_code_label(work):
 
 
 def case_line_breaks(work):
-    r"""A book that breaks lines with \\, \newline, and \linebreak, which
-    leave no space between their lines in a tagged PDF's text, the words
-    on either side run together (NVDA 2026.3 in Acrobat read an address's
-    lines as "OpenStaxRice University6100 Main Street"): its tagged copy
-    gets latexbuild's LINE_BREAK_SPACE, as a book's PDF from its pages
-    has it, and the run says so; its PDF, built from its own LaTeX, has a
-    space at each break, but a \linebreak with no space before it, inside
-    a word, one where \nolinebreak keeps two words together, and its
-    table's rows as they were; built with pdfLaTeX, as a DVI or untagged,
-    it's as before, pdfTeX's own \pdffakespace an error in a DVI and a
-    font of its own in an untagged PDF; a copy made from the copy has it
-    once; a book whose \\ end only a table's rows or a formula's lines,
-    or that breaks no line, doesn't get it; a book whose own preamble
-    defines \@gnewline and \@no@lnbk keeps its own; and ragged2e's
-    \justifying, which puts back the \@gnewline ragged2e saved when it
-    loaded, puts back the spaced one."""
+    r"""A book that breaks lines with \\, \newline, \linebreak, and \break,
+    which leave no space between their lines in a tagged PDF's text, the
+    words on either side run together (NVDA 2026.3 in Acrobat read an
+    address's lines as "OpenStaxRice University6100 Main Street"), and
+    whose numbered part's, chapter's, and section's headings have line
+    breaks of their own: its tagged copy gets latexbuild's
+    LINE_BREAK_SPACE, as a book's PDF from its pages has it, and the run
+    says so; its PDF, built from its own LaTeX, has a space at each break,
+    \hfill\break's and a \linebreak[2] TeX breaks at among them, but none
+    inside a word, nor after a hyphen, nor for an empty line or at a
+    paragraph's end, and its table's rows as they were; its headings read
+    their number, a space, and their lines with a space between them, and
+    so do their bookmarks and titles; built with pdfLaTeX, as a DVI or
+    untagged, it's as before; a copy made from the copy has it once; a
+    book whose \\ end only a table's rows or a formula's lines, or that
+    breaks no line and numbers no chapter, doesn't get it, and one that
+    numbers its chapters and breaks no line does; a book whose own
+    preamble defines \@gnewline and \@no@lnbk keeps its own, and its lines
+    get their space; and ragged2e's \justifying keeps the space."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
     os.makedirs(work)
     with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
-        fh.write("\\documentclass{article}\n\\begin{document}\n"
+        fh.write("\\documentclass{book}\n\\begin{document}\n"
+                 "\\part{Partone}\n\\chapter{Alphaone\\\\Alphatwo}\n"
+                 "\\section{Gammaone\\\\\nGammatwo}\n"
                  "OpenStax\\\\Rice University\\\\6100 Main Street\n\n"
                  "Breakfirst \\newline breaksecond, and justified words before "
                  "\\linebreak after it, words kept \\nolinebreak together, a self-\\linebreak "
                  "contained word, the rest of the paragraph running on to fill another line "
                  "of text here.\n\n"
+                 "Breakthird\\break breakfourth, breakfifth\\hfill\\break breaksixth, "
+                 "wordfirst\\linebreak wordsecond, self-\\\\contained, co\u2010\\\\operate, "
+                 "anti\\discretionary{-}{}{-}\\\\inflammatory, "
+                 "and an empty line\\\\\n\\strut\\\\\nafter it.\\\\\n\n"
+                 "\\parbox{10cm}{\\raggedright Ragone ragtwo ragthree \\linebreak[2] ragfour "
+                 "ragfive.}\n\n"
+                 "\\begin{center}\nCenterone\\\\Centertwo\n\\end{center}\n\n"
+                 "\\parbox{3cm}{Aformula $aaaa + bbbb + cccc + dddd + eeee + ffff$ here.}\n\n"
+                 "\\mbox{\\hspace{1cm}}\\\\Boxafter\n\n"
+                 "\\mbox{Mboxone\\\\Mboxtwo} and Paris -\\\\London.\n\n"
+                 "\\mbox{Tildeone\\\\~Tildetwo}\n\n"
+                 "\\begin{description}\n\\item[Termone\\\\Termtwo] Definition.\n"
+                 "\\end{description}\n\n"
+                 "\\begin{figure}\n\\centering\n\\rule{1cm}{1cm}\n\\caption{Capone\\\\Captwo}\n"
+                 "\\end{figure}\n\n"
                  "\\begin{tabular}{ll}\nCellone & Celltwo\\\\\nCellthree & Cellfour\\\\\n"
-                 "\\end{tabular}\n\\end{document}\n")
+                 "\\end{tabular}\n\n\\chapter{Self-\\\\contained}\nAfter the hyphen.\n"
+                 "\\end{document}\n")
     own = work + "-own"
     os.makedirs(own)
     # A \@gnewline of the book's own, which puts a slash before the break,
@@ -2461,17 +2482,25 @@ def case_line_breaks(work):
     said = result.stdout + result.stderr
     convert(own)
     copy = os.path.join(work, "tagged", "notes.tex")
+    pdf_path = os.path.join(work, "pdf", "book.pdf")
+
+    def why_not():
+        """A reason to skip reading the PDF, or None."""
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return why
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return "no pikepdf to read the PDF"
+        return None
 
     def texts(folder, name="book.pdf"):
         """The PDF's text, each marked content sequence's, or a reason to
         skip."""
-        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        why = why_not()
         if why:
             return skip(why)
-        try:
-            import pikepdf  # noqa: F401
-        except ImportError:
-            return skip("no pikepdf to read the PDF")
         import pdftext
         path = os.path.join(folder, "pdf", name) if os.path.isdir(os.path.join(folder, "pdf")) \
             else os.path.join(folder, name)
@@ -2487,18 +2516,115 @@ def case_line_breaks(work):
                         for t in found)
                 and all(c in found for c in ("Cellone", "Celltwo", "Cellthree", "Cellfour")))
 
+    def broken():
+        """The paragraphs' text, each one's sequences together: the strut
+        of the empty line, an artifact, ends one."""
+        why = why_not()
+        if why:
+            return skip(why)
+        import pdftext
+        found = pdftext.element_texts(pdf_path, "/text") if os.path.exists(pdf_path) else []
+        return ("Breakthird breakfourth, breakfifth breaksixth, wordfirst wordsecond, "
+                "self-contained, co\u2010operate, anti-inflammatory, and an empty line after it."
+                in found
+                and "Ragone ragtwo ragthree ragfour ragfive." in found
+                and "Centerone" in found and "Centertwo" in found and "Boxafter" in found
+                and "Mboxone Mboxtwo and Paris - London." in found and "Capone Captwo" in found
+                and "Tildeone Tildetwo" in found
+                and "Termone Termtwo" in pdftext.element_texts(pdf_path, "/itemlabel"))
+
+    formulas = []
+
+    def headings():
+        r"""(Each heading's kind and text, its Spans' together, the
+        bookmarks' titles, and the headings' /T), or a reason to skip;
+        each formula's text in formulas."""
+        why = why_not()
+        if why:
+            return skip(why)
+        import pikepdf
+        import pdftext
+        if not os.path.exists(pdf_path):
+            return [], [], []
+        marked = pdftext.marked_text(pdf_path)
+        found, titles, marks = [], [], []
+        del formulas[:]
+        with pikepdf.open(pdf_path) as pdf:
+            pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+            def text_of(element):
+                """An element's text, its own and its descendants', in
+                order."""
+                kids = element.get("/K")
+                kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+                page, text = element.get("/Pg"), ""
+                for kid in kids:
+                    if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                        text += text_of(kid)
+                    elif isinstance(kid, pikepdf.Dictionary) and "/MCID" in kid:
+                        where = kid.get("/Pg") or page
+                        text += marked.get((pages[where.objgen], int(kid.MCID)), "")
+                    elif isinstance(kid, int) and page is not None:
+                        text += marked.get((pages[page.objgen], kid), "")
+                return text
+
+            def walk(element):
+                if isinstance(element, pikepdf.Array):
+                    for kid in element:
+                        walk(kid)
+                elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
+                    if str(element.S) in ("/part", "/chapter", "/section"):
+                        found.append((str(element.S), text_of(element)))
+                        titles.append(str(element.get("/T", "")))
+                    elif str(element.S) == "/Formula":
+                        formulas.append(text_of(element))
+                    if element.get("/K") is not None:
+                        walk(element.K)
+            walk(pdf.Root.StructTreeRoot.K)
+            item = pdf.Root.get("/Outlines", {}).get("/First") \
+                if "/Outlines" in pdf.Root else None
+            stack = [item] if item is not None else []
+            while stack:
+                item = stack.pop()
+                while item is not None:
+                    marks.append(str(item.get("/Title", "")))
+                    if item.get("/First") is not None:
+                        stack.append(item.First)
+                    item = item.get("/Next")
+        return found, marks, titles
+
+    def formula():
+        """The formula a narrow box breaks across lines, its text as it
+        reads, with no space in it."""
+        got = headings()
+        if not isinstance(got, tuple):
+            return got
+        return formulas and all(" " not in text for text in formulas) \
+            and any(text.count("+") == 5 for text in formulas)
+
+    def headed():
+        got = headings()
+        if not isinstance(got, tuple):
+            return got
+        found, marks, titles = got
+        return (("/part", "Part I Partone") in found
+                and ("/chapter", "Chapter 1 Alphaone Alphatwo") in found
+                and ("/section", "1.1 Gammaone Gammatwo") in found
+                and ("/chapter", "Chapter 2 Self-contained") in found)
+
     def kept():
         found = texts(own)
         if not isinstance(found, list):
             return found
-        return any(t.startswith("Ownfirst /") for t in found) \
-            and any(t.startswith("Ownthird |") for t in found)
+        return any(t.startswith("Ownfirst / Ownsecond") for t in found) \
+            and any(t.startswith("Ownthird | Ownfourth") for t in found)
 
     def pdftex_as_before():
         r"""The tagged copy built as a DVI with pdfTeX, and with pdfLaTeX
-        without its \DocumentMetadata, untagged: each builds, and the PDF
-        has no font of pdfTeX's for spaces."""
-        why = why_no_tex("no latex or pdflatex to build the copy with pdfTeX", "latex", "pdflatex")
+        and LuaLaTeX without its \DocumentMetadata, untagged: each builds,
+        and pdfLaTeX's PDF has no font of pdfTeX's for spaces."""
+        why = why_no_tex("no latex, pdflatex, or lualatex to build the copy untagged", "latex",
+                         "pdflatex", "lualatex")
         if why:
             return skip(why)
         if not os.path.exists(copy):
@@ -2514,8 +2640,12 @@ def case_line_breaks(work):
                              capture_output=True, text=True, timeout=120)
         pdf = subprocess.run(["pdflatex", "-interaction=nonstopmode", "untagged.tex"],
                              cwd=folder, capture_output=True, text=True, timeout=120)
-        if dvi.returncode or pdf.returncode or not os.path.exists(
-                os.path.join(folder, "dvi.dvi")):
+        shutil.copy(os.path.join(folder, "untagged.tex"), os.path.join(folder, "lua.tex"))
+        lua = subprocess.run(["lualatex", "-interaction=nonstopmode", "lua.tex"],
+                             cwd=folder, capture_output=True, text=True, timeout=300)
+        if dvi.returncode or pdf.returncode or lua.returncode or not os.path.exists(
+                os.path.join(folder, "dvi.dvi")) or not os.path.exists(
+                os.path.join(folder, "lua.pdf")):
             return False
         with open(os.path.join(folder, "untagged.pdf"), "rb") as fh:
             return b"PdfTeX-Space" not in fh.read()
@@ -2533,8 +2663,8 @@ def case_line_breaks(work):
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "r2e.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\DocumentMetadata{tagging=on,pdfstandard=ua-2,lang=en-US}\n"
-                     "\\documentclass{article}\n\\usepackage{ragged2e}\n\\ExplSyntaxOn\n"
-                     + latexbuild.LINE_BREAK_SPACE + "\\ExplSyntaxOff\n\\begin{document}\n"
+                     "\\documentclass{article}\n\\usepackage{ragged2e}\n"
+                     + latexbuild.LINE_BREAK_SPACE + "\\begin{document}\n"
                      "Beforejust\\\\Beforenext\n\n\\justifying\nAfterjust\\\\Afternext\n"
                      "\\end{document}\n")
         subprocess.run(["lualatex", "-interaction=nonstopmode", "r2e.tex"], cwd=folder,
@@ -2544,8 +2674,8 @@ def case_line_breaks(work):
             return found
         return "Beforejust Beforenext" in found and "Afterjust Afternext" in found
 
-    def tagged(body):
-        texts = {"b.tex": "\\documentclass{article}\n\\begin{document}\n" + body
+    def tagged(body, cls="article"):
+        texts = {"b.tex": "\\documentclass{" + cls + "}\n\\begin{document}\n" + body
                  + "\n\\end{document}\n"}
         counts = texremediate.tag(texts, "b.tex", "en", False, ("ua-2",), None)
         return texts["b.tex"], counts
@@ -2556,29 +2686,61 @@ def case_line_breaks(work):
     rows, rows_counts = tagged("\\begin{tabular}{ll}\na & b\\\\\nc & d\\\\\n\\end{tabular}\n\n"
                                "\\begin{align}\nx &= 1\\\\\ny &= 2\n\\end{align}\n\n"
                                "A formula, $\\substack{a\\\\b}$.")
+    chapters, chapter_counts = tagged("\\chapter{Introduction}\nA paragraph.\n\n"
+                                      "\\chapter*{Unnumbered}\n", "report")
+    broke, broke_counts = tagged("Breakone\\break breaktwo.")
+    starred, starred_counts = tagged("\\chapter*{Preface}\nA paragraph.\n", "report")
+    paged, paged_counts = tagged("One.\n\n\\vfill\\break\n\nTwo.")
+    defined, defined_counts = tagged("\\renewcommand\\chapter{\\par}\nA paragraph.", "book")
+    memoir, memoir_counts = tagged("\\chapter{Introduction}\nA paragraph.", "memoir")
     return [
-        ("a tagged copy of a book that breaks lines gets the space at a line break, and the "
-         "run says so",
+        ("a tagged copy of a book that breaks lines and numbers its chapters gets the space "
+         "at a line break and in a heading, and the run says so",
          lambda: os.path.exists(copy)
          and read(work, "tagged", "notes.tex").count(latexbuild.LINE_BREAK_SPACE) == 1
-         and "its line breaks (\\\\, \\newline, and \\linebreak) told to leave a space "
-             "between their lines" in said),
+         and "its line breaks (\\\\, \\newline, \\linebreak, and \\break) told to leave a "
+             "space between their lines" in said
+         and "its parts' and chapters' headings told to leave a space between a heading's "
+             "number and its title" in said),
         ("its PDF, built from its own LaTeX, has a space between the lines of each \\\\, "
          "\\newline, and \\linebreak in its text, none inside a word a \\linebreak breaks, "
          "one space where \\nolinebreak keeps two words together, and a table's rows as "
          "they were", spaced),
+        ("and at \\break, \\hfill\\break, a \\linebreak with no space before it, a "
+         "\\linebreak[2] TeX breaks at, and a dash with spaces, and in a box, a short caption, "
+         "and a list's term, but none after a hyphen, nor for an empty line, nor at a "
+         "paragraph's end, nor after a box with no text", broken),
+        ("a center environment's lines as they were, and none in a formula TeX breaks after "
+         "an operator", formula),
+        ("its part's, chapter's, and section's headings read their number, a space, and "
+         "their lines with a space between them, but none after a hyphen", headed),
         ("built with pdfTeX, as a DVI or untagged without its \\DocumentMetadata, it builds, "
-         "with no font of pdfTeX's for spaces", pdftex_as_before),
+         "with no font of pdfTeX's for spaces, and untagged with LuaLaTeX too",
+         pdftex_as_before),
         ("a copy made again from such a copy has it once",
          lambda: again and again["notes.tex"].count(latexbuild.LINE_BREAK_SPACE) == 1),
-        ("a book that breaks no line doesn't get it, nor one whose \\\\ end only a table's "
-         "rows and a formula's lines",
+        ("a book that breaks no line and numbers no chapter doesn't get it, nor one whose \\\\ "
+         "end only a table's rows and a formula's lines, nor one whose only chapter is "
+         "unnumbered, nor one that breaks a page with \\vfill\\break, defines \\chapter, or "
+         "numbers a memoir chapter; one that numbers a chapter and breaks no line does, for "
+         "its headings, and so does one whose only break is \\break",
          lambda: latexbuild.LINE_BREAK_SPACE not in plain
-         and not plain_counts.get("line_breaks")
-         and latexbuild.LINE_BREAK_SPACE not in rows and not rows_counts.get("line_breaks")),
-        ("a book whose preamble defines \\@gnewline and \\@no@lnbk itself keeps its own",
-         kept),
-        ("ragged2e's \\justifying puts back the line break with its space", justified),
+         and not plain_counts.get("line_breaks") and not plain_counts.get("heading_lines")
+         and latexbuild.LINE_BREAK_SPACE not in rows and not rows_counts.get("line_breaks")
+         and latexbuild.LINE_BREAK_SPACE not in starred
+         and not starred_counts.get("heading_lines")
+         and latexbuild.LINE_BREAK_SPACE not in paged and not paged_counts.get("line_breaks")
+         and latexbuild.LINE_BREAK_SPACE not in defined
+         and latexbuild.LINE_BREAK_SPACE not in memoir
+         and not memoir_counts.get("heading_lines")
+         and chapters.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and chapter_counts.get("heading_lines") == 1
+         and not chapter_counts.get("line_breaks")
+         and broke.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and broke_counts.get("line_breaks") == 1),
+        ("a book whose preamble defines \\@gnewline and \\@no@lnbk itself keeps its own, and "
+         "its lines get their space", kept),
+        ("ragged2e's \\justifying keeps the line break's space", justified),
     ]
 
 

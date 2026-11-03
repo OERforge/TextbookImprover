@@ -1414,6 +1414,15 @@ DEFINING = re.compile(r"\\(?:renewcommand|newcommand|providecommand|def|gdef|ede
                       r"DeclareRobustCommand|NewDocumentCommand|RenewDocumentCommand|"
                       r"DeclareDocumentCommand|ProvideDocumentCommand)\*?\s*$")
 HEADING_CLASSES = ("book", "report", "amsbook")
+# A list of contents, figures, or tables, whose entries' numbers, titles,
+# and page numbers run together in a tagged PDF's text without
+# latexbuild.LINE_BREAK_SPACE ("1.1A section3"), in the classes whose
+# entries LaTeX's tagging sets (latex-lab's toc module; memoir's, KOMA's,
+# and amsbook's are their own), and an \enspace, a kern, for which LaTeX's
+# tagging writes no space ("Some textwith").
+CONTENTS_LIST = re.compile(r"\\(?:tableofcontents|listoffigures|listoftables)(?![A-Za-z@])")
+CONTENTS_CLASSES = ("article", "report", "book")
+ENSPACE = re.compile(r"\\enspace(?![A-Za-z@])")
 # Environments whose \\ ends a table's row or a formula's line, not a
 # paragraph's line (paragraph_breaks).
 ROW_ENVIRONMENTS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "longtable*",
@@ -1463,6 +1472,16 @@ def page_break(text, at):
     previous = text[:start].rstrip(" \t")
     return not previous.rstrip("\n") or previous.endswith("\n\n") or \
         bool(VERTICAL_BEFORE.search(previous.rstrip()))
+
+
+def text_enspaces(text):
+    """ENSPACE's matches in text's code that call \\enspace in text: not in
+    a formula, where it's a kern still, nor where the book defines it."""
+    spans = latexsource.skip_spans(text)
+    maths = latexsource.math_spans(text, spans)
+    return [m for m in latexsource.code_matches(ENSPACE, text, spans)
+            if not latexsource.in_spans(m.start(), maths)
+            and not DEFINING.search(text[max(0, m.start() - 40):m.start()])]
 
 
 def numbered_headings(text):
@@ -1531,16 +1550,25 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     # PDF from its pages has them (latexbuild.LINE_BREAK_SPACE), where the
     # book breaks a paragraph's line with \\, \newline, \linebreak, or
     # \break (paragraph_breaks: a \\ that ends a table's row or a
-    # formula's line isn't one), or numbers a part or a chapter; not again
-    # in a copy made from a copy.
+    # formula's line isn't one), numbers a part or a chapter, sets a list
+    # of contents, figures, or tables in a class whose entries LaTeX's
+    # tagging sets (CONTENTS_CLASSES), the entries getting a space between
+    # their number, title, and page number, or writes an \enspace in text,
+    # which gets one too; not again in a copy made from a copy.
     breaks = any(paragraph_breaks(t) for t in texts.values())
     classes = latexsource.code_matches(latexsource.DOCUMENT_CLASS, texts[master])
     headings = bool(classes) and classes[0].group(1) in HEADING_CLASSES and any(
         numbered_headings(t) for t in texts.values())
-    if (breaks or headings) and not any("oer.break.space" in piece for piece in pieces):
+    contents = bool(classes) and classes[0].group(1) in CONTENTS_CLASSES and any(
+        latexsource.code_matches(CONTENTS_LIST, t) for t in texts.values())
+    enspaces = any(text_enspaces(t) for t in texts.values())
+    if (breaks or headings or contents or enspaces) and not any(
+            "oer.break.space" in piece for piece in pieces):
         block += latexbuild.LINE_BREAK_SPACE
         counts["line_breaks"] = int(breaks)
         counts["heading_lines"] = int(headings)
+        counts["contents_spaces"] = int(contents)
+        counts["en_spaces"] = int(enspaces)
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

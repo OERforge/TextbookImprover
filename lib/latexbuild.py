@@ -2522,10 +2522,18 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % at its end, in the marked content the penalty is in, as LuaTeX gives
 % the \rightskip the penalty's attributes, and nothing on the page
 % moves. In a box, where a line break is no line's end and ends nothing
-% (a caption set on one line, a list's term, \mbox), a glue of no width
-% with those marks goes after the text before a forced break, as Round
-% 36 put a \pdffakespace there (hpack_filter, after tagpdf's markspaces,
-% so the space after the break is marked when it's read). Not where the
+% (a list's term, \mbox, a running head), a glue with those marks goes
+% after the text, as Round 36 put a \pdffakespace there (hpack_filter,
+% after tagpdf's markspaces, so the space after the break is marked when
+% it's read): before \\ and \newline (\unskip\nobreak\hfil\break), as wide
+% as the font's space, which can shrink to nothing, since in a box of its
+% own width, where the fill is nothing, the words had run together on the
+% page ("Termtwo"); before \break, which has no fill, of no width. The
+% fill is left as it is: in a box set to a width it takes its share of
+% the room, as LaTeX sets it, and in a box unpacked into a paragraph, as
+% titlesec's run-in heading is, it ends the line there, the line's words
+% their own width apart, where a space in its place had spread them
+% across the line. Not where the
 % line ends in a hyphen after a letter ("self-\\contained"; a dash with
 % a space before it, "Paris -\\London", gets its space), nor where it
 % has no text, as a line block's empty line has none, nor where no line
@@ -2546,6 +2554,43 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % after one that ended in text, as the next Span of the same structure,
 % starts with tagpdf's \pdffakespace; a P beside another, as a center
 % environment's lines are, is apart already.
+%
+% A contents entry's number, title, and page number are apart too: the
+% classes set the number in a box of its width and the page number in a
+% box at the line's end, and latex-lab's toc module tags each, with
+% nothing between them ("1.1A section3"). Its number's box ends with
+% \pdffakespace (contentsline/number/after, a mirrored hook, where code
+% added after tagpdf's runs before it, in the number's Lbl) and its page
+% number's starts with one (contentsline/page/before, after tagpdf's, in
+% the page number's marked content). And \enspace, a kern, which tagpdf
+% writes no space for, gets one, as amsbook's chapter heading,
+% "CHAPTER\enspace 1", needs, where it's LaTeX's own and in text: before
+% the kern, with no break before it, so a line can still break at the
+% kern where a space follows it, as it could; and \enspace is a space in
+% a heading's title in the structure, as in its bookmark.
+%
+% A caption with a line break, short enough for one line without it, is
+% set as lines centered on the line, broken where it breaks, as the
+% caption package sets one. LaTeX's tagging sets a figure's caption
+% itself (latex-lab-testphase-float.sty's \@makecaption), one that fits a
+% line in a box as wide as the line, between two \hfil, where a \\'s own
+% \hfil took a third of the line's room ("Figure 2.1: Short", 79 points,
+% "caption"); untagged, the classes set it in a box of its own width, the
+% two lines' words run together. Before LaTeX measures a caption
+% (cmd/@makecaption/before), one that holds a \\ or \newline is measured
+% with its line breaks as nothing, its tagging suspended, the footnote
+% counter set back after; where it fits, \@gnewline is the caption's own
+% until it ends: in the box LaTeX measures the caption in, a line break is
+% as wide as the line, so LaTeX sets the caption as a paragraph, and there
+% it breaks the line without the \hfil, the paragraph's lines centered.
+% Once the paragraph begins (para/begin), a line break in a box inside
+% the caption is LaTeX's own again, which the box's filter makes a space.
+% A line break that ends the caption, nothing after it, is nothing, as in
+% a page's caption and an untagged build's: set as a paragraph's, it had
+% left an empty line under the caption, and in LaTeX's box, its \hfil
+% had pushed the caption off center. The measuring finds it, its box
+% ending with the penalty each break leaves there, and LaTeX meets each
+% break once in each pass over the caption, so it's the last of them.
 %
 % \\ and \newline are a space in a bookmark and in a heading's title in
 % the structure, where they had left nothing ("Section witha break"):
@@ -2682,10 +2727,16 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
       elseif n.id == PENALTY and n.penalty <= -10000 and not inmath then
         local kind, at = ending(n.prev)
         if kind == "text" and opening(n.next) == "text" then
+          local fill, f = n.prev, face(n)
           local g = node.new(GLUE)
           g.attr = n.attr
+          if fill and fill.id == GLUE and fill.width == 0 and fill.stretch_order > 0
+              and fill.prev and fill.prev.id == PENALTY and fill.prev.penalty >= 10000 then
+            local width = font.getparameters(f).space
+            node.setglue(g, width, 0, width, 0, 0)
+          end
           node.set_attribute(g, a.g__tag_interwordspace_attr, 1)
-          node.set_attribute(g, a.g__tag_interwordfont_attr, face(n))
+          node.set_attribute(g, a.g__tag_interwordfont_attr, f)
           head = node.insert_after(head, at, g)
         end
       end
@@ -2746,14 +2797,135 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
             \AddToHook { para / begin } [ oer / heading ] { \__oer_heading_begin: }
             \DeclareHookRule { para / begin } { oer / heading } { after } { tagpdf }
           }
+        \bool_lazy_and:nnT
+          { \bool_if_exist_p:N \g__tag_active_space_bool }
+          { \g__tag_active_space_bool }
+          {
+            \IfHookExistsTF { contentsline / page / before }
+              {
+                \AddToHook { contentsline / number / after } [ oer / toc ]
+                  { \nobreak \pdffakespace }
+                \AddToHook { contentsline / page / before } [ oer / toc ]
+                  { \nobreak \pdffakespace }
+              }
+              { }
+            \str_if_eq:eeT { \cs_replacement_spec:c { enspace ~ } }
+              { \c_backslash_str leavevmode@ifvmode ~ \c_backslash_str kern ~ .5em ~ }
+              {
+                \cs_set:cpn { enspace ~ }
+                  {
+                    \use:c { leavevmode@ifvmode }
+                    \mode_if_math:F { \nobreak \pdffakespace }
+                    \tex_kern:D .5em \scan_stop:
+                  }
+              }
+          }
       }
   }
+\IfHookExistsTF { cmd / @makecaption / before }
+  {
+    \bool_new:N \g__oer_caption_break_bool
+    \bool_new:N \g__oer_caption_wide_bool
+    \dim_new:N \g__oer_caption_dim
+    \int_new:N \l__oer_caption_footnote_int
+    \int_new:N \g__oer_caption_breaks_int
+    \int_new:N \g__oer_caption_end_int
+    \int_new:N \g__oer_caption_seen_int
+    \int_const:Nn \c__oer_caption_mark_int { 7919 }
+    \regex_const:Nn \c__oer_caption_break_regex { \c{\\|newline} }
+    \cs_new_eq:Nc \__oer_gnewline:n { @gnewline }
+    \cs_new_protected:Npn \__oer_caption_break:n #1
+      {
+        \unskip
+        \bool_gset_true:N \g__oer_caption_break_bool
+        \int_gincr:N \g__oer_caption_breaks_int
+        \tex_penalty:D \c__oer_caption_mark_int
+        \ignorespaces
+      }
+    \cs_new_protected:Npn \__oer_caption_line:n #1
+      {
+        \int_gincr:N \g__oer_caption_seen_int
+        \mode_if_horizontal:TF
+          {
+            \int_compare:nNnTF
+              {
+                \int_mod:nn { \g__oer_caption_seen_int - 1 } { \g__oer_caption_breaks_int }
+                + 1
+              }
+              = { \g__oer_caption_end_int }
+              { \unskip \ignorespaces }
+              {
+                \mode_if_inner:TF
+                  {
+                    \bool_if:NTF \g__oer_caption_wide_bool
+                      { \tex_hskip:D \hsize }
+                      { \__oer_gnewline:n {#1} }
+                  }
+                  {
+                    \skip_if_eq:nnTF { \leftskip } { 0pt plus 1fil }
+                      {
+                        \unskip \use:c { reserved@e } { \use:c { reserved@f } #1 }
+                        \nobreak \break \null \ignorespaces
+                      }
+                      { \__oer_gnewline:n {#1} }
+                  }
+              }
+          }
+          { \__oer_gnewline:n {#1} }
+      }
+    \cs_new_protected:Npn \__oer_caption:nn #1 #2
+      {
+        \bool_gset_false:N \g__oer_caption_break_bool
+        \int_gzero:N \g__oer_caption_breaks_int
+        \int_gzero:N \g__oer_caption_end_int
+        \int_gzero:N \g__oer_caption_seen_int
+        \regex_match:NnT \c__oer_caption_break_regex {#2}
+          {
+            \int_set_eq:Nc \l__oer_caption_footnote_int { c@footnote }
+            \group_begin:
+              \cs_set_eq:cN { @gnewline } \__oer_caption_break:n
+              \SuspendTagging { oer / caption }
+              \hbox_set:Nn \l_tmpa_box { \UseSocket { caption / label } {#1} #2 }
+              \dim_gset:Nn \g__oer_caption_dim { \box_wd:N \l_tmpa_box }
+              \hbox_set:Nn \l_tmpb_box
+                {
+                  \hbox_unpack:N \l_tmpa_box
+                  \int_compare:nNnT { \tex_lastpenalty:D } = { \c__oer_caption_mark_int }
+                    { \int_gset_eq:NN \g__oer_caption_end_int \g__oer_caption_breaks_int }
+                }
+              \ResumeTagging { oer / caption }
+            \group_end:
+            \int_gset_eq:cN { c@footnote } \l__oer_caption_footnote_int
+          }
+        \bool_if:NT \g__oer_caption_break_bool
+          {
+            \dim_compare:nNnTF { \g__oer_caption_dim } < { \hsize + 1sp }
+              {
+                \skip_set:Nn \leftskip { 0pt plus 1fil }
+                \skip_set:Nn \rightskip { 0pt plus 1fil }
+                \skip_zero:N \parfillskip
+                \cs_set_eq:cN { @gnewline } \__oer_caption_line:n
+                \bool_gset_true:N \g__oer_caption_wide_bool
+              }
+              {
+                \int_compare:nNnF { \g__oer_caption_end_int } = { 0 }
+                  { \cs_set_eq:cN { @gnewline } \__oer_caption_line:n }
+              }
+          }
+      }
+    \AddToHookWithArguments { cmd / @makecaption / before } [ oer / caption ]
+      { \__oer_caption:nn {#1} {#2} }
+    \AddToHook { para / begin } [ oer / caption ]
+      { \bool_gset_false:N \g__oer_caption_wide_bool }
+  }
+  { }
 \AddToHook { package / hyperref / after }
   {
     \pdfstringdefDisableCommands
       {
         \cs_set:Npn \\ { ~ \tex_romannumeral:D - `0 }
         \cs_set:Npn \newline { ~ \tex_romannumeral:D - `0 }
+        \cs_set:Npn \enspace { ~ }
       }
   }
 \ExplSyntaxOff

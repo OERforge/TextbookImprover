@@ -1029,9 +1029,23 @@ HEADINGS_ONE = ("# One<br>its second line\n\n"
                 + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(8)))
 # A caption short enough for one line, which LaTeX sets in a box, as it
 # sets a definition list's term, where \\ is no line break and the space
-# had to come from the box (a review).
+# had to come from the box (a review): LaTeX's tagging set the caption
+# across the line, a third of its room between "Short" and "caption", and
+# the term "Termtwo" on the page. A table whose columns have no widths,
+# whose cells' line breaks the writer set as boxes the structure left
+# out, the cells empty, and a grid table, whose widths stay; a table in a
+# table's cell, whose line break ended its row.
 HEADINGS_TWO = ("# Two\n\nThe second chapter.\n\n![Short<br>caption](cc.png)\n\n"
-                "Term<br>two\n:   Its definition.\n")
+                "Term<br>two\n:   Its definition.\n\n"
+                "| Gamma | Delta |\n|-------|-------|\n| Cell<br>one | Cell<br>two |\n\n"
+                "+--------------+--------------------------------------------+\n"
+                "| Narrow       | Widecol                                    |\n"
+                "+==============+============================================+\n"
+                "| Thin<br>cell | Widecell<br>two                            |\n"
+                "+--------------+--------------------------------------------+\n\n"
+                "<table><tr><th>Outer</th><th>Side</th></tr><tr><td><table><tr><th>In</th>"
+                "<th>Out</th></tr><tr><td>Inner<br>break</td><td>b</td></tr></table></td>"
+                "<td>x</td></tr></table>\n")
 
 
 def build_headings(work):
@@ -4536,8 +4550,10 @@ def footer_checks(footer_path):
 
 def heading_texts(path):
     """[(kind, text)] for each chapter's and section's heading, a caption,
-    and a list's term, its text in its structure's order, its number's
-    and its Spans' with its own."""
+    a list's term, a table's data cell, a contents entry, and a link, its
+    text in its structure's order, its number's and its Spans' with its
+    own; and ("/Link+note", text) for a link that holds a note's mark or
+    its note."""
     if not os.path.exists(path):
         return []
     texts = pdftext.marked_text(path)
@@ -4559,16 +4575,39 @@ def heading_texts(path):
                 text += texts.get((pages[page.objgen], kid), "")
         return text
 
+    def kinds_in(element):
+        kinds = set()
+        for kid in pdfparagraphs.kids_of(element):
+            if pdfparagraphs.is_struct_elem(kid):
+                kinds.add(str(kid["/S"]))
+                kinds |= kinds_in(kid)
+        return kinds
+
     def walk(element):
         if not pdfparagraphs.is_struct_elem(element):
             return
-        if str(element["/S"]) in ("/chapter", "/section", "/Caption", "/itemlabel"):
-            found.append((str(element["/S"]), text_of(element)))
+        kind = str(element["/S"])
+        if kind in ("/chapter", "/section", "/Caption", "/itemlabel", "/TD", "/TOCI", "/Link"):
+            found.append((kind, text_of(element)))
+        if kind == "/Link" and kinds_in(element) & {"/footnote", "/footnotemark", "/FENote"}:
+            found.append(("/Link+note", text_of(element)))
         for kid in pdfparagraphs.kids_of(element):
             walk(kid)
     for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
         walk(kid)
     return found
+
+
+def line_holding(path, words):
+    """(page, baseline, left, right) of the first line on a page whose
+    glyphs, spaces aside, hold words (glyph_lines), or None."""
+    if not os.path.exists(path):
+        return None
+    for page, lines in sorted(glyph_lines(path).items()):
+        for baseline, left, right, text in lines:
+            if squeezed(words) in squeezed(text):
+                return page, baseline, left, right
+    return None
 
 
 def word_gaps(path, before, after):
@@ -4594,8 +4633,14 @@ def word_gaps(path, before, after):
 def headings_checks(headings_path):
     """The headings book's checks (build_headings): a heading's number and
     its lines apart in the text a screen reader gets, and in the running
-    head."""
+    head; a short caption's line break kept, a list's term's a space on
+    the page, the spaces in the book's face; a contents entry's number,
+    title, and page number apart; and a cell's lines in its table's
+    structure."""
     found = heading_texts(headings_path)
+    first = line_holding(headings_path, "Figure 2.1: Short")
+    second = line_holding(headings_path, "caption")
+    entries = [text for kind, text in found if kind == "/TOCI"]
     return [
         ("a numbered chapter's heading reads its number, a space, and its title's lines with "
          "a space between them, as a numbered section's does",
@@ -4612,6 +4657,39 @@ def headings_checks(headings_path):
          and all(gap > 2 for gap in word_gaps(headings_path, "ONE", "ITS"))
          and word_gaps(headings_path, "SECTION", "ITS")
          and all(gap > 2 for gap in word_gaps(headings_path, "SECTION", "ITS"))),
+        # LaTeX's tagging set it in a box as wide as the line, where the
+        # \\ took a third of the line's room: "Figure 2.1: Short", 79
+        # points, "caption".
+        ("a caption short enough for one line but for its line break is set as two lines, "
+         "broken there, each centered under the figure",
+         lambda: first is not None and second is not None and first[0] == second[0]
+         and first[1] > second[1]
+         and abs((first[2] + first[3]) / 2 - (second[2] + second[3]) / 2) < 1),
+        ("and a list's term's line break, which a box can't break, is a space on the page",
+         lambda: word_gaps(headings_path, "Term", "two")
+         and all(2 < gap < 6 for gap in word_gaps(headings_path, "Term", "two"))),
+        ("the spaces at its line breaks, a box's among them, are in the book's own face, "
+         "IBM Plex, with no face of LaTeX's own embedded for them",
+         lambda: os.path.exists(headings_path)
+         and all("IBMPlex" in name for name in font_names(pypdf.PdfReader(headings_path)))),
+        ("a contents entry reads its number, its title, and its page number with a space "
+         "between each",
+         lambda: any(re.fullmatch(r"1 One its second line \d+", text) for text in entries)
+         and any(re.fullmatch(r"1\.1 A section its second line \d+", text) for text in entries)),
+        # The writer set such a cell's lines as boxes in a \vtop, which
+        # LaTeX's tagging left out of the cell: the cells were empty.
+        ("a table whose columns have no widths keeps a cell's lines, a line break between "
+         "them, in its data cells, and one with widths keeps its widths, its narrow column "
+         "narrow",
+         lambda: ("/TD", "Cellone") in found and ("/TD", "Celltwo") in found
+         and ("/TD", "Thincell") in found
+         and word_gaps(headings_path, "Narrow", "Widecol")
+         and all(gap < 100 for gap in word_gaps(headings_path, "Narrow", "Widecol"))),
+        # The PDF sets a table in a cell in columns that don't wrap, where
+        # the writer's \\ ended the row: "Inner" beside an empty cell, then
+        # "break" in a row of its own.
+        ("a line break in a table inside a table's cell is a space there, its row whole",
+         lambda: ("/TD", "Inner break") in found and ("/TD", "Inner") not in found),
     ]
 
 

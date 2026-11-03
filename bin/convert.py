@@ -3788,6 +3788,13 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "heading's number and its title in the text a screen reader gets, where "
                   "LaTeX's tagging ran them together (\"Chapter 1Introduction\"), "
                   if counts.get("tag_heading_lines") else "")
+               + ("its lists of contents, figures, or tables told to leave a space between "
+                  "an entry's number, its title, and its page number in the text a screen "
+                  "reader gets, where LaTeX's tagging ran them together (\"1.1A section3\"), "
+                  if counts.get("tag_contents_spaces") else "")
+               + ("its \\enspace a space in the text a screen reader gets, where LaTeX's "
+                  "tagging wrote none for its kern, "
+                  if counts.get("tag_en_spaces") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
                   "them, not gathered at the end of the document, "
                   if counts.get("tag_floats") else "")
@@ -4213,6 +4220,11 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                "gets, " if counts.get("tag_line_breaks") else "")
             + ("a space between a part's or a chapter's number and its title in the text "
                "a screen reader gets, " if counts.get("tag_heading_lines") else "")
+            + ("a space between a contents entry's number, its title, and its page "
+               "number in the text a screen reader gets, "
+               if counts.get("tag_contents_spaces") else "")
+            + ("a space for each \\enspace in the text a screen reader gets, "
+               if counts.get("tag_en_spaces") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

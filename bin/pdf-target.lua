@@ -120,6 +120,12 @@
 --    latexbuild's FIT_MACROS to measure as LaTeX sets it and fit to its
 --    line on a later run (below).
 --
+-- 20. A table whose columns have no widths and a cell of which holds a
+--    line break, which the writer set as boxes that LaTeX's tagging left
+--    out of the cell, empty to a screen reader: given the equal widths
+--    the writer set its columns at, so each line is a paragraph of the
+--    cell (below).
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -361,15 +367,23 @@ end
 -- outer cell, lettered, where its text took a number another note had.
 -- The writer puts a cell holding a div in a minipage, as it did the raw
 -- block before.
+--
+-- A line break in such a table's cell is a space: the tabular's columns
+-- are l, c, or r, which don't wrap, and the writer's \\ there ended the
+-- row, so a cell "Inner<br>break" was two rows' cells, "Inner" beside an
+-- empty one, then "break" beside the next cell, in the page and the
+-- structure.
 local ALIGN = { AlignLeft = 'l', AlignCenter = 'c', AlignRight = 'r' }
 local NOTE_MARK = 'OERINNERNOTE'
 
 local function cell_latex(cell, notes)
   local contents = cell.contents:walk({
+    traverse = 'topdown',
     Note = function(note)
       notes[#notes + 1] = note
-      return pandoc.Str(NOTE_MARK .. #notes .. 'X')
+      return pandoc.Str(NOTE_MARK .. #notes .. 'X'), false
     end,
+    LineBreak = function() return pandoc.Space() end,
   })
   local text = pandoc.write(pandoc.Pandoc(contents), 'latex')
   text = text:gsub('%s+$', ''):gsub('^%s+', ''):gsub('\n%s*\n', ' ')
@@ -2093,10 +2107,44 @@ function Table(tbl)
   return fitted(result)
 end
 
+-- 20. A table whose columns have no widths, a cell of which holds a line
+-- break: the writer sets every cell of such a table through fixLineBreaks
+-- (cellToLaTeX, Writers/LaTeX/Table.hs, 3.12.1 and 3.13), which makes a
+-- cell's lines boxes, \vtop{\hbox{\strut Cell}\hbox{\strut one}}, in the
+-- p columns it gives the table, of equal widths, since the break makes it
+-- no simple table (isSimpleCell). A box in vertical mode opens no
+-- paragraph, so LaTeX's tagging left the cell's TD empty and its text an
+-- artifact: "CelloneCelltwo" outside the structure, which a screen reader
+-- never reaches (a Markdown table's cells holding <br>). Given those
+-- equal widths, as Pandoc's HTML reader gives a table whose cells aren't
+-- all a line of text (normalizeColWidths, Readers/HTML/Table.hs), the
+-- writer sets such a cell in a minipage, \raggedright, where each line is
+-- a paragraph of the cell, and a header cell in one too, as a table with
+-- widths has them. A table in its cells is LaTeX already (flatten_nested),
+-- or, where a cell of it spans rows, lines of text with a line break
+-- between its rows (as_lines), which counts.
+local function break_widths(tbl)
+  for _, spec in ipairs(tbl.colspecs) do
+    if spec[2] ~= nil then return end
+  end
+  local broken = false
+  for _, row in ipairs(rows_of(tbl)) do
+    for _, cell in ipairs(row.cells) do
+      pandoc.Blocks(cell.contents):walk({ LineBreak = function() broken = true end })
+    end
+  end
+  if not broken then return end
+  local count = #tbl.colspecs
+  for j = 1, count do
+    tbl.colspecs[j] = { tbl.colspecs[j][1], 1 / count }
+  end
+end
+
 sized_table = function(tbl)
   local cell = in_cell(tbl)
   tbl = tbl:walk(braced_math)
   flatten_nested(tbl)
+  break_widths(tbl)
   unquote_cells(tbl.head.rows)
   for _, body in ipairs(tbl.bodies) do
     unquote_cells(body.head)

@@ -2424,11 +2424,19 @@ def case_line_breaks(work):
     inside a word, nor after a hyphen, nor for an empty line or at a
     paragraph's end, and its table's rows as they were; its headings read
     their number, a space, and their lines with a space between them, and
-    so do their bookmarks and titles; built with pdfLaTeX, as a DVI or
-    untagged, it's as before; a copy made from the copy has it once; a
-    book whose \\ end only a table's rows or a formula's lines, or that
-    breaks no line and numbers no chapter, doesn't get it, and one that
-    numbers its chapters and breaks no line does; a book whose own
+    so do their bookmarks and titles; its short caption is two lines on
+    the page, broken at its \\ and centered, one that ends with its \\
+    one line, and a term's and an \mbox's \\ a space there, but a box
+    unpacked into a paragraph is set as it was; its contents' entries read
+    their number, title, and page number a space apart, and its \enspace,
+    a kern, is a space, in a heading's title and its bookmark too, as is
+    amsbook's in "CHAPTER 1", and a line still breaks at it; built with
+    pdfLaTeX, as a DVI or untagged, it's as before; a copy made from the
+    copy has it once; a book whose \\ end only a table's rows or a
+    formula's lines, or that breaks no line and numbers no chapter,
+    doesn't get it, and one that numbers its chapters and breaks no line
+    does, as do one that sets a list of contents, but not memoir's, and
+    one that writes an \enspace in text; a book whose own
     preamble defines \@gnewline and \@no@lnbk keeps its own, and its lines
     get their space; and ragged2e's \justifying keeps the space."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
@@ -2436,7 +2444,7 @@ def case_line_breaks(work):
     import texremediate
     os.makedirs(work)
     with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
-        fh.write("\\documentclass{book}\n\\begin{document}\n"
+        fh.write("\\documentclass{book}\n\\begin{document}\n\\tableofcontents\n"
                  "\\part{Partone}\n\\chapter{Alphaone\\\\Alphatwo}\n"
                  "\\section{Gammaone\\\\\nGammatwo}\n"
                  "OpenStax\\\\Rice University\\\\6100 Main Street\n\n"
@@ -2455,12 +2463,47 @@ def case_line_breaks(work):
                  "\\mbox{\\hspace{1cm}}\\\\Boxafter\n\n"
                  "\\mbox{Mboxone\\\\Mboxtwo} and Paris -\\\\London.\n\n"
                  "\\mbox{Tildeone\\\\~Tildetwo}\n\n"
+                 "Enone\\enspace Entwo, an en space.\n\n"
                  "\\begin{description}\n\\item[Termone\\\\Termtwo] Definition.\n"
                  "\\end{description}\n\n"
                  "\\begin{figure}\n\\centering\n\\rule{1cm}{1cm}\n\\caption{Capone\\\\Captwo}\n"
                  "\\end{figure}\n\n"
+                 "\\begin{figure}\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Nestone \\mbox{Nestbox\\\\Nestboxtwo}\\\\Nesttwo}\n\\end{figure}\n\n"
+                 "\\begin{figure}\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Longone longer words that run on past the width of a line, so "
+                 "that LaTeX sets the caption as a paragraph of its own\\\\Longtwo}\n"
+                 "\\end{figure}\n\n"
+                 "\\makebox[6cm][l]{Fillone\\hfill\\break Filltwo}\n\n"
+                 "A formula with an en space, $a\\enspace b$.\n\n"
+                 "\\newlength\\Enwidth\\settowidth\\Enwidth{Enpre Ensplitone\\enspace}"
+                 "\\parbox{\\Enwidth}{\\raggedright Enpre Ensplitone\\enspace{} Ensplittwo}\n\n"
+                 "Unboxlead \\setbox0\\hbox{Unboxone unboxtwo\\\\Unboxthree}\\unhbox0\\ "
+                 "unboxtail.\n\n"
                  "\\begin{tabular}{ll}\nCellone & Celltwo\\\\\nCellthree & Cellfour\\\\\n"
-                 "\\end{tabular}\n\n\\chapter{Self-\\\\contained}\nAfter the hyphen.\n"
+                 "\\end{tabular}\n\n\\section{Ensec\\enspace Entitle}\nEnsection words.\n\n"
+                 "\\chapter{Self-\\\\contained}\nAfter the hyphen.\n\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n\\caption{Trailone\\\\}\n"
+                 "Belowtrail\n\\end{figure}\n\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n\\caption{Plainone}\n"
+                 "Belowplain\n\\end{figure}\n\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Longer words that run on past the width of a line, so that LaTeX "
+                 "sets the caption as a paragraph, trailend\\\\}\nBelowlongtrail\n"
+                 "\\end{figure}\n\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Longer words that run on past the width of a line, so that LaTeX "
+                 "sets the caption as a paragraph, plainend}\nBelowlongplain\n\\end{figure}\n\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Noteone\\protect\\footnotemark}\n\\end{figure}\n"
+                 "\\footnotetext{Notetexta.}\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Notecap\\\\Notetwo\\protect\\footnotemark}\n\\end{figure}\n"
+                 "\\footnotetext{Notetextb.}\n"
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption{Notethree\\protect\\footnotemark}\n\\end{figure}\n"
+                 "\\footnotetext{Notetextc.}Afternote words.\n\n"
+                 "\\parbox{1cm}{\\hyphenpenalty=10000 Ennoone\\enspace Ennotwo}\n"
                  "\\end{document}\n")
     own = work + "-own"
     os.makedirs(own)
@@ -2471,8 +2514,10 @@ def case_line_breaks(work):
                  "\\def\\@gnewline#1{\\ifvmode\\@nolnerr\\else\\unskip\\ /\\nobreak\\hfil"
                  "\\break\\fi}\n"
                  "\\def\\@no@lnbk#1[#2]{\\ifvmode\\@nolnerr\\else\\unskip\\ |"
-                 "\\penalty#1\\@getpen{#2}\\fi}\n\\makeatother\n\\begin{document}\n"
-                 "Ownfirst\\\\Ownsecond\n\nOwnthird \\linebreak Ownfourth\n\\end{document}\n")
+                 "\\penalty#1\\@getpen{#2}\\fi}\n\\makeatother\n"
+                 "\\DeclareRobustCommand\\enspace{\\kern.5em/}\n\\begin{document}\n"
+                 "Ownfirst\\\\Ownsecond\n\nOwnthird \\linebreak Ownfourth\n\n"
+                 "Enown\\enspace Entwoown.\n\\end{document}\n")
     config = ("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
               "  pdf:\n    format: pdf\n")
     for folder in (work, own):
@@ -2494,6 +2539,24 @@ def case_line_breaks(work):
         except ImportError:
             return "no pikepdf to read the PDF"
         return None
+
+    def pdf_said(*messages):
+        """Whether the PDF target's run said each of messages, where TeX
+        could build its PDF; where it couldn't, the run built none and said
+        nothing of it, which a check's other parts don't wait on."""
+        if why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk"):
+            return True
+        return all(message in said for message in messages)
+
+    def contents_said():
+        """The contents' entries apart, and the runs saying so."""
+        got = contents()
+        if got is not True:
+            return got
+        return "its lists of contents, figures, or tables told to leave a space between an " \
+            "entry's number, its title, and its page number" in said \
+            and pdf_said("a space between a contents entry's number, its title, and its page "
+                         "number in the text a screen reader gets")
 
     def texts(folder, name="book.pdf"):
         """The PDF's text, each marked content sequence's, or a reason to
@@ -2531,6 +2594,7 @@ def case_line_breaks(work):
                 and "Centerone" in found and "Centertwo" in found and "Boxafter" in found
                 and "Mboxone Mboxtwo and Paris - London." in found and "Capone Captwo" in found
                 and "Tildeone Tildetwo" in found
+                and "Unboxlead Unboxone unboxtwo Unboxthree unboxtail." in found
                 and "Termone Termtwo" in pdftext.element_texts(pdf_path, "/itemlabel"))
 
     formulas = []
@@ -2576,6 +2640,8 @@ def case_line_breaks(work):
                     if str(element.S) in ("/part", "/chapter", "/section"):
                         found.append((str(element.S), text_of(element)))
                         titles.append(str(element.get("/T", "")))
+                    elif str(element.S) == "/TOCI":
+                        found.append(("/TOCI", text_of(element)))
                     elif str(element.S) == "/Formula":
                         formulas.append(text_of(element))
                     if element.get("/K") is not None:
@@ -2614,12 +2680,156 @@ def case_line_breaks(work):
                 and "Alphaone Alphatwo" in marks and "Gammaone Gammatwo" in marks
                 and "Alphaone Alphatwo" in titles and "Gammaone Gammatwo" in titles)
 
+    def contents():
+        """Each contents entry's text, its number's, its title's, and its
+        page number's together: a space between each."""
+        got = headings()
+        if not isinstance(got, tuple):
+            return got
+        entries = [text for kind, text in got[0] if kind == "/TOCI"]
+        return any(re.fullmatch(r"1 Alphaone Alphatwo \d+", t) for t in entries) \
+            and any(re.fullmatch(r"1\.1 Gammaone Gammatwo \d+", t) for t in entries)
+
+    def seen():
+        r"""On the page: the short caption's two lines, broken where its \\
+        is, each centered on the other, and a space's width between the
+        words of a list's term and of an \mbox that a \\ joins, which a
+        box can't break, an \mbox's in a caption broken so among them; a
+        long caption's line after its \\ where its first line starts, at
+        the margin, as LaTeX sets a caption longer than a line; a caption
+        that ends with its \\ one line, centered as one with none is, no
+        empty line under it, nor under a long one; an \hfill\break in a
+        box set to a width, its fill the box's room, as it was; a box
+        unpacked into a paragraph, its line's words their own width apart,
+        where its \\ ends the line; a note's mark in a caption with a \\
+        numbered as LaTeX numbers one in a caption without, which its
+        measuring steps; and a line still broken at an \enspace a space
+        follows, and not before one."""
+        why = why_not()
+        if why:
+            return skip(why)
+        import pdftext
+        if not os.path.exists(pdf_path):
+            return False
+        rows = {}
+        for page, baseline, left, right, char in pdftext.glyph_boxes(pdf_path):
+            if char.strip():
+                rows.setdefault((page, round(baseline, 1)), []).append((left, right, char))
+        lines = {key: ("".join(g[2] for g in glyphs), glyphs) for key, glyphs in rows.items()}
+
+        def line(words):
+            return next(((key, glyphs) for key, (text, glyphs) in lines.items()
+                         if words in text), (None, None))
+
+        def gap(before, after):
+            for text, glyphs in lines.values():
+                at = text.find(before + after)
+                if at >= 0:
+                    end = at + len(before)
+                    return glyphs[end][0] - glyphs[end - 1][1]
+            return None
+
+        def center(glyphs):
+            return (glyphs[0][0] + glyphs[-1][1]) / 2
+
+        def mark(words):
+            """The number a note's mark sets before the note's words."""
+            key, glyphs = line(words)
+            if key is None:
+                return None
+            digits = sorted((left, char) for (page, base), row in rows.items()
+                            if page == key[0] and 0 < base - key[1] < 6
+                            for left, right, char in row
+                            if char.isdigit() and right <= glyphs[0][0] + 0.5)
+            return int("".join(char for _, char in digits)) if digits else None
+
+        first, one = line("Capone")
+        second, two = line("Captwo")
+        trail, trailed = line("Trailone")
+        plain, plained = line("Plainone")
+        below_trail, below_plain = line("Belowtrail")[0], line("Belowplain")[0]
+        long_trail, long_plain = line("trailend")[0], line("plainend")[0]
+        below_long_trail, below_long_plain = line("Belowlongtrail")[0], line("Belowlongplain")[0]
+        split = next((text for text, _ in lines.values() if "Ensplitone" in text), "")
+        tight = next((text for text, _ in lines.values() if "Ennoone" in text), "")
+        a, b, c = mark("Notetexta."), mark("Notetextb."), mark("Notetextc.")
+        nest, nested = line("Nestone"), line("Nesttwo")
+        _, margin = line("Longone")
+        _, last = line("Longtwo")
+        return first is not None and second is not None and first != second \
+            and first[0] == second[0] and first[1] > second[1] \
+            and abs((one[0][0] + one[-1][1]) / 2 - (two[0][0] + two[-1][1]) / 2) < 1 \
+            and 2 < (gap("Termone", "Termtwo") or 0) < 6 \
+            and 2 < (gap("Mboxone", "Mboxtwo") or 0) < 6 \
+            and nest[0] is not None and nested[0] is not None and nest[0] != nested[0] \
+            and 2 < (gap("Nestbox", "Nestboxtwo") or 0) < 6 \
+            and margin is not None and last is not None and abs(last[0][0] - margin[0][0]) < 1 \
+            and trail is not None and plain is not None and below_trail is not None \
+            and below_plain is not None \
+            and trail[0] == below_trail[0] and plain[0] == below_plain[0] \
+            and abs(center(trailed) - center(plained)) < 1 \
+            and abs((trail[1] - below_trail[1]) - (plain[1] - below_plain[1])) < 0.5 \
+            and None not in (long_trail, long_plain, below_long_trail, below_long_plain) \
+            and long_trail[0] == below_long_trail[0] and long_plain[0] == below_long_plain[0] \
+            and abs((long_trail[1] - below_long_trail[1])
+                    - (long_plain[1] - below_long_plain[1])) < 0.5 \
+            and None not in (a, b, c) and b - a == c - b > 0 \
+            and "EnnooneEnnotwo" in tight \
+            and (gap("Fillone", "Filltwo") or 0) > 20 \
+            and 2 < (gap("Unboxone", "unboxtwo") or 0) < 6 \
+            and "EnpreEnsplitone" in split and "Ensplittwo" not in split
+
+    def en_spaced():
+        r"""An \enspace in text is a space in its text, and in a heading's
+        title, a space in the heading's text, its contents entry's, its
+        bookmark, and its /T."""
+        found = texts(work)
+        if not isinstance(found, list):
+            return found
+        got = headings()
+        if not isinstance(got, tuple):
+            return got
+        entries, marks, titles = got
+        return any("Enone Entwo, an en space." in t for t in found) \
+            and ("/section", "1.2 Ensec Entitle") in entries \
+            and any(kind == "/TOCI" and re.fullmatch(r"1\.2 Ensec Entitle \d+", text)
+                    for kind, text in entries) \
+            and "Ensec Entitle" in marks and "Ensec Entitle" in titles \
+            and "its \\enspace a space in the text a screen reader gets" in said \
+            and pdf_said("a space for each \\enspace in the text a screen reader gets")
+
+    def ams():
+        r"""A tagged document of amsbook's, the space, and an \enspace:
+        its chapter heading's number, which amsbook sets after the word
+        with an \enspace, a kern, reads "CHAPTER 1", and the text's
+        \enspace is a space too."""
+        why = why_no_tex("no lualatex to build the amsbook document", "lualatex")
+        if why:
+            return skip(why)
+        if not subprocess.run(["kpsewhich", "amsbook.cls"], capture_output=True,
+                              text=True).stdout.strip():
+            return skip("no amsbook here")
+        folder = os.path.join(work, "amsbook")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "ams.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\DocumentMetadata{tagging=on,pdfstandard=ua-2,lang=en-US}\n"
+                     "\\documentclass{amsbook}\n" + latexbuild.LINE_BREAK_SPACE
+                     + "\\begin{document}\n\\chapter{Introduction}\n"
+                     "Amsone\\enspace Amstwo.\n\\end{document}\n")
+        subprocess.run(["lualatex", "-interaction=nonstopmode", "ams.tex"], cwd=folder,
+                       capture_output=True, text=True, timeout=300)
+        found = texts(folder, "ams.pdf")
+        if not isinstance(found, list):
+            return found
+        return any("CHAPTER 1" in t for t in found) and any("Amsone Amstwo." in t for t in found)
+
     def kept():
         found = texts(own)
         if not isinstance(found, list):
             return found
         return any(t.startswith("Ownfirst / Ownsecond") for t in found) \
-            and any(t.startswith("Ownthird | Ownfourth") for t in found)
+            and any(t.startswith("Ownthird | Ownfourth") for t in found) \
+            and any("Enown/Entwoown." in t for t in found)
 
     def pdftex_as_before():
         r"""The tagged copy built as a DVI with pdfTeX, and with pdfLaTeX
@@ -2695,6 +2905,11 @@ def case_line_breaks(work):
     paged, paged_counts = tagged("One.\n\n\\vfill\\break\n\nTwo.")
     defined, defined_counts = tagged("\\renewcommand\\chapter{\\par}\nA paragraph.", "book")
     memoir, memoir_counts = tagged("\\chapter{Introduction}\nA paragraph.", "memoir")
+    listed, listed_counts = tagged("\\tableofcontents\n\\section{One}\nA paragraph.")
+    memoir_listed, memoir_listed_counts = tagged("\\tableofcontents\n\\section*{One}\n", "memoir")
+    spaced_en, en_counts = tagged("Before\\enspace after.")
+    math_en, math_en_counts = tagged("A formula, $a\\enspace b$.")
+    defined_en, defined_en_counts = tagged("\\renewcommand\\enspace{\\kern.5em}\nA paragraph.")
     return [
         ("a tagged copy of a book that breaks lines and numbers its chapters gets the space "
          "at a line break and in a heading, and the run says so",
@@ -2703,7 +2918,10 @@ def case_line_breaks(work):
          and "its line breaks (\\\\, \\newline, \\linebreak, and \\break) told to leave a "
              "space between their lines" in said
          and "its parts' and chapters' headings told to leave a space between a heading's "
-             "number and its title" in said),
+             "number and its title" in said
+         and pdf_said("a space between a line break's two lines in the text a screen reader "
+                      "gets", "a space between a part's or a chapter's number and its title in "
+                      "the text a screen reader gets")),
         ("its PDF, built from its own LaTeX, has a space between the lines of each \\\\, "
          "\\newline, and \\linebreak in its text, none inside a word a \\linebreak breaks, "
          "one space where \\nolinebreak keeps two words together, and a table's rows as "
@@ -2714,6 +2932,15 @@ def case_line_breaks(work):
          "paragraph's end, nor after a box with no text", broken),
         ("a center environment's lines as they were, and none in a formula TeX breaks after "
          "an operator", formula),
+        ("on the page, a caption short enough for one line but for its \\\\ set as two "
+         "lines, broken there and centered, as the caption package sets one, one ending with "
+         "its \\\\ one line, and a list's term's and an \\mbox's \\\\, which a box can't "
+         "break, a space; a box unpacked into a paragraph, a caption's note's number, and a "
+         "line an \\enspace ends as they were", seen),
+        ("its contents' entries read their number, a space, their title, a space, and their "
+         "page number, and the run says so", contents_said),
+        ("its \\enspace is a space in its text, and the run says so", en_spaced),
+        ("and amsbook's \\enspace after the word in its chapter's heading, \"CHAPTER 1\"", ams),
         ("its part's, chapter's, and section's headings read their number, a space, and "
          "their lines with a space between them, but none after a hyphen, and so do their "
          "bookmarks and structure titles", headed),
@@ -2741,6 +2968,19 @@ def case_line_breaks(work):
          and not chapter_counts.get("line_breaks")
          and broke.count(latexbuild.LINE_BREAK_SPACE) == 1
          and broke_counts.get("line_breaks") == 1),
+        ("one that sets a list of contents gets it, for the entries, and one that writes an "
+         "\\enspace, a kern, for its space, each counted; not a memoir book's contents, which "
+         "LaTeX's tagging doesn't set, nor an \\enspace only in a formula or defined",
+         lambda: listed.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and listed_counts.get("contents_spaces") == 1 and not listed_counts.get("line_breaks")
+         and spaced_en.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and en_counts.get("en_spaces") == 1 and not en_counts.get("contents_spaces")
+         and not plain_counts.get("contents_spaces") and not plain_counts.get("en_spaces")
+         and latexbuild.LINE_BREAK_SPACE not in memoir_listed
+         and not memoir_listed_counts.get("contents_spaces")
+         and latexbuild.LINE_BREAK_SPACE not in math_en and not math_en_counts.get("en_spaces")
+         and latexbuild.LINE_BREAK_SPACE not in defined_en
+         and not defined_en_counts.get("en_spaces")),
         ("a book whose preamble defines \\@gnewline and \\@no@lnbk itself keeps its own, and "
          "its lines get their space", kept),
         ("ragged2e's \\justifying keeps the line break's space", justified),

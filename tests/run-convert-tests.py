@@ -2062,6 +2062,94 @@ def case_markdown_raw_code(work):
     ]
 
 
+# A note in a link's text, which Pandoc's HTML writer wrote as an anchor
+# inside the link's, and a raw <a> holding one (Round 35's item 137); and
+# one in a span meant for the EPUB alone, which goes with the span.
+NOTE_LINK_MD = """# Links
+
+A [linked word[^l]](https://example.org/) here, [two[^m] words](https://example.com/)
+there, and a <a href="https://example.net/">raw link[^n]</a> too.
+
+Targets: [see [this[^q]]{targets="epub"} here](https://example.info/) there.
+
+[^l]: The first note.
+[^m]: The second note.
+[^n]: The third note.
+[^q]: Note q, for the EPUB only.
+"""
+# A link whose text is a note alone, which went, the link having no text,
+# and the note with it.
+NOTE_ALONE_MD = """# Alone
+
+A link of [[^o]](https://example.net/alone) a note alone.
+
+[^o]: The note alone.
+"""
+
+
+def anchors_nested(html):
+    """Whether an <a> opens inside another in the HTML."""
+    from html.parser import HTMLParser
+    found = []
+
+    class Anchors(HTMLParser):
+        depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                if self.depth:
+                    found.append(attrs)
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "a" and self.depth:
+                self.depth -= 1
+    Anchors().feed(html)
+    return bool(found)
+
+
+def case_note_in_link(work):
+    """A note in a link's text goes after the link in the pages, where it
+    was an anchor inside the link's, which HTML doesn't allow; in a raw
+    <a> too; but not one in a span meant for another target, which goes
+    with the span; and the Markdown target keeps it where the author wrote
+    it. A link whose text is a note alone goes, as a link with no text
+    does, and its note stays, where it had gone with the link."""
+    os.makedirs(work)
+    with open(os.path.join(work, "links.md"), "w", encoding="utf-8") as fh:
+        fh.write(NOTE_LINK_MD)
+    with open(os.path.join(work, "alone.md"), "w", encoding="utf-8") as fh:
+        fh.write(NOTE_ALONE_MD)
+    result = convert(work, "targets:\n  html:\n    format: html\n"
+                           "  md:\n    format: markdown\n", fixtures=())
+    page = read(work, "html", "links.html") if exists(work, "html", "links.html") else ""
+    markdown = read(work, "md", "links.md") if exists(work, "md", "links.md") else ""
+    alone = read(work, "html", "alone.html") if exists(work, "html", "alone.html") else ""
+    alone_md = read(work, "md", "alone.md") if exists(work, "md", "alone.md") else ""
+    return [
+        ("a note in a link's text is after the link in the pages, each link's text its "
+         "words alone, in a raw <a> too, and no anchor opens inside another",
+         lambda: result.returncode == 0
+         and re.search(r'<a href="https://example.org/">linked word</a><a\s+href="#fn1"', page)
+         and re.search(r'<a href="https://example.com/">two words</a><a\s+href="#fn2"', page)
+         and re.search(r'<a href="https://example.net/">raw link</a><a\s+href="#fn3"', page)
+         and not anchors_nested(page)),
+        ("a note in a span meant for the EPUB alone goes with the span, the link's other "
+         "words kept",
+         lambda: re.search(r'<a href="https://example.info/">see\s+here</a>\s+there', page)
+         and "for the EPUB only" not in page and 'href="#fn4"' not in page),
+        ("and the Markdown target keeps the notes in the links, as the author wrote them",
+         lambda: "[linked word[^1]](https://example.org/)" in markdown
+         and "[two[^2]" in markdown),
+        ("a link whose text is a note alone goes, as one with no text does, and its note "
+         "stays where it was, in the pages and the Markdown target",
+         lambda: re.search(r'A link of <a\s+href="#fn1"', alone)
+         and "The note alone." in alone and "example.net/alone" not in alone
+         and re.search(r"A link of \[\^1\] a note alone\.", alone_md)
+         and "The note alone." in alone_md),
+    ]
+
+
 BANDED = """<!DOCTYPE html><html lang="en"><head><title>Bands</title></head>
 <body><main><h1>Bands</h1>
 <table><tr><td colspan="3"><b>The Message Triangle</b></td></tr>
@@ -8541,6 +8629,7 @@ CASES = [
     ("the footer on every page of every format", case_page_footer),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("raw code in a Markdown source, as written", case_markdown_raw_code),
+    ("a note in a link's text, after the link", case_note_in_link),
     ("title rows and bands, split and grouped", case_bands),
     ("a group's own header row, split", case_group_heads),
     ("a heading's id from its words gives way", case_heading_ids),

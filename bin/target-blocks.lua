@@ -25,6 +25,9 @@
 -- MathML of a page, an EPUB, and a deck's reveal.js presentation too, but
 -- in a heading or a picture's description, whose text the writer reads.
 --
+-- A note in a link's text goes after the link, for every writer but
+-- those two: a page's note in a link was an anchor in an anchor.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -120,6 +123,32 @@ local function local_file_link(link)
   lost('file-link', name)
   return pandoc.Span(link.content,
     pandoc.Attr('', { 'file-link' }, { { 'data-file', name } }))
+end
+
+-- A note in a link's text goes after the link, the notes in the order the
+-- link held them. An HTML writer writes a note's mark as a link of its
+-- own, inside the link's, an anchor in an anchor, which HTML doesn't allow
+-- (Pandoc writes [x[^1]](u) so, Writers/HTML.hs, 3.12.1), and LaTeX's
+-- tagging set the mark, a link, and the note's text inside the link's
+-- structure element, the note read as part of the link. Once a span or a
+-- div meant for another target is gone (resolve), with any note in it.
+-- Not for a source writer, Markdown's or AsciiDoc's, whose file keeps what
+-- the author wrote. A link whose text was its note alone is gone already,
+-- the note kept (figures-and-tables.lua's Link).
+local function notes_after(link)
+  if SOURCE_WRITERS[FORMAT] then return nil end
+  local notes = pandoc.List()
+  local content = link.content:walk({
+    Note = function(note)
+      notes:insert(note)
+      return {}
+    end,
+  })
+  if #notes == 0 then return nil end
+  link.content = content
+  local out = pandoc.Inlines({ link })
+  out:extend(notes)
+  return out
 end
 
 local function escape(value)
@@ -309,6 +338,7 @@ return {
   { Pandoc = add_footer },
   { Div = resolve, Span = resolve, Image = remote_image,
     Link = local_file_link },
+  { Link = notes_after },
   { Pandoc = display_styles },
   { Pandoc = title_heading },
   { Meta = drop_title_block },

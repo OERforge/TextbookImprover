@@ -1007,7 +1007,12 @@ function Link(link)
     local image = false
     link.content:walk({ Image = function() image = true end })
     if image then return nil end
-    return {}
+    -- A note, which has no text of the link's (stringify leaves it out),
+    -- went with it too, the author's words lost: it stays where the link
+    -- was, [[^1]](https://example.org/) a note's mark alone.
+    local notes = pandoc.List()
+    link.content:walk({ Note = function(note) notes:insert(note) end })
+    return notes
   end
   return nil
 end

@@ -1034,7 +1034,8 @@ HEADINGS_ONE = ("# One<br>its second line\n\n"
 # the term "Termtwo" on the page. A table whose columns have no widths,
 # whose cells' line breaks the writer set as boxes the structure left
 # out, the cells empty, and a grid table, whose widths stay; a table in a
-# table's cell, whose line break ended its row.
+# table's cell, whose line break ended its row; and a link holding a
+# note, which LaTeX's tagging set inside the link's structure element.
 HEADINGS_TWO = ("# Two\n\nThe second chapter.\n\n![Short<br>caption](cc.png)\n\n"
                 "Term<br>two\n:   Its definition.\n\n"
                 "| Gamma | Delta |\n|-------|-------|\n| Cell<br>one | Cell<br>two |\n\n"
@@ -1045,7 +1046,9 @@ HEADINGS_TWO = ("# Two\n\nThe second chapter.\n\n![Short<br>caption](cc.png)\n\n
                 "+--------------+--------------------------------------------+\n\n"
                 "<table><tr><th>Outer</th><th>Side</th></tr><tr><td><table><tr><th>In</th>"
                 "<th>Out</th></tr><tr><td>Inner<br>break</td><td>b</td></tr></table></td>"
-                "<td>x</td></tr></table>\n")
+                "<td>x</td></tr></table>\n\n"
+                "A [linked word[^l]](https://example.org/) here.\n\n"
+                "[^l]: The link's note.\n")
 
 
 def build_headings(work):
@@ -4635,8 +4638,8 @@ def headings_checks(headings_path):
     its lines apart in the text a screen reader gets, and in the running
     head; a short caption's line break kept, a list's term's a space on
     the page, the spaces in the book's face; a contents entry's number,
-    title, and page number apart; and a cell's lines in its table's
-    structure."""
+    title, and page number apart; a cell's lines in its table's structure;
+    and a link's note after it."""
     found = heading_texts(headings_path)
     first = line_holding(headings_path, "Figure 2.1: Short")
     second = line_holding(headings_path, "caption")
@@ -4690,6 +4693,9 @@ def headings_checks(headings_path):
         # "break" in a row of its own.
         ("a line break in a table inside a table's cell is a space there, its row whole",
          lambda: ("/TD", "Inner break") in found and ("/TD", "Inner") not in found),
+        ("a note in a link's text is set after the link, outside its structure element",
+         lambda: ("/Link", "linked word") in found
+         and not any(kind == "/Link+note" for kind, _ in found)),
     ]
 
 

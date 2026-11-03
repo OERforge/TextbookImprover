@@ -495,12 +495,18 @@ FIGURE_PLACEMENT = {
 # through, whatever the class; a copy (\NewCommandCopy), since they're
 # robust. An empty mark stays empty, as the kernel tells them apart
 # (2e-right-nonempty). The head is an artifact, so its text is the
-# reader's no matter its size.
+# reader's no matter its size. A line break in a title, \\ or \newline,
+# star and space and all, is a space in the head, which is one line: it
+# had set nothing there, and a chapter "Chapter one<br>second line" ran
+# "CHAPTER ONESECOND LINE" across the top of its pages.
 RUNNING_HEADS = r"""\RequirePackage{graphicx}
 \makeatletter
 \newsavebox\oer@headbox
+\protected\def\oer@headcr{\@ifstar\oer@headcr@\oer@headcr@}
+\def\oer@headcr@{\@ifnextchar[\oer@headcr@@{\unskip\space\ignorespaces}}
+\def\oer@headcr@@[#1]{\unskip\space\ignorespaces}
 \DeclareRobustCommand\oerfithead[1]{%
-  \sbox\oer@headbox{#1}%
+  \sbox\oer@headbox{\let\\\oer@headcr\let\newline\oer@headcr#1}%
   \ifdim\wd\oer@headbox>\dimexpr\textwidth-3em\relax
     \resizebox{\dimexpr\textwidth-3em\relax}{!}{\usebox\oer@headbox}%
   \else\usebox\oer@headbox\fi}

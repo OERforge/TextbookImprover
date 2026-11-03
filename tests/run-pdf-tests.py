@@ -1021,7 +1021,8 @@ def build_footer(work):
 # class sets a chapter's number as a paragraph of its own, and the title
 # \raggedright, where \\ ends a paragraph, each a Span of the heading's
 # with nothing between them: "One<br>its second line" read "Chapter
-# 1Oneits second line".
+# 1Oneits second line". And \\ set nothing in a running head, a line of
+# its own: "ONEITS SECOND LINE".
 HEADINGS_ONE = ("# One<br>its second line\n\n"
                 + "".join(FOOTER_WORDS * 4 + "\n\n" for _ in range(8))
                 + "## A section<br>its second line\n\n"
@@ -4570,9 +4571,30 @@ def heading_texts(path):
     return found
 
 
+def word_gaps(path, before, after):
+    """For each line on a page whose glyphs, spaces aside, hold before
+    and then after, how far apart the two are on the page, in points: from
+    the right of before's last glyph to the left of after's first."""
+    if not os.path.exists(path):
+        return []
+    lines = {}
+    for page, baseline, left, right, char in pdftext.glyph_boxes(path):
+        if char.strip():
+            lines.setdefault((page, round(baseline, 1)), []).append((left, right, char))
+    gaps = []
+    for glyphs in lines.values():
+        text = "".join(char for _, _, char in glyphs)
+        at = text.find(before + after)
+        if at >= 0:
+            end = at + len(before)
+            gaps.append(glyphs[end][0] - glyphs[end - 1][1])
+    return gaps
+
+
 def headings_checks(headings_path):
     """The headings book's checks (build_headings): a heading's number and
-    its lines apart in the text a screen reader gets."""
+    its lines apart in the text a screen reader gets, and in the running
+    head."""
     found = heading_texts(headings_path)
     return [
         ("a numbered chapter's heading reads its number, a space, and its title's lines with "
@@ -4582,6 +4604,14 @@ def headings_checks(headings_path):
         ("a one-line caption's line break and a definition list's term's have a space too",
          lambda: any(kind == "/Caption" and text.endswith("Short caption") for kind, text in found)
          and ("/itemlabel", "Term two") in found),
+        # Its text had a space there, LaTeX's tagging's, which takes up
+        # none of the line: "ONEITS" on the page.
+        ("the running heads over the chapter's pages and the section's set a space where the "
+         "title breaks, a space's width on the page",
+         lambda: word_gaps(headings_path, "ONE", "ITS")
+         and all(gap > 2 for gap in word_gaps(headings_path, "ONE", "ITS"))
+         and word_gaps(headings_path, "SECTION", "ITS")
+         and all(gap > 2 for gap in word_gaps(headings_path, "SECTION", "ITS"))),
     ]
 
 

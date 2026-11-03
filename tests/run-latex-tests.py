@@ -2610,7 +2610,9 @@ def case_line_breaks(work):
         return (("/part", "Part I Partone") in found
                 and ("/chapter", "Chapter 1 Alphaone Alphatwo") in found
                 and ("/section", "1.1 Gammaone Gammatwo") in found
-                and ("/chapter", "Chapter 2 Self-contained") in found)
+                and ("/chapter", "Chapter 2 Self-contained") in found
+                and "Alphaone Alphatwo" in marks and "Gammaone Gammatwo" in marks
+                and "Alphaone Alphatwo" in titles and "Gammaone Gammatwo" in titles)
 
     def kept():
         found = texts(own)
@@ -2713,7 +2715,8 @@ def case_line_breaks(work):
         ("a center environment's lines as they were, and none in a formula TeX breaks after "
          "an operator", formula),
         ("its part's, chapter's, and section's headings read their number, a space, and "
-         "their lines with a space between them, but none after a hyphen", headed),
+         "their lines with a space between them, but none after a hyphen, and so do their "
+         "bookmarks and structure titles", headed),
         ("built with pdfTeX, as a DVI or untagged without its \\DocumentMetadata, it builds, "
          "with no font of pdfTeX's for spaces, and untagged with LuaLaTeX too",
          pdftex_as_before),

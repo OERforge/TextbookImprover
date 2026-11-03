@@ -2546,6 +2546,16 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % after one that ended in text, as the next Span of the same structure,
 % starts with tagpdf's \pdffakespace; a P beside another, as a center
 % environment's lines are, is apart already.
+%
+% \\ and \newline are a space in a bookmark and in a heading's title in
+% the structure, where they had left nothing ("Section witha break"):
+% hyperref's \pdfstringdef makes a bookmark's string, and LaTeX runs
+% hyperref's settings for it before it makes a title's (\pdf_purify:nN).
+% One space after either is taken with it, as Pandoc puts a line's end
+% after \\, so "A\\B" and Pandoc's title have one space there; "A \\B",
+% with a space before it, has two, where LaTeX gave it one, as "A \\ B"
+% had two already. A star or a length after \\ is left in the string, as
+% hyperref left it ("I*J"), now after the space.
 \ifdefined\directlua
 \newattribute\OERBreakSpaceAttribute
 \directlua{
@@ -2736,6 +2746,14 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
             \AddToHook { para / begin } [ oer / heading ] { \__oer_heading_begin: }
             \DeclareHookRule { para / begin } { oer / heading } { after } { tagpdf }
           }
+      }
+  }
+\AddToHook { package / hyperref / after }
+  {
+    \pdfstringdefDisableCommands
+      {
+        \cs_set:Npn \\ { ~ \tex_romannumeral:D - `0 }
+        \cs_set:Npn \newline { ~ \tex_romannumeral:D - `0 }
       }
   }
 \ExplSyntaxOff

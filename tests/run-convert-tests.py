@@ -2085,6 +2085,46 @@ A link of [[^o]](https://example.net/alone) a note alone.
 
 [^o]: The note alone.
 """
+# Two notes in one link's text, which go after it in a row, two the author
+# wrote in a row, and two a space parts: the marks of each pair in a row
+# read as one number, "12", without a comma.
+NOTE_PAIRS_MD = """# Pairs
+
+Two in one link: [both[^r] notes[^s]](https://example.edu/), and two
+side by side.[^t][^u] And apart,[^v] [^w] with a space.
+
+## Sets[^ha][^hb]
+
+![A gray square[^fa][^fb]](square.png)
+
+| Cell[^ca][^cb] |
+|---|
+| One[^cc][^cd] |
+
+: Plans[^ta][^tb]
+
+Term[^da][^db]
+:   Its definition.
+
+[^r]: Note r.
+[^s]: Note s.
+[^t]: Note t.
+[^u]: Note u.
+[^v]: Note v.
+[^w]: Note w.
+[^ha]: Note ha.
+[^hb]: Note hb.
+[^fa]: Note fa.
+[^fb]: Note fb.
+[^ca]: Note ca.
+[^cb]: Note cb.
+[^cc]: Note cc.
+[^cd]: Note cd.
+[^ta]: Note ta.
+[^tb]: Note tb.
+[^da]: Note da.
+[^db]: Note db.
+"""
 
 
 def anchors_nested(html):
@@ -2114,18 +2154,29 @@ def case_note_in_link(work):
     <a> too; but not one in a span meant for another target, which goes
     with the span; and the Markdown target keeps it where the author wrote
     it. A link whose text is a note alone goes, as a link with no text
-    does, and its note stays, where it had gone with the link."""
+    does, and its note stays, where it had gone with the link. Two notes
+    in a row, a link's two after it among them, get a comma between their
+    marks in the pages, in a table's cell and a term too, but not in a
+    heading or a caption, whose words are a title or an entry elsewhere
+    too, where a comma would stay behind; and keep the author's text in
+    the Markdown target."""
     os.makedirs(work)
     with open(os.path.join(work, "links.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_LINK_MD)
     with open(os.path.join(work, "alone.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_ALONE_MD)
+    with open(os.path.join(work, "pairs.md"), "w", encoding="utf-8") as fh:
+        fh.write(NOTE_PAIRS_MD)
+    with open(os.path.join(work, "square.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n", fixtures=())
     page = read(work, "html", "links.html") if exists(work, "html", "links.html") else ""
     markdown = read(work, "md", "links.md") if exists(work, "md", "links.md") else ""
     alone = read(work, "html", "alone.html") if exists(work, "html", "alone.html") else ""
     alone_md = read(work, "md", "alone.md") if exists(work, "md", "alone.md") else ""
+    pairs = read(work, "html", "pairs.html") if exists(work, "html", "pairs.html") else ""
+    pairs_md = read(work, "md", "pairs.md") if exists(work, "md", "pairs.md") else ""
     return [
         ("a note in a link's text is after the link in the pages, each link's text its "
          "words alone, in a raw <a> too, and no anchor opens inside another",
@@ -2147,6 +2198,28 @@ def case_note_in_link(work):
          and "The note alone." in alone and "example.net/alone" not in alone
          and re.search(r"A link of \[\^1\] a note alone\.", alone_md)
          and "The note alone." in alone_md),
+        ("two notes in a row get a comma between their marks, set as the marks are, two "
+         "in one link's text after it and two the author wrote together, but not two a "
+         "space parts",
+         lambda: re.search(r'<a href="https://example\.edu/">both\s+notes</a><a\s+href="#fn1"'
+                           r'[^>]*><sup>1</sup></a><sup>,</sup><a\s+href="#fn2"', pairs)
+         and re.search(r'side\s+by\s+side\.<a\s+href="#fn3"[^>]*><sup>3</sup></a><sup>,</sup>'
+                       r'<a\s+href="#fn4"', pairs)
+         and re.search(r'<sup>5</sup></a>\s+<a\s+href="#fn6"', pairs)
+         and pairs.count("<sup>,</sup>") == 5),
+        ("and two in a table's cells, its head's and its body's, and in a term, but not in a "
+         "heading, a figure's caption, or a table's, or the picture's description",
+         lambda: re.search(r'Cell<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
+         and re.search(r'One<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
+         and re.search(r'<dt>Term<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
+         and re.search(r'<h2[^>]*>Sets<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
+         and re.search(r'A gray square<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
+         and re.search(r'<caption>Plans<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
+         and re.search(r'alt="A gray square"', pairs)),
+        ("and the Markdown target keeps them as the author wrote them, with no comma",
+         lambda: re.search(r"\[both\[\^1\]\s+notes\[\^2\]\]\(https://example\.edu/\)", pairs_md)
+         and re.search(r"side\s+by\s+side\.\[\^3\]\[\^4\]", pairs_md)
+         and "^,^" not in pairs_md and "<sup>" not in pairs_md),
     ]
 
 

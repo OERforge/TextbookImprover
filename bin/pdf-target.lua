@@ -53,7 +53,8 @@
 --    \footnotetext), and LaTeX's tagging stops on that pair in a list's
 --    label (the number of automatic begin and end text-unit hooks differ,
 --    LaTeX 2026-06-01). It goes at the head of the term's definition, where
---    the writer gives it as a footnote, as it does in a paragraph.
+--    the writer gives it as a footnote, as it does in a paragraph; two or
+--    more go there in a row, a comma between their marks, "1,2".
 --
 -- 8. A passage in another language, a span, a link, or a div with a lang
 --    attribute, which the writer marks for babel, whose commands set its
@@ -2851,12 +2852,21 @@ local function div_language(div)
   end
 end
 
+-- The moved notes' marks in a row, a comma between them, "1,2", as
+-- target-blocks.lua's separate_notes puts between two notes in a row in
+-- the text (and leaves out of a term for LaTeX, where it would have stayed
+-- behind).
+local function comma()
+  return pandoc.Superscript({ pandoc.Str(',') })
+end
+
 local function term_notes(list)
   local items, moved_any = pandoc.List({}), false
   for _, item in ipairs(list.content) do
     local moved = pandoc.Inlines({})
     local term = pandoc.Inlines(item[1]):walk({
       Note = function(note)
+        if #moved > 0 then moved:insert(comma()) end
         moved:insert(note)
         return {}
       end,
@@ -2869,6 +2879,9 @@ local function term_notes(list)
       if first and (first.t == 'Para' or first.t == 'Plain') then
         local content = pandoc.Inlines({})
         content:extend(moved)
+        if first.content[1] and first.content[1].t == 'Note' then
+          content:insert(comma())
+        end
         content:extend(first.content)
         first.content = content
         blocks[1] = first

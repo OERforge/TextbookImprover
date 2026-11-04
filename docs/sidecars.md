@@ -186,6 +186,8 @@ as long as no table is inserted or removed above it on that page — the
 trade for being able to caption a table the source never named. Labeled
 tables are unaffected and keep their label as the key.
 
+A `source` target writes each description into a Markdown file's copy as the table's `Table:` line, except for a table written in HTML in the file, and every table after it there, which get theirs in the pages, the EPUB, and the PDF but not in the copy ([Formats](formats.md#source)).
+
 One alt per image file. If the same image appears twice on a page with
 different alt text, you get a warning and the first entry wins.
 

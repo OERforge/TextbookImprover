@@ -81,6 +81,17 @@ def text_of(inlines):
     return "".join(out)
 
 
+def caption_inlines(blocks):
+    """A caption's blocks as one run of inlines, a space between blocks."""
+    out = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("t") in ("Plain", "Para"):
+            if out:
+                out.append({"t": "Space"})
+            out.extend(block["c"])
+    return out
+
+
 def walk(node, on_block=None, on_inline=None):
     if isinstance(node, dict):
         t = node.get("t")
@@ -203,9 +214,32 @@ def check(path, kind, markers=("matrix", "row-headers")):
                 head = body.strip().split("\n", 1)[0][:60]
                 out.append(Finding(name, "source-raw-html", head, file=name,
                                    kind=kind))
+        elif t == "Figure":
+            # A figure's image whose alt text is the caption, word for
+            # word: Pandoc's Markdown reader gives a figure's image its
+            # caption for alt text when it has none of its own
+            # (![caption](file)), and a tagged PDF then says it twice, as
+            # the Caption and as the Figure's /Alt; a page hides the
+            # caption from a screen reader (aria-hidden), as Pandoc's HTML
+            # writer does. Alt text after the image, {alt="..."}, is the
+            # image's description: Pandoc's reader puts it there.
+            caption = " ".join(text_of(caption_inlines(node["c"][1][1])).split())
+            if caption:
+                def same(image):
+                    if isinstance(image, dict):
+                        if image.get("t") == "Image" and \
+                                " ".join(text_of(image["c"][1]).split()) == caption:
+                            alt_is_caption[id(image)] = caption
+                        for value in image.values():
+                            same(value)
+                    elif isinstance(image, list):
+                        for item in image:
+                            same(item)
+                same(node["c"][2])
 
     image_index = [0]
     described = []      # (image n, src, alt) for alt text no rule names
+    alt_is_caption = {}     # id(image node): its alt text, the caption's
 
     def on_inline(node):
         t = node["t"]
@@ -229,6 +263,14 @@ def check(path, kind, markers=("matrix", "row-headers")):
                                        file=name, kind=kind))
                 else:
                     described.append((image_index[0], src, text_of(alt).strip()))
+                    # Its caption's words, where no rule finds more to say
+                    # of them: a rule that does names what's wrong, and the
+                    # caption is that too (a review).
+                    if id(node) in alt_is_caption:
+                        out.append(Finding(f"image {image_index[0]}",
+                                           "source-image-alt-is-caption", "%s: %r" % (
+                                               os.path.basename(src), alt_is_caption[id(node)]),
+                                           file=name, kind=kind))
         elif t == "Link":
             attr, inner, (target, _) = node["c"]
             label = text_of(inner).strip()

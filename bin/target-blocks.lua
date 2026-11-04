@@ -26,7 +26,8 @@
 -- in a heading or a picture's description, whose text the writer reads.
 --
 -- A note in a link's text goes after the link, for every writer but
--- those two: a page's note in a link was an anchor in an anchor.
+-- those two: a page's note in a link was an anchor in an anchor. And two
+-- notes in a row get a comma between their marks, "1,2", not "12".
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -149,6 +150,117 @@ local function notes_after(link)
   local out = pandoc.Inlines({ link })
   out:extend(notes)
   return out
+end
+
+-- Two notes in a row get a comma between their marks, set as the marks
+-- are, "1,2", where they read as one number, "12": several notes in one
+-- link's text, which notes_after puts in a row after it, and two an
+-- author wrote together. LaTeX's footmisc package sets them so with its
+-- multiple option. Not for a source writer, whose file keeps what the
+-- author wrote. A space between two notes keeps their marks apart
+-- already. Only in the body's text, a paragraph's, a line block's, a
+-- table's cell's, a definition's, a term's, what a figure holds: not in a
+-- heading or a caption, whose words are a title, a contents entry, a
+-- bookmark, or a list of figures' entry too, where the notes are taken out
+-- and a comma would have stayed ("Sets,"; a review). Nor in a picture's
+-- description, which isn't text with marks. And not in a term for LaTeX,
+-- where pdf-target.lua's term_notes moves a term's notes to the head of
+-- its definition, a comma between them, so none stays behind in the term.
+local NOTE_HOLDERS = { Emph = true, Strong = true, Underline = true, Strikeout = true,
+                       SmallCaps = true, Superscript = true, Subscript = true, Span = true,
+                       Quoted = true }
+local TERMS_MOVED = { latex = true, beamer = true }
+
+local function comma_notes(inlines)
+  local out, changed = pandoc.Inlines({}), false
+  for i, inline in ipairs(inlines) do
+    if inline.t == 'Note' and i > 1 and inlines[i - 1].t == 'Note' then
+      out:insert(pandoc.Superscript({ pandoc.Str(',') }))
+      changed = true
+    elseif NOTE_HOLDERS[inline.t] then
+      local inner = comma_notes(inline.content)
+      if inner then
+        inline.content = inner
+        changed = true
+      end
+    end
+    out:insert(inline)
+  end
+  if changed then return out end
+  return nil
+end
+
+local separate_notes = {}
+if not SOURCE_WRITERS[FORMAT] then
+  local function text(block)
+    local content = comma_notes(block.content)
+    if content then
+      block.content = content
+      return block
+    end
+  end
+  local function lines(block)
+    local content, changed = pandoc.List({}), false
+    for _, line in ipairs(block.content) do
+      local separated = comma_notes(line)
+      changed = changed or separated ~= nil
+      content:insert(separated or line)
+    end
+    if changed then
+      block.content = content
+      return block
+    end
+  end
+  -- A table's cells, each as the body is, its caption left alone; each
+  -- part read, changed, and assigned back, as a table's head and bodies
+  -- are copies when read (PANDOC-NOTES).
+  local function in_rows(rows)
+    for _, row in ipairs(rows) do
+      local cells = row.cells
+      for _, cell in ipairs(cells) do
+        cell.contents = cell.contents:walk(separate_notes)
+      end
+      row.cells = cells
+    end
+    return rows
+  end
+  separate_notes = {
+    traverse = 'topdown',
+    Figure = function(fig)
+      fig.content = fig.content:walk(separate_notes)
+      return fig, false
+    end,
+    Table = function(tbl)
+      local head, bodies, foot = tbl.head, tbl.bodies, tbl.foot
+      head.rows = in_rows(head.rows)
+      for _, body in ipairs(bodies) do
+        body.head = in_rows(body.head)
+        body.body = in_rows(body.body)
+      end
+      foot.rows = in_rows(foot.rows)
+      tbl.head, tbl.bodies, tbl.foot = head, bodies, foot
+      return tbl, false
+    end,
+    DefinitionList = function(list)
+      local items = pandoc.List({})
+      for _, item in ipairs(list.content) do
+        local term = item[1]
+        if not TERMS_MOVED[FORMAT] then
+          term = comma_notes(term) or term
+        end
+        local definitions = pandoc.List({})
+        for _, blocks in ipairs(item[2]) do
+          definitions:insert(pandoc.Blocks(blocks):walk(separate_notes))
+        end
+        items:insert({ term, definitions })
+      end
+      list.content = items
+      return list, false
+    end,
+    Para = text,
+    Plain = text,
+    LineBlock = lines,
+  }
 end
 
 local function escape(value)
@@ -339,6 +451,7 @@ return {
   { Div = resolve, Span = resolve, Image = remote_image,
     Link = local_file_link },
   { Link = notes_after },
+  separate_notes,
   { Pandoc = display_styles },
   { Pandoc = title_heading },
   { Meta = drop_title_block },

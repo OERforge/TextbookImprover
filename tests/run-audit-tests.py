@@ -56,6 +56,16 @@ name, ![Figure 2 (fig2.png)](fig2.png). One that is only a credit,
 ![A rising line](up.png) and ![A rising line](up-2.png), which are one
 picture, and ![A rising line.](down.png), which isn't.
 
+![A line of sales rising each year](sales.png)
+
+![A line of sales rising each year](sales-3.png)
+
+![Sales by year](sales-2.png){alt="Sales rose from two units to nine"}
+
+![Source: the census (2020)](census.png)
+
+![A border](border.png){.decorative}
+
 And one whose scheme is in capitals,
 [HTTPS://example.org/report](HTTPS://example.org/report).
 
@@ -113,13 +123,28 @@ def case_sources():
          == ["shape.png: 'Picture 3' (a default shape name)"]
          and [c.count("source-image-alt-" + k) for k in ("auto-generated", "page-title",
                                                           "is-file-name", "credit")]
-         == [1, 1, 1, 1]),
+         == [1, 1, 1, 2]),
         ("and one alt text on different pictures, told apart by their files' bytes, so "
          "two files holding one picture are one",
          lambda: [f.detail for f in md if f.check == "source-image-alt-shared"] == [
              "up.png: 'A rising line' (shared with 1 other image)",
              "up-2.png: 'A rising line' (shared with 1 other image)",
-             "down.png: 'A rising line.' (shared with 1 other image)"]),
+             "down.png: 'A rising line.' (shared with 1 other image)",
+             "sales.png: 'A line of sales rising each year' (shared with 1 other image)",
+             "sales-3.png: 'A line of sales rising each year' (shared with 1 other image)"]),
+        # Pandoc's Markdown reader gives a figure's image its caption for
+        # alt text when it has none, and a tagged PDF says it twice.
+        ("a figure's image whose alt text is its caption, as Pandoc copies it, is found, "
+         "and not one given alt text of its own or marked decorative",
+         lambda: [f.detail for f in md if f.check == "source-image-alt-is-caption"]
+         == ["sales.png: 'A line of sales rising each year'",
+             "sales-3.png: 'A line of sales rising each year'"]),
+        # A rule that finds more to say of the caption's words names what's
+        # wrong with them (a review); two such pictures' alt text is still
+        # compared with the others' (the shared check above).
+        ("and one whose caption another rule finds is found by that rule alone",
+         lambda: [f.check for f in md if f.detail.startswith("census.png")]
+         == ["source-image-alt-credit"]),
         ("a Word file's image is told apart by its file in the archive",
          lambda: sourcecheck.picture(os.path.join(FIXTURES, "media-a.docx"), "source-docx")(
              "media/image1.png") == hashlib.sha256(zipfile.ZipFile(os.path.join(
@@ -334,7 +359,8 @@ def main():
     WORK = tempfile.mkdtemp(prefix="audit-tests-")
     with open(os.path.join(WORK, "page.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN)
-    for name, data in (("up.png", b"up"), ("up-2.png", b"up"), ("down.png", b"down")):
+    for name, data in (("up.png", b"up"), ("up-2.png", b"up"), ("down.png", b"down"),
+                       ("sales.png", b"sales"), ("sales-3.png", b"other sales")):
         with open(os.path.join(WORK, name), "wb") as fh:
             fh.write(data)
     with open(os.path.join(WORK, "page.html"), "w", encoding="utf-8") as fh:

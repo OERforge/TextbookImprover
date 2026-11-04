@@ -565,6 +565,46 @@ equal widths; and a table of numbers too wide for a line:
 # figure, and a footnote; with a link to one, and a section after them.
 # The headings are a level below a section's, so none skips a level,
 # which heading_levels would lift.
+# Two notes in a row in a heading, a caption, and a term: the term's go to
+# the head of its definition (pdf-target.lua's term_notes), a comma between
+# them; the heading's and the caption's are left without one, which would
+# have stayed behind in the contents, the bookmarks, and the list of
+# figures, where the notes are left out.
+NOTES_PAIRS = r"""# Pairs
+
+## Sets[^j][^k]
+
+Its words.
+
+![A gray circle[^l][^m]](assets/red.png)
+
+Term[^n][^o]
+:   Its definition.
+
+| Kind | Count |
+|------|-------|
+| One  | 1     |
+
+: A table whose caption has a note.[^p]
+
+| Kind | Count |
+|------|-------|
+| Two  | 2     |
+
+: A table whose caption, long enough to run past the width of its line and be set as a paragraph of its own, has a note.[^q]
+
+After the tables, a note.[^r]
+
+[^j]: Note j, in a heading.
+[^k]: Note k, in a heading too.
+[^l]: Note l, in a caption.
+[^m]: Note m, in a caption too.
+[^n]: Note n, in a term.
+[^o]: Note o, in a term too.
+[^p]: Note p, in a table's caption.
+[^q]: Note q, in a long table caption.
+[^r]: Note r, after the tables.
+"""
 NOTES_HEADINGS = r"""# Headings
 
 ## In a list, a quotation, a table, a figure, and a note
@@ -925,24 +965,26 @@ def pikepdf_open(path):
 
 
 def build_notes(work):
-    """NOTES_CAPTIONS, NOTES_CELLS, and NOTES_HEADINGS, built tagged, to
-    PDF/UA-2, with a list of figures, and untagged, on the default page,
-    each in Latin Modern (LATIN_MODERN): (the tagged PDF's path, the
-    untagged one's, what the run said, the tagged one's LaTeX). pypdf's
+    """NOTES_CAPTIONS, NOTES_CELLS, NOTES_HEADINGS, and NOTES_PAIRS, built
+    tagged, to PDF/UA-2, with a list of figures, and untagged, on the
+    default page, each in Latin Modern (LATIN_MODERN): (the tagged PDF's
+    path, the untagged one's, what the run said, the tagged one's
+    LaTeX). pypdf's
     text of an untagged PDF in IBM Plex runs its words together, which
     pdftotext's and MuPDF's don't: such a PDF draws no spaces, and pypdf
     finds them by the gaps."""
     os.makedirs(os.path.join(work, "assets"))
     png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
-                       ("headings.md", NOTES_HEADINGS),
+                       ("headings.md", NOTES_HEADINGS), ("pairs.md", NOTES_PAIRS),
                        ("meta.md", "---\nlof: true\n" + CLASS_PAGE + "---\n"),
                        ("plain.md", "---\n" + LATIN_MODERN + "---\n")):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Notes\n  identifier: org.example.notes\n"
-                 "  language: en-US\n  contents:\n    - captions\n    - cells\n    - headings\n")
+                 "  language: en-US\n  contents:\n    - captions\n    - cells\n    - headings\n"
+                 "    - pairs\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n"
                  "  plain:\n    format: pdf\n    pdf:\n      standard: []\n"
@@ -6500,7 +6542,7 @@ def ams_checks(ams_path, ams_said):
     """The checks of AMS_PAGE's book in amsbook's class: its lists'
     \\@starttoc, of two arguments, wrapped whole, so the log marks each
     list and nothing of the build's is on the page; each list started as
-    amsbook starts it."""
+    amsbook starts it; and its two notes in a row a comma apart."""
     ams_text = "".join(page.extract_text() or "" for page in pypdf.PdfReader(ams_path).pages) \
         if os.path.exists(ams_path) else ""
     return [
@@ -6514,6 +6556,9 @@ def ams_checks(ams_path, ams_said):
         ("and a heading too long for its line is named as the contents' there, the log "
          "marking the list",
          lambda: re.search(r"WARNING: [^\n]* 1 in the contents\b", ams_said)),
+        ("two notes in a row are marked 1,2, a comma between their marks",
+         lambda: [mark for mark, _ in footnote_marks(ams_path)] == ["1", "2"]
+         and re.search(r"collection\.\s*1\s*,\s*2", ams_text)),
     ]
 
 def checks(work, jobs=1):
@@ -6595,6 +6640,12 @@ def checks(work, jobs=1):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
             if os.path.exists(path) else ""
     notes_text, notes_plain_text = page_text(notes_path), page_text(notes_plain)
+
+    def before_pairs(text):
+        """The notes book's text before its chapter of pairs (NOTES_PAIRS),
+        whose captioned tables LaTeX numbers."""
+        at = text.rfind("Pairs")
+        return text[:at] if at >= 0 else text
 
     def notes_marks():
         return footnote_marks(notes_path) if os.path.exists(notes_path) else []
@@ -6971,6 +7022,30 @@ def checks(work, jobs=1):
          and numbered_notes(notes_plain_text, "defgh", 4, CELL_MARKS)),
         ("and its mark is linked to its note",
          lambda: linked_notes(notes_marks()[3:8], "defgh", 4)),
+        # NOTES_PAIRS: a comma left in a heading or a caption would stay
+        # behind in the contents, the bookmarks, or the list of figures,
+        # where the notes are left out (a review).
+        ("two notes in a term are set at the head of its definition, a comma between their "
+         "marks, tagged and untagged; two in a heading and two in a caption get none, and "
+         "the contents, the bookmarks, and the list of figures have their words alone",
+         lambda: re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_text)
+         and re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_plain_text)
+         and re.search(r"Sets\s*1011\s", notes_text)
+         and re.search(r"A\s+gray\s+circle\s*1213", notes_text)
+         and not re.search(r"Sets\s*,|circle\s*,", notes_text + notes_plain_text)
+         and notes_reader is not None and "Sets" in outline_titles(notes_reader)
+         and {"Sets", "A gray circle"} <= {str(e.get("/T")) for e in elements(
+             notes_reader.trailer["/Root"]["/StructTreeRoot"]) if kind(e) == "/TOCI"}),
+        # The caption package's longtable caption, which latexbuild's
+        # LINE_BREAK_SPACE wraps as it does longtable's own (a review).
+        ("a note in a table's caption, short or too long for its line, takes one number, "
+         "tagged and untagged, the note after the tables its own",
+         lambda: all(re.search(r"caption\s+has\s+a\s+note\.\s*16(?!\d)", text)
+                     and re.search(r"of\s+its\s+own,\s+has\s+a\s+note\.\s*17(?!\d)", text)
+                     and re.search(r"After\s+the\s+tables,\s+a\s+note\.\s*18(?!\d)", text)
+                     for text in (notes_text, notes_plain_text))),
+        ("and each mark is linked to its note",
+         lambda: linked_notes(notes_marks()[9:18], "jklmnopqr", 10)),
         ("an untagged PDF of a book with a table with a header column, and one in a "
          "table's cell with a head, is built, as LaTeX stopped on \\tagpdfsetup",
          lambda: os.path.exists(notes_plain) and "Undefined control sequence" not in notes_said),
@@ -7005,7 +7080,8 @@ def checks(work, jobs=1):
         # longtable's head, tagged a header cell with no row.
         ("and its id is an anchor before it, which a link goes to, not an empty "
          "caption LaTeX numbers, tagged or untagged",
-         lambda: not re.search(r"Table\s*\d", notes_text + notes_plain_text)
+         lambda: not re.search(r"Table\s*\d", before_pairs(notes_text)
+                               + before_pairs(notes_plain_text))
          and (lambda first, second: first is not None and second is not None
               and goes_to(notes_path, "the first steps") == [first]
               and goes_to(notes_path, "the second") == [second])(
@@ -7016,7 +7092,8 @@ def checks(work, jobs=1):
         # so a link to it went nowhere; both ids are anchors before them.
         ("a data table with an id and no caption is numbered by nothing, and "
          "its id is an anchor a link goes to, one the book doesn't number too",
-         lambda: not re.search(r"Table\s*\d", notes_text + notes_plain_text)
+         lambda: not re.search(r"Table\s*\d", before_pairs(notes_text)
+                               + before_pairs(notes_plain_text))
          and (lambda rates, fees: rates is not None and fees is not None
               and goes_to(notes_path, "the rates") == [rates]
               and goes_to(notes_path, "the fees") == [fees])(

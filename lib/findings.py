@@ -149,6 +149,12 @@ CHECKS = OrderedDict([
     ("source-image-alt-credit", ("an image whose alt text is only a credit: who made the "
                                  "picture, its license, or where it's from", "warning",
                                  "WCAG 2.0 SC 1.1.1 (A)", "source")),
+    ("source-image-alt-is-caption", ("a figure's image whose alt text is the figure's caption, "
+                                     "word for word, as Pandoc copies a Markdown figure's "
+                                     "caption when it's given no alt text: a tagged PDF says "
+                                     "it twice, as the caption and as the picture's "
+                                     "description, and the picture has no description of its "
+                                     "own", "warning", "WCAG 2.0 SC 1.1.1 (A)", "source")),
     ("source-image-alt-shared", ("an image whose alt text a different image in the file has "
                                  "too, which may be a description copied to a picture it "
                                  "doesn't fit, or the same picture in two files", "note",

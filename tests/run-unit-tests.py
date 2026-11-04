@@ -2281,6 +2281,38 @@ def check_shortdoi():
     ]
 
 
+def check_own_contents_warning():
+    """The run's warning for a list a class sets with code of its own,
+    which LaTeX's tagging reaches only in part (texremediate's
+    own_contents): once for each class, a book of several documents'
+    classes joined as merge_counts joins them, and none for the book
+    class."""
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_contents")
+    said = []
+    convert.say = said.append
+    convert.warn_own_contents("pdf", [{"tag_own_contents": "memoir, amsart"},
+                                      {"tag_own_contents": "memoir"}, {}], "the copy")
+    memoir_said = [s for s in said if "memoir's own code" in s]
+    amsart_said = [s for s in said if "amsart's own code" in s]
+    convert.warn_own_contents("pdf", [{"tag_contents_spaces": 1}], "the copy")
+    convert.warn_own_contents("pdf", [{"tag_own_contents": "book"}], "the copy")
+    return [
+        ("a class's own contents is warned of once for each class, a book of several "
+         "documents' classes read one by one",
+         lambda: len(said) == 2 and len(memoir_said) == 1 and len(amsart_said) == 1
+         and memoir_said[0].startswith("WARNING: pdf: a list of contents, figures, or tables "
+                                       "in the copy is set by memoir's own code")
+         and "dot leaders are read as text" in memoir_said[0]
+         and "the list's heading, which LaTeX stopped on, is an unnumbered section" in amsart_said[0]
+         and 'docs/latex.md, "A class\'s own contents"' in memoir_said[0]),
+        ("every class texremediate counts has its words, the KOMA-Script classes and "
+         "amsproc as their kin's",
+         lambda: set(convert.OWN_CONTENTS) == set(__import__("texremediate").OWN_CONTENTS_CLASSES)
+         and convert.OWN_CONTENTS["scrreprt"] == convert.OWN_CONTENTS["scrbook"]
+         and "amsproc" in convert.OWN_CONTENTS["amsproc"]),
+    ]
+
+
 def check_report_rows():
     """A report's rows are sorted whole: a field holding a line end, as an
     image's current alt text can, stays in its row."""
@@ -6591,6 +6623,7 @@ GROUPS = [
     ("a page's language", check_page_languages),
     ("a page's language in its source's copy", check_copy_languages),
     ("a one-page book's title page, its page in another language", check_title_page_languages),
+    ("the warning for a class's own contents", check_own_contents_warning),
 ]
 
 

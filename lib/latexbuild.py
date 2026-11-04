@@ -2592,6 +2592,53 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % ending with the penalty each break leaves there, and LaTeX meets each
 % break once in each pass over the caption, so it's the last of them.
 %
+% A note's mark in a caption takes one number. LaTeX's float module sets
+% a caption twice, in a box to measure it, its tagging suspended, then
+% again, and \footnotemark stepped the footnote counter each time, so a
+% LaTeX book's first such note was 2, the next 4, and a footnote after
+% them 5 (measured on main, 2026-11-03); in a minipage, \footnote stepped
+% its own counter twice, its first note "b", and its text was set twice
+% under the minipage. The counters and the minipage's notes are noted as
+% the caption begins (cmd/@makecaption/before) and set back when the
+% module resumes its tagging after measuring
+% (\ResumeTagging{\@makecaption}), \ResumeTagging changed for that in the
+% caption's own group (\@caption's). LaTeX's table module sets
+% longtable's caption twice too (\LT@makecaption, its tagging suspended
+% under the label caption and resumed with \tag_resume:n), in an
+% alignment's cell, where nothing may come before longtable's \multispan:
+% there, the caption's text opens with \__oer_caption_once:, which notes
+% them the first time it's set and sets them back each time after, so a
+% long caption that longtable sets twice untagged gives a note one number
+% too. A Markdown book's figure caption with a note opens with
+% \OERCaptionNotes as well (PDF_MACROS), for the caption the classes set
+% twice untagged.
+%
+% amsbook begins a list of contents, figures, or tables (\@starttoc) with
+% its \chapter, \secdef made to take its two arguments and set nothing,
+% so that the list starts a page as a chapter does. LaTeX's tagging puts
+% a \chapter of its own in amsbook's place (latex-lab's first aid, made
+% from its heading templates), which takes what follows for a title: each
+% list's heading was a numbered chapter, "CHAPTER 1" with "sec/title/end"
+% printed under it, the book's own chapters numbered one more for each
+% list, and tagpdf stopped on its count of paragraphs (measured with
+% TeX Live 2026, 2026-11-03). Where \@starttoc makes that call and
+% \chapter has no \secdef, the list's \chapter starts its page as
+% amsbook's does: on a right-hand page if the book opens chapters there,
+% the page's style plain, no float at its top, its first paragraph
+% indented. The entries are still set from what LaTeX's headings write,
+% \numberline, which amsbook's own lines don't expect (docs/latex.md).
+%
+% amsart and amsproc head a list with a sectioning command of no name and
+% level \@M (\@startsection{}\@M\z@...), which LaTeX's tagging can't tag:
+% it names a heading's structure by its level, and has no name for 10000,
+% so LaTeX stopped on the heading, 14 errors for a contents ("Missing
+% number", "Undefined control sequence" for \l__tag_name_sec/10000_tl;
+% measured with TeX Live 2026, 2026-11-03). Where \@starttoc makes that
+% call and LaTeX's tagging is on, the list's heading is an unnumbered
+% section, \@startsection{section}{1}...*, set with the class's own
+% spacing and type; an unnumbered section writes no contents line, as the
+% level \@M, deeper than any the contents lists, didn't.
+%
 % \\ and \newline are a space in a bookmark and in a heading's title in
 % the structure, where they had left nothing ("Section witha break"):
 % hyperref's \pdfstringdef makes a bookmark's string, and LaTeX runs
@@ -2822,12 +2869,48 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
           }
       }
   }
+\int_new:N \g__oer_caption_counter_int
+\int_new:N \g__oer_caption_mpcounter_int
+\box_new:N \g__oer_caption_mpfootins_box
+\bool_new:N \g__oer_caption_noted_bool
+\cs_new_protected:Npn \__oer_caption_note:
+  {
+    \int_gset_eq:Nc \g__oer_caption_counter_int { c@footnote }
+    \int_gset_eq:Nc \g__oer_caption_mpcounter_int { c@mpfootnote }
+    \box_gset_eq:Nc \g__oer_caption_mpfootins_box { @mpfootins }
+  }
+\cs_new_protected:Npn \__oer_caption_back:
+  {
+    \int_gset_eq:cN { c@footnote } \g__oer_caption_counter_int
+    \int_gset_eq:cN { c@mpfootnote } \g__oer_caption_mpcounter_int
+    \box_gset_eq:cN { @mpfootins } \g__oer_caption_mpfootins_box
+  }
+\cs_new_protected:Npn \__oer_caption_once:
+  {
+    \bool_if:NTF \g__oer_caption_noted_bool
+      { \__oer_caption_back: }
+      {
+        \__oer_caption_note:
+        \bool_gset_true:N \g__oer_caption_noted_bool
+      }
+  }
+\AddToHook { begindocument } [ oer / caption ]
+  {
+    \cs_if_exist:cT { LT@makecaption }
+      {
+        \cs_set_eq:Nc \__oer_caption_lt:nnn { LT@makecaption }
+        \cs_set:cpn { LT@makecaption } #1#2#3
+          {
+            \__oer_caption_lt:nnn {#1} {#2} { \__oer_caption_once: #3 }
+            \bool_gset_false:N \g__oer_caption_noted_bool
+          }
+      }
+  }
 \IfHookExistsTF { cmd / @makecaption / before }
   {
     \bool_new:N \g__oer_caption_break_bool
     \bool_new:N \g__oer_caption_wide_bool
     \dim_new:N \g__oer_caption_dim
-    \int_new:N \l__oer_caption_footnote_int
     \int_new:N \g__oer_caption_breaks_int
     \int_new:N \g__oer_caption_end_int
     \int_new:N \g__oer_caption_seen_int
@@ -2881,7 +2964,6 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
         \int_gzero:N \g__oer_caption_seen_int
         \regex_match:NnT \c__oer_caption_break_regex {#2}
           {
-            \int_set_eq:Nc \l__oer_caption_footnote_int { c@footnote }
             \group_begin:
               \cs_set_eq:cN { @gnewline } \__oer_caption_break:n
               \SuspendTagging { oer / caption }
@@ -2895,7 +2977,7 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
                 }
               \ResumeTagging { oer / caption }
             \group_end:
-            \int_gset_eq:cN { c@footnote } \l__oer_caption_footnote_int
+            \__oer_caption_back:
           }
         \bool_if:NT \g__oer_caption_break_bool
           {
@@ -2913,12 +2995,84 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
               }
           }
       }
+    \tl_const:Nx \c__oer_caption_label_tl { \exp_not:c { @makecaption } }
+    \cs_new_eq:NN \__oer_caption_resume:n \ResumeTagging
+    \cs_new_protected:Npn \__oer_caption_resumed:n #1
+      {
+        \__oer_caption_resume:n {#1}
+        \tl_if_eq:NnT \c__oer_caption_label_tl {#1}
+          { \__oer_caption_back: }
+      }
     \AddToHookWithArguments { cmd / @makecaption / before } [ oer / caption ]
-      { \__oer_caption:nn {#1} {#2} }
+      {
+        \__oer_caption_note:
+        \cs_if_eq:NNF \ResumeTagging \__oer_caption_resumed:n
+          {
+            \cs_set_eq:NN \__oer_caption_resume:n \ResumeTagging
+            \cs_set_eq:NN \ResumeTagging \__oer_caption_resumed:n
+          }
+        \__oer_caption:nn {#1} {#2}
+      }
     \AddToHook { para / begin } [ oer / caption ]
       { \bool_gset_false:N \g__oer_caption_wide_bool }
   }
   { }
+\cs_new_protected:Npn \__oer_list_page:
+  {
+    \legacy_if:nTF { @openright } { \cleardoublepage } { \clearpage }
+    \thispagestyle { plain }
+    \int_gzero:c { @topnum }
+    \legacy_if_set_true:n { @afterindent }
+  }
+\AddToHook { begindocument } [ oer / lists ]
+  {
+    \exp_args:Nee \str_if_in:nnT { \cs_replacement_spec:c { @starttoc } }
+      {
+        \c_backslash_str let ~ \c_backslash_str secdef ~ \c_backslash_str @gobbletwo ~
+        \c_backslash_str chapter ~
+      }
+      {
+        \exp_args:Nee \str_if_in:nnF { \cs_replacement_spec:N \chapter }
+          { \c_backslash_str secdef ~ }
+          {
+            \cs_set_eq:Nc \__oer_list_start:nn { @starttoc }
+            \cs_set_protected:cpn { @starttoc } #1 #2
+              {
+                \group_begin:
+                  \cs_set_eq:NN \chapter \__oer_list_page:
+                  \__oer_list_start:nn {#1} {#2}
+                \group_end:
+              }
+          }
+      }
+    \exp_args:Nee \str_if_in:nnT { \cs_replacement_spec:c { @starttoc } }
+      {
+        \c_backslash_str @startsection ~ \c_left_brace_str \c_right_brace_str
+        \c_backslash_str @M ~
+      }
+      {
+        \bool_lazy_and:nnT
+          { \bool_if_exist_p:N \g__tag_active_struct_bool }
+          { \g__tag_active_struct_bool }
+          {
+            \cs_set_eq:Nc \__oer_list_toc:nn { @starttoc }
+            \cs_set_protected:cpn { @starttoc } #1 #2
+              {
+                \group_begin:
+                  \cs_set_eq:Nc \__oer_list_startsection:nnnnnn { @startsection }
+                  \cs_set_eq:cN { @startsection } \__oer_list_section:nnnnnn
+                  \__oer_list_toc:nn {#1} {#2}
+                \group_end:
+              }
+          }
+      }
+  }
+\cs_new_protected:Npn \__oer_list_section:nnnnnn #1#2#3#4#5#6
+  {
+    \tl_if_empty:nTF {#1}
+      { \__oer_list_startsection:nnnnnn { section } { 1 } {#3} {#4} {#5} {#6} * }
+      { \__oer_list_startsection:nnnnnn {#1} {#2} {#3} {#4} {#5} {#6} }
+  }
 \AddToHook { package / hyperref / after }
   {
     \pdfstringdefDisableCommands
@@ -3244,16 +3398,52 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % build had looked up in the book's LaTeX: Sociology's front matter's page
 % numbers, too wide for the contents' column, were counted as lines of
 % text. The log marks where each list is set, whatever class or package
-% sets it, for latexbuild.overfull_lines.
+% sets it, for latexbuild.overfull_lines: \@starttoc is wrapped as it's
+% defined, with LaTeX's one argument, the list's file's extension, or
+% with the AMS classes' two, the extension and the list's heading; with
+% one, amsart's, amsbook's, and amsproc's had taken the wrapper's own
+% \typeout for its heading, which printed "TextbookImprover list end" on
+% the page after four errors. A document command of mandatory arguments
+% alone, as skrapport's (\RenewDocumentCommand\@starttoc{m}), has no
+% parameters of its own, and its code, "\@starttoc code", has them: it's
+% wrapped as that has them, as the one-argument wrapper before it had
+% wrapped skrapport's (a review; skrapport itself stops on TeX Live 2026's
+% kpfonts-otf, an option it doesn't know, measured 2026-11-03). Defined
+% some other way, it's left alone, and its lines are looked up in the
+% book's LaTeX, as before.
+\tl_new:N \l__oer_start_toc_tl
 \AddToHook { begindocument / end }
   {
-    \cs_set_eq:Nc \__oer_start_toc:n { @starttoc }
-    \cs_set_protected:cpn { @starttoc } #1
+    \cs_set_eq:Nc \__oer_start_toc:w { @starttoc }
+    \tl_set:Nx \l__oer_start_toc_tl { \cs_parameter_spec:N \__oer_start_toc:w }
+    \str_if_eq:eeT { \cs_replacement_spec:N \__oer_start_toc:w }
+      { \c_backslash_str __cmd_start_optimized: ~ \c_backslash_str @starttoc ~ code ~ }
       {
-        \typeout { TextbookImprover~list:~#1 }
-        \__oer_start_toc:n {#1}
-        \typeout { TextbookImprover~list~end }
+        \tl_set:Nx \l__oer_start_toc_tl
+          { \exp_args:Nc \cs_parameter_spec:N { @starttoc ~ code } }
       }
+    \str_case_e:nnF { \l__oer_start_toc_tl }
+      {
+        { \c_hash_str 1 }
+          {
+            \cs_set_protected:cpn { @starttoc } #1
+              {
+                \typeout { TextbookImprover~list:~#1 }
+                \__oer_start_toc:w {#1}
+                \typeout { TextbookImprover~list~end }
+              }
+          }
+        { \c_hash_str 1 \c_hash_str 2 }
+          {
+            \cs_set_protected:cpn { @starttoc } #1 #2
+              {
+                \typeout { TextbookImprover~list:~#1 }
+                \__oer_start_toc:w {#1} {#2}
+                \typeout { TextbookImprover~list~end }
+              }
+          }
+      }
+      { }
   }
 % A fill-in blank (\OERBlank, below): its underscores in a bookmark and in
 % a structure element's title.

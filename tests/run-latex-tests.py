@@ -614,6 +614,13 @@ def why_no_tex(missing, *programs):
     return tex_unready()
 
 
+def ran(done):
+    """Whether a run with a PDF target went through: its exit status 0, or
+    any where TeX can't build the PDF here (why_no_tex), the run's source
+    target's copy and words checked apart."""
+    return done.returncode == 0 or why_no_tex("", "lualatex", "latexmk") is not None
+
+
 def why_no_drawings():
     """Why the book's drawings aren't made here, or None: they need pdfLaTeX
     or LuaLaTeX, pdftocairo, and TeX ready (tex_unready)."""
@@ -2503,6 +2510,13 @@ def case_line_breaks(work):
                  "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
                  "\\caption{Notethree\\protect\\footnotemark}\n\\end{figure}\n"
                  "\\footnotetext{Notetextc.}Afternote words.\n\n"
+                 # A caption with two marks, a \\settowidth between them, which
+                 # resumes tagging under its own label, \\@settodim.
+                 "\\begin{figure}[h]\n\\centering\n\\rule{1cm}{1cm}\n"
+                 "\\caption[Notefour]{Notefour\\protect\\footnotemark{} \\protect\\settowidth"
+                 "{\\dimen0}{x}Notefive\\protect\\footnotemark}\n\\end{figure}\n"
+                 "\\addtocounter{footnote}{-1}\\footnotetext{Notetextd.}"
+                 "\\stepcounter{footnote}\\footnotetext{Notetexte.}\n\n"
                  "\\parbox{1cm}{\\hyphenpenalty=10000 Ennoone\\enspace Ennotwo}\n"
                  "\\end{document}\n")
     own = work + "-own"
@@ -2701,10 +2715,12 @@ def case_line_breaks(work):
         empty line under it, nor under a long one; an \hfill\break in a
         box set to a width, its fill the box's room, as it was; a box
         unpacked into a paragraph, its line's words their own width apart,
-        where its \\ ends the line; a note's mark in a caption with a \\
-        numbered as LaTeX numbers one in a caption without, which its
-        measuring steps; and a line still broken at an \enspace a space
-        follows, and not before one."""
+        where its \\ ends the line; a note's mark in a caption, with a \\
+        or without, numbered once, the chapter's first three 1, 2, and 3,
+        where LaTeX's tagging, which sets a caption twice, gave 2, 4, and 6,
+        and a caption's two, a \settowidth between them, 4 and 5;
+        and a line still broken at an \enspace a space follows, and not
+        before one."""
         why = why_not()
         if why:
             return skip(why)
@@ -2753,6 +2769,7 @@ def case_line_breaks(work):
         split = next((text for text, _ in lines.values() if "Ensplitone" in text), "")
         tight = next((text for text, _ in lines.values() if "Ennoone" in text), "")
         a, b, c = mark("Notetexta."), mark("Notetextb."), mark("Notetextc.")
+        d, e = mark("Notetextd."), mark("Notetexte.")
         nest, nested = line("Nestone"), line("Nesttwo")
         _, margin = line("Longone")
         _, last = line("Longtwo")
@@ -2773,7 +2790,7 @@ def case_line_breaks(work):
             and long_trail[0] == below_long_trail[0] and long_plain[0] == below_long_plain[0] \
             and abs((long_trail[1] - below_long_trail[1])
                     - (long_plain[1] - below_long_plain[1])) < 0.5 \
-            and None not in (a, b, c) and b - a == c - b > 0 \
+            and (a, b, c, d, e) == (1, 2, 3, 4, 5) \
             and "EnnooneEnnotwo" in tight \
             and (gap("Fillone", "Filltwo") or 0) > 20 \
             and 2 < (gap("Unboxone", "unboxtwo") or 0) < 6 \
@@ -2802,7 +2819,12 @@ def case_line_breaks(work):
         r"""A tagged document of amsbook's, the space, and an \enspace:
         its chapter heading's number, which amsbook sets after the word
         with an \enspace, a kern, reads "CHAPTER 1", and the text's
-        \enspace is a space too."""
+        \enspace is a space too; and its contents and list of figures
+        start their pages as amsbook starts them, the list of figures on a
+        right-hand page, 3, with LaTeX stopping on nothing, where LaTeX's
+        tagging made each a numbered chapter,
+        "CHAPTER 1" with "sec/title/end" under it, and the book's chapter
+        "CHAPTER 3"."""
         why = why_no_tex("no lualatex to build the amsbook document", "lualatex")
         if why:
             return skip(why)
@@ -2814,14 +2836,22 @@ def case_line_breaks(work):
         with open(os.path.join(folder, "ams.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\DocumentMetadata{tagging=on,pdfstandard=ua-2,lang=en-US}\n"
                      "\\documentclass{amsbook}\n" + latexbuild.LINE_BREAK_SPACE
-                     + "\\begin{document}\n\\chapter{Introduction}\n"
-                     "Amsone\\enspace Amstwo.\n\\end{document}\n")
-        subprocess.run(["lualatex", "-interaction=nonstopmode", "ams.tex"], cwd=folder,
-                       capture_output=True, text=True, timeout=300)
+                     + "\\begin{document}\n\\tableofcontents\n\\listoffigures\n"
+                     "\\chapter{Introduction}\nAmsone\\enspace Amstwo.\n"
+                     "\\begin{figure}\\centering\\rule{1cm}{1cm}\\caption{Amsfigure}"
+                     "\\end{figure}\n\\end{document}\n")
+        for _ in range(2):
+            built = subprocess.run(["lualatex", "-interaction=nonstopmode", "ams.tex"],
+                                   cwd=folder, capture_output=True, text=True, timeout=300)
         found = texts(folder, "ams.pdf")
         if not isinstance(found, list):
             return found
-        return any("CHAPTER 1" in t for t in found) and any("Amsone Amstwo." in t for t in found)
+        return any("CHAPTER 1" in t for t in found) and any("Amsone Amstwo." in t for t in found) \
+            and not any(re.search(r"CHAPTER [23]|sec/title/end", t) for t in found) \
+            and any(t.strip() == "Contents" for t in found) \
+            and any(t.strip() == "List of Figures" for t in found) \
+            and any(re.fullmatch(r"List of Figures\s*3", t.strip()) for t in found) \
+            and not re.search(r"^! ", built.stdout, re.M)
 
     def kept():
         found = texts(own)
@@ -2907,6 +2937,25 @@ def case_line_breaks(work):
     memoir, memoir_counts = tagged("\\chapter{Introduction}\nA paragraph.", "memoir")
     listed, listed_counts = tagged("\\tableofcontents\n\\section{One}\nA paragraph.")
     memoir_listed, memoir_listed_counts = tagged("\\tableofcontents\n\\section*{One}\n", "memoir")
+    # Captions holding a note's mark: a short caption with brackets inside
+    # braces, a \captionof, a \footnote, a \captionbox, and one with a brace
+    # in a comment inside it; not a caption without one, one whose mark is
+    # in a comment, nor \caption's own definition.
+    noted, noted_counts = tagged(
+        "\\begin{figure}\\caption[{Short [a]}]{Long\\protect\\footnotemark}\\end{figure}\n"
+        "\\footnotetext{N.}\n\\captionof{figure}{Of\\protect\\footnotemark}\n"
+        "\\begin{table}\\caption*{Star\\footnote{Note.}}\\end{table}\n"
+        "\\begin{figure}\\captionbox{Box\\protect\\footnotemark}{\\rule{1cm}{1cm}}"
+        "\\end{figure}\n"
+        "\\begin{figure}\\caption{Brace % a } in a comment\nthen\\protect\\footnotemark}"
+        "\\end{figure}\n")
+    unnoted, unnoted_counts = tagged(
+        "\\renewcommand\\caption[1]{#1\\footnotemark}\n"
+        "\\begin{figure}\\caption{No note}\\end{figure}\nA \\footnotemark{} in text.\n"
+        "\\begin{figure}\\caption{Commented % \\footnotemark\n}\\end{figure}\n")
+    ams_listed, ams_listed_counts = tagged("\\tableofcontents\n\\chapter*{One}\n", "amsbook")
+    art_listed, art_listed_counts = tagged("\\tableofcontents\n\\section{One}\n", "amsart")
+    koma_listed, koma_listed_counts = tagged("\\listoffigures\n\\section*{One}\n", "scrartcl")
     spaced_en, en_counts = tagged("Before\\enspace after.")
     math_en, math_en_counts = tagged("A formula, $a\\enspace b$.")
     defined_en, defined_en_counts = tagged("\\renewcommand\\enspace{\\kern.5em}\nA paragraph.")
@@ -2935,12 +2984,19 @@ def case_line_breaks(work):
         ("on the page, a caption short enough for one line but for its \\\\ set as two "
          "lines, broken there and centered, as the caption package sets one, one ending with "
          "its \\\\ one line, and a list's term's and an \\mbox's \\\\, which a box can't "
-         "break, a space; a box unpacked into a paragraph, a caption's note's number, and a "
-         "line an \\enspace ends as they were", seen),
+         "break, a space; a box unpacked into a paragraph and a line an \\enspace ends as "
+         "they were; and a note's mark in a caption numbered once, 1, 2, 3, where LaTeX's "
+         "tagging gave 2, 4, 6, and a caption's two, a \\settowidth between them, 4 and 5",
+         seen),
+        ("the run says how many captions hold a note's mark, in the copy and the PDF",
+         lambda: "4 caption(s) holding a note's mark told to give it one number" in said
+         and pdf_said("one number for a note's mark in a caption")),
         ("its contents' entries read their number, a space, their title, a space, and their "
          "page number, and the run says so", contents_said),
         ("its \\enspace is a space in its text, and the run says so", en_spaced),
-        ("and amsbook's \\enspace after the word in its chapter's heading, \"CHAPTER 1\"", ams),
+        ("and amsbook's \\enspace after the word in its chapter's heading, \"CHAPTER 1\", its "
+         "contents and list of figures starting their pages as amsbook starts them, where "
+         "LaTeX's tagging made each a numbered chapter", ams),
         ("its part's, chapter's, and section's headings read their number, a space, and "
          "their lines with a space between them, but none after a hyphen, and so do their "
          "bookmarks and structure titles", headed),
@@ -2981,9 +3037,264 @@ def case_line_breaks(work):
          and latexbuild.LINE_BREAK_SPACE not in math_en and not math_en_counts.get("en_spaces")
          and latexbuild.LINE_BREAK_SPACE not in defined_en
          and not defined_en_counts.get("en_spaces")),
+        ("one whose captions hold a note's mark gets it, each such caption counted, a short "
+         "caption with brackets, a \\captionof, a \\footnote, a \\captionbox, and one with a "
+         "brace in a comment among them; not one whose caption holds none, or only in a "
+         "comment, a note in its text and \\caption's own definition aside",
+         lambda: noted.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and noted_counts.get("caption_notes") == 5
+         and latexbuild.LINE_BREAK_SPACE not in unnoted
+         and not unnoted_counts.get("caption_notes")),
+        ("an amsbook book that sets a list gets it, for the list's start, and an amsart one "
+         "for the list's heading, each counted for the run's warning, as a memoir and a "
+         "KOMA-Script one are; a book class's isn't",
+         lambda: ams_listed.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and ams_listed_counts.get("list_chapters") == 1
+         and not ams_listed_counts.get("list_headings")
+         and ams_listed_counts.get("own_contents") == "amsbook"
+         and art_listed.count(latexbuild.LINE_BREAK_SPACE) == 1
+         and art_listed_counts.get("list_headings") == 1
+         and not art_listed_counts.get("list_chapters")
+         and art_listed_counts.get("own_contents") == "amsart"
+         and memoir_listed_counts.get("own_contents") == "memoir"
+         and not memoir_listed_counts.get("list_chapters")
+         and koma_listed_counts.get("own_contents") == "scrartcl"
+         and not listed_counts.get("own_contents") and not listed_counts.get("list_chapters")),
         ("a book whose preamble defines \\@gnewline and \\@no@lnbk itself keeps its own, and "
          "its lines get their space", kept),
         ("ragged2e's \\justifying keeps the line break's space", justified),
+    ]
+
+
+
+def case_class_contents(work):
+    """A book in a class that sets its lists with code of its own, which
+    LaTeX's tagging reaches only in part: an amsbook book with a contents
+    and a list of figures, whose tagged copy and PDF start each list as
+    amsbook starts it, its chapter numbered 1 with no list a chapter; an
+    amsart article with them, whose PDF builds, each list headed as an
+    unnumbered section, its own section numbered 1, where LaTeX stopped on
+    the class's own headings;
+    the runs saying so, and warning of what's still wrong; and a memoir
+    book's copy, warned of too."""
+    ams, art, memoir = (os.path.join(work, name) for name in ("amsbook", "amsart", "memoir"))
+    for folder, cls, extra, unit in ((ams, "amsbook", "\\listoffigures\n", "chapter"),
+                                     (art, "amsart", "\\listoffigures\n", "section"),
+                                     (memoir, "memoir", "", "chapter")):
+        os.makedirs(folder)
+        with open(os.path.join(folder, "book.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\documentclass{" + cls + "}\n\\title{Classed}\n\\begin{document}\n"
+                     + ("\\maketitle\n" if folder == art else "")
+                     + "\\tableofcontents\n" + extra + "\\" + unit + "{Classone}\nClasstext.\n"
+                     "\\begin{figure}\\centering\\rule{1cm}{1cm}\\caption{Classfigure}"
+                     "\\end{figure}\n\\end{document}\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
+                     + ("" if folder == memoir else "  pdf:\n    format: pdf\n"))
+    ams_done, art_done, memoir_done = convert(ams), convert(art), convert(memoir)
+    ams_said = ams_done.stdout + ams_done.stderr
+    art_said = art_done.stdout + art_done.stderr
+    memoir_said = memoir_done.stdout + memoir_done.stderr
+    warning = "a list of contents, figures, or tables in %s is set by %s's own code"
+
+    def pages(folder):
+        """The book's PDF's text, a reason to skip, or False with none."""
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return skip(why)
+        path = os.path.join(folder, "pdf", "book.pdf")
+        if not os.path.exists(path):
+            return False
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        return subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True,
+                              text=True).stdout
+
+    def ams_pdf():
+        text = pages(ams)
+        if not isinstance(text, str):
+            return text
+        return "CHAPTER 1" in text and "Classone" in text and "Contents" in text \
+            and "List of Figures" in text \
+            and not re.search(r"CHAPTER [23]|sec/title/end", text) \
+            and "amsbook's lists of contents, figures, and tables starting their pages as " \
+            "amsbook starts them" in ams_said \
+            and "WARNING: pdf: " + warning % ("the copy LaTeX builds", "amsbook") in ams_said
+
+    def art_untagged():
+        """Untagged, an amsart article keeps the class's own headings for its
+        lists, which put nothing in its contents: an unnumbered section in
+        amsart does, its own contents among them."""
+        why = why_no_tex("no lualatex to build the article", "lualatex")
+        if why:
+            return skip(why)
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import latexbuild
+        folder = os.path.join(work, "amsart-untagged")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "art.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\documentclass{amsart}\n" + latexbuild.LINE_BREAK_SPACE
+                     + "\\begin{document}\n\\tableofcontents\n\\listoffigures\n"
+                     "\\section{Artone}\nText.\n\\begin{figure}\\caption{Artfigure}"
+                     "\\end{figure}\n\\end{document}\n")
+        subprocess.run(["lualatex", "-interaction=nonstopmode", "art.tex"], cwd=folder,
+                       capture_output=True, text=True, timeout=300)
+        if not os.path.exists(os.path.join(folder, "art.toc")):
+            return False
+        toc = read(folder, "art.toc")
+        return "Artone" in toc and "Contents" not in toc and toc.count("List of Figures") == 1
+
+    def loaded_classes():
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import texremediate
+        folder = os.path.join(work, "own-class")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "mybook.cls"), "w", encoding="utf-8") as fh:
+            fh.write("\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{mybook}\n"
+                     "\\LoadClass[12pt]{amsbook}\n")
+        with open(os.path.join(folder, "ourbook.cls"), "w", encoding="utf-8") as fh:
+            fh.write("\\ProvidesClass{ourbook}\n% \\LoadClass{book}\n"
+                     "\\LoadClassWithOptions{mybook}\n")
+        with open(os.path.join(folder, "plainer.cls"), "w", encoding="utf-8") as fh:
+            fh.write("\\ProvidesClass{plainer}\n\\LoadClass{book}\n")
+        found = {}
+        for cls in ("ourbook", "plainer"):
+            texts = {"book.tex": "\\documentclass{%s}\n\\begin{document}\n\\tableofcontents\n"
+                                 "\\chapter*{One}\n\\end{document}\n" % cls}
+            counts = texremediate.tag(texts, "book.tex", "en", False, ("ua-2",), folder)
+            found[cls] = (counts.get("list_chapters"), counts.get("own_contents"))
+        return found == {"ourbook": (1, "amsbook"), "plainer": (0, None)}
+
+    def art_pdf():
+        text = pages(art)
+        if not isinstance(text, str):
+            return text
+        return "Contents" in text and "List of Figures" in text \
+            and re.search(r"(?m)^\s*1\s+Classone", text) \
+            and not re.search(r"[0-9][ \t]+(Contents|List of Figures)", text) \
+            and "Classfigure" in text and "wasn't built" not in art_said \
+            and "its lists of contents, figures, and tables headed as unnumbered sections, " \
+            in art_said \
+            and "WARNING: pdf: " + warning % ("the copy LaTeX builds", "amsart") in art_said
+    return [
+        ("an amsbook book's tagged copy starts its lists as amsbook does, and the run says "
+         "so and warns of what LaTeX's tagging still does to them",
+         lambda: ran(ams_done)
+         and "amsbook's lists of contents, figures, and tables told to start their pages as "
+             "amsbook does" in ams_said
+         and "WARNING: tagged: " + warning % ("the copy", "amsbook") in ams_said
+         and "so a chapter's \"Chapter 1.\" is gone" in ams_said),
+        ("its PDF, built from its own LaTeX, has its lists headed as amsbook heads them and "
+         "its chapter numbered 1, none of them a chapter, and the run says so", ams_pdf),
+        ("an amsart article's tagged copy heads its lists as unnumbered sections, and the run "
+         "says so and warns of what's still wrong",
+         lambda: ran(art_done)
+         and "its lists of contents, figures, and tables headed as unnumbered sections, set "
+             "as the class sets their headings" in art_said
+         and "WARNING: tagged: " + warning % ("the copy", "amsart") in art_said
+         and "so a section's number falls under its title" in art_said),
+        ("and its PDF builds, where LaTeX had stopped on the lists' headings, and the run "
+         "says so", art_pdf),
+        ("untagged, an amsart article keeps the class's own headings for its lists, nothing "
+         "of them in its contents", art_untagged),
+        # A class of the book's own that loads one of them is that class's
+        # (texremediate.loaded_class; a review): its own class file beside
+        # it, and one that loads that one, a \\LoadClass in a comment aside.
+        ("a book in a class of its own beside it, built on amsbook, is taken for amsbook's, "
+         "two classes down, and a book class's isn't",
+         loaded_classes),
+        ("a memoir book's tagged copy is warned of too, its entries run together and its dot "
+         "leaders read as text",
+         lambda: memoir_done.returncode == 0
+         and "WARNING: tagged: " + warning % ("the copy", "memoir") in memoir_said
+         and "its dot leaders are read as text" in memoir_said
+         and "amsbook's lists" not in memoir_said and "unnumbered sections" not in memoir_said),
+    ]
+
+
+def case_caption_notes(work):
+    """A note's mark in a caption LaTeX's tagging sets twice, where it took
+    two numbers (a review): a longtable's caption, short and too long for
+    its line, whose caption latex-lab's table module sets twice in an
+    alignment's cell; a \\captionof in a minipage, whose \\footnote took
+    two of the minipage's letters and set its text twice under it; and the
+    caption package's \\captionbox. Each takes one number, the notes after
+    them theirs, and the run counts them."""
+    lt, box = os.path.join(work, "longtable"), os.path.join(work, "captionbox")
+    for folder in (lt, box):
+        os.makedirs(folder)
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
+                     "  pdf:\n    format: pdf\n")
+    with open(os.path.join(lt, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{book}\n\\usepackage{longtable}\n\\makeatletter\n"
+                 "\\providecommand\\captionof[1]{\\def\\@captype{#1}\\caption}\n\\makeatother\n"
+                 "\\begin{document}\n\\chapter{Capnotes}\n"
+                 "\\begin{longtable}{ll}\n\\caption{Ltshort\\protect\\footnotemark}\\\\\n"
+                 "a & b \\\\\n\\end{longtable}\n\\footnotetext{Ltnotea.}\n"
+                 "\\begin{longtable}{ll}\n\\caption{Ltlong, with words enough to run past the "
+                 "width of a line of the page, so that it is set as a "
+                 "paragraph\\protect\\footnotemark}\\\\\n"
+                 "c & d \\\\\n\\end{longtable}\n\\footnotetext{Ltnoteb.}\n\n"
+                 "\\noindent\\begin{minipage}{\\linewidth}\n\\centering\\rule{1cm}{1cm}\n"
+                 "\\captionof{figure}{Mpcaption\\protect\\footnote{Mpnote.}}\n"
+                 "\\end{minipage}\n\nCaptext.\\footnote{Ltnotec.}\n\\end{document}\n")
+    with open(os.path.join(box, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{book}\n\\usepackage{caption}\n\\begin{document}\n"
+                 "\\chapter{Boxnotes}\n\\begin{figure}\\centering\n"
+                 "\\captionbox{Boxcaption\\protect\\footnotemark}{\\rule{8cm}{1cm}}\n"
+                 "\\end{figure}\n\\footnotetext{Boxnotea.}\nBoxtext.\\footnote{Boxnoteb.}\n"
+                 "\\end{document}\n")
+    lt_done, box_done = convert(lt), convert(box)
+    lt_said, box_said = lt_done.stdout + lt_done.stderr, box_done.stdout + box_done.stderr
+    told = "%d caption(s) holding a note's mark told to give it one number"
+
+    def pages(folder):
+        """The book's PDF's text, a reason to skip, or False with none."""
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return skip(why)
+        path = os.path.join(folder, "pdf", "book.pdf")
+        if not os.path.exists(path):
+            return False
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        return subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True,
+                              text=True).stdout
+
+    def lt_pdf():
+        text = pages(lt)
+        if not isinstance(text, str):
+            return text
+        return re.search(r"Ltshort\s*1(?!\d)", text) \
+            and re.search(r"paragraph\s*2(?!\d)", text) \
+            and re.search(r"(?m)^\s*1\s*Ltnotea\.", text) \
+            and re.search(r"(?m)^\s*2\s*Ltnoteb\.", text) \
+            and re.search(r"Captext\.\s*3(?!\d)", text) \
+            and re.search(r"(?m)^\s*3\s*Ltnotec\.", text) \
+            and re.search(r"Mpcaption\s*a(?![a-z])", text) \
+            and re.search(r"(?m)^\s*a\s*Mpnote\.", text) and text.count("Mpnote.") == 1 \
+            and "one number for a note's mark in a caption" in lt_said
+
+    def box_pdf():
+        text = pages(box)
+        if not isinstance(text, str):
+            return text
+        return re.search(r"Boxcaption\s*1(?!\d)", text) \
+            and re.search(r"(?m)^\s*1\s*Boxnotea\.", text) \
+            and re.search(r"Boxtext\.\s*2(?!\d)", text) \
+            and re.search(r"(?m)^\s*2\s*Boxnoteb\.", text) \
+            and "one number for a note's mark in a caption" in box_said
+    return [
+        ("a longtable's caption, short or long, and a minipage's \\captionof, each holding a "
+         "note's mark, are counted in the tagged copy, which gets the block",
+         lambda: ran(lt_done) and (told % 3) in lt_said
+         and "oer.break.space" in read(lt, "tagged", "book.tex")),
+        ("and in its PDF each mark takes one number, the minipage's note one letter and its "
+         "text set once, and the note after them its own", lt_pdf),
+        ("a \\captionbox holding a note's mark is counted too",
+         lambda: ran(box_done) and (told % 1) in box_said),
+        ("and in its PDF the mark takes one number, the note after it its own", box_pdf),
     ]
 
 
@@ -6888,6 +7199,9 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("a list's item that opens with fancyvrb's code", case_code_label),
          ("a line break's two lines in a tagged PDF's text", case_line_breaks),
+         ("a class's own contents, under tagging", case_class_contents),
+         ("a note's mark in a longtable's, a minipage's, and a \\captionbox's caption",
+          case_caption_notes),
          ("the AAA page's measure of its lines", case_line_measure),
          ("the PDF build's copy of the book", case_pdf_copy),
          ("the book's other masters", case_other_masters),

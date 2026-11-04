@@ -6398,8 +6398,123 @@ def fancy_checks(fancy_path, fancy_said):
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
-                "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured")
+                "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured", "-ams",
+                "-doctoc")
 
+
+# A book in amsbook's class, with a contents and a list of figures, whose
+# \@starttoc takes two arguments, the list's file's extension and its
+# heading, where the build's own wrapper of it, which marks each list in
+# the log, had taken one ("TextbookImprover list end" on the page, four
+# errors), and LaTeX's tagging had made each list a numbered chapter; and
+# two notes in a row, their marks a comma apart. A heading too long for
+# its line is too long in the contents too, where the log's marks name it.
+AMS_PAGE = """# Sets
+
+A set is a collection.[^a][^b]
+
+![A gray square](assets/gray.png)
+
+## Subsets
+
+A subset is a set.
+
+## Supercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocious
+
+A word too long for its line, in the contents too.
+
+[^a]: The first note.
+[^b]: The second note.
+"""
+
+
+def build_ams(work):
+    """AMS_PAGE in amsbook's class, tagged, to PDF/UA-2, with a contents
+    and a list of figures, in Latin Modern: (the PDF's path, what the run
+    said)."""
+    os.makedirs(os.path.join(work, "assets"))
+    png(os.path.join(work, "assets", "gray.png"), (128, 128, 128))
+    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+        fh.write(AMS_PAGE)
+    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ndocumentclass: amsbook\ntoc: true\nlof: true\n" + LATIN_MODERN + "---\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Sets\n  identifier: org.example.sets\n"
+                 "  language: en-US\n  contents:\n    - sets\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
+
+
+
+# A contents whose \@starttoc is a document command of one argument, as
+# skrapport's is, around LaTeX's own, and a heading too long for it.
+DOC_TOC_PAGE = """# Sets
+
+A set is a collection.
+
+## Sixty-four places of π, 3141592653589793238462643383279502884197169399375105820974944592
+
+A number too long for its line, in the contents too.
+"""
+
+
+def build_doc_toc(work):
+    """DOC_TOC_PAGE with a contents, its \\@starttoc a document command
+    of one argument, in Latin Modern: (the PDF's path, what the run
+    said)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+        fh.write(DOC_TOC_PAGE)
+    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntoc: true\nheader-includes: |\n  ```{=latex}\n  \\makeatletter\n"
+                 "  \\let\\kernelstarttoc\\@starttoc\n"
+                 "  \\RenewDocumentCommand\\@starttoc{m}{\\kernelstarttoc{#1}}\n"
+                 "  \\makeatother\n  ```\n" + LATIN_MODERN + "---\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Sets\n  identifier: org.example.sets\n"
+                 "  language: en-US\n  contents:\n    - sets\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
+
+
+def doc_toc_checks(doc_toc_path, doc_toc_said):
+    """The checks of DOC_TOC_PAGE's book: the document command wrapped as
+    its code takes its argument, as the wrapper of one argument before it
+    wrapped skrapport's (a review)."""
+    return [
+        ("a contents whose \\@starttoc is a document command of one argument, as "
+         "skrapport's is, is marked in the log, so a heading too long for it is named as "
+         "the contents'",
+         lambda: os.path.exists(doc_toc_path) and "wasn't built" not in doc_toc_said
+         and re.search(r"WARNING: [^\n]* 1 in the contents\b", doc_toc_said)),
+    ]
+
+
+def ams_checks(ams_path, ams_said):
+    """The checks of AMS_PAGE's book in amsbook's class: its lists'
+    \\@starttoc, of two arguments, wrapped whole, so the log marks each
+    list and nothing of the build's is on the page; each list started as
+    amsbook starts it."""
+    ams_text = "".join(page.extract_text() or "" for page in pypdf.PdfReader(ams_path).pages) \
+        if os.path.exists(ams_path) else ""
+    return [
+        ("a book in amsbook's class builds with its contents and list of figures, headed as "
+         "amsbook heads them, nothing of the build's own on the page, and no list made a "
+         "numbered chapter",
+         lambda: os.path.exists(ams_path) and "wasn't built" not in ams_said
+         and "Contents" in ams_text and "List of Figures" in ams_text
+         and "A gray square" in ams_text
+         and not re.search(r"TextbookImprover|sec/title/end|CHAPTER", ams_text)),
+        ("and a heading too long for its line is named as the contents' there, the log "
+         "marking the list",
+         lambda: re.search(r"WARNING: [^\n]* 1 in the contents\b", ams_said)),
+    ]
 
 def checks(work, jobs=1):
     # The two books, at once when there's room: each is a LaTeX build of
@@ -6425,6 +6540,8 @@ def checks(work, jobs=1):
             coded = pool.submit(build_code, work + "-code")
             mathed = pool.submit(build_math_font, work + "-mathfont")
             measured = pool.submit(build_measured, work + "-measured")
+            amsed = pool.submit(build_ams, work + "-ams")
+            doc_tocced = pool.submit(build_doc_toc, work + "-doctoc")
             reader, source, rows, log, placements = book.result()
             ua1_path, ua1_said, ua1_rows = ua1.result()
             untagged_path, untagged_said = plain.result()
@@ -6446,6 +6563,8 @@ def checks(work, jobs=1):
              tall_said, wrap_paths, wrap_said) = coded.result()
             math_paths, math_said = mathed.result()
             measured_path, measured_said, measured_source = measured.result()
+            ams_path, ams_said = amsed.result()
+            doc_toc_path, doc_toc_said = doc_tocced.result()
     else:
         reader, source, rows, log, placements = build(work)
         ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
@@ -6469,6 +6588,8 @@ def checks(work, jobs=1):
          tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
         math_paths, math_said = build_math_font(work + "-mathfont")
         measured_path, measured_said, measured_source = build_measured(work + "-measured")
+        ams_path, ams_said = build_ams(work + "-ams")
+        doc_toc_path, doc_toc_said = build_doc_toc(work + "-doctoc")
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -7320,6 +7441,8 @@ def checks(work, jobs=1):
                   "code and a comment in a footnote's",
                   lambda: {latex_color(theme["DecVal"]["text-color"]),
                            latex_color(theme["Comment"]["text-color"])} <= fill_colors(reader)))
+    items += ams_checks(ams_path, ams_said)
+    items += doc_toc_checks(doc_toc_path, doc_toc_said)
     return items
 
 

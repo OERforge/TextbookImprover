@@ -3795,6 +3795,18 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                + ("its \\enspace a space in the text a screen reader gets, where LaTeX's "
                   "tagging wrote none for its kern, "
                   if counts.get("tag_en_spaces") else "")
+               + (f"{counts['tag_caption_notes']} caption(s) holding a note's mark told to "
+                  "give it one number, where LaTeX's tagging, which sets a caption twice, "
+                  "numbered it twice, "
+                  if counts.get("tag_caption_notes") else "")
+               + ("amsbook's lists of contents, figures, and tables told to start their "
+                  "pages as amsbook does, where LaTeX's tagging made each list's heading a "
+                  "numbered chapter and numbered the book's chapters on from it, "
+                  if counts.get("tag_list_chapters") else "")
+               + ("its lists of contents, figures, and tables headed as unnumbered "
+                  "sections, set as the class sets their headings, where LaTeX's tagging "
+                  "stopped on the class's own headings for them, "
+                  if counts.get("tag_list_headings") else "")
                + (f"{counts['tag_floats']} figure(s) and table(s) tagged where the text has "
                   "them, not gathered at the end of the document, "
                   if counts.get("tag_floats") else "")
@@ -3823,6 +3835,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             + (f" {counts['pspicture']} pspicture(s) have no key for alt text and "
                "were left alone." if counts.get("pspicture") else ""))
         warn_stand_ins(target.name, [counts] + [c for _, _, c in others], "the copy")
+        warn_own_contents(target.name, [counts] + [c for _, _, c in others], "the copy")
         if others:
             say(f"{target.name}: the book's other master(s) written too, "
                 + "; ".join(f"{name}" + (f" with {only} file(s) only it reaches" if only
@@ -3919,6 +3932,45 @@ def warn_stand_ins(name, all_counts, where):
             "are defined in the copy instead, to keep what the book says, not how it "
             "looks, so its PDF looks different from the book's own: "
             + texremediate.shim_changes(shimmed) + ".")
+
+
+# What LaTeX's tagging does to a list of contents, figures, or tables a
+# class sets with code of its own (texremediate.OWN_CONTENTS_CLASSES),
+# measured with TeX Live 2026 (docs/latex.md, "A class's own contents").
+OWN_CONTENTS = {
+    "amsart": "in the tagged PDF, its entries are set from what LaTeX's headings write, "
+              "which amsart's own lines don't expect, so a section's number falls under "
+              "its title, veraPDF's PDF/UA-2 check fails on the list's structure, and "
+              "with hyperref its entries aren't links; the list's heading, which LaTeX "
+              "stopped on, is an unnumbered section in the copy",
+    "amsbook": "in the tagged PDF, its entries are set from what LaTeX's headings write, "
+               "which amsbook's own lines don't expect, so a chapter's \"Chapter 1.\" is "
+               "gone and a section's number falls under its title, veraPDF's PDF/UA-2 "
+               "check fails on the list's structure, the list's heading is tagged as a "
+               "paragraph, and with hyperref its entries aren't links",
+    "memoir": "in the tagged PDF, an entry's number, title, and page number run together "
+              "in the text a screen reader gets, its dot leaders are read as text, and "
+              "veraPDF's PDF/UA-2 check fails on the list's structure",
+    "scrbook": "in the tagged PDF, its entries are marked as page decoration, so a screen "
+               "reader skips the list",
+}
+OWN_CONTENTS["amsproc"] = OWN_CONTENTS["amsart"].replace("amsart", "amsproc")
+OWN_CONTENTS["scrartcl"] = OWN_CONTENTS["scrreprt"] = OWN_CONTENTS["scrbook"]
+
+
+def warn_own_contents(name, all_counts, where):
+    """The warning for a list of contents, figures, or tables a class sets
+    with code of its own, which LaTeX's tagging reaches only in part, from
+    the counts of each master: once for each class."""
+    said = []
+    for counts in all_counts:
+        for cls in (counts.get("tag_own_contents") or "").split(","):
+            cls = cls.strip()
+            if cls in OWN_CONTENTS and cls not in said:
+                said.append(cls)
+                say(f"WARNING: {name}: a list of contents, figures, or tables in {where} is "
+                    f"set by {cls}'s own code, which LaTeX's tagging reaches only in part: "
+                    f"{OWN_CONTENTS[cls]} (docs/latex.md, \"A class's own contents\").")
 
 
 def embed_figures(target, root, out_root, skip, where):
@@ -4122,6 +4174,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         written_files.update(files)
     counts["unplaced"] = len(counts.get("unplaced_keys", []))
     warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
+    warn_own_contents(target.name, [counts], "the copy LaTeX builds")
     # The book's PDF figures with their fonts embedded, in the copy LaTeX
     # builds, where the output folders aren't.
     embed_figures(target, build, build, (), "the copy LaTeX builds")
@@ -4225,6 +4278,12 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                if counts.get("tag_contents_spaces") else "")
             + ("a space for each \\enspace in the text a screen reader gets, "
                if counts.get("tag_en_spaces") else "")
+            + ("one number for a note's mark in a caption, "
+               if counts.get("tag_caption_notes") else "")
+            + ("amsbook's lists of contents, figures, and tables starting their pages "
+               "as amsbook starts them, " if counts.get("tag_list_chapters") else "")
+            + ("its lists of contents, figures, and tables headed as unnumbered "
+               "sections, " if counts.get("tag_list_headings") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

@@ -1422,6 +1422,22 @@ HEADING_CLASSES = ("book", "report", "amsbook")
 # tagging writes no space ("Some textwith").
 CONTENTS_LIST = re.compile(r"\\(?:tableofcontents|listoffigures|listoftables)(?![A-Za-z@])")
 CONTENTS_CLASSES = ("article", "report", "book")
+# amsbook, whose lists LaTeX's tagging made numbered chapters, each
+# numbering the book's chapters one on (latexbuild.LINE_BREAK_SPACE starts
+# each as amsbook does); and amsart and amsproc, whose lists' headings it
+# stopped on (the block sets each as an unnumbered section).
+LIST_CHAPTER_CLASSES = ("amsbook",)
+LIST_HEADING_CLASSES = ("amsart", "amsproc")
+# The classes whose contents LaTeX's tagging reaches only in part, their
+# own code setting it, which the run warns of where a book in one sets a
+# list (convert.py's OWN_CONTENTS, measured with TeX Live 2026).
+OWN_CONTENTS_CLASSES = ("amsart", "amsbook", "amsproc", "memoir", "scrartcl", "scrbook",
+                        "scrreprt")
+# A caption, \caption's (a float's or a longtable's), \captionof's, or the
+# caption package's \captionbox's, whose note's mark LaTeX's tagging
+# numbered twice, setting the caption twice (latexbuild.LINE_BREAK_SPACE).
+CAPTION = re.compile(r"\\caption(of|box)?(?![A-Za-z@])\s*\*?\s*")
+NOTE_MARK = re.compile(r"\\footnote(?:mark)?(?![A-Za-z@])")
 ENSPACE = re.compile(r"\\enspace(?![A-Za-z@])")
 # Environments whose \\ ends a table's row or a formula's line, not a
 # paragraph's line (paragraph_breaks).
@@ -1482,6 +1498,87 @@ def text_enspaces(text):
     return [m for m in latexsource.code_matches(ENSPACE, text, spans)
             if not latexsource.in_spans(m.start(), maths)
             and not DEFINING.search(text[max(0, m.start() - 40):m.start()])]
+
+
+def bracket_end(text, start):
+    """The index just past the optional argument that opens at text[start]
+    == '[': its first ] outside braces, or -1."""
+    depth, i = 0, start + 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "]" and depth == 0:
+            return i + 1
+        i += 1
+    return -1
+
+
+def loaded_class(name, master, base):
+    """The class a class of the book's own, beside it, loads
+    (\\LoadClass{amsbook} in mybook.cls), followed as far as such files go,
+    as preamble_packages follows them: name where there's none, or no
+    base. A book in a class built on amsbook sets its lists with amsbook's
+    code (a review)."""
+    seen, folder = {name}, os.path.dirname(master)
+    while base:
+        for where in dict.fromkeys((folder, "")):
+            path = os.path.join(base, where, name + ".cls")
+            if os.path.isfile(path):
+                break
+        else:
+            return name
+        found = latexsource.code_matches(LOAD_CLASS, latexsource.read_text(path))
+        loaded = found[0].group(1).strip() if found else ""
+        if not loaded or loaded in seen:
+            return name
+        seen.add(loaded)
+        name = loaded
+    return name
+
+
+def caption_notes(text):
+    """How many captions in text's code hold a note's mark: \\caption's
+    argument, \\captionbox's first, or \\captionof's after its type, past
+    a short caption in brackets, that calls \\footnotemark or \\footnote;
+    not where the book defines \\caption itself. Comments and verbatim
+    text are blanked first, so that a brace or a mark in a comment counts
+    for nothing (a review)."""
+    pieces, last = [], 0
+    for start, end in latexsource.skip_spans(text):
+        pieces.append(text[last:start])
+        pieces.append(" " * (end - start))
+        last = end
+    pieces.append(text[last:])
+    text = "".join(pieces)
+    count = 0
+    for m in CAPTION.finditer(text):
+        if DEFINING.search(text[max(0, m.start() - 40):m.start()]):
+            continue
+        at = m.end()
+        if m.group(1) == "of":
+            if not text.startswith("{", at):
+                continue
+            at = latexsource.matching_brace(text, at)
+            if at < 0:
+                continue
+        at = len(text) - len(text[at:].lstrip())
+        if text.startswith("[", at):
+            at = bracket_end(text, at)
+            if at < 0:
+                continue
+            at = len(text) - len(text[at:].lstrip())
+        if not text.startswith("{", at):
+            continue
+        end = latexsource.matching_brace(text, at)
+        if end > 0 and NOTE_MARK.search(text, at, end):
+            count += 1
+    return count
 
 
 def numbered_headings(text):
@@ -1554,21 +1651,35 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     # of contents, figures, or tables in a class whose entries LaTeX's
     # tagging sets (CONTENTS_CLASSES), the entries getting a space between
     # their number, title, and page number, or writes an \enspace in text,
-    # which gets one too; not again in a copy made from a copy.
+    # which gets one too; where a caption holds a note's mark, which the
+    # block numbers once, and where amsbook sets a list, which it starts as
+    # amsbook does (LIST_CHAPTER_CLASSES), or amsart or amsproc does, whose
+    # heading it sets as an unnumbered section (LIST_HEADING_CLASSES); not
+    # again in a copy made from a copy. A class that sets its contents with
+    # code of its own (OWN_CONTENTS_CLASSES) is counted for the run to warn
+    # of.
     breaks = any(paragraph_breaks(t) for t in texts.values())
     classes = latexsource.code_matches(latexsource.DOCUMENT_CLASS, texts[master])
-    headings = bool(classes) and classes[0].group(1) in HEADING_CLASSES and any(
-        numbered_headings(t) for t in texts.values())
-    contents = bool(classes) and classes[0].group(1) in CONTENTS_CLASSES and any(
-        latexsource.code_matches(CONTENTS_LIST, t) for t in texts.values())
+    name = loaded_class(classes[0].group(1), master, base) if classes else ""
+    lists = any(latexsource.code_matches(CONTENTS_LIST, t) for t in texts.values())
+    headings = name in HEADING_CLASSES and any(numbered_headings(t) for t in texts.values())
+    contents = name in CONTENTS_CLASSES and lists
     enspaces = any(text_enspaces(t) for t in texts.values())
-    if (breaks or headings or contents or enspaces) and not any(
-            "oer.break.space" in piece for piece in pieces):
+    notes = sum(caption_notes(t) for t in texts.values())
+    list_chapters = name in LIST_CHAPTER_CLASSES and lists
+    list_headings = name in LIST_HEADING_CLASSES and lists
+    if (breaks or headings or contents or enspaces or notes or list_chapters
+            or list_headings) and not any("oer.break.space" in piece for piece in pieces):
         block += latexbuild.LINE_BREAK_SPACE
         counts["line_breaks"] = int(breaks)
         counts["heading_lines"] = int(headings)
         counts["contents_spaces"] = int(contents)
         counts["en_spaces"] = int(enspaces)
+        counts["caption_notes"] = notes
+        counts["list_chapters"] = int(list_chapters)
+        counts["list_headings"] = int(list_headings)
+    if name in OWN_CONTENTS_CLASSES and lists:
+        counts["own_contents"] = name
     shimmed = shimmed_packages(packages, base)
     # A package math_block stands in for, so unicode-math loads.
     stand_ins = [n for n in (counts.get("math_stand_in") or "").split(", ") if n]

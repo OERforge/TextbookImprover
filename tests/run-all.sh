@@ -4,6 +4,8 @@
 #
 #     bash tests/run-all.sh          # cases side by side, half the processors
 #     bash tests/run-all.sh -j 4     # four at a time; -j 1, one at a time
+#     PATH="$PWD/tests/pandoc39:$PATH" bash tests/run-all.sh
+#                                    # as Pandoc 3.9 would (tests/pandoc39/pandoc)
 #
 # Exits non-zero if anything failed, so it works as a pre-commit hook or a
 # CI step. Each suite is independent and runs even if an earlier one
@@ -116,6 +118,27 @@ side=""
 if [ -n "$jobs" ]; then side="-j $jobs"; fi
 
 here="$(cd "$(dirname "$0")" && pwd)"
+
+# Under the stand-in for Pandoc 3.9 (tests/pandoc39 first on the PATH),
+# the Pandoc it runs, named in PANDOC39_REAL for every suite: the first
+# pandoc on the PATH that isn't a stand-in, as the stand-in finds it. A
+# check that hides the PATH's other programs from a run keeps a link to
+# the stand-in, which would find no other Pandoc there.
+stand_in () { head -c 512 "$1" 2>/dev/null | grep -qF "pandoc -- a stand-in for Pandoc 3.9"; }
+if [ -z "${PANDOC39_REAL:-}" ] && stand_in "$(command -v pandoc 2>/dev/null)"; then
+  IFS=: read -r -a folders <<< "$PATH"
+  for folder in "${folders[@]}"; do
+    candidate="${folder:-.}/pandoc"
+    if [ -f "$candidate" ] && [ -x "$candidate" ] && ! stand_in "$candidate"; then
+      PANDOC39_REAL="$(cd "${folder:-.}" && pwd)/pandoc"
+      export PANDOC39_REAL
+      break
+    fi
+  done
+  echo "Running as Pandoc 3.9 would, through tests/pandoc39/pandoc, which runs" \
+       "${PANDOC39_REAL:-no other Pandoc: none is on the PATH}."
+fi
+
 failures=0
 failed=""
 skipped=""

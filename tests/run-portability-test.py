@@ -110,6 +110,8 @@ def sources():
                    os.path.join("lib", "cnx", "bake"), "util",
                    os.path.join("util", "contrib"), "tests"):
         yield from sorted(glob.glob(os.path.join(ROOT, folder, "*.py")))
+    # The stand-in for Pandoc 3.9, named for the program it stands in for.
+    yield os.path.join(ROOT, "tests", "pandoc39", "pandoc")
 
 
 # Run by the oldest interpreter on every file at once: each one that

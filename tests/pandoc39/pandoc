@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+pandoc -- a stand-in for Pandoc 3.9, the oldest Pandoc TextbookImprover
+takes, for running the test suites as a machine with 3.9 would run them,
+without 3.9:
+
+    PATH="$PWD/tests/pandoc39:$PATH" bash tests/run-all.sh
+
+It runs the Pandoc installed, 3.11 or later, with 3.9's interface, as read
+from 3.9's source, and nothing more:
+
+- `pandoc --version` says 3.9, the installed Pandoc's other lines after
+  it.
+- A long option 3.9 doesn't have (options-3.9.txt, beside this script:
+  --math-method, --completion, and --typst-input came later) stops it as
+  3.9 stops, "Unknown option --x." and exit code 6; a unique beginning of
+  one it has is taken as that option, as 3.9's getOpt takes it.
+- Math is written as 3.9 writes it unless asked for otherwise, as plain
+  text (PlainMath, 3.9's default on the command line and in
+  WriterOptions; 3.11 made MathML the default), and --mathml, 3.9's way
+  to ask for MathML, is passed on as --math-method=mathml, which it means,
+  so the installed Pandoc doesn't warn that it's deprecated.
+- A Lua filter, reader, or writer has 3.9's functions (data/init.lua, run
+  from the --data-dir this gives the installed Pandoc, and given to
+  `pandoc lua` as -e before its script): no pandoc.TableBody (3.10) or
+  pandoc.types.Sources (3.9.0.1), a pandoc.read that takes a list of
+  nothing but Pandoc's own Source objects, PANDOC_VERSION 3.9, and
+  pandoc.write and pandoc.WriterOptions writing math as plain text unless
+  html_math_method says otherwise.
+
+The Pandoc it runs is the one the environment variable PANDOC39_REAL
+names, or else the first on the PATH that isn't a stand-in, this one or
+a copy of it, another clone's, say, known by the words this docstring
+opens with. It must be 3.11 or later, which has --math-method; `pandoc
+--version` stops, saying so, otherwise. run-all.sh, run with this folder
+first on the PATH, names that Pandoc in PANDOC39_REAL for every suite,
+since a check that hides the PATH's other programs from a run keeps a
+link to this and not the Pandoc after it. Each stand-in tells the Pandoc
+it runs how many stand-ins deep it is (PANDOC39_DEPTH), and one ten deep
+stops, saying so: a stand-in that runs itself, through PANDOC39_REAL or
+a script that runs pandoc, stops at once rather than filling the machine
+with copies of itself.
+
+What it shows is what the run asks of 3.9's interface, which is where
+code written against a newer Pandoc fails on 3.9: under it, the code as
+it was before 3.9 was made to work (2026-11-04) failed 781 checks in 12
+suites, every conversion stopping on --math-method or pandoc.TableBody.
+What it can't show is what 3.9's readers, writers, and templates make of
+what they're given: those are the installed Pandoc's. The differences
+known are on the installation page.
+It's for Linux and macOS, whose PATH finds a script by its name; Windows
+doesn't.
+
+Copyright 2026 Robert Szarka
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+import os
+import re
+import subprocess
+import sys
+
+# The folder this script is in, through a link to it too.
+HERE = os.path.dirname(os.path.realpath(__file__))
+DATA = os.path.join(HERE, "data")
+MATH = ("math-method", "mathml", "mathjax", "webtex", "katex", "gladtex")
+# The words this script's docstring opens with, which mark a copy of it.
+MARK = b"pandoc -- a stand-in for Pandoc 3.9"
+# How many stand-ins deep a run is, which each passes to the Pandoc it
+# runs, one more than it was given, and how deep one stops: Pandoc running
+# a filter that runs pandoc is a level or two.
+DEPTH, DEEPEST = "PANDOC39_DEPTH", 10
+
+
+def stand_in(path):
+    """Whether the executable at path is this stand-in or a copy of it,
+    another clone's, say, by the words its docstring opens with."""
+    try:
+        with open(path, "rb") as fh:
+            return MARK in fh.read(512)
+    except OSError:
+        return False
+
+
+def real_pandoc():
+    """The Pandoc this stands in front of: PANDOC39_REAL, or else the first
+    executable named pandoc on the PATH that isn't a stand-in, this one or
+    a copy of it. A copy would take the --math-method this passes on as an
+    option 3.9 lacks, and one that ran this would run it again."""
+    named = os.environ.get("PANDOC39_REAL")
+    if named:
+        return named
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = os.path.join(folder or ".", "pandoc")
+        if (os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+                and not stand_in(candidate)):
+            return candidate
+    sys.exit("tests/pandoc39/pandoc: no other Pandoc on the PATH to run; install "
+             "Pandoc 3.11 or later, or name one in PANDOC39_REAL.")
+
+
+def main(args):
+    deep = os.environ.get(DEPTH, "")
+    depth = (int(deep) if deep.isdigit() else 0) + 1
+    if depth > DEEPEST:
+        sys.exit(f"tests/pandoc39/pandoc: {DEEPEST} stand-ins deep, so it's running itself: "
+                 "the Pandoc it runs, the one PANDOC39_REAL names or else the first on the "
+                 "PATH that isn't a stand-in, must be Pandoc 3.11 or later, not a stand-in or "
+                 "a script that runs pandoc.")
+    os.environ[DEPTH] = str(depth)
+    real = real_pandoc()
+    if args[:1] == ["lua"]:
+        with open(os.path.join(DATA, "init.lua"), encoding="utf-8") as fh:
+            init = fh.read()
+        os.execv(real, [real, "lua", "-e", init] + args[1:])
+    if args[:1] == ["server"]:
+        os.execv(real, [real] + args)
+    if "--version" in args or "-v" in args:
+        try:
+            probe = subprocess.run([real, "--version"], capture_output=True, text=True)
+        except OSError as exc:
+            sys.exit(f"tests/pandoc39/pandoc: {real} can't be run: {exc.strerror}.")
+        if probe.returncode and probe.stderr:
+            # A stand-in that stopped, its own reason passed on.
+            sys.stderr.write(probe.stderr)
+            return probe.returncode
+        lines = probe.stdout.splitlines() or [""]
+        found = re.match(r"pandoc\S*\s+(\d+)\.(\d+)", lines[0])
+        if not found or (int(found.group(1)), int(found.group(2))) < (3, 11):
+            sys.exit(f"tests/pandoc39/pandoc: {real} is {lines[0] or 'no Pandoc'}; the "
+                     "stand-in for 3.9 runs Pandoc 3.11 or later, which has --math-method.")
+        sys.stdout.write("\n".join(["pandoc 3.9"] + lines[1:]) + "\n")
+        return 0
+    with open(os.path.join(HERE, "options-3.9.txt"), encoding="utf-8") as fh:
+        options = [line.strip() for line in fh
+                   if line.strip() and not line.startswith("#")]
+    unknown, given = [], []
+    for arg in args:
+        if arg == "--":
+            break
+        if not arg.startswith("--") or len(arg) == 2:
+            continue
+        name = arg[2:].split("=", 1)[0]
+        if name in options:
+            given.append(name)
+            continue
+        matches = [o for o in options if o.startswith(name)]
+        if len(matches) == 1:
+            given.append(matches[0])
+        else:
+            unknown.append("--" + name)
+    if unknown:
+        sys.stderr.write("".join("Unknown option %s.\n" % u for u in unknown)
+                         + "Try pandoc --help for more information.\n")
+        return 6
+    out = ["--math-method=mathml" if arg == "--mathml" else arg for arg in args]
+    # 3.9's default, before the rest, which a -- may end the options of.
+    plain = [] if any(g in MATH for g in given) else ["--math-method=plain"]
+    os.execv(real, [real, "--data-dir=" + DATA] + plain + out)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

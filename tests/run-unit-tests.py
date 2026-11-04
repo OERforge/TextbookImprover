@@ -2211,6 +2211,123 @@ def check_images_plan():
     ]
 
 
+def check_pandoc39_stand_in():
+    """tests/pandoc39/pandoc, the stand-in for Pandoc 3.9 the suites can
+    be run under, still answers as 3.9 does: its version; an option 3.9
+    lacks stopped as 3.9 stops, with its message and exit code 6, and a
+    beginning of one it has taken; math as text unless asked for, and
+    --mathml asked for; a Lua filter's and pandoc lua's 3.9 functions and
+    defaults; an installed Pandoc older than 3.11, which it can't run,
+    refused; a copy of it on the PATH passed over; and a run that's
+    stand-ins deep stopped. Skips without a Pandoc 3.11 or later to run."""
+    stand_in = os.path.join(HERE, "pandoc39", "pandoc")
+    # Its folder first on the PATH, as the suites run under it, so that
+    # it's run as pandoc would be, and it finds the Pandoc after it there:
+    # one PANDOC39_REAL names (run-all.sh names it under the stand-in) is
+    # put on the PATH after it, not named, so the PATH is what it reads.
+    named = os.environ.get("PANDOC39_REAL")
+    first = {name: value for name, value in os.environ.items()
+             if name not in ("PANDOC39_DEPTH", "PANDOC39_REAL")}
+    first["PATH"] = os.pathsep.join(
+        [os.path.dirname(stand_in)] + ([os.path.dirname(os.path.abspath(named))] if named else [])
+        + [os.environ.get("PATH", "")])
+
+    def run(*args, stdin="", env=None):
+        return subprocess.run([sys.executable, stand_in, *args], input=stdin,
+                              capture_output=True, text=True, env=env or first, timeout=120)
+    # The Pandoc it runs, found as it finds it, apart from the stand-in: a
+    # machine without one of 3.11 or later skips, and a stand-in that
+    # doesn't answer as 3.9 over one fails.
+    def copy_of_it(path):
+        try:
+            with open(path, "rb") as fh:
+                return b"pandoc -- a stand-in for Pandoc 3.9" in fh.read(512)
+        except OSError:
+            return False
+    real = None
+    for folder in first["PATH"].split(os.pathsep):
+        candidate = os.path.join(folder or ".", "pandoc")
+        if (os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+                and not copy_of_it(candidate)):
+            real = candidate
+            break
+    try:
+        said = subprocess.run([real, "--version"], capture_output=True, text=True,
+                              timeout=60).stdout if real else ""
+    except OSError:
+        said = ""
+    found = re.match(r"pandoc\S*\s+(\d+)\.(\d+)", said)
+    if not found or (int(found.group(1)), int(found.group(2))) < (3, 11):
+        why = f"no Pandoc 3.11 or later for it to run ({real or 'none found'})"
+        return [("the stand-in for Pandoc 3.9",
+                 lambda: print(f"  skip  {why}") or True)]
+    version = run("--version")
+    work = scratch("pandoc39-")
+    probe = os.path.join(work, "probe.lua")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write("io.stderr:write(tostring(pandoc.TableBody == nil), ' ',\n"
+                 "  tostring(pandoc.types.Sources == nil), ' ', tostring(PANDOC_VERSION), ' ',\n"
+                 "  tostring(pcall(pandoc.read, {{name = 'a', text = 'x'}})), ' ',\n"
+                 "  pandoc.write(pandoc.read('$x$'), 'html'), '\\n')\n")
+    filtered = run("-L", probe, "-t", "native", stdin="x")
+    lua = run("lua", probe)
+    unknown = run("--math-method=mathml", "-t", "html", stdin="x")
+    typst = run("--typst-input", "x", stdin="x")
+    begun = run("--standal", "-t", "html", stdin="x")
+    plain = run("-t", "html", stdin="$x^2$")
+    mathml = run("--mathml", "-t", "html", stdin="$x^2$")
+    old = os.path.join(work, "pandoc-3.10")
+    with open(old, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 3.10.1'\n")
+    os.chmod(old, 0o755)
+    refused = run("--version", env=dict(first, PANDOC39_REAL=old))
+    # A copy of it after it on the PATH, another clone's, say, which would
+    # refuse the --math-method it's given, passed over; and a run ten
+    # stand-ins deep, as one that ran itself would be, stopped at once.
+    second = os.path.join(work, "second")
+    shutil.copytree(os.path.dirname(stand_in), second)
+    two = dict(first, PATH=os.path.dirname(stand_in) + os.pathsep + second + os.pathsep
+               + os.environ.get("PATH", ""))
+    two_version = run("--version", env=two)
+    two_plain = run("-t", "html", stdin="$x^2$", env=two)
+    deep = run("--version", env=dict(first, PANDOC39_DEPTH="10"))
+    told = os.path.join(work, "pandoc-3.12")
+    with open(told, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 3.12.0'\necho \"depth $PANDOC39_DEPTH\"\n")
+    os.chmod(told, 0o755)
+    depth = run("--version", env=dict(first, PANDOC39_REAL=told))
+    lua_line = "true true 3.9 false"
+    return [
+        ("it says it's 3.9",
+         lambda: version.stdout.startswith("pandoc 3.9\n")),
+        ("an option 3.9 lacks stops it as 3.9 stops, with exit code 6",
+         lambda: unknown.returncode == 6
+         and unknown.stderr == ("Unknown option --math-method.\n"
+                                "Try pandoc --help for more information.\n")
+         and typst.returncode == 6 and "Unknown option --typst-input." in typst.stderr),
+        ("a beginning of an option 3.9 has is taken as that option",
+         lambda: begun.returncode == 0 and "<!DOCTYPE html>" in begun.stdout),
+        ("math is plain text unless asked for, and --mathml asks for MathML",
+         lambda: "<em>x</em><sup>2</sup>" in plain.stdout and "<math" not in plain.stdout
+         and "<math" in mathml.stdout and not mathml.stderr),
+        ("a filter, and pandoc lua, have 3.9's functions: no pandoc.TableBody or "
+         "pandoc.types.Sources, PANDOC_VERSION 3.9, a pandoc.read that refuses a list of "
+         "tables, and a pandoc.write that writes math as text",
+         lambda: filtered.stderr.startswith(lua_line) and "<em>x</em>" in filtered.stderr
+         and lua.stderr.startswith(lua_line) and "<em>x</em>" in lua.stderr),
+        ("an installed Pandoc older than 3.11 is refused, saying why",
+         lambda: refused.returncode != 0
+         and "runs Pandoc 3.11 or later" in refused.stderr),
+        ("a copy of it after it on the PATH is passed over for the Pandoc after both",
+         lambda: two_version.returncode == 0 and two_version.stdout.startswith("pandoc 3.9\n")
+         and two_plain.returncode == 0 and "<em>x</em><sup>2</sup>" in two_plain.stdout),
+        ("it tells the Pandoc it runs how many stand-ins deep it is, and a run ten deep, "
+         "as one that runs itself is, stops, saying so",
+         lambda: depth.stdout == "pandoc 3.9\ndepth 1\n"
+         and deep.returncode != 0 and "10 stand-ins deep" in deep.stderr and not deep.stdout),
+    ]
+
+
 # The formats whose math is written by Pandoc's math method: a page, an
 # EPUB, and a presentation in HTML, with or without extensions.
 HTML_FORMATS = r"(?:html[45]?|epub[23]?|revealjs|chunkedhtml|s5|slidy|slideous|dzslides)(?:[+-]\w+)*"
@@ -6968,6 +7085,7 @@ GROUPS = [
     ("MathML asked for by Pandoc's version", check_pandoc_math_option),
     ("images.compress and images.downsample, as the copies are made",
      check_images_plan),
+    ("the stand-in for Pandoc 3.9 (tests/pandoc39)", check_pandoc39_stand_in),
     ("MathML asked for in every call that writes HTML", check_math_asked_for),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),

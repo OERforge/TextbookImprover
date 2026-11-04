@@ -5132,9 +5132,26 @@ def default_checks(default_path, default_said, lacking_path, lacking_said):
                 "\\setmathfont{IBMPlexMath-Regular.otf}" in latex)
     shapes = ("Regular", "Bold", "Italic", "BoldItalic")
     # The book's one character no font has, Latin Modern's fallbacks
-    # filling in for the rest as they do for Plex.
-    unfilled = ("WARNING: 3 character(s) the fonts don't have are missing from the PDF: "
-                "\u6f22 (U+6F22) x3.")
+    # filling in for the rest as they do for Plex: 漢, three times; and
+    # where a fallback isn't installed, what only it has, the circled
+    # letter New Computer Modern's math font's and the emoji Noto Emoji's,
+    # as their own checks below skip then.
+    expected = {"6F22": "3"}
+    if not font_installed("NewCMMath-Book.otf"):
+        expected["24D0"] = None
+    if not font_installed("NotoEmoji-Regular.ttf"):
+        expected["1F30E"] = None
+
+    def unfilled(said):
+        """Whether the run's one warning of characters missing from the
+        PDF names those expected, each as often as expected, and no other."""
+        found = re.search(r"WARNING: \d+ character\(s\) the fonts don't have are missing "
+                          r"from the PDF: (.*)$", said, re.M)
+        listed = dict(re.findall(r"\(U\+([0-9A-F]+)\) x(\d+)", found.group(1))) if found \
+            else {}
+        return (listed.keys() == expected.keys()
+                and all(times is None or listed[code] == times
+                        for code, times in expected.items()))
     plex = ["IBMPlex%s-%s.otf" % (face, shape) for face in ("Serif", "Sans", "Mono")
             for shape in shapes]
     items = [("the book on the PDF target's default page builds, LaTeX stopping on "
@@ -5146,7 +5163,7 @@ def default_checks(default_path, default_said, lacking_path, lacking_said):
               lambda: all(any(face in name for name in fonts) for face in
                           ("IBMPlexSerif-Regular", "IBMPlexMono", "IBMPlexMath-Regular"))
               and not any("LMRoman" in name or "LatinModern" in name for name in fonts)
-              and "default faces" not in default_said and unfilled in default_said),
+              and "default faces" not in default_said and unfilled(default_said)),
              ("where TeX lacks a file of Plex's, its math font's here, the book is set in "
               "Latin Modern, as it was before Plex was the default, with the fallback "
               "fonts, and the run warns, naming the file, the package that has them, and "
@@ -5154,7 +5171,7 @@ def default_checks(default_path, default_said, lacking_path, lacking_said):
               lambda: any("LMRoman" in name for name in lacking)
               and any("LatinModernMath" in name for name in lacking)
               and not any("IBMPlex" in name for name in lacking)
-              and unfilled in lacking_said
+              and unfilled(lacking_said)
               and re.search(r"WARNING: TeX lacks the PDF's default faces, IBM Plex and IBM Plex "
                             r"Math, so the book is set in Latin Modern: LaTeX found no "
                             r"NoSuchMath-Regular\.otf\. TeX Live's plex package has them: for "

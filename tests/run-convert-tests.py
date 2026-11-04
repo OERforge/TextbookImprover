@@ -542,16 +542,21 @@ def case_lowercase_names(work):
 
 
 def case_downsample(work):
-    """images.downsample: at 0, the default, the run says how many images
-    are wider in pixels than the pages show them, and by how much the
-    widest; set, an html, an EPUB, and a Word target carry copies scaled
-    down to that many times the width shown, which is the page's width, a
-    percentage of the column, or a height and the image's proportions,
-    while a markdown target and the original keep the author's file; a
-    copy of a drawing, an original of few colors, has a palette of 256,
-    its transparency kept, an alpha channel's or an RGB PNG's transparent
-    color's, and a photograph's its colors; and without
-    Pillow, a run with it set stops and says what to install."""
+    """images.downsample and images.compress: at 0 and none, the defaults,
+    the run says how many images are wider in pixels than the pages show
+    them, and by how much the widest, and how many JPEGs are saved at a
+    quality over 90; downsample set, an html, an EPUB, and a Word target
+    carry copies scaled down to that many times the width shown, which is
+    the page's width, a percentage of the column, or a height and the
+    image's proportions, while a markdown target and the original keep the
+    author's file, and a JPEG no wider is left as it is; a copy of a
+    drawing, an original of few colors, has a palette of 256, its
+    transparency kept, an alpha channel's or an RGB PNG's transparent
+    color's, and a photograph's its colors; compress at screen scales to 2
+    and writes a JPEG at quality 85, scaled or at its own size where it
+    was saved at a higher one, a JPEG saved at a lower one left as it is,
+    and downsample, set beside it, gives the limit; and without Pillow, a
+    run with either set stops and says what to install."""
     import random
     import struct
     import zlib
@@ -602,6 +607,8 @@ def case_downsample(work):
     if Image is not None:
         page += ("\n![Colored noise](assets/colors.png){width=100px}\n\n"
                  "![A photograph of noise](assets/photo.jpg){height=50px}\n\n"
+                 "![A fine photograph](assets/fine.jpg)\n\n"
+                 "![A coarse photograph](assets/coarse.jpg)\n\n"
                  "![A drawing in eight colors](assets/drawing.png){width=100px}\n\n"
                  "![A drawing half clear](assets/clear.png){width=100px}\n\n"
                  "![A drawing half in a clear color](assets/key.png){width=100px}\n")
@@ -635,6 +642,11 @@ def case_downsample(work):
             png(os.path.join(where, "assets", "colors.png"), 400, 200, palette=True)
             Image.frombytes("RGB", (300, 150), noise.randbytes(300 * 150 * 3)).save(
                 os.path.join(where, "assets", "photo.jpg"), quality=95)
+            # Shown at their own width: one saved at quality 99, as OpenStax
+            # saved Principles of Marketing's photographs, and one at 70.
+            shades = Image.linear_gradient("L").resize((160, 80)).convert("RGB")
+            shades.save(os.path.join(where, "assets", "fine.jpg"), quality=99, subsampling=0)
+            shades.save(os.path.join(where, "assets", "coarse.jpg"), quality=70)
             drawing(os.path.join(where, "assets", "drawing.png"))
             drawing(os.path.join(where, "assets", "clear.png"), clear=True)
             drawing(os.path.join(where, "assets", "key.png"), key=True)
@@ -663,7 +675,12 @@ def case_downsample(work):
          lambda: whole.returncode == 0
          and re.search(r"WARNING: \d image\(s\) are wider in pixels than the pages show them, "
                        r"\d of them more than twice as wide, up to 4\.0 times \(assets/big\.png, "
-                       r"400 pixels shown 100 wide\); the outputs carry them whole", whole_said)
+                       r"400 pixels shown 100 wide\)"
+                       + (r", and 2 JPEG\(s\) are saved at a quality over 90, up to 99"
+                          if Image is not None else "")
+                       + r"; the outputs carry them whole", whole_said)
+         and "images.compress makes them smaller, at a level of print, screen, or small"
+         in whole_said
          and "docs/configuration.md#images-larger-than-theyre-shown" in whole_said
          and file_size(a, "html", "assets", "big.png") == (400, 200)),
     ]
@@ -707,6 +724,51 @@ def case_downsample(work):
     c, _, without = book("without", "defaults:\n  images:\n    downsample: 2\n"
                                     "targets:\n  html:\n    format: html\n",
                          env=dict(os.environ, PYTHONPATH=blocked))
+    _, _, without_level = book("without-level", "defaults:\n  images:\n    compress: small\n"
+                                                "targets:\n  html:\n    format: html\n",
+                               env=dict(os.environ, PYTHONPATH=blocked))
+    e, _, compressed = book("compressed", "defaults:\n  images:\n    compress: screen\n"
+                                          "    responsive: false\n"
+                                          "targets:\n  html:\n    format: html\n"
+                                          "  three:\n    format: html\n    images:\n"
+                                          "      downsample: 3\n"
+                                          "  printed:\n    format: html\n    images:\n"
+                                          "      compress: print\n")
+    compressed_said = compressed.stdout + compressed.stderr
+
+    def in_book(where, *parts):
+        """A copy's format, size, and luminance table, or None."""
+        path = os.path.join(where, *parts)
+        if not os.path.exists(path):
+            return None
+        with Image.open(path) as im:
+            return im.format, im.size, list((getattr(im, "quantization", None) or {}).get(0, []))
+
+    def table_at(quality):
+        """The luminance table Pillow gives a JPEG it saves at quality, which
+        a copy written at that quality has."""
+        import io
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8)).save(buffer, "JPEG", quality=quality)
+        buffer.seek(0)
+        with Image.open(buffer) as im:
+            return list(im.quantization[0])
+
+    def sampling(where, *parts):
+        """A JPEG's chroma subsampling, as Pillow's writer names it: 0 for
+        4:4:4, 2 for 4:2:0."""
+        from PIL import JpegImagePlugin
+        with Image.open(os.path.join(where, *parts)) as im:
+            return JpegImagePlugin.get_sampling(im)
+
+    def same_file(where, *parts):
+        with open(os.path.join(where, *parts), "rb") as a, \
+                open(os.path.join(where, *parts[1:]), "rb") as b:
+            return a.read() == b.read()
+
+    def smaller(where, *parts):
+        return (os.path.getsize(os.path.join(where, *parts))
+                < os.path.getsize(os.path.join(where, *parts[1:])))
     d, _, unscaled = book("unscaled", "targets:\n  html:\n    format: html\n",
                           env=dict(os.environ, PYTHONPATH=blocked))
     return checks + [
@@ -716,6 +778,8 @@ def case_downsample(work):
          and file_size(b, "html", "assets", "big.png") == (200, 100)
          and file_size(b, "html", "assets", "strip.png") == (576, 72)
          and opened("html", "assets", "photo.jpg") == ("JPEG", "RGB", (200, 100))),
+        ("a JPEG no wider than that is left as it is, whatever its quality",
+         lambda: same_file(b, "html", "assets", "fine.jpg")),
         ("an image no wider than that is copied as it is, and a palette's image has a "
          "palette again",
          lambda: file_size(b, "html", "assets", "small.png") == (4, 4)
@@ -742,7 +806,7 @@ def case_downsample(work):
          and open(os.path.join(b, "md", "assets", "big.png"), "rb").read() == original),
         ("the run says how many it scaled and how many of them were drawings given a "
          "palette, and a target set to 0 is named as carrying them whole",
-         lambda: re.search(r"images\.downsample 2: 7 of 8 image\(s\) scaled down to 2 times "
+         lambda: re.search(r"images\.downsample 2: 7 of 10 image\(s\) scaled down to 2 times "
                            r"the width they're shown at, [\d.]+ [kM]B to [\d.]+ [kM]B, 3 of "
                            r"them drawings given a palette of 256 colors\.", said)
          and "the outputs (full) carry them whole" in said
@@ -750,11 +814,47 @@ def case_downsample(work):
         ("without Pillow, a run with it set stops before writing and says what to install; "
          "at 0 the run measures without it",
          lambda: without.returncode != 0
-         and "images.downsample needs Python's Pillow" in without.stdout + without.stderr
+         and "images.downsample and images.compress need Python's Pillow"
+         in without.stdout + without.stderr
          and "sudo apt install python3-pil" in without.stdout + without.stderr
+         and without_level.returncode != 0
+         and "images.downsample and images.compress need Python's Pillow"
+         in without_level.stdout + without_level.stderr
          and not exists(c, "html", "page.html")
          and unscaled.returncode == 0
          and "up to 4.0 times (assets/big.png" in unscaled.stdout + unscaled.stderr),
+        ("images.compress at screen scales an image down to twice the width it's shown at, "
+         "a JPEG written at quality 85",
+         lambda: compressed.returncode == 0
+         and file_size(e, "html", "assets", "big.png") == (200, 100)
+         and in_book(e, "html", "assets", "photo.jpg") == ("JPEG", (200, 100), table_at(85))),
+        ("and writes a JPEG saved at a higher quality again at its own size, at 85, smaller, "
+         "and leaves one saved at a lower quality as it is",
+         lambda: in_book(e, "html", "assets", "fine.jpg") == ("JPEG", (160, 80), table_at(85))
+         and in_book(e, "assets", "fine.jpg")[2] == table_at(99)
+         and smaller(e, "html", "assets", "fine.jpg")
+         and same_file(e, "html", "assets", "coarse.jpg")),
+        ("at print, a JPEG written again at quality 90 keeps its color's resolution (4:4:4), "
+         "which screen halves (4:2:0)",
+         lambda: in_book(e, "printed", "assets", "fine.jpg") == ("JPEG", (160, 80), table_at(90))
+         and sampling(e, "assets", "fine.jpg") == 0
+         and sampling(e, "printed", "assets", "fine.jpg") == 0
+         and sampling(e, "html", "assets", "fine.jpg") == 2),
+        ("images.downsample set beside it gives the limit, the level its quality",
+         lambda: file_size(e, "three", "assets", "big.png") == (300, 150)
+         and in_book(e, "three", "assets", "photo.jpg") == ("JPEG", (300, 150), table_at(85))),
+        ("the run says what each made smaller",
+         lambda: re.search(r"images\.compress screen: 8 of 10 image\(s\) made smaller, "
+                           r"[\d.]+ [kM]B to [\d.]+ [kM]B: 7 scaled down to 2 times the width "
+                           r"they're shown at, 3 of them drawings given a palette of 256 colors, "
+                           r"and 1 JPEG\(s\) written again at their own size, at quality 85, as "
+                           r"a scaled JPEG is\.", compressed_said)
+         # How many drawings' copies at three quarters of their width come
+         # out larger than they are depends on Pillow's palette.
+         and re.search(r"images\.compress screen, images\.downsample 3: \d+ of 10 image\(s\) "
+                       r"made smaller, [\d.]+ [kM]B to [\d.]+ [kM]B: \d+ scaled down to 3 "
+                       r"times the width they're shown at, .*and 2 JPEG\(s\) written again at "
+                       r"their own size, at quality 85", compressed_said)),
     ]
 
 

@@ -118,10 +118,11 @@ SOURCE_TARGETS = ("markdown", "asciidoc")
 # The targets that copy the files a page names, whose names media.lowercase
 # lowercases.
 LOWERCASED = ("html", "revealjs", "markdown", "asciidoc")
-# The targets whose images images.downsample scales: the rest write
-# copies of the author's sources, which keep the author's files.
+# The targets whose images images.downsample scales and images.compress
+# makes smaller: the rest write copies of the author's sources, which keep
+# the author's files.
 SCALED_FORMATS = ("html", "epub3", "docx", "pdf", "revealjs", "pptx")
-# Each such target's folder of scaled copies, by its name, once the run
+# Each such target's folder of smaller copies, by its name, once the run
 # has made them (prepare_downsampled).
 DOWNSAMPLED = {}
 TARGET_FILTER = os.path.join(HERE, "target-blocks.lua")
@@ -5677,44 +5678,57 @@ def copy_media(base, output_dir, pages, safe=True, lower=False, scaled=None):
 
 
 def scales_images(target, latex_book):
-    """Whether images.downsample applies to a target: one of
-    SCALED_FORMATS, but not a LaTeX book's PDF built from its own files
-    (pdf.from: book), which sets the book's own images as its LaTeX sizes
-    them."""
+    """Whether images.downsample and images.compress apply to a target:
+    one of SCALED_FORMATS, but not a LaTeX book's PDF built from its own
+    files (pdf.from: book), which sets the book's own images as its LaTeX
+    sizes them."""
     return target.format in SCALED_FORMATS and not (
         latex_book and target.format == "pdf" and str(target["pdf.from"]) == "book")
 
 
+def images_plan(target):
+    """A target's (limit, quality, keep), as downsample.plan_of reads its
+    images.downsample and images.compress."""
+    return downsample.plan_for(target)[0]
+
+
 def prepare_downsampled(targets, pages_by_dir, base, work, latex_book=False):
-    """images.downsample, once per limit: copies of the images wider than
-    that many times the width they're shown at, scaled to it, in a folder
-    of work's, which each target with that limit reads in the originals'
-    place (DOWNSAMPLED, by target name). Where a target that ships images
-    keeps them whole, the run says how many are wider than they're shown,
-    and by how much at most, once."""
-    by_limit, whole = {}, []
+    """images.downsample and images.compress, once per plan (a limit, a
+    quality, and whether a JPEG keeps its color's resolution,
+    downsample.plan_of): copies of the images wider than the
+    limit's times the width they're shown at, scaled to it, and of the
+    JPEGs saved at a higher quality, written again at it, in a folder of
+    work's, which each target with that plan reads in the originals' place
+    (DOWNSAMPLED, by target name). Where a target that ships images keeps
+    them whole, the run says how many are wider than they're shown, and by
+    how much at most, and how many JPEGs are saved at a high quality,
+    once."""
+    by_plan, whole = {}, []
     for target in targets:
         if not scales_images(target, latex_book):
             continue
-        limit = downsample.limit_of(target["images.downsample"])
-        if limit:
-            by_limit.setdefault(limit, []).append(target)
+        plan = images_plan(target)
+        if downsample.makes_copies(plan):
+            by_plan.setdefault(plan, []).append(target)
         else:
             whole.append(target)
 
     def pages_of(group):
         return sorted({p for t in group for p in pages_by_dir.get(t.pages_dir, [])})
-    if by_limit and downsample.Image is None:
+    if by_plan and downsample.Image is None:
         die(downsample.INSTALL)
-    for limit, group in sorted(by_limit.items()):
-        folder = os.path.join(work, f"downsample-{limit:g}")
-        counts = downsample.scale(downsample.measure(base, pages_of(group)), limit, folder)
-        say(downsample.report(counts, limit))
+    for plan, group in sorted(by_plan.items(),
+                              key=lambda item: (item[0][0], item[0][1] or 0, item[0][2])):
+        limit, quality, keep = plan
+        folder = os.path.join(work, "downsample-" + downsample.plan_name(*plan))
+        counts = downsample.scale(downsample.measure(base, pages_of(group)), limit, folder,
+                                  quality, keep)
+        say(downsample.report(counts, limit, quality, downsample.plan_for(group[0])[1]))
         for target in group:
             DOWNSAMPLED[target.name] = folder
     if whole:
         line = downsample.warning(downsample.measure(base, pages_of(whole)),
-                                  [t.name for t in whole] if by_limit else ())
+                                  [t.name for t in whole] if by_plan else ())
         if line:
             say(line)
 
@@ -6156,10 +6170,11 @@ def main():
         output_dirs = [t.output_dir for t in targets]
         latex_main = [] if DECK_RUN else latex_masters(base, skip=output_dirs)
         master = latex_main[0] if latex_main else None
-        # images.downsample scales with Pillow: without it, said before a
-        # page is read rather than once they all are.
+        # images.downsample and images.compress make their copies with
+        # Pillow: without it, said before a page is read rather than once
+        # they all are.
         if downsample.Image is None and any(
-                scales_images(t, bool(master)) and downsample.limit_of(t["images.downsample"])
+                scales_images(t, bool(master)) and downsample.makes_copies(images_plan(t))
                 for t in targets):
             die(downsample.INSTALL)
         named = {page_name_of(n) for n in list(docs) + markdown + adoc}

@@ -2081,6 +2081,136 @@ def check_pandoc_math_option():
     ]
 
 
+def check_images_plan():
+    """images.compress and images.downsample as the copies are made from
+    them (lib/downsample.py): a level's limit, JPEG quality, and whether a
+    JPEG keeps its color's resolution, the limit images.downsample sets in
+    its place, and the settings named as the run names them; a JPEG's
+    quality read from its luminance table, for each quality Pillow saves
+    at; a JPEG written again at print keeping 4:4:4 and at screen 4:2:0;
+    and a build on its own (folder_for_build) using the run's copies where
+    they were made for its plan, and making its own, in a folder of its
+    own, where they weren't."""
+    import downsample
+    plans = [downsample.plan_of(*given) for given in (
+        (0, "none"), (2, "none"), (0, "screen"), (3, "small"), ("", None), (None, "Print "))]
+    labels = [downsample.label_of(*given) for given in (
+        (0, "screen"), (3, "small"), (2, "none"), (0, "none"))]
+    resolved = downsample.plan_for({"images.downsample": 3, "images.compress": "small"})
+    checks = [
+        ("a level gives a limit and a quality, images.downsample replaces the limit, and "
+         "none gives no quality",
+         lambda: plans == [(0, None, False), (2, None, False), (2, 85, False),
+                           (3, 75, False), (0, None, False), (4, 90, True)]),
+        ("the run names the settings a plan comes from, and a target's settings give both",
+         lambda: labels == ["images.compress screen", "images.compress small, "
+                            "images.downsample 3", "images.downsample 2", ""]
+         and resolved == ((3, 75, False), "images.compress small, images.downsample 3")),
+    ]
+    if downsample.Image is None:
+        return checks + [("a JPEG's quality, and a build's own copies",
+                          lambda: print("  skip  no Pillow (python3-pil)") or True)]
+    from PIL import Image
+    work = scratch("images-plan-")
+    shades = Image.linear_gradient("L").resize((64, 32)).convert("RGB")
+    read = {}
+    for quality in range(1, 101):
+        path = os.path.join(work, f"q{quality}.jpg")
+        shades.save(path, quality=quality)
+        read[quality] = downsample.jpeg_quality(path)
+    shades.save(os.path.join(work, "not.png"))
+    with open(os.path.join(work, "not.jpg"), "w") as fh:
+        fh.write("no picture")
+    # A book of one page and two pictures, measured as a build measures
+    # its book: a JPEG at quality 99 shown at its width, and a PNG four
+    # times as wide as it's shown.
+    book = os.path.join(work, "book")
+    os.makedirs(os.path.join(book, "media"))
+    shades.save(os.path.join(book, "media", "fine.jpg"), quality=99, subsampling=0)
+    shades.save(os.path.join(book, "media", "edge.jpg"), quality=85)
+    # Saved at a low quality, and four times as wide as it's shown.
+    Image.linear_gradient("L").resize((400, 200)).convert("RGB").save(
+        os.path.join(book, "media", "low.jpg"), quality=50)
+    Image.linear_gradient("L").resize((400, 40)).save(os.path.join(book, "media", "wide.png"))
+    page = {"blocks": [{"t": "Para", "c": [
+        {"t": "Image", "c": [["", [], []], [], ["media/fine.jpg", ""]]},
+        {"t": "Image", "c": [["", [], []], [], ["media/edge.jpg", ""]]},
+        {"t": "Image", "c": [["", [], [["width", "100px"]]], [], ["media/low.jpg", ""]]},
+        {"t": "Image", "c": [["", [], [["width", "100px"]]], [], ["media/wide.png", ""]]}]}]}
+    made = downsample.scale(downsample.measure(book, [page]), 2, os.path.join(work, "run"), 85)
+    kept = downsample.scale(downsample.measure(book, [page]), 4, os.path.join(work, "print"), 90,
+                            True)
+    # A JPEG whose resolution is in its EXIF data alone, as most of
+    # Principles of Marketing's are, scaled to half its width.
+    exif = Image.Exif()
+    exif[282], exif[283], exif[296] = 200.0, 200.0, 2
+    Image.linear_gradient("L").resize((400, 200)).convert("RGB").save(
+        os.path.join(work, "exif.jpg"), quality=80, exif=exif.tobytes())
+    downsample.scale_one(os.path.join(work, "exif.jpg"), os.path.join(work, "half", "exif.jpg"),
+                         0.5, 85)
+    with Image.open(os.path.join(work, "half", "exif.jpg")) as im:
+        halved = (im.size, im.info.get("jfif_density"),
+                  [float(im.getexif().get(tag) or 0) for tag in (282, 283)])
+    from PIL import JpegImagePlugin
+
+    def sampling(*parts):
+        with Image.open(os.path.join(work, *parts)) as im:
+            return JpegImagePlugin.get_sampling(im)
+    said = []
+    saved = os.environ.get("DOWNSAMPLED")
+    try:
+        os.environ["DOWNSAMPLED"] = os.path.join(work, "run")
+        given = downsample.folder_for_build((2.0, 85, False), book, [page],
+                                            os.path.join(work, "a"), said.append,
+                                            "images.compress screen")
+        other = downsample.folder_for_build((2.0, None, False), book, [page],
+                                            os.path.join(work, "b"), said.append)
+        nothing = downsample.folder_for_build((0.0, None, False), book, [page],
+                                              os.path.join(work, "c"))
+    finally:
+        if saved is None:
+            os.environ.pop("DOWNSAMPLED", None)
+        else:
+            os.environ["DOWNSAMPLED"] = saved
+    return checks + [
+        ("a JPEG's quality is read as the quality Pillow saved it at, from 1 to 100, and "
+         "anything else has none",
+         lambda: all(read[q] == q for q in read)
+         and downsample.jpeg_quality(os.path.join(work, "not.png")) is None
+         and downsample.jpeg_quality(os.path.join(work, "not.jpg")) is None),
+        ("a JPEG saved at a higher quality is written again at the plan's, at its size, one "
+         "saved at the plan's left as it is, and an image wider than the limit scaled",
+         lambda: made["requality"] == 1 and made["scaled"] == 2
+         and not os.path.exists(os.path.join(work, "run", "media", "edge.jpg"))
+         and downsample.jpeg_quality(os.path.join(work, "run", "media", "fine.jpg")) == 85
+         and Image.open(os.path.join(work, "run", "media", "fine.jpg")).size == (64, 32)
+         and Image.open(os.path.join(work, "run", "media", "wide.png")).size == (200, 20)),
+        ("a JPEG scaled down that was saved at a lower quality than the plan's keeps its own",
+         lambda: Image.open(os.path.join(work, "run", "media", "low.jpg")).size == (200, 100)
+         and downsample.jpeg_quality(os.path.join(work, "run", "media", "low.jpg")) == 50),
+        ("a JPEG scaled down prints at the original's size: the resolution in its EXIF data, "
+         "which LuaTeX and Pandoc's Word writer read first, scaled with its pixels, and its "
+         "JFIF header's too",
+         lambda: halved == ((200, 100), (100, 100), [100.0, 100.0])),
+        ("written again at print, a JPEG keeps its color's resolution (4:4:4); at screen "
+         "it's written at libjpeg's 4:2:0",
+         lambda: kept["requality"] == 1
+         and downsample.jpeg_quality(os.path.join(work, "print", "media", "fine.jpg")) == 90
+         and sampling("book", "media", "fine.jpg") == 0
+         and sampling("print", "media", "fine.jpg") == 0
+         and sampling("run", "media", "fine.jpg") == 2),
+        ("a build uses the run's copies made for its limit and quality, and makes its own "
+         "for another, saying so, and none where nothing's asked",
+         lambda: given == os.path.join(work, "run")
+         and other == os.path.join(work, "b", "downsample")
+         and not os.path.exists(os.path.join(work, "b", "downsample", "media", "fine.jpg"))
+         and Image.open(os.path.join(other, "media", "wide.png")).size == (200, 20)
+         and said == ["images.downsample 2: 2 of 4 image(s) scaled down to 2 times the width "
+                      "they're shown at, " + said[0].split("shown at, ", 1)[1]]
+         and nothing is None),
+    ]
+
+
 # The formats whose math is written by Pandoc's math method: a page, an
 # EPUB, and a presentation in HTML, with or without extensions.
 HTML_FORMATS = r"(?:html[45]?|epub[23]?|revealjs|chunkedhtml|s5|slidy|slideous|dzslides)(?:[+-]\w+)*"
@@ -6836,6 +6966,8 @@ GROUPS = [
      check_without_table_body),
     ("the Markdown reader on Pandoc 3.9's pandoc.read", check_markdown_reader_39),
     ("MathML asked for by Pandoc's version", check_pandoc_math_option),
+    ("images.compress and images.downsample, as the copies are made",
+     check_images_plan),
     ("MathML asked for in every call that writes HTML", check_math_asked_for),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),

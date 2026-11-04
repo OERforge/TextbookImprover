@@ -1661,12 +1661,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         command = ["pandoc", "-f", "json", "-t", "pdf", book_json,
                    "-o", os.path.abspath(out_path),
                    f"--pdf-engine={ENGINE}"] + filters
-        # images.downsample: scaled copies, which Pandoc finds before the
-        # originals, the run's own or made here.
+        # images.downsample and images.compress: smaller copies, which
+        # Pandoc finds before the originals, the run's own or made here.
+        plan, label = downsample.plan_for(resolved)
         try:
             scaled = downsample.folder_for_build(
-                downsample.limit_of(resolved["images.downsample"]), base, [document], work,
-                lambda line: print(line, file=sys.stderr))
+                plan, base, [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
         command += downsample.resource_args(scaled)

@@ -990,12 +990,12 @@ def build(base, name, resolved, keep, intermediates=None):
             command += ["-V", "oer-footer=" + footer]
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]))
-        # images.downsample: scaled copies, which Pandoc finds before the
-        # originals, the run's own or made here.
+        # images.downsample and images.compress: smaller copies, which
+        # Pandoc finds before the originals, the run's own or made here.
+        plan, label = downsample.plan_for(resolved)
         try:
             scaled = downsample.folder_for_build(
-                downsample.limit_of(resolved["images.downsample"]), base, [document], work,
-                lambda line: print(line, file=sys.stderr))
+                plan, base, [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
         command += downsample.resource_args(scaled)

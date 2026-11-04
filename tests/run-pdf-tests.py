@@ -134,7 +134,7 @@ Greek and symbols as text, and not math, which the math repair would make
 of a Greek letter alone: the letters αβγ as one word, and ≤ and ≈ named on
 their own. And 漢, which no Latin Modern font has, and ⓐ, a circled
 letter, which of the fonts the build falls back to only New Computer
-Modern's math font has.
+Modern's math font has, and 🌎, an emoji, which only Noto Emoji has.
 
 Inline math $x^2 + y^2 = z^2$, and a display:
 
@@ -7494,6 +7494,14 @@ def checks(work, jobs=1):
     else:
         print("  skip  New Computer Modern isn't installed; the circled letter "
               "it would supply isn't checked")
+    # And the last, Noto Emoji, when it's installed: an emoji had been the
+    # .notdef glyph, which veraPDF rejects.
+    if font_installed("NotoEmoji-Regular.ttf"):
+        items.append(("an emoji, which of the fallbacks only Noto Emoji has, is in the PDF's "
+                      "text, and isn't reported missing",
+                      lambda: "\U0001F30E" in text and "U+1F30E" not in log))
+    else:
+        print("  skip  Noto Emoji isn't installed; the emoji it would supply isn't checked")
     # Pandoc's highlighted code, its tokens colored: a space beside a
     # color's change was no character, and an indentation one
     # (latexbuild.CODE_SPACES).

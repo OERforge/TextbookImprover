@@ -197,9 +197,15 @@ OWN_MATH_FONT = re.compile(r"\\setmathfont(?![A-Za-z@])")
 # desktops: it has what Latin Modern Math doesn't, such as the circled
 # digits an AsciiDoc book's code callouts are (58 of them in the security
 # textbook, all drawn blank without it). New Computer Modern's math font
-# comes last when it's installed, as it is wherever decks are built: it has
-# the circled letters OpenStax's math books letter a question's parts with
-# (1,391 in the first chapter of College Algebra), which neither has.
+# comes after them when it's installed, as it is wherever decks are built:
+# it has the circled letters OpenStax's math books letter a question's parts
+# with (1,391 in the first chapter of College Algebra), which neither has.
+# Noto Emoji, the black-and-white one TeX Live's noto-emoji package has,
+# comes last when it's installed: it has the emoji a book's text holds, as
+# a video's title does in a link's words (Principles of Marketing's 2.2
+# ends one with a globe, books, and a smiling face), which none of the
+# others has but DejaVu Sans's faces (the smiling one); without it, each
+# was the font's .notdef, which PDF/UA-2 forbids (veraPDF's 8.4.5.9-1).
 FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
             "\\IfFontExistsTF{DejaVu Sans}\n"
             "  {\\edef\\OERFallbackFonts{\\OERFallbackFonts, "
@@ -207,6 +213,9 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
             "\\IfFontExistsTF{NewCMMath-Book.otf}\n"
             "  {\\edef\\OERFallbackFonts{\\OERFallbackFonts, "
             "\"NewCMMath-Book.otf:mode=harf;\"}}{}\n"
+            "\\IfFontExistsTF{NotoEmoji-Regular.ttf}\n"
+            "  {\\edef\\OERFallbackFonts{\\OERFallbackFonts, "
+            "\"NotoEmoji-Regular.ttf:mode=harf;\"}}{}\n"
             "\\directlua{luaotfload.add_fallback(\"oerfallback\", "
             "{\\OERFallbackFonts})}\n")
 # The default's faces: IBM Plex, its Serif for the text, its Sans and Mono

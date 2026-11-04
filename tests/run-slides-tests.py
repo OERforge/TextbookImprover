@@ -4879,6 +4879,58 @@ def case_round_trip(work):
         seen == [(label, True, sorted(where)) for label, _o, _n, *where in changes], seen
 
 
+def subtitle(shape_id, text):
+    return shape(shape_id, "Subtitle %s" % shape_id, [p(r(text))],
+                 ph='<p:ph type="subTitle" idx="1"/>')
+
+
+def saved_deck(path):
+    """A deck as LibreOffice saves one from an ODP: its title slide a title
+    placeholder beside a subtitle, where PowerPoint's is a ctrTitle."""
+    return deck(path, [
+        {"shapes": [title(2, "A Saved Talk", box=TITLE_BOX), subtitle(3, "For the suite")]},
+        {"shapes": [title(2, "Second Slide", box=TITLE_BOX), content(3, ["One point"])]}])
+
+
+def case_saved_title(work):
+    """The title slide as LibreOffice saves one, a title placeholder beside
+    a subtitle with nothing else on the slide, where PowerPoint's has a
+    ctrTitle: the deck's title and subtitle, as PowerPoint's is. Not the
+    layout's type, which LibreOffice gives ordinary slides too."""
+    import pptxsource
+    answer = os.path.join(work, "saved.pptx")
+    saved_deck(answer)
+
+    def title_slide(path):
+        doc, record = pptxsource.read(path, work, work)
+        losses = [kind for kind, _ in record.losses]
+        return (inline_text(doc["meta"]["title"]["c"]) if "title" in doc["meta"] else None,
+                inline_text(doc["meta"]["subtitle"]["c"]) if "subtitle" in doc["meta"] else None,
+                [inline_text(b["c"][2]) for b in doc["blocks"] if b["t"] == "Header"],
+                "title-slide" in losses)
+    yield "the reader takes a first slide's title and subtitle alone as the title slide, as " \
+        "LibreOffice saves one", title_slide(answer) == (
+            "A Saved Talk", "For the suite", ["Second Slide"], False), title_slide(answer)
+    more = os.path.join(work, "more.pptx")
+    deck(more, [{"shapes": [title(2, "A Picture and Its Words", box=TITLE_BOX),
+                            subtitle(3, "Its caption"), content(4, ["Its text"])]},
+                {"shapes": [title(2, "Next", box=TITLE_BOX), content(3, ["Text"])]}])
+    yield "but not one with more on it, which would be lost", title_slide(more) == (
+        None, None, ["A Picture and Its Words", "Next"], False), title_slide(more)
+    typed = os.path.join(work, "typed.pptx")
+    deck(typed, [{"shapes": [title(2, "Agenda", box=TITLE_BOX), content(3, ["Items"])]},
+                 {"shapes": [title(2, "Next", box=TITLE_BOX), content(3, ["Text"])]}],
+         layout=layout_xml().replace('type="obj"', 'type="title"', 1))
+    yield "nor a slide on a layout typed a Title Slide's, as LibreOffice types ordinary ones", \
+        title_slide(typed) == (None, None, ["Agenda", "Next"], False), title_slide(typed)
+    empty = os.path.join(work, "empty.pptx")
+    deck(empty, [{"shapes": [title(2, "Just a Slide", box=TITLE_BOX),
+                             shape(4, "Subtitle 4", [], ph='<p:ph type="subTitle" idx="2"/>')]},
+                 {"shapes": [title(2, "Next", box=TITLE_BOX), content(3, ["Text"])]}])
+    yield "nor a title beside an empty subtitle", title_slide(empty) == (
+        None, None, ["Just a Slide", "Next"], False), title_slide(empty)
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -4907,7 +4959,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("each deck's language", case_deck_languages),
          ("a converted deck's PDF and presentation", case_converting_more),
          ("a deck rebuilt on a template", case_rebuild),
-         ("the round trip", case_round_trip)]
+         ("the round trip", case_round_trip),
+         ("the title slide as LibreOffice saves one", case_saved_title)]
 
 
 def main():

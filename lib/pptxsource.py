@@ -44,10 +44,12 @@ checks and the copy, and keeps:
 - speaker notes, as a ::: notes div after the slide's content, read as
   the slide's text is, a list's bullets inherited from the notes master;
 - the title slide, the first slide when its title is a ctrTitle
-  placeholder, as the deck's title and subtitle, which is where Pandoc's
-  slide writers take a title slide from; its notes go first, before the
-  first slide's heading, which Pandoc's PowerPoint writer gives the title
-  slide; the deck's language, from its text.
+  placeholder, or when it holds a title and a subtitle with text and
+  nothing else, as LibreOffice saves a title slide (bare_title_slide),
+  as the deck's title and subtitle, which is where Pandoc's slide writers
+  take a title slide from; its notes go first, before the first slide's
+  heading, which Pandoc's PowerPoint writer gives the title slide; the
+  deck's language, from its text.
 
 The decisions a person made for the deck's copy (pptxremediate.py) are
 the conversion's too, read from the same sidecars with the same keys and
@@ -353,6 +355,31 @@ def chain_levels(lists):
 # --------------------------------------------------------------------------
 # A deck
 # --------------------------------------------------------------------------
+
+
+def bare_title_slide(slide):
+    """Whether a slide holds a title, a subtitle with text, and nothing
+    else the reader keeps, which is how LibreOffice saves a title slide:
+    a title placeholder beside a subtitle, where PowerPoint's title slide
+    has a ctrTitle. Not the slide's layout: LibreOffice gives ordinary
+    slides' layouts the Title Slide type too (an ODP page with no layout
+    of its own, as Impress saves a Section Header or a Content with
+    Caption slide), so a slide with more on it is read as a slide."""
+    subtitle = False
+
+    def kept(shape):
+        nonlocal subtitle
+        if shape.kind == "grpSp":
+            return any(kept(child) for child in shape.children)
+        if shape.hidden or shape.furniture or shape.is_title:
+            return False
+        if shape.ph_type == "subTitle":
+            subtitle = subtitle or bool(shape.text.strip())
+            return False
+        return shape.kind not in ("sp", "cxnSp") or bool(
+            shape.text.strip() or shape.image or shape.math)
+    return not any(kept(shape) for shape in slide.shapes) and subtitle
+
 
 class Reader:
     """One deck, read slide by slide into Pandoc's blocks."""
@@ -978,7 +1005,8 @@ class Reader:
                 sections.setdefault(sid, (n, name))
         opened = set()
         title_slide = None
-        if shown and shown[0].title_shape is not None and shown[0].title_shape.ph_type == "ctrTitle":
+        if shown and shown[0].title_shape is not None and (
+                shown[0].title_shape.ph_type == "ctrTitle" or bare_title_slide(shown[0])):
             title_slide = shown[0]
         for slide in shown:
             self.slide = slide

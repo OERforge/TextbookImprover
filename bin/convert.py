@@ -79,6 +79,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import alttext
+    import decksave
     import docxrepair
     import docxremediate
     import htmlremediate
@@ -151,6 +152,8 @@ INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
 SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 # PowerPoint decks: sources of a slides run, not a book's pages (deckrun.py).
 DECK_EXTENSIONS = (".pptx",)
+# Decks a slides run saves as PowerPoint before it reads them (decksave.py).
+OTHER_DECK_EXTENSIONS = decksave.EXTENSIONS
 # A tar, compressed or not, which a plain archive of a book's files can be
 # as well as a zip.
 TAR_EXTENSIONS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
@@ -405,8 +408,8 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     import sitesource
     import cartridgesource
     import tarfile
-    skip = SOURCE_EXTENSIONS + DECK_EXTENSIONS + (".yaml", ".yml", ".csv", ".json", ".css",
-                                                  ".lua", ".txt", ".pdf", ".epub")
+    skip = SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS + (
+        ".yaml", ".yml", ".csv", ".json", ".css", ".lua", ".txt", ".pdf", ".epub")
     candidates = sorted(p for p in glob.glob(os.path.join(base, "*"))
                         if os.path.isfile(p) and not p.lower().endswith(skip))
     cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
@@ -431,7 +434,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     # the download it came from). A LaTeX book's are its masters, here or
     # where latex.main names them (FINC 308's src/), whose own cartridge,
     # built beside them, was taken for a book to unpack.
-    if any(p.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS)
+    if any(p.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS)
            for p in glob.glob(os.path.join(base, "*"))) or latex_book_here(base):
         # Beside a folder of its own name, an archive is that folder
         # packed, as a target's archive setting packs one: the run's own
@@ -495,7 +498,8 @@ def unpack_archives(base, check_only=False, linked_documents=False):
                 say(f"{names} holds pages saved from a browser; they're "
                     "unpacked as unpack-site.py unpacks a browser's save.")
             held = sorted(os.listdir(work))
-            if not any(n.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS)
+            if not any(n.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS
+                                          + OTHER_DECK_EXTENSIONS)
                        for n in held):
                 inside = [n for n in held if n.lower().endswith(
                     (".imscc", ".warc", ".gz", ".wacz", ".epub", ".zip")
@@ -546,13 +550,126 @@ def unpack_archives(base, check_only=False, linked_documents=False):
                   if p.lower().endswith(SOURCE_EXTENSIONS))
     decks = sum(1 for p in glob.glob(os.path.join(base, "*"))
                 if p.lower().endswith(DECK_EXTENSIONS))
-    held = (f"{decks} PowerPoint deck(s), which are the slides" if decks and not sources
-            else f"{sources} source(s)" + (f" and {decks} PowerPoint deck(s)" if decks else "")
+    # Decks in other formats are slides once they're saved as PowerPoint
+    # (save_other_decks), which says what to correct then; in a book's
+    # folder they're left out, and that says so.
+    others = 0 if sources else len(decksave.other_decks(base))
+    kinds = " and ".join(part for part in (f"{decks} PowerPoint deck(s)" if decks else "",
+                                           f"{others} deck(s) to save as PowerPoint"
+                                           if others else "") if part)
+    held = (f"{kinds}, which are the slides" if kinds and not sources
+            else f"{sources} source(s)" + (f" and {kinds}" if kinds else "")
             + ", which are the book")
-    say(f"Unpacked {names}: {held} from now on. Correct them, not the archive: "
-        "later runs don't read it again."
+    say(f"Unpacked {names}: {held} from now on"
+        + (", as the PowerPoint files they're saved as next. Correct those"
+           if others else ". Correct them")
+        + ", not the archive: later runs don't read it again."
         + (" unpack-report.csv says what the unpacking found."
            if os.path.exists(os.path.join(base, "unpack-report.csv")) else ""))
+
+
+# How many decks a run couldn't save as PowerPoint (save_other_decks),
+# which makes its exit status 1, as a deck that can't be read does.
+SAVE_FAILED = 0
+
+
+def save_other_decks(base, alone, looks=(), check_only=False):
+    """Each deck here in another format, an OpenDocument presentation
+    (.odp) or a PowerPoint 97-2003 deck (.ppt), saved as PowerPoint beside
+    it through LibreOffice, once (decksave.py): from then on the PowerPoint
+    file is the deck, as an archive's files are the book once it's
+    unpacked, and a later run reads it in the original's place. A deck
+    that can't be saved is named with the reason, and the rest go on, as
+    a deck that can't be read is. alone says the folder has no PowerPoint
+    deck besides, so a run left with nothing to read stops; looks are the
+    decks' reference documents. Returns how many decks a --check-only run
+    would have saved, having saved none."""
+    global SAVE_FAILED
+    found = decksave.plan(base, looks)
+
+    def listing(pairs):
+        return ", ".join(f"{a} as {b}" for a, b in pairs[:4]) + (", ..." if len(pairs) > 4 else "")
+
+    if found.in_place:
+        say(f"NOTE: {len(found.in_place)} deck(s) here aren't read, each one's PowerPoint file "
+            "beside it being the deck in its place, saved from it or its other export ("
+            + ", ".join(f"{b} for {a}" for a, b in found.in_place[:4])
+            + (", ..." if len(found.in_place) > 4 else "") + "). To save one as PowerPoint "
+            "again, delete its PowerPoint file.")
+        for name, pptx in found.in_place:
+            original, saved = os.path.join(base, name), os.path.join(base, pptx)
+            if os.path.getmtime(original) > os.path.getmtime(saved):
+                say(f"WARNING: {name} is newer than {pptx}, which is read in its place: if {name} "
+                    f"has changes {pptx} hasn't, delete {pptx} and run again, which saves it anew.")
+    for name, look in found.looks:
+        say(f"NOTE: {name} isn't read: {look}, the name it would be saved as, is the decks' "
+            "reference document (slides.reference_doc), which isn't a deck.")
+    for name, there in found.blocked:
+        say(f"WARNING: {name} isn't saved as PowerPoint: {there} is here already, and isn't a "
+            "file (a folder, or a link to nothing). Move it, and run again.")
+    for target, names in sorted(found.clashes.items()):
+        say(f"WARNING: {' and '.join(names)} would each be saved as {target}, so none is: keep "
+            "one of them here, or save one as PowerPoint yourself.")
+    to_save = []
+    for name, target in found.to_save:
+        why = decksave.problem(os.path.join(base, name))
+        if why:
+            say(f"ERROR: {name} couldn't be saved as PowerPoint: {why}.")
+            SAVE_FAILED += 1
+        else:
+            to_save.append((name, target))
+    nothing = "No deck here can be read, as the lines above say. Nothing was converted."
+    if not to_save:
+        if alone:
+            die(nothing)
+        return 0
+    program = decksave.libreoffice()
+    named = os.environ.get("LIBREOFFICE", "").strip()
+    missing = (f"LIBREOFFICE names {named}, which isn't a program here" if named
+               else "it isn't installed (soffice, or LIBREOFFICE naming it)")
+    by_hand = ("sudo apt install libreoffice-impress. Or save each as PowerPoint yourself: in "
+               "LibreOffice Impress, File > Save As, PowerPoint 2007-365; in PowerPoint, File > "
+               "Save As, PowerPoint Presentation; from Google Slides, File > Download, Microsoft "
+               "PowerPoint.")
+    if check_only:
+        say(f"{len(to_save)} deck(s) here would be saved as PowerPoint through LibreOffice, each "
+            f"beside its original ({listing(to_save)}), and then checked; a --check-only run "
+            "saves nothing." + ("" if program else f" LibreOffice is needed for that, and "
+                                f"{missing}: {by_hand}"))
+        return len(to_save)
+    if program is None:
+        why = (f"{len(to_save)} deck(s) here are read once they're saved as PowerPoint ("
+               + ", ".join(name for name, _ in to_save[:4]) + (", ..." if len(to_save) > 4 else "")
+               + f"), which LibreOffice does, and {missing}: {by_hand}")
+        if alone:
+            die(why + " Nothing was converted.")
+        say("WARNING: " + why + " They're left out.")
+        return 0
+    saved = []
+    for name, target in to_save:
+        try:
+            decksave.save(program, os.path.join(base, name), os.path.join(base, target))
+        except decksave.SaveError as exc:
+            say(f"ERROR: {name} couldn't be saved as PowerPoint: {exc}.")
+            SAVE_FAILED += 1
+            continue
+        saved.append((name, target))
+    if saved:
+        say(f"Saved {len(saved)} deck(s) as PowerPoint through LibreOffice, each beside its "
+            f"original ({listing(saved)}): from now on each PowerPoint file is the deck, and its "
+            "original isn't read again. Correct the PowerPoint file, or the sidecars, not the "
+            "original; to save one again, delete its PowerPoint file.")
+    for name, target in saved:
+        objects = decksave.objects_without_pictures(os.path.join(base, target))
+        if objects:
+            say(f"NOTE: LibreOffice gave {objects} embedded object(s) in {target} no picture, "
+                "so they're left out, as the run says of each"
+                + (": a PowerPoint 97-2003 deck's equations are such objects. PowerPoint's own "
+                   f"Save As keeps their pictures: {name} saved as PowerPoint there, in place of "
+                   f"{target}, keeps them." if name.lower().endswith(".ppt") else "."))
+    if alone and not saved:
+        die(nothing)
+    return 0
 
 
 def die(text, code=1):
@@ -685,6 +802,8 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         alt_max_chars=first["images.alt_max_chars"],
         alt_placeholders=first["images.alt_placeholders"] or (),
         check_only=args.check_only, say=say, copy_language=copy_language, math=math)
+    if SAVE_FAILED:
+        code = code or 1
     report_languages(project, reports, paths)
     warn_unreviewed(paths)
     if not archive:
@@ -5994,21 +6113,38 @@ def main():
              for name in oerconfig.reference_docs(os.path.join(base, CONFIG_NAME))}
     decks = [name for name in deckrun.deck_sources(base)
              if os.path.normcase(os.path.abspath(os.path.join(base, name))) not in looks]
+    # Decks in another format, saved as PowerPoint before they're read
+    # (save_other_decks), are PowerPoint decks for what the folder is,
+    # but beside decks written in Markdown, which a slides run reads
+    # alone, as it did before such decks were read.
+    others = decksave.other_decks(base)
     book_here = bool(book_sources(base)) or latex_book_here(base)
     markdown_here = [n for n in book_sources(base) if n.lower().endswith(".md")]
     targets, project = load_targets(base, args.allow_unknown_keys,
-                                    decks_only=bool(decks) and not book_here,
-                                    pptx_decks=bool(decks),
+                                    decks_only=bool(decks or others) and not book_here,
+                                    pptx_decks=bool(decks or (others and not markdown_here)),
                                     markdown_decks=bool(markdown_here))
     # A folder is a book or a set of slides: slides when project.kind says
     # so, or when it says nothing and the folder holds decks alone.
-    slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks)
+    slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks or others)
                                            and not book_here)
     if decks and not slides:
         say(f"NOTE: {len(decks)} PowerPoint deck(s) here are left out ("
             + ", ".join(decks[:4]) + (", ..." if len(decks) > 4 else "")
             + "): a deck isn't a page of a book. In a folder of their own, decks "
             "are slides, each checked and remediated (project.kind: slides).")
+    if others and not slides:
+        say(f"NOTE: {len(others)} deck(s) in other formats here are left out ("
+            + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
+            + "): a deck isn't a page of a book. In a folder of their own, decks "
+            "are slides, each saved as PowerPoint, checked, and remediated "
+            "(project.kind: slides).")
+    if slides and others and markdown_here and not decks:
+        say(f"NOTE: {len(others)} deck(s) in other formats here are left out ("
+            + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
+            + "): this folder's slides are its decks written in Markdown, and a slides run "
+            "reads one kind of deck for now.")
+        others = []
     if slides and decks and markdown_here:
         # The two kinds' runs write the same reports, PowerPoint decks'
         # from the decks themselves (deckrun.py) and Markdown decks' from
@@ -6017,6 +6153,12 @@ def main():
             f"{len(markdown_here)} written in Markdown ({decks[0]}, {markdown_here[0]}). "
             "Put each kind in a folder of its own: a slides run reads one kind of deck "
             "for now. Nothing was converted.")
+    if slides and others:
+        if save_other_decks(base, alone=not decks, looks=looks,
+                            check_only=args.check_only) and not decks:
+            sys.exit(0)
+        decks = [name for name in deckrun.deck_sources(base)
+                 if os.path.normcase(os.path.abspath(os.path.join(base, name))) not in looks]
     # Pandoc 3.9 introduced the options this script relies on. Earlier
     # versions accept most of the command line and quietly do something
     # else: 3.6 and older write grid tables without cell spans, so a table

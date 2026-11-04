@@ -13,9 +13,11 @@ and runs here without one on the PATH too; the case of a deck beside a
 book's pages, whose book needs Pandoc 3.9 or later, and the cases that
 convert a deck skip without it, a deck rebuilt on a template and the
 round trip without 3.10.1, a deck's PDF without LuaLaTeX,
-ltx-talk, or the packages the deck loads too, and the reading of its
-slides without pikepdf. The rest needs nothing but the standard
-library, and PyYAML where it runs convert.py.
+ltx-talk, or the packages the deck loads too, the reading of its
+slides without pikepdf, and an ODP saved as PowerPoint by LibreOffice
+itself without LibreOffice or Pandoc (the other cases of decks in other
+formats save through a stand-in for LibreOffice). The rest needs nothing
+but the standard library, and PyYAML where it runs convert.py.
 
 A deck converted is held to a round trip: to Markdown, back to
 PowerPoint through a Markdown deck's pptx target, and compared with
@@ -4879,6 +4881,39 @@ def case_round_trip(work):
         seen == [(label, True, sorted(where)) for label, _o, _n, *where in changes], seen
 
 
+# A stand-in for LibreOffice's soffice, so the save of a deck in another
+# format runs without LibreOffice: its arguments logged, and --convert-to
+# pptx --outdir DIR FILE answered with the deck FAKE_SOFFICE_DECK names,
+# copied to DIR under FILE's name; FAKE_SOFFICE_MODE fail exits 1 saying
+# why, nothing exits 0 having written nothing, garbage writes a file that
+# isn't PowerPoint's, and hang starts a program of its own, as soffice
+# starts soffice.bin, its process id in FAKE_SOFFICE_LOG.pid, and waits.
+FAKE_SOFFICE = r'''#!/usr/bin/env python3
+import os, shutil, subprocess, sys, time
+args = sys.argv[1:]
+with open(os.environ["FAKE_SOFFICE_LOG"], "a") as fh:
+    fh.write("\t".join(args) + "\n")
+mode = os.environ.get("FAKE_SOFFICE_MODE", "ok")
+if mode == "fail":
+    print("Error: source file could not be loaded", file=sys.stderr)
+    sys.exit(1)
+if mode == "nothing":
+    sys.exit(0)
+if mode == "hang":
+    child = subprocess.Popen(["sleep", "60"])
+    with open(os.environ["FAKE_SOFFICE_LOG"] + ".pid", "w") as fh:
+        fh.write(str(child.pid))
+    time.sleep(60)
+out = args[args.index("--outdir") + 1]
+stem = os.path.splitext(os.path.basename(args[-1]))[0]
+if mode == "garbage":
+    with open(os.path.join(out, stem + ".pptx"), "w") as fh:
+        fh.write("not a zip")
+    sys.exit(0)
+shutil.copy(os.environ["FAKE_SOFFICE_DECK"], os.path.join(out, stem + ".pptx"))
+'''
+
+
 def subtitle(shape_id, text):
     return shape(shape_id, "Subtitle %s" % shape_id, [p(r(text))],
                  ph='<p:ph type="subTitle" idx="1"/>')
@@ -4890,6 +4925,21 @@ def saved_deck(path):
     return deck(path, [
         {"shapes": [title(2, "A Saved Talk", box=TITLE_BOX), subtitle(3, "For the suite")]},
         {"shapes": [title(2, "Second Slide", box=TITLE_BOX), content(3, ["One point"])]}])
+
+
+def odp_file(path, encrypted=False):
+    """An ODP as far as its package goes, which is all the stand-in for
+    LibreOffice needs and decksave.problem() looks at: its mimetype first,
+    and a manifest, with encryption data when encrypted."""
+    entry = ('<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml">'
+             + ('<manifest:encryption-data manifest:checksum-type="SHA1/1K" '
+                'manifest:checksum="x"/>' if encrypted else "") + '</manifest:file-entry>')
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(zipfile.ZipInfo("mimetype"), "application/vnd.oasis.opendocument."
+                         "presentation", compress_type=zipfile.ZIP_STORED)
+        archive.writestr("META-INF/manifest.xml", '<manifest:manifest xmlns:manifest="urn:oasis:'
+                         'names:tc:opendocument:xmlns:manifest:1.0">%s</manifest:manifest>' % entry)
+        archive.writestr("content.xml", "<office:document-content/>")
 
 
 def case_saved_title(work):
@@ -4931,6 +4981,343 @@ def case_saved_title(work):
         None, None, ["Just a Slide", "Next"], False), title_slide(empty)
 
 
+def case_other_formats(work):
+    """Decks in other formats, an ODP or a PowerPoint 97-2003 deck, saved as
+    PowerPoint beside them through LibreOffice before a slides run reads
+    them (decksave.py), with a stand-in for LibreOffice that answers with a
+    deck of the suite's, so it runs without one."""
+    import decksave
+    import time
+    tools = os.path.join(work, "tools")
+    os.makedirs(tools)
+    fake = os.path.join(tools, "soffice")
+    with open(fake, "w") as fh:
+        fh.write(FAKE_SOFFICE)
+    os.chmod(fake, 0o755)
+    log = os.path.join(work, "soffice.log")
+    answer = os.path.join(work, "answer.pptx")
+    saved_deck(answer)
+    env = dict(os.environ, LIBREOFFICE=fake, FAKE_SOFFICE_LOG=log, FAKE_SOFFICE_DECK=answer)
+    missing = os.path.join(tools, "missing")
+
+    def run(where, *flags, **extra):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+                              cwd=where, env=dict(env, **extra), capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+
+    def calls():
+        if not os.path.exists(log):
+            return []
+        with open(log) as fh:
+            return [line.rstrip("\n").split("\t") for line in fh]
+
+    def folder_of(name, *decks):
+        where = os.path.join(work, name)
+        os.makedirs(where)
+        for deck_name in decks:
+            path = os.path.join(where, deck_name)
+            if deck_name.endswith(".odp"):
+                odp_file(path)
+            elif deck_name.endswith(".ppt"):
+                with open(path, "wb") as fh:
+                    fh.write(deckrun.OLE + b"\0" * 504)
+            else:
+                clean_deck(path)
+        return where
+
+    folder = folder_of("decks", "talk.odp")
+    odp = os.path.join(folder, "talk.odp")
+    with open(odp, "rb") as fh:
+        before = fh.read()
+    result = run(folder)
+    yield "a deck in ODP is saved as PowerPoint beside it, and the run reads that as the deck", \
+        result.returncode == 0 and os.path.exists(os.path.join(folder, "talk.pptx")) \
+        and "Saved 1 deck(s) as PowerPoint through LibreOffice, each beside its original " \
+        "(talk.odp as talk.pptx): from now on each PowerPoint file is the deck" in result.stderr \
+        and os.path.exists(os.path.join(folder, "remediated", "talk.pptx")), result.stderr[-700:]
+    with open(odp, "rb") as fh:
+        yield "the original is left as it is", fh.read() == before, ""
+    asked = calls()
+    profile = [a for a in (asked[0] if asked else []) if a.startswith("-env:UserInstallation=")]
+    yield "LibreOffice is asked for PowerPoint, headless, with a profile of its own, into a " \
+        "folder of its own", len(asked) == 1 and "--headless" in asked[0] \
+        and asked[0][asked[0].index("--convert-to") + 1] == "pptx" \
+        and os.path.dirname(asked[0][asked[0].index("--outdir") + 1]) != folder \
+        and asked[0][-1] == odp and len(profile) == 1 and profile[0].startswith(
+            "-env:UserInstallation=file://"), asked
+    yield "and the profile and that folder are removed after", asked and not os.path.exists(
+        os.path.dirname(asked[0][asked[0].index("--outdir") + 1])), asked
+    result = run(folder)
+    yield "a later run reads the PowerPoint file, and doesn't save the original again", \
+        result.returncode == 0 and len(calls()) == 1 and "1 deck(s) here aren't read, each " \
+        "one's PowerPoint file beside it being the deck in its place, saved from it or its " \
+        "other export (talk.pptx for talk.odp)" in result.stderr \
+        and "newer" not in result.stderr, result.stderr[-700:]
+    later = os.path.getmtime(os.path.join(folder, "talk.pptx")) + 60
+    os.utime(odp, (later, later))
+    result = run(folder)
+    yield "an original newer than its PowerPoint file is warned of", \
+        "WARNING: talk.odp is newer than talk.pptx, which is read in its place: if talk.odp " \
+        "has changes talk.pptx hasn't, delete talk.pptx and run again" in result.stderr, \
+        result.stderr[-500:]
+    old = os.path.join(folder, "older.ppt")
+    with open(old, "wb") as fh:
+        fh.write(deckrun.OLE + b"\0" * 504)
+    result = run(folder, "--check-only")
+    yield "--check-only says what it would save, and saves nothing", \
+        result.returncode == 0 and not os.path.exists(os.path.join(folder, "older.pptx")) \
+        and len(calls()) == 1 and "1 deck(s) here would be saved as PowerPoint through " \
+        "LibreOffice, each beside its original (older.ppt as older.pptx), and then checked; " \
+        "a --check-only run saves nothing." in result.stderr, result.stderr[-500:]
+    result = run(folder, "--check-only", LIBREOFFICE=missing)
+    yield "and without LibreOffice, how to save one by hand", \
+        result.returncode == 0 and "LibreOffice is needed for that, and LIBREOFFICE names " \
+        "%s, which isn't a program here: sudo apt install libreoffice-impress. Or save each " \
+        "as PowerPoint yourself" % missing in result.stderr, result.stderr[-500:]
+    result = run(folder, FAKE_SOFFICE_MODE="fail")
+    yield "a deck LibreOffice can't save is named, saying why, with nothing left beside it, " \
+        "and the rest are read, the run's status 1", \
+        result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
+        "LibreOffice wrote no PowerPoint file (exit status 1; Error: source file could not be " \
+        "loaded; a deck saved with a password can't be, and LibreOffice needs its Impress " \
+        "(libreoffice-impress) for any)." in result.stderr \
+        and "Slides: 1 PowerPoint deck(s)" in result.stderr \
+        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-600:]
+    result = run(folder, FAKE_SOFFICE_MODE="nothing")
+    yield "and so is one LibreOffice writes nothing for, though it says nothing either", \
+        result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
+        "LibreOffice wrote no PowerPoint file." in result.stderr \
+        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-500:]
+    result = run(folder, FAKE_SOFFICE_MODE="garbage")
+    yield "and one whose PowerPoint file isn't one", \
+        result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
+        "LibreOffice wrote no PowerPoint file." in result.stderr \
+        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-500:]
+    os.remove(old)
+
+    bad = folder_of("bad", "clean.pptx")
+    with open(os.path.join(bad, "empty.odp"), "wb"):
+        pass
+    with open(os.path.join(bad, "text.odp"), "w") as fh:
+        fh.write("not a deck")
+    odp_file(os.path.join(bad, "locked.odp"), encrypted=True)
+    clean_deck(os.path.join(bad, "renamed.ppt"))
+    clean_deck(os.path.join(bad, "misnamed.odp"))
+    asked = len(calls())
+    result = run(bad)
+    yield "a file that isn't a deck of its kind is named before LibreOffice sees it, and the " \
+        "rest are read", result.returncode == 1 and len(calls()) == asked and all(
+            line in result.stderr for line in (
+                "ERROR: empty.odp couldn't be saved as PowerPoint: the file is empty.",
+                "ERROR: text.odp couldn't be saved as PowerPoint: it isn't an OpenDocument "
+                "presentation (an .odp is a zip, and this isn't one).",
+                "ERROR: locked.odp couldn't be saved as PowerPoint: it's saved with a password",
+                "ERROR: renamed.ppt couldn't be saved as PowerPoint: it isn't a PowerPoint "
+                "97-2003 deck (it's a PowerPoint file: renamed .pptx, it can be read).",
+                "ERROR: misnamed.odp couldn't be saved as PowerPoint: it isn't an OpenDocument "
+                "presentation (it's a PowerPoint file: renamed .pptx, it can be read).")) \
+        and os.path.exists(os.path.join(bad, "remediated", "clean.pptx")) \
+        and not any(n.endswith(".pptx") and n != "clean.pptx" for n in os.listdir(bad)), \
+        result.stderr[-900:]
+
+    alone = folder_of("alone", "talk.odp")
+    result = run(alone, LIBREOFFICE=missing)
+    yield "with no LibreOffice, a folder of decks to save stops, saying how to save one by hand", \
+        result.returncode != 0 and "1 deck(s) here are read once they're saved as PowerPoint " \
+        "(talk.odp), which LibreOffice does, and LIBREOFFICE names %s, which isn't a program " \
+        "here" % missing in result.stderr \
+        and "File > Save As, PowerPoint 2007-365" in result.stderr \
+        and "Nothing was converted." in result.stderr and "left out" not in result.stderr \
+        and not os.path.exists(os.path.join(alone, "talk.pptx")), result.stderr[-500:]
+    clean_deck(os.path.join(alone, "clean.pptx"))
+    result = run(alone, LIBREOFFICE=missing)
+    yield "beside a PowerPoint deck, it's left out with a warning, and the deck is read", \
+        result.returncode == 0 and "They're left out." in result.stderr \
+        and os.path.exists(os.path.join(alone, "remediated", "clean.pptx")) \
+        and not os.path.exists(os.path.join(alone, "remediated", "talk.pptx")), \
+        result.stderr[-500:]
+    os.remove(os.path.join(alone, "clean.pptx"))
+    result = run(alone, LIBREOFFICE="soffice", PATH=tools + os.pathsep + os.environ["PATH"])
+    yield "LIBREOFFICE can name a command on the path", result.returncode == 0 \
+        and os.path.exists(os.path.join(alone, "talk.pptx")), result.stderr[-400:]
+
+    clash = folder_of("clash", "a.odp", "a.ppt", "clean.pptx")
+    result = run(clash)
+    yield "two decks that would each be saved under one name are neither saved", \
+        result.returncode == 0 and "WARNING: a.odp and a.ppt would each be saved as a.pptx, " \
+        "so none is" in result.stderr and not os.path.exists(os.path.join(clash, "a.pptx")), \
+        result.stderr[-500:]
+    os.remove(os.path.join(clash, "clean.pptx"))
+    result = run(clash)
+    yield "and with nothing else to read, the run stops", \
+        result.returncode != 0 and "No deck here can be read, as the lines above say." \
+        in result.stderr, result.stderr[-300:]
+
+    blocked = folder_of("blocked", "folder.odp", "linked.odp", "clean.pptx")
+    os.makedirs(os.path.join(blocked, "folder.pptx"))
+    os.symlink(os.path.join(work, "nowhere.pptx"), os.path.join(blocked, "linked.pptx"))
+    result = run(blocked)
+    yield "a folder or a link to nothing at a deck's PowerPoint name keeps it from being " \
+        "saved, said so", result.returncode == 0 and all(
+            "WARNING: %s.odp isn't saved as PowerPoint: %s.pptx is here already, and isn't a " \
+            "file" % (n, n) in result.stderr for n in ("folder", "linked")) \
+        and os.path.isdir(os.path.join(blocked, "folder.pptx")), result.stderr[-600:]
+
+    looked = folder_of("looked", "template.odp", "clean.pptx")
+    clean_deck(os.path.join(looked, "template.pptx"))
+    with open(os.path.join(looked, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  remediated:\n    format: source\n    slides:\n"
+                 "      reference_doc: template.pptx\n")
+    result = run(looked)
+    yield "an original whose PowerPoint name is the decks' reference document isn't read", \
+        "NOTE: template.odp isn't read: template.pptx, the name it would be saved as, is the " \
+        "decks' reference document" in result.stderr and "newer" not in result.stderr, \
+        result.stderr[-500:]
+
+    archive = os.path.join(work, "archived")
+    os.makedirs(archive)
+    odp_file(os.path.join(work, "one.odp"))
+    with zipfile.ZipFile(os.path.join(archive, "decks.zip"), "w") as zf:
+        zf.write(os.path.join(work, "one.odp"), "one.odp")
+    result = run(archive)
+    yield "an archive's decks in other formats are unpacked, then saved as PowerPoint", \
+        result.returncode == 0 and "Unpacked decks.zip: 1 deck(s) to save as PowerPoint, which " \
+        "are the slides from now on, as the PowerPoint files they're saved as next. Correct " \
+        "those, not the archive" in result.stderr \
+        and os.path.exists(os.path.join(archive, "one.pptx")), result.stderr[-600:]
+
+    decksave_timeout, decksave.TIMEOUT = decksave.TIMEOUT, 1
+    hung = folder_of("hung", "slow.odp")
+    pid_file = log + ".pid"
+    try:
+        saved_env = dict(os.environ)
+        os.environ.update(FAKE_SOFFICE_LOG=log, FAKE_SOFFICE_DECK=answer, FAKE_SOFFICE_MODE="hang")
+        started = time.monotonic()
+        try:
+            decksave.save([fake], os.path.join(hung, "slow.odp"), os.path.join(hung, "slow.pptx"))
+            why = None
+        except decksave.SaveError as exc:
+            why = str(exc)
+        took = time.monotonic() - started
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_env)
+        decksave.TIMEOUT = decksave_timeout
+    with open(pid_file) as fh:
+        child = int(fh.read())
+    gone = False
+    for _ in range(40):
+        try:
+            with open("/proc/%d/stat" % child) as fh:
+                gone = fh.read().split(")")[-1].split()[0] == "Z"
+        except OSError:
+            gone = True
+        if gone:
+            break
+        time.sleep(0.05)
+    yield "a save that takes too long stops LibreOffice and what it started, at once", \
+        why == "LibreOffice took more than 1 seconds" and gone and took < 15 \
+        and not os.path.exists(os.path.join(hung, "slow.pptx")), (why, child, gone, took)
+
+    if pandoc_ok():
+        book = os.path.join(work, "book")
+        os.makedirs(book)
+        with open(os.path.join(book, "one.md"), "w") as fh:
+            fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
+        odp_file(os.path.join(book, "talk.odp"))
+        asked = len(calls())
+        result = run(book, "--check-only")
+        yield "in a book's folder, a deck in another format is left out, and isn't saved", \
+            "NOTE: 1 deck(s) in other formats here are left out (talk.odp): a deck isn't a " \
+            "page of a book" in result.stderr and not os.path.exists(
+                os.path.join(book, "talk.pptx")) and len(calls()) == asked, result.stderr[-500:]
+        markdown = os.path.join(work, "markdown")
+        os.makedirs(markdown)
+        with open(os.path.join(markdown, "lecture.md"), "w") as fh:
+            fh.write("---\ntitle: A Lecture\n---\n\n## One\n\nText.\n")
+        odp_file(os.path.join(markdown, "lecture.odp"))
+        with open(os.path.join(markdown, "project.yaml"), "w") as fh:
+            fh.write("project:\n  kind: slides\n  title: Lectures\n  identifier: org.example.l\n")
+        result = run(markdown, "--check-only")
+        yield "beside decks written in Markdown, one in another format is left out, and they're " \
+            "read", result.returncode == 0 and "NOTE: 1 deck(s) in other formats here are left " \
+            "out (lecture.odp): this folder's slides are its decks written in Markdown" \
+            in result.stderr and len(calls()) == asked \
+            and not os.path.exists(os.path.join(markdown, "lecture.pptx")), result.stderr[-600:]
+
+    # What decksave.py finds for itself.
+    plain = os.path.join(work, "plan")
+    os.makedirs(plain)
+    for name in ("b.ODP", "C.odp", "c.PPTX", "d.ppt", ".~lock.d.ppt#", "~$e.ppt", "notes.txt"):
+        with open(os.path.join(plain, name), "wb") as fh:
+            fh.write(b"x")
+    found = decksave.plan(plain)
+    yield "the plan: the decks to save and their names, a PowerPoint file in any case taken " \
+        "as one's own, and the lock files left alone", \
+        found.to_save == [("b.ODP", "b.pptx"), ("d.ppt", "d.pptx")] \
+        and found.in_place == [("C.odp", "c.PPTX")] and found.clashes == {} \
+        and found.blocked == [] and found.looks == [], vars(found)
+    ole = os.path.join(work, "ole.pptx")
+    frame = ('<p:graphicFrame>%s<p:xfrm><a:off x="0" y="0"/><a:ext cx="9" cy="9"/></p:xfrm>'
+             '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/'
+             '2006/ole">%%s</a:graphicData></a:graphic></p:graphicFrame>'
+             % nv("graphicFrame", 5, "Object 5"))
+    deck(ole, [{"shapes": [
+        title(2, "Objects"),
+        frame % '<p:oleObj r:id="rId9" spid=""><p:embed/></p:oleObj>',
+        frame % '<p:oleObj r:id="rId9"/>',
+        frame % ('<p:oleObj r:id="rId9"><p:embed/><p:pic>%s<p:blipFill/><p:spPr/></p:pic>'
+                 '</p:oleObj>' % nv("pic", 6, "Picture 6")),
+        alternate(frame % '<p:oleObj r:id="rId9" spid=""><p:embed/></p:oleObj>',
+                  frame % ('<p:oleObj r:id="rId9"><p:embed/><p:pic>%s<p:blipFill/><p:spPr/>'
+                           '</p:pic></p:oleObj>' % nv("pic", 7, "Picture 7")))]}])
+    yield "embedded objects with no picture are counted, PowerPoint's Choice of one with its " \
+        "picture in the Fallback not among them", decksave.objects_without_pictures(ole) == 2, \
+        decksave.objects_without_pictures(ole)
+
+
+def case_other_formats_libreoffice(work):
+    """A deck in ODP saved as PowerPoint by LibreOffice itself: the ODP made
+    by LibreOffice from a deck Pandoc writes, as an ODP made in LibreOffice
+    Impress is, then read. Skips without LibreOffice or Pandoc."""
+    import decksave
+    import pptxsource
+    if decksave.libreoffice() is None:
+        print("  skip  LibreOffice not found; saving a deck as PowerPoint needs it")
+        return
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    made = os.path.join(work, "made")
+    os.makedirs(made)
+    source = os.path.join(made, "talk.md")
+    with open(source, "w") as fh:
+        fh.write("---\ntitle: A Saved Talk\nsubtitle: For the suite\n---\n\n## Second Slide\n\n"
+                 "- One point\n- Another point\n\n::: notes\nA note.\n:::\n")
+    subprocess.run(["pandoc", source, "-o", os.path.join(made, "talk.pptx")], check=True)
+    profile = tempfile.mkdtemp(prefix="profile-", dir=work)
+    subprocess.run(decksave.libreoffice() + [
+        "--headless", "--norestore", "-env:UserInstallation=file://" + profile,
+        "--convert-to", "odp", "--outdir", folder, os.path.join(made, "talk.pptx")],
+        capture_output=True, check=True)
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=folder,
+                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    saved = os.path.join(folder, "talk.pptx")
+    yield "LibreOffice saves the ODP as PowerPoint beside it, and the run reads and copies it", \
+        result.returncode == 0 and os.path.exists(saved) \
+        and os.path.exists(os.path.join(folder, "remediated", "talk.pptx")), result.stderr[-600:]
+    doc, record = pptxsource.read(saved, work, work)
+    meta = doc["meta"]
+    yield "its title slide is the deck's title and subtitle", \
+        inline_text(meta.get("title", {}).get("c", [])) == "A Saved Talk" \
+        and inline_text(meta.get("subtitle", {}).get("c", [])) == "For the suite", sorted(meta)
+    lists = [b for b in doc["blocks"] if b["t"] == "BulletList"]
+    notes = [b for b in doc["blocks"] if b["t"] == "Div" and "notes" in b["c"][0][1]]
+    yield "and its list and notes are read", len(lists) == 1 and len(lists[0]["c"]) == 2 \
+        and len(notes) == 1, [b["t"] for b in doc["blocks"]]
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -4960,7 +5347,9 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("a converted deck's PDF and presentation", case_converting_more),
          ("a deck rebuilt on a template", case_rebuild),
          ("the round trip", case_round_trip),
-         ("the title slide as LibreOffice saves one", case_saved_title)]
+         ("the title slide as LibreOffice saves one", case_saved_title),
+         ("decks in other formats", case_other_formats),
+         ("a deck in ODP, saved by LibreOffice", case_other_formats_libreoffice)]
 
 
 def main():

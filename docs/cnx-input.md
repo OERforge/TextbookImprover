@@ -11,7 +11,7 @@ cd ~/books/econ
 python3 $T/bin/convert.py
 ```
 
-A repository can hold several books (a "bundle"); `--list` names them, and `--book` picks one. In the Connexions archive, a copy of a book an instructor derived from it is a branch of the book's repository: `git ls-remote --heads` with the repository's address lists them, and `git clone --branch` with a branch's name gets one to unpack. `unpack-cnx.py` reads the repository and never writes to it. It needs lxml (`sudo apt install python3-lxml`, or `pip install lxml`) and nothing else: not Ruby, not Docker, not OpenStax's own tools. Converting what it writes needs Pandoc 3.9 or later, as every conversion does.
+A repository can hold several books (a "bundle"); `--list` names them, and `--book` picks one. In the Connexions archive, a copy of a book an instructor derived from it is a branch of the book's repository: `git ls-remote --heads` with the repository's address lists them, and `git clone --branch` with a branch's name gets one to unpack. `unpack-cnx.py` reads the repository and never writes to it. It needs lxml (`sudo apt install python3-lxml`, or `pip install lxml`) and nothing else: not Ruby, not Docker, not OpenStax's own tools. Converting what it writes needs Pandoc 3.9 or later, as every conversion does. A book that keeps exercises in OpenStax's exercise bank needs the network the first time it's unpacked, which fetches them; converting it never does ([below](#exercises-from-openstaxs-exercise-bank)).
 
 ## What's written
 
@@ -162,6 +162,13 @@ A link to a module of another book in the same repository (a bundle's microecono
 Many of OpenStax's newer books keep exercises outside the repository, in OpenStax's exercise bank: *Principles of Marketing*'s knowledge checks and end-of-chapter questions, *Foundations of Information Systems*'s review questions, nearly all of *Contemporary Mathematics*'s questions, *Algebra 1*'s practice pages. The page holds a link to the exercise, which `unpack-cnx.py` replaces with the exercise, fetched from the bank's public API (`exercises.openstax.org`), and bakes as the recipe says: numbered, its choices lettered, its solution in the answer key with the right letter first.
 
 The first unpacking of such a book fetches every exercise, several at a time, and keeps each in a cache, `~/.cache/textbookimprover/cnx-exercises` by default (`--exercises-cache` names another), so later runs need no network and the cache can be copied to a machine that has none. `--offline` uses the cache alone. An exercise that can't be had is a sentence saying so where it would stand, and a row in the report.
+
+So fetching is part of unpacking, not a step of its own. A book's exercises are fetched as `unpack-cnx.py` puts the book together, and the pages it writes hold them, so `convert.py`, which reads those pages, never asks the bank for anything, and converting the book again, or to other formats, fetches nothing. An exercise already in the cache isn't fetched again, which also means the cache isn't brought up to date: an exercise OpenStax changes in the bank later is unpacked as it was cached until its file in the cache is deleted. Without the network, an exercise the cache doesn't have is the sentence saying so, and the report's `exercise-missing`; unpacking the book again with the network, into a new folder as always, puts it in. To unpack on a machine that can't reach the bank, unpack the book once on one that can, copy the cache's folder across, and unpack with `--offline`, naming the copy with `--exercises-cache` if it isn't in the default place:
+
+```bash
+python3 $T/bin/unpack-cnx.py osbooks-principles-marketing --book principles-marketing \
+    -o ~/books/marketing --exercises-cache ~/cnx-exercises --offline
+```
 
 The bank makes some books' answers public and not others': *Principles of Marketing*'s are, all but two of its 662 questions', and of *Foundations of Information Systems*'s 410, 100 are, so its other questions come without their answers, and its answer key holds those 100 (in the bank as fetched on 2026-11-03). OpenStax's own Word files have them, because OpenStax builds with a token the bank's owners issue; one set in the environment variable `OPENSTAX_EXERCISES_TOKEN` is used, and the cache keeps what it brings apart from the public copies.
 

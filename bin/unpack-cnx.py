@@ -45,9 +45,12 @@ A newer OpenStax book keeps many of its exercises (a section's
 repository. They're fetched from the bank's public API
 (exercises.openstax.org) the first time a book is unpacked and kept in a
 cache, ~/.cache/textbookimprover/cnx-exercises by default, so later runs
-need no network; --offline uses the cache alone. Where the bank keeps an
-exercise's answers private, its question comes without them, and the
-report says so.
+need no network; --offline uses the cache alone. An exercise the cache
+has isn't fetched again, so a change OpenStax makes to it later isn't
+seen until --update-exercises asks the bank for each of the book's
+exercises again and writes the newer ones over the cache's copies. Where
+the bank keeps an exercise's answers private, its question comes without
+them, and the report says so.
 
 The repository is read, never written. Needs lxml (python3-lxml).
 
@@ -105,10 +108,18 @@ def main():
                         f"are kept (default: {default_cache()})")
     parser.add_argument("--offline", action="store_true",
                         help="don't fetch exercises; use the cache alone")
+    parser.add_argument("--update-exercises", action="store_true",
+                        help="ask the bank again for each exercise the book "
+                        "embeds, which the cache's copy otherwise stands in "
+                        "for, and write a newer version over the cache's copy "
+                        "(needs the network)")
     parser.add_argument("--no-boxes", action="store_true",
                         help="don't make the book's notes boxes (class box), "
                         "which every format draws with a border or rules")
     args = parser.parse_args()
+    if args.offline and args.update_exercises:
+        parser.error("--update-exercises asks the bank, which --offline "
+                     "doesn't: give one or the other")
     try:
         repo = Repo(args.repository)
     except ValueError as exc:
@@ -126,7 +137,8 @@ def main():
     if os.path.exists(out) and os.listdir(out):
         sys.exit(f"{out} exists and is not empty; unpacking would mix two "
                  "books. Name another directory with -o.")
-    bank = Bank(cache=args.exercises_cache, offline=args.offline)
+    bank = Bank(cache=args.exercises_cache, offline=args.offline,
+                update=args.update_exercises)
     result = unpack(args.repository, out, book.slug, bank=bank,
                     boxes=not args.no_boxes)
     how = (f"baked as OpenStax bakes style {result.style!r}" if result.baked
@@ -150,6 +162,23 @@ def main():
               + (f"; {result.exercises_missing} couldn't be had"
                  if result.exercises_missing else "")
               + f" (cache: {bank.cache}).")
+    if bank.update:
+        cached = len(bank.updated) + len(bank.unchanged) + len(bank.not_updated)
+        missing = len(bank.asked & set(bank.failures))
+        fetched = len(bank.asked) - cached - missing
+        parts = [f"{len(bank.updated)} newer, written over the cache's copy",
+                 f"{len(bank.unchanged)} at the cache's version"]
+        if bank.not_updated:
+            parts.append(f"{len(bank.not_updated)} not updated, the bank's not "
+                         "newer or not to be had (exercise-not-updated in "
+                         "unpack-report.csv)")
+        line = (f"--update-exercises: {cached} of the book's {len(bank.asked)} "
+                "exercise(s) in the cache, asked of the bank again: "
+                + "; ".join(parts) + ".")
+        if fetched or missing:
+            line += (f" {fetched + missing} not in the cache: {fetched} fetched as "
+                     f"on a first unpacking, {missing} not to be had.")
+        print(line)
     if result.exercise_formulas_rewritten:
         print(f"{result.exercise_formulas_rewritten} of their formulas, "
               "written for MathJax in forms Pandoc's TeX reader doesn't "

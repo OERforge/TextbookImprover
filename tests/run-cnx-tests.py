@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from html import unescape
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1027,6 +1028,347 @@ source, 2020.</span></note></section>""")
          and "1. A source, 2020." in flat(refs)),
     ]
 
+
+
+# The bank asked again (--update-exercises) --------------------------------
+
+# Runs a script (unpack-cnx.py, util/fetch-exercises.py) with the bank's
+# answers from a file in place of the network: the file maps each address
+# asked for to its answer, a picture's bytes as a string of latin-1
+# characters, null for one that can't be had, {"cut off": true} for a
+# reply cut off (http.client.IncompleteRead), or {"flaky": answer} for one
+# that fails the first time it's asked and answers after; and every
+# address asked for is a line of the second file named.
+BANK_RUNNER = """
+import json, runpy, sys
+lib, script, bank, asked = sys.argv[1:5]
+sys.path.insert(0, lib)
+from cnx import exercises
+with open(bank, encoding="utf-8") as fh:
+    answers = json.load(fh)
+def fetch(self, url, auth=True):
+    with open(asked, encoding="utf-8") as fh:
+        before = fh.read().split().count(url)
+    with open(asked, "a", encoding="utf-8") as fh:
+        fh.write(url + "\\n")
+    answer = answers.get(url)
+    if isinstance(answer, dict) and "flaky" in answer:   # fails the first time
+        if not before:
+            raise OSError("the bank timed out (the suite's stand-in)")
+        answer = answer["flaky"]
+    if isinstance(answer, dict) and answer.get("cut off"):
+        import http.client
+        raise http.client.IncompleteRead(b"{")
+    if answer is None:
+        raise OSError("no route to the bank (the suite's stand-in)")
+    if isinstance(answer, str):          # a picture's bytes
+        return answer.encode("latin-1")
+    return json.dumps(answer).encode("utf-8")
+exercises.Bank._fetch = fetch
+sys.argv = [script] + sys.argv[5:]
+runpy.run_path(script, run_name="__main__")
+"""
+
+
+def case_bank_update(work):
+    """--update-exercises: without it an exercise the cache has isn't
+    asked for, though the bank has a newer one, and one whose fetch fails
+    once is asked again; with it each the cache has is asked for once, and
+    the bank's kept in the cache's copy's place where it's a later version,
+    the cache's kept where the bank's is the same version, whatever else
+    differs, or earlier, gone, or not to be had, a reply cut off among
+    them, each reported but the same, and one the cache hasn't fetched as a
+    first unpacking fetches it; with --offline it's refused."""
+    from cnx.exercises import Bank
+    repo = os.path.join(work, "osbooks-updating")
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+<book slug="tiny-updating" style="marketing"
+ href="../collections/tiny-updating.collection.xml"/></container>""")
+    write(os.path.join(repo, "collections", "tiny-updating.collection.xml"),
+          COLLECTION.format(title="Tiny Updating", slug="tiny-updating",
+                            uuid="22222222-2222-4333-8444-666666666666",
+                            content="""
+<col:subcollection><md:title>Getting Going</md:title><col:content>
+<col:module document="m31001"/>
+<col:subcollection><md:title>Selling Basics</md:title><col:content>
+<col:module document="m31002"/><col:module document="m31003"/>
+</col:content></col:subcollection></col:content></col:subcollection>"""))
+    module(repo, "m31001", "Unit Opener", """
+<para id="p1">Here we go.</para>""", cls="unit-opener")
+    module(repo, "m31002", "In Focus", """
+<para id="p1">A shop opens.</para>""", cls="introduction")
+    codes = [f"TEST_UP{n}" for n in range(1, 10)]
+    module(repo, "m31003", "What Selling Is", """
+<para id="p1">Selling is offering.</para>
+<section id="kc" class="knowledge-check"><title>Knowledge Check</title>"""
+           + "".join(f"""
+<exercise id="x{n}"><problem id="pr{n}"><para id="pp{n}"><link class="os-embed"
+url="#exercise/{code}"/></para></problem></exercise>"""
+                     for n, code in enumerate(codes, 1)) + "</section>")
+
+    def item(code, number, version, stem):
+        answer = bank_item(code, stem, ["Yes", "No"], 0, "Yes.")
+        answer["items"][0].update(number=number, version=version,
+                                  uid=f"{number}@{version}")
+        return answer
+
+    def url(code):
+        return f"https://exercises.openstax.org/api/exercises?q=nickname:{code}"
+    cached = {"TEST_UP1": item("TEST_UP1", 1, 1, "Which is the old one?"),
+              "TEST_UP2": item("TEST_UP2", 2, 4, "Which stays as it was?"),
+              "TEST_UP3": item("TEST_UP3", 3, 3, "Which is the cache's third?"),
+              "TEST_UP4": item("TEST_UP4", 4, 1, "Which can't be checked?"),
+              "TEST_UP6": item("TEST_UP6", 6, 2, "Which is gone from the bank?"),
+              "TEST_UP7": item("TEST_UP7", 7, 1, "Which reply is cut off?")}
+    # The same version of TEST_UP2, with something else in the answer that
+    # differs, as a field the bank adds or a picture's address would.
+    same = json.loads(json.dumps(cached["TEST_UP2"]))
+    same["items"][0]["published_at"] = "2026-11-04T12:00:00.000Z"
+    same["items"][0]["questions"][0]["stem_html"] = "Which stays as it was? "
+    bank = {url("TEST_UP1"): item("TEST_UP1", 1, 2, "Which is the new one?"),
+            url("TEST_UP2"): same,
+            url("TEST_UP3"): item("TEST_UP3", 3, 2, "Which is the bank's second?"),
+            url("TEST_UP4"): None,
+            url("TEST_UP5"): item("TEST_UP5", 5, 1, "Which was never cached?"),
+            url("TEST_UP6"): {"total_count": 0, "items": []},
+            url("TEST_UP7"): {"cut off": True},
+            url("TEST_UP8"): {"flaky": item("TEST_UP8", 8, 1, "Which came on a second try?")},
+            url("TEST_UP9"): None}
+    with open(os.path.join(work, "bank.json"), "w", encoding="utf-8") as fh:
+        json.dump(bank, fh)
+    with open(os.path.join(work, "runner.py"), "w", encoding="utf-8") as fh:
+        fh.write(BANK_RUNNER)
+
+    def cache_for(name):
+        cache = os.path.join(work, name)
+        for code, answer in cached.items():
+            write(os.path.join(cache, "public", "nickname", code + ".json"),
+                  json.dumps(answer, ensure_ascii=False, indent=1))
+        return cache
+
+    def run(name, *extra):
+        out, asked = os.path.join(work, name), os.path.join(work, name + "-asked.txt")
+        open(asked, "w").close()
+        done = subprocess.run(
+            ["python3", os.path.join(work, "runner.py"), os.path.join(ROOT, "lib"),
+             os.path.join(BIN, "unpack-cnx.py"), os.path.join(work, "bank.json"), asked,
+             repo, "-o", out, "--exercises-cache", cache_for(name + "-cache"), *extra],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        with open(asked, encoding="utf-8") as fh:
+            return done, out, fh.read().split()
+
+    def cached_copy(name, code):
+        with open(os.path.join(work, name + "-cache", "public", "nickname", code + ".json"),
+                  encoding="utf-8") as fh:
+            return json.load(fh)
+
+    plain, plain_out, plain_asked = run("plain")
+    update, update_out, update_asked = run("update", "--update-exercises")
+    refused, refused_out, refused_asked = run("refused", "--update-exercises", "--offline")
+
+    def page(out):
+        path = os.path.join(out, "1-1-what-selling-is.html")
+        return read(path) if os.path.exists(path) else ""
+    section = page(update_out)
+    rows = {r["Detail"].split(":", 1)[0]: r for r in report_of(update_out)
+            if r["Check"] in ("exercise-updated", "exercise-not-updated")} \
+        if update.returncode == 0 else {}
+    missing = [r["Detail"] for r in report_of(update_out) if r["Check"] == "exercise-missing"] \
+        if update.returncode == 0 else []
+    uncached = ["TEST_UP5", "TEST_UP8", "TEST_UP8", "TEST_UP9", "TEST_UP9"]
+    return [
+        ("without --update-exercises, an exercise the cache has isn't asked for, and is "
+         "unpacked as the cache has it though the bank's is newer; one it hasn't is fetched, "
+         "and one whose first fetch fails is asked again",
+         lambda: plain.returncode == 0
+         and sorted(plain_asked) == sorted(url(code) for code in uncached)
+         and "Which is the old one?" in page(plain_out)
+         and "Which came on a second try?" in page(plain_out)
+         and cached_copy("plain", "TEST_UP1")["items"][0]["version"] == 1),
+        ("with it, each exercise the cache has is asked for once, and the bank's newer "
+         "version is unpacked and written over the cache's copy, reported",
+         lambda: update.returncode == 0
+         and sorted(update_asked) == sorted([url(code) for code in cached]
+                                            + [url(code) for code in uncached])
+         and "Which is the new one?" in section and "Which is the old one?" not in section
+         and cached_copy("update", "TEST_UP1")["items"][0]["version"] == 2
+         and rows.get("#exercise/TEST_UP1", {}).get("Check") == "exercise-updated"
+         and "the bank's 1@2 kept in place of the cache's 1@1"
+         in rows.get("#exercise/TEST_UP1", {}).get("Detail", "")),
+        ("the same version, its answer different in other ways, leaves the cache's copy as "
+         "it is, unreported",
+         lambda: cached_copy("update", "TEST_UP2") == cached["TEST_UP2"]
+         and "#exercise/TEST_UP2" not in rows and "Which stays as it was?" in section),
+        ("the cache's copy is kept, and said why, where the bank's is an earlier version, "
+         "has none, can't be asked, or its reply is cut off",
+         lambda: "Which is the cache's third?" in section
+         and "Which is the bank's second?" not in section
+         and cached_copy("update", "TEST_UP3")["items"][0]["version"] == 3
+         and "earlier version (3@2) than the cache's (3@3)"
+         in rows.get("#exercise/TEST_UP3", {}).get("Detail", "")
+         and "Which can't be checked?" in section
+         and "couldn't be asked" in rows.get("#exercise/TEST_UP4", {}).get("Detail", "")
+         and "Which is gone from the bank?" in section
+         and "has none now" in rows.get("#exercise/TEST_UP6", {}).get("Detail", "")
+         and "Which reply is cut off?" in section
+         and "couldn't be asked: IncompleteRead"
+         in rows.get("#exercise/TEST_UP7", {}).get("Detail", "")
+         and all(rows.get(f"#exercise/{code}", {}).get("Check") == "exercise-not-updated"
+                 for code in ("TEST_UP3", "TEST_UP4", "TEST_UP6", "TEST_UP7"))),
+        ("one the cache hasn't is fetched as on a first unpacking, asked again after a "
+         "failure, and reported missing if it can't be had; the run counts each",
+         lambda: "Which was never cached?" in section
+         and "Which came on a second try?" in section
+         and any(detail.startswith("#exercise/TEST_UP9: couldn't be fetched")
+                 for detail in missing)
+         and "--update-exercises: 6 of the book's 9 exercise(s) in the cache, asked of the "
+             "bank again: 1 newer, written over the cache's copy; 1 at the cache's version; "
+             "4 not updated, the bank's not newer or not to be had (exercise-not-updated in "
+             "unpack-report.csv). 3 not in the cache: 2 fetched as on a first unpacking, 1 "
+             "not to be had." in update.stdout),
+        ("with --offline it's refused before anything is read or asked, and a bank offline "
+         "is asked nothing again, whatever update says",
+         lambda: refused.returncode == 2
+         and "--update-exercises asks the bank, which --offline doesn't" in refused.stderr
+         and not refused_asked and not os.path.exists(refused_out)
+         and not Bank(cache=os.path.join(work, "never"), offline=True, update=True).update),
+    ]
+
+
+def case_fetch_exercises(work):
+    """util/fetch-exercises.py: a list of a repository's exercises, written
+    without the network, by the unpacker's own assembly; the list's
+    exercises and their pictures fetched into the cache, as unpack-cnx.py
+    fetches them; the cache packed into a zip without the network, an
+    earlier run's zip removed, which, unzipped, a book is unpacked offline
+    from; one that can't be had listed in fetch-failures.tsv, which a run
+    where nothing fails removes; --update-exercises failing the run where
+    the bank can't be asked; and a book no repository has refused."""
+    repo = os.path.join(work, "osbooks-fetching")
+    write(os.path.join(repo, "META-INF", "books.xml"), """<container
+ xmlns="https://openstax.org/namespaces/book-container" version="1">
+<book slug="tiny-fetching" style="marketing"
+ href="../collections/tiny-fetching.collection.xml"/></container>""")
+    write(os.path.join(repo, "collections", "tiny-fetching.collection.xml"),
+          COLLECTION.format(title="Tiny Fetching", slug="tiny-fetching",
+                            uuid="22222222-2222-4333-8444-777777777777",
+                            content="""
+<col:subcollection><md:title>Selling Basics</md:title><col:content>
+<col:module document="m32001"/><col:module document="m32002"/>
+</col:content></col:subcollection>"""))
+    module(repo, "m32001", "In Focus", """
+<para id="p1">A shop opens.</para>""", cls="introduction")
+    module(repo, "m32002", "What Selling Is", """
+<para id="p1">Selling is offering.</para>
+<section id="kc" class="knowledge-check"><title>Knowledge Check</title>
+<exercise id="x1"><problem id="pr1"><para id="pp1"><link class="os-embed"
+url="#exercise/TEST_F1"/></para></problem></exercise>
+<exercise id="x2"><problem id="pr2"><para id="pp2"><link class="os-embed"
+url="#ost/api/ex/test-f2"/></para></problem></exercise></section>""")
+    picture = "https://example.org/fetched-picture"
+    first = bank_item("TEST_F1", f'Which shop? <img src="{picture}" alt="A shop">',
+                      ["This", "That"], 0, "This.")
+    second = bank_item("test-f2", "Which day?", ["Today", "Never"], 0, "Today.")
+    api = "https://exercises.openstax.org/api/exercises?q="
+    bank = {api + "nickname:TEST_F1": first, api + "tag:test-f2": second,
+            picture: ONE_PIXEL.decode("latin-1")}
+    with open(os.path.join(work, "bank.json"), "w", encoding="utf-8") as fh:
+        json.dump(bank, fh)
+    with open(os.path.join(work, "gone.json"), "w", encoding="utf-8") as fh:
+        json.dump(dict(bank, **{api + "tag:test-f2": None}), fh)
+    with open(os.path.join(work, "runner.py"), "w", encoding="utf-8") as fh:
+        fh.write(BANK_RUNNER)
+    script = os.path.join(ROOT, "util", "fetch-exercises.py")
+
+    def run(name, *args, answers="bank.json", cwd=None):
+        asked = os.path.join(work, name + "-asked.txt")
+        open(asked, "w").close()
+        done = subprocess.run(
+            ["python3", os.path.join(work, "runner.py"), os.path.join(ROOT, "lib"), script,
+             os.path.join(work, answers), asked, *args],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=cwd or work)
+        with open(asked, encoding="utf-8") as fh:
+            return done, fh.read().split()
+
+    listing = os.path.join(work, "exercises.tsv")
+    cache = os.path.join(work, "cache")
+    zips = os.path.join(work, "zips")
+    written, written_asked = run("list", "--write-list", listing, repo)
+    fetched, fetched_asked = run("fetch", "--list", listing, "--exercises-cache", cache)
+    # A larger run's last part, in the folder before this run's.
+    os.makedirs(zips)
+    with zipfile.ZipFile(os.path.join(zips, "cnx-exercises-07.zip"), "w") as z:
+        z.writestr("public/nickname/STALE.json", "{}")
+    packed, packed_asked = run("zip", "--list", listing, "--exercises-cache", cache,
+                               "--zip", zips)
+    unzipped = os.path.join(work, "unzipped")
+    names = []
+    if os.path.exists(os.path.join(zips, "cnx-exercises-01.zip")):
+        with zipfile.ZipFile(os.path.join(zips, "cnx-exercises-01.zip")) as z:
+            names = sorted(z.namelist())
+            z.extractall(unzipped)
+    book = os.path.join(work, "book")
+    unpacked = unpack(repo, book, "--exercises-cache", unzipped)
+    failing = os.path.join(work, "failing")
+    os.makedirs(failing)
+    gone, gone_asked = run("gone", repo, "--exercises-cache", os.path.join(work, "cache2"),
+                           answers="gone.json", cwd=failing)
+    failures = os.path.join(failing, "fetch-failures.tsv")
+    gone_failures = read(failures) if os.path.exists(failures) else ""
+    again, _ = run("again", repo, "--exercises-cache", os.path.join(work, "cache2"),
+                   cwd=failing)
+    failures_after_again = os.path.exists(failures)
+    with open(os.path.join(work, "nobody.json"), "w", encoding="utf-8") as fh:
+        json.dump({picture: ONE_PIXEL.decode("latin-1")}, fh)
+    unasked, unasked_asked = run("unasked", repo, "--exercises-cache", os.path.join(work, "cache2"),
+                                 "--update-exercises", answers="nobody.json", cwd=failing)
+    nosuch, _ = run("nosuch", repo, "--book", "no-such-book")
+    shot = hashlib.sha1(picture.encode("utf-8")).hexdigest()[:16] + ".png"
+    return [
+        ("--write-list lists each exercise the book embeds, by nickname and by tag, "
+         "without the network",
+         lambda: written.returncode == 0 and not written_asked
+         and read(listing).splitlines() == [
+             "osbooks-fetching\ttiny-fetching\tnickname\tTEST_F1",
+             "osbooks-fetching\ttiny-fetching\ttag\ttest-f2"]),
+        ("--list fetches the list's exercises and their pictures into the cache, where "
+         "unpack-cnx.py keeps them",
+         lambda: fetched.returncode == 0
+         and sorted(fetched_asked) == sorted(bank)
+         and os.path.exists(os.path.join(cache, "public", "nickname", "TEST_F1.json"))
+         and os.path.exists(os.path.join(cache, "public", "tag", "test-f2.json"))
+         and os.path.exists(os.path.join(cache, "images", shot))
+         and "Done: 2 of 2 exercise(s) and 1 of 1 picture(s) in the cache" in fetched.stdout),
+        ("--zip packs them without asking the bank, an earlier run's zip in the folder "
+         "removed, and a book unpacks offline from the zip's files",
+         lambda: packed.returncode == 0 and not packed_asked
+         and names == ["images/" + shot, "public/nickname/TEST_F1.json",
+                       "public/tag/test-f2.json"]
+         and sorted(os.listdir(zips)) == ["cnx-exercises-01.zip"]
+         and unpacked.returncode == 0
+         and "Which shop?" in read(book, "1-1-what-selling-is.html")
+         and "Which day?" in read(book, "1-1-what-selling-is.html")
+         and os.path.exists(os.path.join(book, "media", "exercises", shot))),
+        ("from a repository, one that can't be had is listed in fetch-failures.tsv, in the "
+         "folder it's run from, and the run fails",
+         lambda: gone.returncode == 1
+         and len(gone_asked) == 3
+         and gone_failures.startswith("tag\ttest-f2\tcouldn't be fetched: ")
+         and "1 exercise(s) and 0 picture(s) couldn't be had" in gone.stdout),
+        ("a run where nothing fails removes an earlier run's fetch-failures.tsv",
+         lambda: gone_failures and again.returncode == 0 and not failures_after_again),
+        ("--update-exercises where the bank can't be asked keeps the cache, names each in "
+         "fetch-failures.tsv, and fails the run",
+         lambda: unasked.returncode == 1 and len(unasked_asked) == 2
+         and "--update-exercises: 0 newer, written over the cache's copy; 0 at the cache's "
+             "version; 2 not updated" in unasked.stdout
+         and read(failing, "fetch-failures.tsv").count("not updated: the bank couldn't be "
+                                                      "asked") == 2),
+        ("a book no repository named has is refused",
+         lambda: nosuch.returncode != 0
+         and "No repository named has a book called no-such-book" in nosuch.stderr),
+    ]
 
 # The bank's TeX, in LaTeX's forms ----------------------------------------
 
@@ -3482,6 +3824,8 @@ CASES = [
     ("a repository of OpenStax's, baked as economics", case_trade),
     ("a book of the Connexions archive's", case_archive),
     ("exercises from OpenStax's exercise bank", case_bank),
+    ("the bank asked again for newer exercises", case_bank_update),
+    ("util/fetch-exercises.py, for books and for a list", case_fetch_exercises),
     ("the bank's TeX, in LaTeX's forms", case_texforms),
     ("the bank's decorative pictures, as the pages show them",
      case_decorative),

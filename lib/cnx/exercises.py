@@ -21,6 +21,22 @@ cache can be copied to a machine that has none. An exercise that can't
 be had is a sentence saying so where it would stand, and a line in the
 report.
 
+An exercise the cache has isn't asked for again, so a change OpenStax
+makes to it in the bank isn't seen, unless the bank is asked to check
+(update, unpack-cnx.py's --update-exercises): then each exercise the book
+embeds that the cache has is fetched again and compared with the cache's
+copy, and the bank's is kept in its place where it's newer, a later
+version of an exercise the two share by number, or other exercises; at
+the same versions the cache's copy stays, whatever else the answers
+differ in. Nothing short of asking says whether it's changed: the cache
+keeps the API's answer, which carries each exercise's version and the
+time it was published, and not the reply's headers, and a file's own
+time in the cache is when it was fetched. A picture is fetched by its
+address and kept, and isn't fetched again, which is right for a picture
+at an S3 key, the SHA-256 of its bytes (all 283 such keys among the 26
+books' exercises, fetched on 2026-11-03), and presumed for one at the
+bank's own address, which names an upload.
+
 What's written in the link's place is the shape OpenStax's assembly
 writes, which the recipes' directions read:
 
@@ -64,6 +80,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import concurrent.futures
 import hashlib
+import http.client
 import json
 import os
 import posixpath
@@ -90,6 +107,11 @@ TOKEN_VARIABLE = "OPENSTAX_EXERCISES_TOKEN"
 # How a link names its exercise, and what the API is asked for.
 PREFIXES = (("#exercise/", "nickname"), ("#ost/api/ex/", "tag"))
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+# What a fetch can fail with: the network's errors (URLError is an
+# OSError), an answer that isn't JSON or UTF-8 (ValueError), and a reply cut
+# off or garbled (http.client's IncompleteRead and BadStatusLine, which are
+# neither).
+FETCH_ERRORS = (urllib.error.URLError, OSError, ValueError, http.client.HTTPException)
 # The extension a picture's bytes call for, as epubsource.sniff names them.
 FORMATS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
            "image/webp": ".webp", "image/svg+xml": ".svg"}
@@ -109,14 +131,39 @@ def embedded(url):
     return None
 
 
+def _items(data):
+    items = data.get("items") if isinstance(data, dict) else None
+    return [item for item in items or [] if isinstance(item, dict)]
+
+
+def _why(exc):
+    """What an error says, or its kind where it says nothing."""
+    return str(exc) or type(exc).__name__
+
+
+def versions(data):
+    """An answer's exercises, as {number: version}."""
+    return {item.get("number"): item.get("version") or 0 for item in _items(data)}
+
+
+def uids(data):
+    """An answer's exercises as the bank names each version, number@version
+    (84@9), or "none"."""
+    found = [str(item.get("uid") or f"{item.get('number')}@{item.get('version')}")
+             for item in _items(data)]
+    return ", ".join(found) or "none"
+
+
 class Bank:
     """The exercise bank, through its cache. With offline set, only the
-    cache is read."""
+    cache is read; with update, each exercise is asked of the bank again
+    (refresh), once."""
 
     def __init__(self, cache=None, offline=False, token=None, host=HOST,
-                 timeout=30):
+                 timeout=30, update=False):
         self.cache = cache or default_cache()
         self.offline = offline
+        self.update = update and not offline
         self.token = token if token is not None else os.environ.get(
             TOKEN_VARIABLE) or None
         self.host = host
@@ -126,6 +173,18 @@ class Bank:
         self.root = os.path.join(self.cache,
                                  "with-token" if self.token else "public")
         self.failures = {}      # (kind, code) -> why it couldn't be had
+        # With update: each (kind, code) a book embeds, asked again or, not
+        # in the cache, fetched as on a first unpacking; those whose copy in
+        # the cache the bank's replaced, as (the cache's uids, the bank's);
+        # those the bank had at the cache's versions; those whose copy in
+        # the cache was kept, and why; and, among them, those the bank
+        # couldn't be asked about. Sets and dicts, which threads add to
+        # safely.
+        self.asked = set()
+        self.updated = {}
+        self.unchanged = set()
+        self.not_updated = {}
+        self.unreachable = set()
 
     def url(self, kind, code):
         query = urllib.parse.quote(f"{kind}:{code}", safe=":")
@@ -144,7 +203,10 @@ class Bank:
 
     def get(self, kind, code):
         """The API's answer for one exercise, from the cache or fetched,
-        or None (the reason kept in failures)."""
+        or None (the reason kept in failures). With update, the bank is
+        asked first (refresh)."""
+        if self.update and (kind, code) not in self.asked:
+            self.refresh(kind, code)
         data = self.cached(kind, code)
         if data is not None:
             return data
@@ -154,17 +216,61 @@ class Bank:
         try:
             data = json.loads(self._fetch(self.url(kind, code)).decode(
                 "utf-8"))
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            self.failures[(kind, code)] = f"couldn't be fetched: {exc}"
+        except FETCH_ERRORS as exc:
+            self.failures[(kind, code)] = f"couldn't be fetched: {_why(exc)}"
             return None
-        self._keep(self.path(kind, code), json.dumps(
-            data, ensure_ascii=False, indent=1).encode("utf-8"))
+        self._write(kind, code, data)
+        self.failures.pop((kind, code), None)       # a failure asking before
         return data
 
+    def refresh(self, kind, code):
+        """Ask the bank again for an exercise the cache has, and keep its
+        answer in the cache's copy's place where it's newer: a later version
+        of an exercise the two share by number, none earlier, or other
+        exercises. At the same versions the cache's copy stays (unchanged),
+        whatever else the answers differ in, since a version the bank has
+        published doesn't change. The cache's copy stays too where the bank
+        has none now, or an earlier version, or can't be asked (not_updated,
+        with why; unreachable). One the cache hasn't is left to get, which
+        fetches it as a first unpacking does."""
+        self.asked.add((kind, code))
+        old = self.cached(kind, code)
+        if old is None:
+            return
+        try:
+            new = json.loads(self._fetch(self.url(kind, code)).decode("utf-8"))
+        except FETCH_ERRORS as exc:
+            self.not_updated[(kind, code)] = f"the bank couldn't be asked: {_why(exc)}"
+            self.unreachable.add((kind, code))
+            return
+        if new == old:
+            self.unchanged.add((kind, code))
+            return
+        was, now = versions(old), versions(new)
+        if not now:
+            if not was:                 # none in the cache either
+                self.unchanged.add((kind, code))
+            else:
+                self.not_updated[(kind, code)] = (
+                    f"the bank has none now, where the cache has {uids(old)}")
+            return
+        shared = now.keys() & was.keys()
+        if any(now[number] < was[number] for number in shared):
+            self.not_updated[(kind, code)] = (
+                f"the bank's is an earlier version ({uids(new)}) than the "
+                f"cache's ({uids(old)})")
+            return
+        if now.keys() == was.keys() and all(now[number] == was[number] for number in shared):
+            self.unchanged.add((kind, code))
+            return
+        self._write(kind, code, new)
+        self.updated[(kind, code)] = (uids(old), uids(new))
+
     def prefetch(self, wanted, workers=8):
-        """Fetch every (kind, code) not yet cached, several at once."""
+        """Fetch every (kind, code) not yet cached, or with update every
+        one, several at once."""
         todo = [w for w in dict.fromkeys(wanted)
-                if not os.path.exists(self.path(*w))]
+                if self.update or not os.path.exists(self.path(*w))]
         if not todo or self.offline:
             return 0
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
@@ -185,7 +291,7 @@ class Bank:
             return None
         try:
             self._keep(path, self._fetch(url, auth=False))
-        except (urllib.error.URLError, OSError, ValueError):
+        except FETCH_ERRORS:
             return None
         return path
 
@@ -197,6 +303,10 @@ class Bank:
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=self.timeout) as reply:
             return reply.read()
+
+    def _write(self, kind, code, data):
+        self._keep(self.path(kind, code), json.dumps(
+            data, ensure_ascii=False, indent=1).encode("utf-8"))
 
     @staticmethod
     def _keep(path, data):
@@ -395,15 +505,25 @@ def missing(kind, code, why):
     return p
 
 
+def embed_links(body):
+    """The links an assembled book embeds an exercise with, in order."""
+    return [a for a in body.iter("a")
+            if a.get("data-type") == "embed"
+            and embedded(a.get("data-embed") or "")]
+
+
+def wanted(body):
+    """(kind, code) for each exercise an assembled book embeds, in order,
+    once each."""
+    return list(dict.fromkeys(embedded(a.get("data-embed")) for a in embed_links(body)))
+
+
 def inject(asm, body, bank):
     """Every embedded exercise of the assembled book, put in. Returns
     (injected, missing, formulas read once rewritten in LaTeX's forms,
     the pictures the bank marks decorative for report_decorative)."""
-    links = [a for a in body.iter("a")
-             if a.get("data-type") == "embed"
-             and embedded(a.get("data-embed") or "")]
-    wanted = [embedded(a.get("data-embed")) for a in links]
-    bank.prefetch(wanted)
+    links = embed_links(body)
+    bank.prefetch(wanted(body))
     pages_by_uuid = {}
     for module_id, module in asm.modules.items():
         if getattr(module, "uuid", None):
@@ -419,6 +539,14 @@ def inject(asm, body, bank):
                      if p.get("data-type") == "page"), None)
         data = bank.get(kind, code)
         items = (data or {}).get("items") or []
+        where = page.get("data-module") if page is not None else ""
+        if (kind, code) in bank.updated:
+            was, now = bank.updated[(kind, code)]
+            asm.report(where, "exercise-updated",
+                       f"{url}: the bank's {now} kept in place of the cache's {was}")
+        elif (kind, code) in bank.not_updated:
+            asm.report(where, "exercise-not-updated",
+                       f"{url}: {bank.not_updated[(kind, code)]}; the cache's copy is used")
         if not items:
             why = bank.failures.get((kind, code)) or "the bank has none"
             asm.report(page.get("data-module") if page is not None else "",

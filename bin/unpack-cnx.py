@@ -150,6 +150,11 @@ def main():
               + (f"; {result.exercises_missing} couldn't be had"
                  if result.exercises_missing else "")
               + f" (cache: {bank.cache}).")
+    if result.exercise_formulas_rewritten:
+        print(f"{result.exercise_formulas_rewritten} of their formulas, "
+              "written for MathJax in forms Pandoc's TeX reader doesn't "
+              "take ({\\rm km}, \\over, a bare % or $), read once those "
+              "were written as LaTeX writes them.")
     if result.prefilled:
         print(f"table-captions.csv: {result.prefilled} description(s) from "
               "the tables' summaries, for tables whose caption is their "

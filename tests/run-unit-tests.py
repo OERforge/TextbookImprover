@@ -5552,6 +5552,10 @@ def check_alt_text_rules():
     return [
         ("a picture's name no file system takes is its own identity, not a crash",
          lambda: alttext.digest("a\x00.png", "a\x00.png") == "a\x00.png"),
+        ("an editor's placeholder says nothing, as Organic Chemistry's exercises from "
+         "OpenStax's bank have it",
+         lambda: alttext.problem("Alt Text Placeholder") == ("placeholder", "says nothing")
+         and alttext.problem("A placeholder for the reaction.") is None),
         ("each kind's finding is declared, for pages, sources, decks, and PDFs",
          lambda: "credit" in kinds and not wanted - set(findings_lib.CHECKS)
          or print("    undeclared: %s" % sorted(wanted - set(findings_lib.CHECKS)))),

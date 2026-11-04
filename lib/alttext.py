@@ -54,6 +54,10 @@ GENERIC_WORDS = {
     "alt", "alt text", "alternative text", "alt tag", "description", "untitled",
     "insert alt text", "add alt text", "null", "none", "n/a", "na", "tbd", "todo",
     "object", "shape", "group",
+    # The words an editor's own placeholder leaves, as 19 of Organic
+    # Chemistry's pictures from OpenStax's exercise bank have them.
+    "alt text placeholder", "image placeholder", "placeholder image",
+    "placeholder text",
 }
 GENERIC_PATTERNS = [
     ("a clip-art id", re.compile(r"[a-z]{1,3}\d{5,}_?", re.I)),     # j0309720, bd20069_

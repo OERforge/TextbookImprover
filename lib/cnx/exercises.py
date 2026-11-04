@@ -38,9 +38,12 @@ writes, which the recipes' directions read:
         div data-type="question-solution" data-solution-type="detailed"
 
 An exercise's text is HTML; it's read as HTML and copied in element by
-element. Its formulas are TeX (a span or div with data-math), made
-MathML by Pandoc's TeX reader, one Pandoc can't read left as its TeX and
-reported; its pictures are fetched into the cache and copied to
+element, an attribute whose name XML doesn't allow left out and
+reported. Its formulas are TeX (a span or div with data-math), made
+MathML by Pandoc's TeX reader; one Pandoc can't read is read again with
+the forms MathJax takes and Pandoc doesn't rewritten in LaTeX's
+(cnx.texforms), and one it can't read either way left as its TeX and
+reported. Its pictures are fetched into the cache and copied to
 media/exercises/.
 
 Copyright 2026 Robert Szarka
@@ -64,6 +67,7 @@ import hashlib
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
 import tempfile
@@ -74,14 +78,20 @@ import urllib.request
 from lxml import etree
 from lxml import html as lxml_html
 
-from .cnxml import E, append_text
+from epubsource import sniff
+
+from .cnxml import E, append_text, code_lines
 from .mathml import MATHML
+from .texforms import latex_forms, mathjax_rows
 
 HOST = "exercises.openstax.org"
 TOKEN_VARIABLE = "OPENSTAX_EXERCISES_TOKEN"
 # How a link names its exercise, and what the API is asked for.
 PREFIXES = (("#exercise/", "nickname"), ("#ost/api/ex/", "tag"))
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+# The extension a picture's bytes call for, as epubsource.sniff names them.
+FORMATS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+           "image/webp": ".webp", "image/svg+xml": ".svg"}
 
 
 def default_cache():
@@ -198,10 +208,15 @@ class Bank:
 
 # HTML from the bank, into the tree -------------------------------------
 
-def html_children(text):
+def html_children(text, dropped=None):
     """An HTML fragment as (leading text, [elements]) in the tree's own
     elements: what the bank writes copied element by element, since
-    lxml's HTML elements don't mix with the rest."""
+    lxml's HTML elements don't mix with the rest. What XML doesn't allow
+    is said in dropped: an attribute whose name it doesn't, left out; an
+    element whose name it doesn't, its content kept in a span; and a
+    character it doesn't (a control character, half a surrogate pair),
+    left out."""
+    text = _xml_text(text, dropped)
     if not text or not text.strip():
         return (text or "", [])
     try:
@@ -214,31 +229,68 @@ def html_children(text):
         if isinstance(part, str):
             lead += part
         else:
-            out.append(_copy(part))
-    return lead, out
+            out.append(_copy(part, dropped))
+    return _xml_text(lead, dropped), out
 
 
-def _copy(element):
+# What XML doesn't allow in text, which lxml's tree refuses: a control
+# character but a tab or a line's end, half a surrogate pair, U+FFFE, and
+# U+FFFF. HTML's parser keeps one, written as it is or as a character
+# reference (&#1;).
+_NOT_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def _xml_text(text, dropped=None):
+    """text without the characters XML doesn't allow, each said in
+    dropped."""
+    if not text or not _NOT_XML.search(text):
+        return text
+    if dropped is not None:
+        dropped.extend(f"a character U+{ord(c):04X}, left out"
+                       for c in _NOT_XML.findall(text))
+    return _NOT_XML.sub("", text)
+
+
+def _copy(element, dropped=None):
+    """element in the tree's own elements. A name lxml's tree refuses, as
+    XML does, comes of a tag the bank's HTML leaves open, which HTML's
+    parser reads on: "c<", an attribute's name, from '<code
+    class="python" c< code data-lang="python">' in Introduction to
+    Python Programming's CPL-ch05-m02-p03, which stopped the book's
+    unpacking; an element's, "b<i" from '<b<i>'. The attribute is left
+    out, the element a span, its content kept; each said in dropped."""
     tag = element.tag if isinstance(element.tag, str) else None
     if tag is None:                      # a comment
         holder = E("span")
-        holder.tail = element.tail
+        holder.tail = _xml_text(element.tail, dropped)
         return holder
-    out = E(tag.lower(), {k: v for k, v in element.attrib.items()
-                          if isinstance(k, str) and ":" not in k})
-    out.text = element.text
+    try:
+        out = E(tag.lower())
+    except ValueError:
+        out = E("span")
+        if dropped is not None:
+            dropped.append(f"an element named {tag!r}, its content kept")
+    for name, value in element.attrib.items():
+        if not isinstance(name, str) or ":" in name:
+            continue
+        try:
+            out.set(name, _xml_text(value, dropped))
+        except ValueError:
+            if dropped is not None:
+                dropped.append(f"an attribute named {name!r}, left out")
+    out.text = _xml_text(element.text, dropped)
     for child in element:
         if isinstance(child.tag, str):
-            out.append(_copy(child))
+            out.append(_copy(child, dropped))
         else:
-            append_text(out, child.tail)
-    out.tail = element.tail
+            append_text(out, _xml_text(child.tail, dropped))
+    out.tail = _xml_text(element.tail, dropped)
     return out
 
 
-def fill(holder, html):
+def fill(holder, html, dropped=None):
     """holder's content: the HTML fragment, as elements."""
-    lead, children = html_children(html)
+    lead, children = html_children(html, dropped)
     append_text(holder, lead)
     for child in children:
         holder.append(child)
@@ -247,8 +299,9 @@ def fill(holder, html):
 
 # One exercise ----------------------------------------------------------
 
-def render(item, page_key, link_class, url, context=None):
-    """The bank's item as OpenStax's assembly writes it."""
+def render(item, page_key, link_class, url, context=None, dropped=None):
+    """The bank's item as OpenStax's assembly writes it; an attribute's
+    name XML doesn't allow, left out, added to dropped."""
     out = E("div", {"data-type": "injected-exercise",
                     "class": link_class or None,
                     "data-injected-from-nickname": item.get("nickname"),
@@ -264,7 +317,7 @@ def render(item, page_key, link_class, url, context=None):
         out.append(holder)
     if (item.get("stimulus_html") or "").strip():
         out.append(fill(E("div", {"data-type": "exercise-stimulus"}),
-                        item["stimulus_html"]))
+                        item["stimulus_html"], dropped))
     for question in item.get("questions") or []:
         q = E("div", {"data-type": "exercise-question",
                       "data-is-answer-order-important": str(bool(
@@ -274,9 +327,9 @@ def render(item, page_key, link_class, url, context=None):
                       "id": f"auto_{page_key}_{question.get('id')}"})
         if (question.get("stimulus_html") or "").strip():
             q.append(fill(E("div", {"data-type": "question-stimulus"}),
-                          question["stimulus_html"]))
+                          question["stimulus_html"], dropped))
         q.append(fill(E("div", {"data-type": "question-stem"}),
-                      question.get("stem_html") or ""))
+                      question.get("stem_html") or "", dropped))
         answers = question.get("answers") or []
         if answers:
             ol = E("ol", {"data-type": "question-answers", "type": "a"})
@@ -284,10 +337,10 @@ def render(item, page_key, link_class, url, context=None):
                 li = E("li", {"data-type": "question-answer",
                               "data-correctness": answer.get("correctness")})
                 li.append(fill(E("div", {"data-type": "answer-content"}),
-                               answer.get("content_html") or ""))
+                               answer.get("content_html") or "", dropped))
                 if (answer.get("feedback_html") or "").strip():
                     li.append(fill(E("div", {"data-type": "answer-feedback"}),
-                                   answer["feedback_html"]))
+                                   answer["feedback_html"], dropped))
                 ol.append(li)
             q.append(ol)
         for solution in question.get("collaborator_solutions") or []:
@@ -298,7 +351,7 @@ def render(item, page_key, link_class, url, context=None):
             # The space OpenStax's template leaves before a solution,
             # which parts the letter of the right choice from it.
             holder.text = " "
-            q.append(fill(holder, solution.get("content_html") or ""))
+            q.append(fill(holder, solution.get("content_html") or "", dropped))
         out.append(q)
     return out
 
@@ -318,8 +371,16 @@ def context_of(item, page, pages_by_uuid):
     candidates = [own] + [pages_by_uuid[m] for m in modules
                           if m in pages_by_uuid]
     for module in candidates:
-        if module and page.getroottree().xpath(
-                f"//*[@id='{module}__{feature}']"):
+        if not module:
+            continue
+        # The id as an XPath variable, so that a quote in a tag doesn't end
+        # the expression; one XML can't hold names nothing.
+        try:
+            found = page.getroottree().xpath("//*[@id=$id]",
+                                             id=f"{module}__{feature}")
+        except (ValueError, etree.XPathError):
+            return None
+        if found:
             return f"{module}__{feature}"
     return None
 
@@ -335,7 +396,8 @@ def missing(kind, code, why):
 
 def inject(asm, body, bank):
     """Every embedded exercise of the assembled book, put in. Returns
-    (injected, missing)."""
+    (injected, missing, formulas read once rewritten in LaTeX's forms,
+    the pictures the bank marks decorative for report_decorative)."""
     links = [a for a in body.iter("a")
              if a.get("data-type") == "embed"
              and embedded(a.get("data-embed") or "")]
@@ -348,6 +410,7 @@ def inject(asm, body, bank):
     done = 0
     lost = 0
     formulas = []
+    decorative = {}
     for link in links:
         url = link.get("data-embed")
         kind, code = embedded(url)
@@ -366,10 +429,26 @@ def inject(asm, body, bank):
             page_key = page.get("data-module") if page is not None else ""
             context = context_of(item, page, pages_by_uuid) \
                 if page is not None else None
-            new = render(item, page_key, _without(link.get("class"),
-                                                  "autogenerated-content"),
-                         bank.url(kind, code), context)
-            _pictures(asm, new, bank, code)
+            dropped = []
+            try:
+                new = render(item, page_key,
+                             _without(link.get("class"), "autogenerated-content"),
+                             bank.url(kind, code), context, dropped)
+            except ValueError as exc:
+                # Something of the bank's XML can't hold, which no field of
+                # the cache has: one exercise doesn't stop the book.
+                why = "its item has what XML can't hold"
+                asm.report(page_key, "exercise-html", f"{url}: {why} ({exc})")
+                _replace_link(link, missing(kind, code, why))
+                lost += 1
+                continue
+            if dropped:
+                asm.report(page_key, "exercise-html",
+                           f"{code}: its HTML has what XML doesn't allow (a "
+                           "tag left open, a stray character): "
+                           + "; ".join(dict.fromkeys(dropped)))
+            _code_blocks(new)
+            _pictures(asm, new, bank, code, page_key, decorative)
             _formulas(asm, new, page_key, code, formulas)
             if not item.get("solutions_are_public", True) and not bank.token:
                 asm.report(page_key, "exercise-solutions-not-public",
@@ -377,8 +456,8 @@ def inject(asm, body, bank):
                            "answer")
             done += 1
         _replace_link(link, new)
-    tex_to_mathml(asm, formulas)
-    return done, lost
+    rewritten = tex_to_mathml(asm, formulas)
+    return done, lost, rewritten, decorative
 
 
 def _without(classes, name):
@@ -405,19 +484,168 @@ def _replace_link(link, new):
     parent.replace(link, new)
 
 
-def _pictures(asm, exercise, bank, code):
+# What a program's pre holds as text: a line break, and words set apart
+# (a span, a link, bold, italics), whose text a code block keeps.
+TEXT_IN_CODE = {"br", "span", "a", "b", "strong", "i", "em", "u", "sub", "sup",
+                "small", "code"}
+
+
+def _code_blocks(exercise):
+    """A program the bank writes as preformatted text, a pre with no code
+    in it (274 of Introduction to Python Programming's code blocks), as
+    cnxml.do_code writes a page's own block of code of text alone: its
+    text in a code element of its classes, which Pandoc's HTML reader
+    reads as code, where from Pandoc 3.11 it reads a pre without one as
+    text set apart, each space a no-break space and each line a line
+    break, so no format had them as code; its no-break spaces, the bank's
+    way of keeping indentation, spaces; its indentation kept, the
+    program's own, where code_lines takes off what a page's every line
+    shares, its source's markup's (the bank indents the methods a
+    question offers to sit in their class, Python's CPL-ch11-m04-p06);
+    and lines the questions name by number ("After line 1"), class
+    line-numbering, numbered as Pandoc numbers a code block's
+    (numberLines). A picture in it, which a code block can't hold
+    (Principles of Data Science's DS_Ch05_Sec03_QP4 shows a plot after
+    its program, in the pre), stands after the code before it, and the
+    code after it is a block of its own; a pre holding more than text
+    inside the words it sets apart is left as it is."""
+    for pre in list(exercise.iter("pre")):
+        if pre.find("code") is not None or any(
+                isinstance(el.tag, str) and el.tag not in TEXT_IN_CODE
+                for child in pre if child.tag in TEXT_IN_CODE
+                for el in child.iterdescendants()):
+            continue
+        for part in _parts_of(pre):
+            if part.tag == "pre":
+                _as_code(part)
+
+
+def _parts_of(pre):
+    """pre split, in its place, at each child that isn't text: a pre for
+    each run of text and words (one of nothing but spaces left out), the
+    child between them. Returns the parts."""
+    if all(not isinstance(child.tag, str) or child.tag in TEXT_IN_CODE
+           for child in pre):
+        return [pre]
+    parts = []
+    current = E("pre", dict(pre.attrib))
+    current.text = pre.text
+    for child in list(pre):
+        if not isinstance(child.tag, str) or child.tag in TEXT_IN_CODE:
+            current.append(child)
+            continue
+        after, child.tail = child.tail, None
+        parts += [current, child]
+        current = E("pre", {k: v for k, v in pre.attrib.items() if k != "id"})
+        current.text = after
+    parts.append(current)
+    parts = [p for p in parts if p.tag != "pre" or len(p)
+             or (p.text or "").strip()]
+    if pre.get("id") and parts and pre.get("id") not in (
+            p.get("id") for p in parts):
+        first = next((p for p in parts if not p.get("id")), None)
+        if first is not None:
+            first.set("id", pre.get("id"))
+    parent, tail = pre.getparent(), pre.tail
+    index = parent.index(pre)
+    parent.remove(pre)
+    for k, part in enumerate(parts):
+        parent.insert(index + k, part)
+    if parts:
+        parts[-1].tail = tail
+    return parts
+
+
+def _as_code(pre):
+    classes = (pre.get("class") or "").split()
+    code = E("code", {"class": " ".join(classes) or None})
+    code.text, pre.text = pre.text, None
+    for child in list(pre):
+        code.append(child)
+    pre.append(code)
+    for node in code.iter():
+        if node.text:
+            node.text = node.text.replace("\u00a0", " ")
+        if node is not code and node.tail:
+            node.tail = node.tail.replace("\u00a0", " ")
+    code_lines(code, dedent=False)
+    if "line-numbering" in classes and "numberLines" not in classes:
+        pre.set("class", " ".join(classes + ["numberLines"]))
+
+
+def _pictures(asm, exercise, bank, code, page_key="", decorative=None):
+    """Each picture an exercise shows, fetched into the cache and copied
+    to media/exercises/. One the bank marks decorative, its alt empty,
+    goes in decorative, {path: [(img, exercise)]}, for
+    report_decorative."""
     for img in exercise.iter("img"):
         src = img.get("src") or ""
         if not src.startswith(("http://", "https://")):
             continue
         path = bank.image(src)
         if path is None:
-            asm.report("", "exercise-image-missing",
+            asm.report(page_key, "exercise-image-missing",
                        f"{code}: {src} couldn't be fetched")
             continue
-        rel = posixpath.join("media", "exercises", os.path.basename(path))
+        rel = posixpath.join("media", "exercises", _named_for_bytes(path))
         asm.media[rel] = path
         img.set("src", rel)
+        alt = img.get("alt")
+        if decorative is not None and alt is not None and not alt.strip():
+            decorative.setdefault(rel, []).append((img, code))
+
+
+def report_decorative(pages, decorative, report):
+    """Each picture an exercise shows that the bank marks decorative
+    (decorative, from inject), reported on the page that shows it, once
+    baking has put each part of an exercise where it goes and left out
+    what it drops (an answer's feedback, a solution its recipe doesn't
+    keep): every format hides such a picture from a screen reader, and
+    the bank marks some so that the question is about (Biology for AP
+    Courses' apbio-ch03-ex065 asks of a Western blot "What is the
+    relationship between the green line and the red line?"; 174 of that
+    book's pictures, in 177 places, are marked so), which a row of
+    image-alt.csv describes, under the page's name and the picture's
+    path, or the path alone for every page. A row names the exercise that
+    showed the picture there, or, where baking copied it, every exercise
+    that showed that picture."""
+    owner = {page.element: page for page in pages}
+    for page in pages:
+        for img in page.element.iter("img"):
+            src, alt = img.get("src") or "", img.get("alt")
+            if src not in decorative or alt is None or alt.strip():
+                continue
+            if next((a for a in img.iterancestors() if a in owner),
+                    None) is not page.element:
+                continue                 # a page inside this one says it
+            shown = decorative[src]
+            codes = ", ".join(dict.fromkeys(
+                [code for el, code in shown if el is img]
+                or [code for _, code in shown]))
+            report(page.name, "exercise-image-decorative",
+                   f"{codes}: {src} is marked decorative in the bank "
+                   "(alt=\"\"), so no format gives it to a screen reader; if "
+                   "the question needs it, describe it in image-alt.csv")
+
+
+def _named_for_bytes(path):
+    """A cached picture's name with the extension its bytes call for. The
+    bank's address for a picture often has none (an S3 key), so the cache
+    keeps it as .png, which 316 JPEGs and 80 SVGs of the 3,869 pictures
+    the 26 books' exercises show weren't (Algebra 1's 187 JPEGs and 80
+    SVGs, Biology for AP Courses' 126 JPEGs, and Contemporary
+    Mathematics' 3): a browser shows no SVG so named, a PDF stops on one,
+    and epubcheck rejects the EPUB (OPF-029), as a page's own misnamed
+    picture is renamed for (assemble.Assembly._named_for_its_bytes). The
+    cache's name stays, so that the address finds it."""
+    name = os.path.basename(path)
+    stem, ext = os.path.splitext(name)
+    with open(path, "rb") as fh:
+        right = FORMATS.get(sniff(fh.read(2048)))
+    if right and ext.lower() not in (right, ".jpeg" if right == ".jpg"
+                                     else right):
+        return stem + right
+    return name
 
 
 def _formulas(asm, exercise, page_key, code, found):
@@ -431,12 +659,30 @@ def _formulas(asm, exercise, page_key, code, found):
 
 def tex_to_mathml(asm, found, pandoc=None):
     """Each formula made MathML by Pandoc's TeX reader, as the page's
-    formulas are; one Pandoc can't read, or every one when there's no
-    Pandoc, left as its TeX and reported."""
+    formulas are, without a line break just before an environment's end,
+    which MathJax ends no row at (texforms.mathjax_rows); one Pandoc
+    can't read, read again with MathJax's and plain TeX's forms written
+    as LaTeX's (texforms.latex_forms); one it can't read either way, or
+    every one when there's no Pandoc, left as its TeX and reported.
+    Returns how many were read once rewritten."""
     pandoc = pandoc or shutil.which("pandoc")
     made = {}
+    rewritten = 0
     if pandoc and found:
-        made = _through_pandoc(pandoc, [tex for _, tex, _, _ in found])
+        tried = [mathjax_rows(tex) for _, tex, _, _ in found]
+        made = _through_pandoc(pandoc, tried)
+        again = {}
+        for index, (_, tex, _, _) in enumerate(found):
+            if index not in made:
+                forms = latex_forms(tex)
+                if forms and forms != tried[index]:
+                    again[index] = forms
+        if again:
+            order = list(again)
+            read = _through_pandoc(pandoc, [again[i] for i in order])
+            for k, math in read.items():
+                made[order[k]] = math
+            rewritten = len(read)
     for index, (el, tex, page_key, code) in enumerate(found):
         math = made.get(index)
         for child in list(el):
@@ -451,6 +697,7 @@ def tex_to_mathml(asm, found, pandoc=None):
         if el.tag == "div":
             math.set("display", "block")
         el.append(math)
+    return rewritten
 
 
 def _through_pandoc(pandoc, formulas):

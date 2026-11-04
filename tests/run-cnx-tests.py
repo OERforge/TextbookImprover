@@ -5,21 +5,24 @@ assembled, baked as OpenStax bakes it, and cut into pages.
 
     python3 tests/run-cnx-tests.py
 
-The books are built here, small and made up, in the layout of
-OpenStax's osbooks-* repositories and of the Connexions archive's
-cnx-user-books ones: a repository of two books whose style one recipe
-bakes ("economics"), its preface, chapter, sections, end-of-chapter
-pages, answer key, appendix, and index; a book of the archive's, which
-no recipe knows; a book whose knowledge checks are exercises from
+The books are built here, small and made up, in the layout of OpenStax's
+osbooks-* repositories and of the Connexions archive's cnx-user-books
+ones: a repository of two books whose style one recipe bakes
+("economics"), its preface, chapter, sections, end-of-chapter pages,
+answer key, appendix, and index; a book of the archive's, which no
+recipe knows; a book whose knowledge checks are exercises from
 OpenStax's exercise bank ("marketing"), read from a cache written here,
-one of them missing; a book whose problems from the bank are "Problem
-1-1" ("organic-chemistry"); a book whose end-of-chapter pages are a
-group of their own ("bca"); and a book whose worked examples set their
-steps out in tables ("dev-math"), beside the same page baked as
-"precalculus". Then baking's steps one at a time, and, with
-CNX_COOKBOOK naming a clone of openstax/cookbook, every ported recipe on
-cookbook's own sample books. Nothing is fetched; the last case converts
-a book and needs Pandoc 3.9 or later.
+one of them missing, one whose HTML leaves tags open, one an item XML
+can't hold, with formulas written for MathJax, programs, and pictures;
+the bank's TeX in LaTeX's forms, form by form; the report of a picture
+the bank marks decorative, on pages built by hand; a book whose problems
+from the bank are "Problem 1-1" ("organic-chemistry"); a book whose
+end-of-chapter pages are a group of their own ("bca"); and a book whose
+worked examples set their steps out in tables ("dev-math"), beside the
+same page baked as "precalculus". Then baking's steps one at a time,
+and, with CNX_COOKBOOK naming a clone of openstax/cookbook, every ported
+recipe on cookbook's own sample books. Nothing is fetched; the last case
+converts a book and needs Pandoc 3.9 or later.
 
 Copyright 2026 Robert Szarka
 
@@ -39,6 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import base64
 import csv
+import hashlib
 import json
 import os
 import re
@@ -779,16 +783,99 @@ class="delete-me" display="inline" id="dm"/></cite></para>
 <exercise id="x1"><problem id="pr1"><para id="pp1"><link class="os-embed"
 url="#exercise/TEST_KC1"/></para></problem></exercise>
 <exercise id="x2"><problem id="pr2"><para id="pp2"><link class="os-embed"
-url="#exercise/TEST_KC2"/></para></problem></exercise></section>
+url="#exercise/TEST_KC2"/></para></problem></exercise>
+<exercise id="x3"><problem id="pr3"><para id="pp3"><link class="os-embed"
+url="#exercise/TEST_KC3"/></para></problem></exercise>
+<exercise id="x4"><problem id="pr4"><para id="pp4"><link class="os-embed"
+url="#exercise/TEST_KC4"/></para></problem></exercise></section>
 <section id="refs" class="references"><title>Endnotes</title>
 <note id="r1"><link target-id="c1"><span>9.</span></link><span>A
 source, 2020.</span></note></section>""")
     cache = os.path.join(work, "cache")
+    # A character XML doesn't allow, as a reference, before the stem's
+    # words, and a context tag whose element's id holds a quote.
+    kc1 = bank_item("TEST_KC1", "&#1;What does a seller offer?",
+                    ["Nothing", "Goods", "Silence"], 1,
+                    'A seller offers goods: <span data-math="x^{2}"></span>.')
+    kc1["items"][0]["tags"] = ["context-cnxfeature:it's"]
     write(os.path.join(cache, "public", "nickname", "TEST_KC1.json"),
-          json.dumps(bank_item("TEST_KC1", "What does a seller offer?",
-                               ["Nothing", "Goods", "Silence"], 1,
-                               'A seller offers goods: <span data-math='
-                               '"x^{2}"></span>.')))
+          json.dumps(kc1))
+    # Formulas as MathJax takes them and Pandoc's TeX reader doesn't (a
+    # font switch's word, a bare percent sign, a character by its number,
+    # words and an operator under a switch, rows \hfill aligns left), one
+    # neither reads (\fbox around a line break, as Contemporary
+    # Mathematics' CM-C11-M1-Q032 has it), with and without a form to
+    # rewrite, and a tag left open, whose stray "c<" HTML's parser takes
+    # for an attribute's name (Python's CPL-ch05-m02-p03), which had
+    # stopped the unpacking, another whose "b<i" it takes for an
+    # element's, and a control character.
+    kc3 = bank_item("TEST_KC3", 'How much is <span data-math="{\\rm{4\\ '
+                    'gallons}}"></span>, <span data-math="50%"></span>, '
+                    'or <span data-math="\\unicode[Arial]{x3B2}"></span>? '
+                    '<span data-math="\\fbox {\\\\}"></span> '
+                    '<span data-math="{\\rm ab}\\fbox {\\\\}"></span> '
+                    '<span data-math="{\\rm{max - min}}"></span> '
+                    '<span data-math="\\begin{gathered} x > 1 \\hfill \\\\ '
+                    'y < 2 \\hfill \\\\ \\end{gathered}"></span> '
+                    '<span data-math="\\begin{array}{*{20}{c}} u > 1 \\hfill '
+                    '\\\\ v < 2 \\hfill \\\\ \\end{array}"></span> '
+                    '<span data-math="\\begin{array}{l} a \\\\ b \\\\ '
+                    '\\end{array}"></span> '
+                    '<span data-math="\\rm True \\wedge False = False"></span> '
+                    '<b<i>Heavy&#1;</b> or <b title="x&#1;y">light<!-- an '
+                    'editor\'s note -->&#1;</b>?&#1;\x01 '
+                    '<img src="https://example.org/gone" alt="A scale">',
+                    ["Some", "None"], 0, "Some.")
+    kc3["items"][0]["questions"][0]["id"] = 502
+    # A program as the bank writes one, a pre with no code in it, its
+    # indentation no-break spaces, its lines numbered for the question.
+    kc3["items"][0]["stimulus_html"] = (
+        '<pre class="python line-numbering" data-lang="python">for c in s:'
+        '\n&nbsp;&nbsp;print(c)\n</pre>'
+        '<p><img src="https://example.org/blot" alt=""></p>')
+    # A method indented to sit in its class, and the plot a program draws,
+    # in its pre (Data Science's DS_Ch05_Sec03_QP4).
+    kc3["items"][0]["questions"][0]["stimulus_html"] = (
+        '<pre class="python">&nbsp;&nbsp;def area(self):\n&nbsp;&nbsp;&nbsp;'
+        '&nbsp;return 1\n<figure><img src="https://example.org/plot" '
+        'alt="A plot of area"></figure>\nprint(1)</pre> After the plot.')
+    # The picture, in the cache as the bank's pictures are kept: a JPEG
+    # whose address has no extension, kept as .png, which the bank marks
+    # decorative though the question is about it.
+    blot = hashlib.sha1(b"https://example.org/blot").hexdigest()[:16]
+    os.makedirs(os.path.join(cache, "images"), exist_ok=True)
+    with open(os.path.join(cache, "images", blot + ".png"), "wb") as fh:
+        fh.write(b"\xff\xd8\xff\xe0" + bytes(60))
+    plot = hashlib.sha1(b"https://example.org/plot").hexdigest()[:16]
+    with open(os.path.join(cache, "images", plot + ".png"), "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n" + bytes(60))
+    kc3["items"][0]["questions"][0]["answers"][1]["feedback_html"] = (
+        'Each (character <code class="python" c< code data-lang="python">)'
+        ', and a star.</code>')
+    kc3["items"][0]["questions"][0]["answers"][0]["feedback_html"] = (
+        'See <img src="https://example.org/blot" alt="">.')
+    write(os.path.join(cache, "public", "nickname", "TEST_KC3.json"),
+          json.dumps(kc3))
+    # An item with what XML can't hold where no copying cleans it, a tag
+    # with a control character.
+    kc4 = bank_item("TEST_KC4", "Which?", ["This", "That"], 0, "This.")
+    kc4["items"][0]["tags"] = ["context-cnxfeature:odd\x01tag"]
+    write(os.path.join(cache, "public", "nickname", "TEST_KC4.json"),
+          json.dumps(kc4))
+    # What lxml's HTML parser, as installed, makes of a tag left open and
+    # of a reference to a control character: libxml2 2.14 (lxml 6.1.3)
+    # keeps "c<", "b<i", and U+0001, which XML doesn't allow, and 2.12
+    # (Ubuntu 24.04's lxml 5.2.1) reads "c" and "b" and drops U+0001, so
+    # that there's nothing to leave out.
+    from lxml import html as lxml_html
+    parsed = [el for part in lxml_html.fragments_fromstring(
+        kc3["items"][0]["questions"][0]["answers"][1]["feedback_html"]
+        + kc3["items"][0]["questions"][0]["stem_html"])
+        if not isinstance(part, str) for el in part.iter()]
+    keeps_names = (any("c<" in el.attrib for el in parsed)
+                   and any(el.tag == "b<i" for el in parsed))
+    keeps_references = "\x01" in "".join(
+        lxml_html.fragments_fromstring("&#1;x")[:1])
     out = os.path.join(work, "selling")
     result = unpack(repo, out, "--exercises-cache", cache)
     names = sorted(n[:-5] for n in os.listdir(out) if n.endswith(".html"))
@@ -837,6 +924,99 @@ source, 2020.</span></note></section>""")
          if shutil.which("pandoc") else
          ("x^{2}" in key and any(r["Check"] == "exercise-tex"
                                   for r in report))),
+        ("a formula written for MathJax that Pandoc can't read as it is, "
+         "a font switch's word, a bare percent sign, a character by its "
+         "number, words with an operator between them under a switch, or "
+         "rows \\hfill aligns left, is read once written as LaTeX writes "
+         "it, a word as text, an operator an operator, the rows aligned "
+         "left, and the run says how many it read so",
+         lambda: ('<mtext mathvariant="normal">4 gallons</mtext>' in section
+                  and "<mi>%</mi>" in section and "<mi>β</mi>" in section
+                  and '<mtext mathvariant="normal">max</mtext><mo>−</mo>'
+                  '<mtext mathvariant="normal">min</mtext>' in section
+                  and '<mtext mathvariant="normal">True</mtext><mo>∧</mo>'
+                  '<mtext mathvariant="normal">False</mtext>' in section
+                  and re.search(r'<mtd columnalign="left"[^>]*><mi>u</mi>',
+                                section)
+                  and re.search(r'<mtd columnalign="center"[^>]*><mi>x</mi>',
+                                section)
+                  and "7 of their formulas" in result.stdout)
+         if shutil.which("pandoc") else True),
+        ("a line break just before an environment's end makes no empty "
+         "row, in a formula read as written or rewritten",
+         lambda: [m.count("<mtr>") for m in re.findall(
+             r'<span data-math="\\begin\{(?:gathered|array)[^"]*">(.*?)</span>',
+             section, re.S)] == [2, 2, 2]
+         if shutil.which("pandoc") else True),
+        ("a program the bank writes as preformatted text is a code block, "
+         "its no-break spaces spaces, its lines numbered as the question "
+         "numbers them",
+         lambda: '<pre class="python line-numbering numberLines">'
+         '<code class="python line-numbering">for c in s:\n  print(c)'
+         '</code></pre>' in section),
+        ("its indentation is kept, a method's in its class; a picture in "
+         "it stands after the code before it, the code after it a block of "
+         "its own",
+         lambda: re.search(r'<pre class="python"><code class="python">  def '
+                           r'area\(self\):\n    return 1</code></pre>\s*'
+                           r'<figure[^>]*>\s*<img src="media/exercises/'
+                           + plot + r'\.png" alt="A plot of area"[^>]*>'
+                           r'.*?</figure>\s*<pre class="python"><code '
+                           r'class="python">print\(1\)</code></pre>\s*'
+                           r'(<p>)?\s*After the plot\.', section, re.S)),
+        ("a picture is named for its bytes, a JPEG the cache keeps as .png "
+         "copied as .jpg",
+         lambda: f'src="media/exercises/{blot}.jpg"' in section
+         and os.path.exists(os.path.join(out, "media", "exercises",
+                                         blot + ".jpg"))),
+        ("a picture the bank marks decorative is reported on the page that "
+         "shows it, once, not again in feedback, which baking drops",
+         lambda: [r["Where"] for r in report
+                  if r["Check"] == "exercise-image-decorative"
+                  and "TEST_KC3" in r["Detail"]
+                  and f"media/exercises/{blot}.jpg" in r["Detail"]]
+         == ["1-1-what-selling-is"]),
+        ("a picture the cache doesn't have is reported where its exercise "
+         "is",
+         lambda: [r["Where"] for r in report
+                  if r["Check"] == "exercise-image-missing"
+                  and "TEST_KC3" in r["Detail"]
+                  and "https://example.org/gone" in r["Detail"]]
+         == ["m30003"]),
+        ("one it can't read either way is left as its TeX, and reported",
+         lambda: "\\fbox {\\\\}" in section
+         and any(r["Check"] == "exercise-tex" and "\\fbox" in r["Detail"]
+                 for r in report)),
+        ("an attribute's name XML doesn't allow, from a tag the bank's "
+         "HTML leaves open, is left out and reported, and the book "
+         "unpacked (where the parser keeps such a name)",
+         lambda: result.returncode == 0
+         and any(r["Check"] == "exercise-html" and "'c<'" in r["Detail"]
+                 for r in report) == keeps_names),
+        ("an element's name XML doesn't allow is a span, its words kept, "
+         "and a control character is left out, as it is or as a reference, "
+         "in text, an attribute, or before an element, each reported "
+         "(where the parser keeps a name or a reference so)",
+         lambda: "Heavy or light ?" in flat(section) and "\x01" not in section
+         and ('<span>Heavy or <b title="xy">light</b>? ' in section
+              or not keeps_names)
+         and any(r["Check"] == "exercise-html" and "TEST_KC3" in r["Detail"]
+                 and "U+0001" in r["Detail"] for r in report)
+         and any(r["Check"] == "exercise-html" and "'b<i'" in r["Detail"]
+                 for r in report) == keeps_names
+         and any(r["Check"] == "exercise-html" and "TEST_KC1" in r["Detail"]
+                 and "U+0001" in r["Detail"] for r in report)
+         == keeps_references),
+        ("a context tag whose id holds a quote doesn't stop the book",
+         lambda: result.returncode == 0
+         and "1</a>. What does a seller offer?" in section),
+        ("an item XML can't hold says so where it would stand, and is "
+         "reported, the book unpacked",
+         lambda: result.returncode == 0
+         and "Exercise TEST_KC4 is in OpenStax's exercise bank" in section
+         and any(r["Check"] == "exercise-html" and "TEST_KC4" in r["Detail"]
+                 and "what XML can't hold" in r["Detail"]
+                 for r in report)),
         ("one the cache doesn't have says so where it would stand, and is "
          "reported",
          lambda: "TEST_KC2" in section and "couldn't be put in" in section
@@ -845,6 +1025,173 @@ source, 2020.</span></note></section>""")
          "to the chapter's references and numbered to match",
          lambda: '<sup class="os-end-note-number">1</sup>' in section
          and "1. A source, 2020." in flat(refs)),
+    ]
+
+
+# The bank's TeX, in LaTeX's forms ----------------------------------------
+
+def case_texforms(work):
+    """cnx.texforms.latex_forms on each form it rewrites, and on what it
+    leaves alone, as the exercise bank writes them."""
+    from cnx.texforms import latex_forms as forms, mathjax_rows as rows
+    return [
+        ("a font switch on a word is \\text, on a letter \\mathrm, to its "
+         "group's end, math-mode spaces dropped and \\  kept",
+         lambda: forms(r"{\rm{4\ gallons}}") == r"{\text{4\ gallons}}"
+         and forms(r"{\rm C}_2") == r"{\mathrm{C}}_2"
+         and forms(r"{\rm{ 180\ minutes}}") == r"{\text{180\ minutes}}"),
+        ("a switch reaches only to the end of its cell, row, or \\left's "
+         "group, not of one that opens inside its reach",
+         lambda: forms(r"\begin{array}{cc} \rm ab & c \end{array}")
+         == r"\begin{array}{cc} \text{ab}& c \end{array}"
+         and forms(r"\left( \rm abc \right) x")
+         == r"\left( \text{abc}\right) x"
+         and forms(r"{\rm a \left( b \right) d}")
+         == r"{\mathrm{a \left( b \right) d}}"
+         and forms(r"\left[ \rm a \left( b \right) c \right] d")
+         == r"\left[ \mathrm{a \left( b \right) c }\right] d"),
+        ("\\bf and \\it are \\mathbf and \\mathit, and a switch with math "
+         "in its reach is \\mathrm",
+         lambda: forms(r"\bf{\it{d\%}}") == r"\mathbf{{\mathit{{d\%}}}}"
+         and forms(r"{\rm H_2O}") == r"{\mathrm{H_2O}}"
+         and forms(r"{\rm km^2}") == r"{\mathrm{km^2}}"),
+        ("under \\rm, each run of words is \\text and what stands between "
+         "runs (an operator, a relation, a bracket) math, as TeX sets it",
+         lambda: forms(r"{\rm{maximum - minimum}}")
+         == r"{\text{maximum}-\text{minimum}}"
+         and forms(r"{\rm{KWN\;1,100 = USD\;1}}")
+         == r"{\text{KWN\;1,100}=\text{USD\;1}}"
+         and forms(r"{\rm x-axis}") == r"{\mathrm{x}-\text{axis}}"
+         and forms(r"\emptyset \;{\rm{or\ \{ }}\}")
+         == r"\emptyset \;{\text{or\ }\{}\}"
+         and forms(r"\rm True \wedge False = False")
+         == r"\text{True}\wedge \text{False}=\text{False}"
+         and forms(r"{\rm km\quad h}") == r"{\text{km}\quad \mathrm{h}}"),
+        ("a switch reaches past \\over, into the denominator, \\left's "
+         "group and all, but not one whose reach ended before it",
+         lambda: forms(r"{\rm km \over h}") == r"{\frac{\text{km}}{\mathrm{h}}}"
+         and forms(r"{\bf a \over b}") == r"{\frac{\mathbf{a }}{\mathbf{b}}}"
+         and forms(r"{\rm km \over \left( h \right)}")
+         == r"{\frac{\text{km}}{\mathrm{\left( h \right)}}}"
+         and forms(r"{\rm km \\ h \over s}") == r"{\frac{\text{km}\\ h }{s}}"),
+        ("a switch in \\text's argument is left alone",
+         lambda: forms(r"\text{\rm a}50%") == r"\text{\rm a}50\%"),
+        ("\\over is \\frac, \\choose \\binom, in every group",
+         lambda: forms(r"{1\over8}") == r"{\frac{1}{8}}"
+         and forms(r"{n \choose k}") == r"{\binom{n }{k}}"),
+        ("MathJax's \\unicode is its character, by hex or decimal",
+         lambda: forms(r"\unicode[Arial]{x3B2}") == "β"
+         and forms(r"\unicode{946}") == "β"),
+        ("and a character TeX gives a meaning is its control symbol, a "
+         "letter after a control word set apart from it; a backslash "
+         "(texmath's \\backslash is set minus), ^, ~, a control character, "
+         "or half a surrogate pair is left as written, and a format or "
+         "private use character, which XML allows, is the character",
+         lambda: forms(r"\unicode{x25}x+1") == r"\%x+1"
+         and forms(r"\unicode{x5C}alpha") == r"\unicode{x5C}alpha"
+         and forms(r"\unicode{x7B}x") == r"\{x"
+         and [forms("\\unicode{x%s}" % c) for c in ("26", "5F", "7D", "24", "23")]
+         == [r"\&", r"\_", r"\}", r"\$", r"\#"]
+         and forms(r"\unicode{x5E}x") == r"\unicode{x5E}x"
+         and forms(r"\unicode{x7E}x") == r"\unicode{x7E}x"
+         and forms(r"\alpha\unicode{x3B2}") == r"\alpha β"
+         and forms(r"\unicode{xD800}") == r"\unicode{xD800}"
+         and forms(r"\unicode{x0}") == r"\unicode{x0}"
+         and forms(r"f\unicode{x2061}(x)") == "f\u2061(x)"
+         and forms(r"\unicode{xE000}") == "\ue000"),
+        ("\\mkern and \\kern are \\mspace in whole mu, a point 1.8 mu",
+         lambda: forms(r"a\mkern 1mu b") == r"a\mspace{1mu} b"
+         and forms(r"a\kern 1pt b") == r"a\mspace{2mu} b"),
+        ("\\hfill ending each row of an array of one column aligns its "
+         "column left, as MathJax aligns it; any \\hfill is left out, and "
+         "gathered's rows, which MathJax centers, are centered",
+         lambda: forms(r"{\begin{array}{*{20}{c}} y \geq 3x \hfill \\ y < 1 "
+                       r"\hfill \end{array}}")
+         == r"{\begin{array}{l} y \geq 3x \\ y < 1 \end{array}}"
+         and forms(r"\begin{gathered} x > 1 \hfill \\ y < 2 \hfill \\ "
+                   r"\end{gathered}")
+         == r"\begin{gathered} x > 1 \\ y < 2 \end{gathered}"
+         and forms(r"\begin{gathered} x &=& 5 \hfill \\ y &=& 4 \hfill "
+                   r"\end{gathered}")
+         == r"\begin{gathered} x &=& 5 \\ y &=& 4 \end{gathered}"
+         and forms(r"\begin{array}{c} x \hfill \\ y \end{array}")
+         == r"\begin{array}{c} x \\ y \end{array}"
+         and forms(r"\begin{array}{cc} a \hfill & b \hfill \end{array}")
+         == r"\begin{array}{cc} a & b \end{array}"),
+        ("a line break just before an environment's end, which MathJax "
+         "ends no row at, is left out, of every formula, the last of two "
+         "alone; one between rows is kept",
+         lambda: rows(r"\begin{array}{l} a \\ b \\ \end{array}")
+         == r"\begin{array}{l} a \\ b \end{array}"
+         and rows(r"\left\{ {\begin{gathered} x \\ y \\  \end{gathered}} \right.")
+         == r"\left\{ {\begin{gathered} x \\ y \end{gathered}} \right."
+         and rows(r"\begin{gathered} a \\ \\ \end{gathered}")
+         == r"\begin{gathered} a \\ \end{gathered}"
+         and rows(r"\begin{array}{l} a \\ b \end{array}")
+         == r"\begin{array}{l} a \\ b \end{array}"
+         and forms(r"{\rm ab}\begin{array}{l} a \\ \end{array}")
+         == r"{\text{ab}}\begin{array}{l} a \end{array}"),
+        ("a bare percent sign and dollar sign are \\% and \\$, a dollar "
+         "sign in \\text kept, a percent sign there too escaped",
+         lambda: forms("(0.41 \\times 100)% = 41%")
+         == r"(0.41 \times 100)\% = 41\%"
+         and forms(r"$10") == r"\$10"
+         and forms(r"\text{$x$ is 5%}") == r"\text{$x$ is 5\%}"),
+        ("a line break outside an environment makes an array of one "
+         "column, its last break left out; one in an environment is kept",
+         lambda: forms(r"x>2\\y\geq3x-1\\")
+         == r"\begin{array}{l}x>2\\y\geq3x-1\end{array}"
+         and forms(r"\begin{cases} a \\ b \end{cases}")
+         == r"\begin{cases} a \\ b \end{cases}"),
+        ("XHTML's CDATA markers, hidden behind percent signs, are taken off",
+         lambda: forms(r"\% <![CDATA[ {1\over8}\%]]>") == r"{\frac{1}{8}}"),
+        ("braces that don't balance give nothing",
+         lambda: forms(r"{\rm a") is None and forms(r"\rm a}") is None),
+    ]
+
+
+# The bank's decorative pictures, as the pages show them -------------------
+
+def case_decorative(work):
+    """exercises.report_decorative on pages as baking leaves them, built
+    by hand: a picture the bank marks decorative is reported on each page
+    that shows it, an answer's feedback, which a book with no recipe
+    keeps, among them."""
+    from cnx import exercises
+    from cnx.pages import Page
+    from cnx.cnxml import E
+    first, second, inner = (E("div", {"data-type": "page"}) for _ in range(3))
+    shown = [E("img", {"src": "media/exercises/a.jpg", "alt": ""})
+             for _ in range(4)]
+    feedback = E("div", {"data-type": "answer-feedback"})
+    feedback.append(shown[0])
+    first.append(feedback)
+    first.append(E("img", {"src": "media/exercises/b.png", "alt": "Bars"}))
+    first.append(shown[3])               # a copy baking made: no exercise's
+    second.append(shown[1])
+    inner.append(shown[2])
+    second.append(inner)
+    pages = [Page(first, "page", "first", "First", None),
+             Page(second, "page", "second", "Second", None),
+             Page(inner, "page", "inner", "Inner", None)]
+    gone = E("img", {"src": "media/exercises/c.jpg", "alt": ""})
+    decorative = {"media/exercises/a.jpg": [(shown[0], "X1"), (shown[1], "X2"),
+                                            (shown[2], "X2")],
+                  "media/exercises/b.png": [(first[1], "X3")],
+                  "media/exercises/c.jpg": [(gone, "X4")]}
+    rows = []
+    exercises.report_decorative(pages, decorative,
+                                lambda *row: rows.append(row))
+    return [
+        ("a picture marked decorative is reported on each page that shows "
+         "it, in feedback too, a page inside another on its own, with the "
+         "exercise that showed it there, or, for a copy, each that showed it",
+         lambda: [(where, detail.split(":")[0]) for where, _, detail in rows]
+         == [("first", "X1"), ("first", "X1, X2"), ("second", "X2"),
+             ("inner", "X2")]
+         and {check for _, check, _ in rows} == {"exercise-image-decorative"}),
+        ("one no page shows, or one a page shows with alt text, isn't",
+         lambda: not any("b.png" in d or "c.jpg" in d for _, _, d in rows)),
     ]
 
 
@@ -3135,6 +3482,9 @@ CASES = [
     ("a repository of OpenStax's, baked as economics", case_trade),
     ("a book of the Connexions archive's", case_archive),
     ("exercises from OpenStax's exercise bank", case_bank),
+    ("the bank's TeX, in LaTeX's forms", case_texforms),
+    ("the bank's decorative pictures, as the pages show them",
+     case_decorative),
     ("Organic Chemistry's problems and pages", case_organic),
     ("a book in Polish", case_polish),
     ("a book in Spanish", case_spanish),

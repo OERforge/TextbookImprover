@@ -131,15 +131,15 @@ def lone_code(para):
     return code
 
 
-def code_lines(code):
+def code_lines(code, dedent=True):
     """A block of code's lines as its text's own. A newline element (a
     <br> by now) is a line break, and the line break the source writes
     after one isn't a second (Introduction to Python Programming writes
     both, and means one: a program's output, line by line). And the code
     loses the blank line it opens with, the indentation it closes with,
-    and the indentation every line of it shares, which is the source's
-    markup's, not the code's. What it holds (a program's example input,
-    in bold) is a word of a line, kept."""
+    and, with dedent, the indentation every line of it shares, which is
+    the source's markup's, not the code's. What it holds (a program's
+    example input, in bold) is a word of a line, kept."""
     for br in list(code.iter("br")):
         tail = br.tail or ""
         _put_text_before(br, "\n" + (tail[1:] if tail.startswith("\n")
@@ -152,7 +152,8 @@ def code_lines(code):
     lines = CODE_MARK.join(texts).split("\n")
     while lines and not lines[0].strip():
         lines.pop(0)
-    parts = textwrap.dedent("\n".join(lines)).rstrip().split(CODE_MARK)
+    text = "\n".join(lines)
+    parts = (textwrap.dedent(text) if dedent else text).rstrip().split(CODE_MARK)
     code.text = parts[0] or None
     for child, tail in zip(children, parts[1:]):
         child.tail = tail or None

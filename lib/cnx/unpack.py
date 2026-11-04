@@ -48,6 +48,7 @@ class Result:
         self.baked = False
         self.exercises = 0
         self.exercises_missing = 0
+        self.exercise_formulas_rewritten = 0
         self.boxes = 0
         self.formula_steps = 0
         self.merged_titles = 0
@@ -118,7 +119,8 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     result.style = book.style
     result.baked = book.style in RECIPES
     asm, body = assemble(repo, book)
-    result.exercises, result.exercises_missing = exercises.inject(
+    (result.exercises, result.exercises_missing,
+     result.exercise_formulas_rewritten, decorative) = exercises.inject(
         asm, body, bank or exercises.Bank())
     baked = bake(body, book.style, book.collection.language)
     outline, pages = P.collect(baked)
@@ -129,6 +131,7 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
 
     P.resolve(baked, pages, report)
     resolve_other_books(repo, book, baked, report)
+    exercises.report_decorative(pages, decorative, report)
     os.makedirs(out, exist_ok=True)
     language = book.collection.language or "en"
     emitter = Emitter(baked, pages, language, report, boxes=boxes)

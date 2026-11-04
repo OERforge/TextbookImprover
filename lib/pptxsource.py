@@ -811,14 +811,18 @@ class Reader:
 
     def table(self, slide, shape):
         """A table, its header row and column as the deck flags them or
-        the sidecar decides, and its cells' spans."""
+        the sidecar decides, and its cells' spans. Its blank rows at the
+        top are no part of it (pptxparse.Table.blank_rows), a decision
+        being the headers of the rows after them, as in the copy, and a
+        Header Row checked over them marking nothing."""
         tbl = shape.element.find(".//" + q("a:tbl"))
         if tbl is None:
             return []
         grid = tbl.find(q("a:tblGrid"))
         columns = len(grid.findall(q("a:gridCol"))) if grid is not None else 0
         pr = tbl.find(q("a:tblPr"))
-        first_row = pr is not None and pr.get("firstRow") in TRUE
+        blank = pptxparse.blank_rows(tbl)
+        first_row = pr is not None and pr.get("firstRow") in TRUE and not blank
         first_col = pr is not None and pr.get("firstCol") in TRUE
         decided = self.tables.get(shape.table.key()) \
             if shape.table is not None and shape.id not in self.repeated else None
@@ -833,7 +837,7 @@ class Reader:
                              (False, True): "first-column"}.get((first_row, first_col))
         inherited = self.inherited(slide, None)
         rows = []
-        for tr in tbl.findall(q("a:tr")):
+        for tr in tbl.findall(q("a:tr"))[blank:]:
             cells = []
             for tc in tr.findall(q("a:tc")):
                 if tc.get("hMerge") in TRUE or tc.get("vMerge") in TRUE:

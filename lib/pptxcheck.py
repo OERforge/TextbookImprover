@@ -327,7 +327,8 @@ def loose_pieces(slide):
 def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
           alt_placeholders=(), tables=None, orders=None, links=None, restricted=None):
     """Findings for a parsed deck. tables: a table-headers sidecar's
-    decisions by key (pptxremediate.header_rows()), for a copy they were
+    decisions by key (pptxremediate.header_rows()), or a function of a
+    slide and a table's shape giving its decision, for a copy they were
     written into: one decided to have no headers isn't missing them.
     orders: the reading-order sidecar's orders for this deck's slides, by
     the slide's id: a slide whose shapes are in its order was decided, in
@@ -335,7 +336,9 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
     sidecar decides, and those it replaces them with: a bare link to one
     was decided, kept bare or not. restricted: {typeface: fsType} of the
     fonts other decks of the run embed restricted (font_items())."""
-    tables, orders, links = tables or {}, orders or {}, links or set()
+    table_decision = tables if callable(tables) else (
+        lambda _slide, shape, by_key=tables or {}: by_key.get(shape.table.key()))
+    orders, links = orders or {}, links or set()
     name = name or os.path.basename(deck.path)
     rules = placeholder_rules(alt_placeholders)
     out = []
@@ -365,10 +368,16 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
             flagged.add(id(shape))
         for shape in slide.all_shapes():
             if shape.table is not None:
-                if not shape.table.first_row and tables.get(shape.table.key()) != "none":
-                    add(where(slide, shape), "pptx-table-no-header",
-                        "%d by %d table" % (len(shape.table.rows),
-                                            max((len(r) for r in shape.table.rows), default=0)))
+                size = "%d by %d table" % (len(shape.table.rows),
+                                           max((len(r) for r in shape.table.rows), default=0))
+                if not shape.table.first_row and table_decision(slide, shape) != "none":
+                    add(where(slide, shape), "pptx-table-no-header", size)
+                elif shape.table.first_row and shape.table.blank_rows:
+                    # PowerPoint's checker counts the Header Row, which
+                    # marks a row with nothing to announce.
+                    add(where(slide, shape), "pptx-table-header-row-blank",
+                        size + ("" if shape.table.blank_rows == 1
+                                else ", its first %d rows blank" % shape.table.blank_rows))
                 if shape.table.merged:
                     add(where(slide, shape), "pptx-merged-cells", "a table with merged cells")
             if shape.media and not _captioned(shape):

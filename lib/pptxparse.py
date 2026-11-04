@@ -225,16 +225,24 @@ class Link:
 
 
 class Table:
-    """A table's cells as text, its header flags, and whether any cell
-    is merged."""
+    """A table's cells as text, its header flags, whether any cell is
+    merged, and how many of its rows at the top hold nothing (blank_rows,
+    blank_row()): no text, equation, or picture in any cell, and no cell
+    reaching down into the row below, a row of something always left after
+    them. Such a row is no
+    part of the table: a Header Row checked over one marks nothing as
+    headers. The census guesses a table's headers without it, the reader
+    leaves it out, and a row of table-headers.csv deciding the table
+    deletes it from the copy (pptxremediate.delete_blank_rows)."""
 
-    __slots__ = ("rows", "first_row", "first_col", "merged", "grid")
+    __slots__ = ("rows", "first_row", "first_col", "merged", "grid", "blank_rows")
 
-    def __init__(self, rows, first_row, first_col, merged, grid=None):
+    def __init__(self, rows, first_row, first_col, merged, grid=None, blank_rows=0):
         self.rows, self.first_row, self.first_col, self.merged = rows, first_row, first_col, merged
         # (text, bold, column span, vertical merge) per cell, the cells a
         # merge covers left out of a row, as the table census reads a grid
         self.grid = grid or []
+        self.blank_rows = blank_rows
 
     def key(self):
         """The table's content hash, as tablecensus keys a table: each
@@ -549,6 +557,33 @@ def _cell_text(tc):
     return "".join(parts).strip()
 
 
+def blank_row(tr):
+    """Whether a table's row holds nothing (Table.blank_rows): no text in
+    any cell, an equation's among it, no picture, and no cell reaching
+    down into the row below. A cell's color and borders are its look, not
+    something in it, as a deck LibreOffice saved has its table style's
+    band written into each cell."""
+    for tc in tr.findall(q("a:tc")):
+        if _cell_text(tc) or tc.find(".//" + q("a:blipFill")) is not None:
+            return False
+        try:
+            if int(tc.get("rowSpan") or 1) > 1:
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def blank_rows(tbl):
+    """How many of a table element's rows at the top hold nothing, a row
+    of something always left after them."""
+    trs = tbl.findall(q("a:tr"))
+    n = 0
+    while n < len(trs) - 1 and blank_row(trs[n]):
+        n += 1
+    return n if n < len(trs) and not blank_row(trs[n]) else 0
+
+
 def _table(frame_el):
     tbl = frame_el.find(".//" + q("a:tbl"))
     if tbl is None:
@@ -582,7 +617,7 @@ def _table(frame_el):
             line.append((text, bold, span, vertical))
         rows.append(cells)
         grid.append(line)
-    return Table(rows, first_row, first_col, merged, grid)
+    return Table(rows, first_row, first_col, merged, grid, blank_rows(tbl))
 
 
 def _stroke(sppr):

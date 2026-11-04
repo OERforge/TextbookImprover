@@ -5318,6 +5318,259 @@ def case_other_formats_libreoffice(work):
         and len(notes) == 1, [b["t"] for b in doc["blocks"]]
 
 
+def case_blank_rows(work):
+    """A table's blank rows at the top (pptxparse.Table.blank_rows), as
+    OpenStax's statistics decks have one under a checked Header Row, with
+    the numbers below it: counted, reported, guessed without, left out of
+    the page, and deleted from the copy once table-headers.csv decides the
+    table, whose value is then the headers of the rows left."""
+    import pptxsource
+    a14 = ('<a14:m xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"><m:oMath '
+           'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r>'
+           '<m:t>x</m:t></m:r></m:oMath></a14:m>')
+    formula = ('<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p>%s</a:p></a:txBody><a:tcPr/>'
+               '</a:tc>' % a14)
+    filled = ('<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p/></a:txBody><a:tcPr><a:blipFill>'
+              '<a:blip r:embed="rId2"/></a:blipFill></a:tcPr></a:tc>')
+    # A color and a border of the cell's own, as a deck LibreOffice saved
+    # has its table style's band in each cell: its look, not something in it.
+    colored = ('<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p/></a:txBody><a:tcPr><a:lnB w="12700">'
+               '<a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:lnB><a:solidFill>'
+               '<a:srgbClr val="1F4E79"/></a:solidFill></a:tcPr></a:tc>')
+    spaced = ('<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>&#160;</a:t></a:r></a:p>'
+              '</a:txBody><a:tcPr/></a:tc>')
+    numbers = [[None, None, None], ["97", "62", "73"], ["74", "66", "93"]]
+    blank = cell(None)
+    box = (457200, 1600200, 6000000, 1112520)
+
+    def at(shapes, slide_title, images=None):
+        return {"shapes": [title(2, slide_title, box=TITLE_BOX)] + shapes,
+                "images": images or {}}
+    path = deck(os.path.join(work, "blank.pptx"), [
+        at([table(4, numbers, box, first_row=True)], "Numbers"),
+        at([table(4, [[None, None], ["Year", "Sales"], ["2024", "10"], ["2025", "12"]], box,
+                  first_row=True)], "Labels Below"),
+        at([table(4, [[None, None], ["", " "], ["1", "2"], ["3", "4"]], box, first_row=True)],
+           "Two Blank Rows"),
+        at([table(4, [[None, None], [None, "x"], ["1", "2"]], box, first_row=True,
+                  cells={0: [cell(None, attrs=' rowSpan="2"'), cell(None)],
+                         1: [cell(None, attrs=' vMerge="1"'), cell("x")]})], "Merged Down"),
+        at([table(4, [[None, None]], box, first_row=True),
+            table(5, [[None, None], [None, None]], (457200, 3000000, 6000000, 741680),
+                  first_row=True)], "Nothing Else"),
+        at([table(4, [[None, None], ["1", "2"]], box, first_row=True,
+                  cells={0: [formula, cell(None)]}),
+            table(5, [[None, None], ["1", "2"]], (457200, 3000000, 6000000, 741680),
+                  first_row=True, cells={0: [filled, cell(None)]}),
+            table(6, [[None, None], ["3", "4"]], (457200, 4000000, 6000000, 741680),
+                  first_row=True, cells={0: [colored, cell(None)]})], "Something in It",
+           {"rId2": RED}),
+        at([table(4, numbers, box).replace("97", "99")], "Not Checked"),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "94")
+                      .replace('h="370840"', 'h="0"'),
+                      table(4, numbers, box, first_row=True).replace("97", "94"))],
+           "Both Branches"),
+        at([table(4, numbers, box, first_row=True).replace("97", "98")], "Undecided"),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "96"),
+                      pic(4, "rId2", box, "A table")),
+            table(5, numbers, (457200, 3000000, 6000000, 1112520),
+                  first_row=True).replace("97", "95")], "A Picture's Fallback", {"rId2": RED}),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "93"),
+                      table(4, [["a", "b", "c"]] + numbers[1:], box,
+                            first_row=True).replace("97", "93"))], "Branches Unlike"),
+        # Two tables the census guesses otherwise with the blank row, or
+        # with Header Row read as marking the first row after it.
+        at([table(4, [[None, None], ["Apples", "Red fruit"], ["Bananas", "Yellow fruit"]], box,
+                  first_row=True)], "Words Below"),
+        at([table(4, [[None, None], ["97", "62"], ["Week one.", None], ["74", "66"],
+                      ["80", "70"]], box, first_row=True,
+                  cells={2: [cell("Week one.", attrs=' gridSpan="2"'),
+                             cell(None, attrs=' hMerge="1"')]})], "A Band Partway"),
+        # A Choice over a blank row whose Fallback has something in it, as
+        # the parser reads a row; and one whose Fallback's row is a no-break
+        # space alone, which is blank.
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "92"),
+                      table(4, numbers, box, first_row=True, cells={0: [filled, blank, blank]})
+                      .replace("97", "92"))], "Fallback Picture", {"rId2": RED}),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "91"),
+                      table(4, numbers, box, first_row=True, cells={
+                          0: [cell(None, attrs=' rowSpan="2"'), blank, blank],
+                          1: [cell(None, attrs=' vMerge="1"'), cell("62"), cell("73")]})
+                      .replace("97", "91"))], "Fallback Merged Down"),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "90"),
+                      table(4, numbers, box, first_row=True, cells={0: [formula, blank, blank]})
+                      .replace("97", "90"))], "Fallback Equation"),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "89"),
+                      table(4, numbers, box, first_row=True, cells={0: [spaced, blank, blank]})
+                      .replace("97", "89"))], "Fallback No-Break Space"),
+        at([alternate(table(4, numbers, box, first_row=True).replace("97", "88"),
+                      table(4, [[None, None, None]], box, first_row=True))], "Fallback Short")])
+    d = pptxparse.read(path)
+
+    def tables(slide):
+        return [s.table for s in d.slides[slide - 1].all_shapes() if s.table is not None]
+    counted = [[t.blank_rows for t in tables(n)] for n in range(1, 12)]
+    yield "the blank rows at the top are counted, a row's own color and border among them, not " \
+        "a row merged into the next, nor all a table's, nor a row holding an equation or a picture", \
+        counted == [[1], [1], [2], [0], [0, 0], [0, 0, 1], [1], [1], [1], [1, 1], [1]], counted
+    found = pptxcheck.check(d, "blank.pptx")
+    blank = [(f.where.split(",")[0], f.detail) for f in found
+             if f.check == "pptx-table-header-row-blank"]
+    yield "a Header Row checked over blank rows is reported, a table without one as before", \
+        blank == [("slide 1", "3 by 3 table"), ("slide 2", "4 by 2 table"),
+                  ("slide 3", "4 by 2 table, its first 2 rows blank"), ("slide 6", "2 by 2 table"),
+                  ("slide 8", "3 by 3 table"),
+                  ("slide 9", "3 by 3 table"), ("slide 10", "3 by 3 table"),
+                  ("slide 10", "3 by 3 table"), ("slide 11", "3 by 3 table"),
+                  ("slide 12", "3 by 2 table"), ("slide 13", "5 by 2 table")] \
+        + [("slide %d" % n, "3 by 3 table") for n in range(14, 19)] \
+        and [f.where.split(",")[0] for f in found if f.check == "pptx-table-no-header"] \
+        == ["slide 7"], blank
+    folder = os.path.join(work, "run")
+    os.makedirs(folder)
+    shutil.copy(path, folder)
+    paths = {"table_headers": os.path.join(folder, "table-headers.csv"),
+             "image_alt": os.path.join(folder, "image-alt.csv"),
+             "slide_titles": os.path.join(folder, "slide-titles.csv")}
+    reports = {k: os.path.join(folder, v) for k, v in (
+        ("image_alt_missing", "image-alt-missing.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
+        ("output_check", "output-check.csv"))}
+    said = []
+    deckrun.run(folder, ["blank.pptx"], [], paths, reports, check_only=True, say=said.append)
+    rows = {r[5]: (r[1], r[7]) for r in rows_of(reports["table_headers_new"])}
+    yield "each is in table-headers-new.csv, its guess and preview without its blank rows", \
+        rows.get("blank.pptx slide 1") == ("none", "97 | 62 | 73") \
+        and rows.get("blank.pptx slide 2") == ("first-row", "Year | Sales") \
+        and rows.get("blank.pptx slide 3") == ("none", "1 | 2") \
+        and rows.get("blank.pptx slide 12") == ("first-column", "Apples | Red fruit") \
+        and rows.get("blank.pptx slide 13") == ("none", "97 | 62") \
+        and "blank.pptx slide 4" not in rows and "blank.pptx slide 7" in rows \
+        and any("or one marked over a blank row" in line for line in said), (rows, said[-6:])
+    keys = {n: [t.key() for t in tables(n)] for n in range(1, 19)}
+    decided = {keys[1][0]: "none", keys[2][0]: "first-row", keys[3][0]: "none",
+               keys[4][0]: "none", keys[7][0]: "first-row", keys[8][0]: "none",
+               keys[10][0]: "none", keys[11][0]: "none"}
+    decided.update({keys[n][0]: "none" for n in range(14, 19)})
+    decided[keys[6][2]] = "none"
+    with open(paths["table_headers"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TABLE_COLUMNS] + [[k, v] for k, v in decided.items()])
+    said = []
+    deckrun.run(folder, ["blank.pptx"], [CopyTarget(folder)], paths, reports, say=said.append)
+    out = os.path.join(folder, "copies", "blank.pptx")
+    e = pptxparse.read(out)
+
+    def copied(slide):
+        return [(t.rows, t.first_row) for s in e.slides[slide - 1].all_shapes()
+                for t in [s.table] if t is not None]
+    yield "the copy deletes a decided table's blank rows, its value the headers of the rows left", \
+        copied(1) == [(numbers[1:], False)] \
+        and copied(2) == [([["Year", "Sales"], ["2024", "10"], ["2025", "12"]], True)] \
+        and copied(3) == [([["1", "2"], ["3", "4"]], False)] \
+        and copied(7) == [([["99", "62", "73"], ["74", "66", "93"]], True)], \
+        [copied(n) for n in (1, 2, 3, 7)]
+    yield "a row merged into the next isn't deleted, nor an undecided table's", \
+        copied(4) == [([["", ""], ["", "x"], ["1", "2"]], False)] \
+        and copied(9)[0][0][0] == ["", "", ""] and copied(9)[0][1], (copied(4), copied(9))
+    xml = read_part(out, "ppt/slides/slide8.xml")
+    yield "a table in Choice and Fallback loses the row in both, each frame as much shorter " \
+        "as the Fallback's row says, the Choice's saying 0", \
+        xml.count("<a:tr ") == 4 and xml.count('cy="%d"' % (1112520 - 370840)) == 2, xml.count(
+            "<a:tr ")
+    unlike = [read_part(out, "ppt/slides/slide%d.xml" % n) for n in (11, 14, 15, 16, 18)]
+    yield "a Fallback with something in its blank rows, as the parser reads a row (text, a " \
+        "picture, a cell merged down, an equation), or no row after them, leaves the table as it is", \
+        [(x.count("<a:tr "), x.count('firstRow="1"')) for x in unlike] \
+        == [(6, 2), (6, 2), (6, 2), (6, 2), (4, 2)], \
+        [(x.count("<a:tr "), x.count('firstRow="1"')) for x in unlike]
+    refused = [line for line in said if "is left as it is in the copy, its table-headers.csv row "
+               "not written there, since a copy of its frame, its Choice or its Fallback, has" in line
+               and "the page leaves its blank rows at the top out, and has the row's headers" in line]
+    yield "and the run says why each is left so, and what the page does", \
+        len(refused) == 5 and sum("has something in those rows" in line for line in refused) == 4 \
+        and any("slide 18's table Table 4" in line and "has no row after them" in line
+                for line in refused), said[-12:]
+    xml = read_part(out, "ppt/slides/slide6.xml")
+    yield "a row of a color and a border of its own is deleted, its look with it", \
+        copied(6)[2] == ([["3", "4"]], False) and "1F4E79" not in xml, (copied(6), "1F4E79" in xml)
+    xml = read_part(out, "ppt/slides/slide17.xml")
+    yield "a no-break space alone is blank in the Fallback too, its row deleted from both", \
+        xml.count("<a:tr ") == 4 and 'firstRow="1"' not in xml, xml.count("<a:tr ")
+    xml = read_part(out, "ppt/slides/slide10.xml")
+    yield "a Fallback that's a picture leaves the next table alone, its Header Row and its row", \
+        xml.count("<a:tr ") == 5 and xml.count('firstRow="1"') == 1 \
+        and xml.index('firstRow="1"') > xml.index("</mc:AlternateContent>"), xml[-1500:]
+    yield "the run says how many rows it deleted", \
+        any("9 blank row(s) deleted from the top of 8 table(s), which table-headers.csv decides"
+            in line for line in said), said[-8:]
+    left = sorted((r[0].split(",")[0], r[1]) for r in rows_of(reports["output_check"])
+                  if r[1].startswith("pptx-table"))
+    yield "and its check counts the copy's tables as decided, the undecided ones left to do", \
+        left == sorted(("slide %d" % n, "pptx-table-header-row-blank")
+                       for n in (9, 10, 11, 12, 13, 14, 15, 16, 18)), left
+    # Two decks, a table in each the content of another's once its blank
+    # row is gone, and two tables whose id repeats on a slide.
+    keyed = os.path.join(work, "keys")
+    os.makedirs(keyed)
+    first, second = [[None, None], ["51", "52"], ["53", "54"]], [[None, None], ["61", "62"],
+                                                                ["63", "64"]]
+    deck(os.path.join(keyed, "a.pptx"), [at([table(4, first, box, first_row=True)], "A1"),
+                                        at([table(4, second, box, first_row=True)], "A2"),
+                                        at([table(4, first[1:], box)], "A3"),
+                                        at([table(4, [["71", "72"], ["73", "74"]], box),
+                                            table(4, [["81", "82"], ["83", "84"]],
+                                                  (457200, 3000000, 6000000, 741680))],
+                                           "Repeated")])
+    deck(os.path.join(keyed, "b.pptx"), [at([table(4, first[1:], box)], "B1"),
+                                        at([table(4, second[1:], box)], "B2")])
+    a, b = pptxparse.read(os.path.join(keyed, "a.pptx")), pptxparse.read(os.path.join(keyed,
+                                                                                    "b.pptx"))
+    key = [[s.table.key() for s in slide.all_shapes() if s.table is not None][0]
+           for slide in a.slides + b.slides]
+    # key: A1, A2, A3, the first of the two tables whose id repeats, B1, B2.
+    paths = {k: os.path.join(keyed, os.path.basename(v)) for k, v in paths.items()}
+    reports = {k: os.path.join(keyed, os.path.basename(v)) for k, v in reports.items()}
+    with open(paths["table_headers"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TABLE_COLUMNS, [key[0], "none"], [key[1], "manual"],
+                                  [key[2], "manual"], [key[3], "none"], [key[5], "none"]])
+    deckrun.run(keyed, ["a.pptx", "b.pptx"], [CopyTarget(keyed)], paths, reports,
+                say=lambda line: None)
+    left = sorted((r[3].split("/")[-1], r[0].split(",")[0], r[1])
+                  for r in rows_of(reports["output_check"]) if r[1].startswith("pptx-table"))
+    yield "a copy's check takes each table's decision from its original, by its slide and " \
+        "shape, not from another deck's table or one its content matches, and a shape whose id " \
+        "repeats from its key", \
+        left == [("a.pptx", "slide 2", "pptx-table-header-row-blank"),
+                 ("a.pptx", "slide 3", "pptx-table-no-header"),
+                 ("a.pptx", "slide 4", "pptx-table-no-header"),
+                 ("b.pptx", "slide 1", "pptx-table-no-header")], left
+
+    def pages(doc):
+        """{slide title: [(header rows, body rows)]} of the tables read."""
+        found, current = {}, [None]
+
+        def walk(blocks):
+            for b in blocks:
+                if b["t"] == "Header":
+                    current[0] = inline_text(b["c"][2])
+                elif b["t"] == "Table":
+                    found.setdefault(current[0], []).append(
+                        (len(b["c"][3][1]), sum(len(body[3]) for body in b["c"][4])))
+                elif b["t"] == "Div":
+                    walk(b["c"][1])
+        walk(doc["blocks"])
+        return found
+    read = pages(pptxsource.read(path, work, work)[0])
+    yield "the page leaves a table's blank rows out, a Header Row over them marking nothing", \
+        [read.get(t) for t in ("Numbers", "Labels Below", "Two Blank Rows", "Not Checked",
+                               "Both Branches")] == [[(0, 2)], [(0, 3)], [(0, 2)], [(0, 2)],
+                                                     [(0, 2)]], read
+    read = pages(pptxsource.read(path, work, work, tables=decided)[0])
+    yield "and a decision is the headers of the rows left, as in the copy", \
+        [read.get(t) for t in ("Numbers", "Labels Below", "Not Checked")] \
+        == [[(0, 2)], [(1, 2)], [(1, 1)]], read
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -5349,7 +5602,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the round trip", case_round_trip),
          ("the title slide as LibreOffice saves one", case_saved_title),
          ("decks in other formats", case_other_formats),
-         ("a deck in ODP, saved by LibreOffice", case_other_formats_libreoffice)]
+         ("a deck in ODP, saved by LibreOffice", case_other_formats_libreoffice),
+         ("a table's blank rows at the top", case_blank_rows)]
 
 
 def main():

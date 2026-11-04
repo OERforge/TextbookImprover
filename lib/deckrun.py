@@ -14,8 +14,10 @@ each deck (pptxremediate.py). The reports:
   object, a group) that needs alt text, keyed on deck/slide-N/shape-M;
   and for a picture whose copies are cropped to show different parts of
   its image, a row for each copy, keyed on its shape as an object's is;
-- table-headers-new.csv: each table with no header row marked, keyed on
-  its content as a book's tables are, with the table census's guess;
+- table-headers-new.csv: each table with no header row marked, or one
+  marked over a blank row (pptxparse.Table.blank_rows), keyed on its
+  content as a book's tables are, with the table census's guess, made
+  without its blank rows;
 - slide-titles-new.csv: each slide with no title, and each whose title
   an earlier slide in its deck has, keyed on deck/slide-N, the second of
   them drafted "Title (2)", the third "Title (3)"; a slide with no title
@@ -146,14 +148,16 @@ def reason_of(check, detail):
 def census_view(table):
     """A deck's table as the table census reads a table: the grid, a
     merged cell repeated across the columns it spans as Word's is, and
-    PowerPoint's header-column flag as Word's table look."""
+    PowerPoint's header-column flag as Word's table look. Its blank rows
+    at the top are no part of it (pptxparse.Table), and a Header Row
+    checked over them marks nothing."""
     grid = []
-    for line in table.grid:
+    for line in table.grid[table.blank_rows:]:
         row = []
         for text, bold, span, vertical in line:
             row.extend([tablecensus.Cell.of(text, bold=bold, span=span, vmerge=vertical)] * span)
         grid.append(row)
-    return tablecensus.View(grid, {"firstRow": table.first_row,
+    return tablecensus.View(grid, {"firstRow": table.first_row and not table.blank_rows,
                                    "firstColumn": table.first_col})
 
 
@@ -175,8 +179,8 @@ def census_guess(table):
 
 def preview(table):
     """The first row's first three cells, as a book's report previews a
-    table."""
-    first = table.rows[0][:3] if table.rows else []
+    table, past its blank rows."""
+    first = table.rows[table.blank_rows][:3] if table.rows else []
     return " | ".join(" ".join(c.split())[:24] for c in first)
 
 
@@ -504,7 +508,9 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 if not pptxremediate.decision(alts, dname, slide, shape)[0]:
                     flagged.add(id(shape))
             for shape in slide.all_shapes():
-                if shape.table is None or shape.table.first_row:
+                # A Header Row checked over blank rows marks nothing.
+                if shape.table is None or (shape.table.first_row
+                                           and not shape.table.blank_rows):
                     continue
                 key = shape.table.key()
                 if key in tables or key in table_report:
@@ -600,7 +606,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                "has a row of its own, keyed on its shape, whose Reason names its image."
                if parted else ""))
     report(reports["table_headers_new"], TABLE_COLUMNS, list(table_report.values()),
-           "table(s) with no header row marked", paths["table_headers"], say)
+           "table(s) with no header row marked, or one marked over a blank row",
+           paths["table_headers"], say)
     hints = []
     if any(r[3] and r[0] in headings for r in title_report):
         hints.append("A Title drafted from a slide's heading makes the heading its title, in "
@@ -689,8 +696,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             # What was left as it was isn't a change.
             changed += any(n for key, n in counts.items()
                            if key not in ("skipped", "orders_refused", "titles_kept",
-                                          "equations_kept"))
-            copies.append((target, name, destination))
+                                          "equations_kept", "blank_refused"))
+            copies.append((target, name, destination, table_decisions(deck, tables)))
         say("%s: %d deck(s) written, %d of them changed: %d picture(s) and object(s) given alt "
             "text and %d marked decorative, %d header row(s) and %d header column(s) marked, "
             "%d slide(s) given the heading they show as their title, in place, %d title(s) "
@@ -702,6 +709,11 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                totals["language"],
                " and %d another in place of their own" % totals["relanguaged"]
                if totals["relanguaged"] else "", totals["core_title"]))
+        if totals["blank_tables"]:
+            say("%s: %d blank row(s) deleted from the top of %d table(s), which %s decides, "
+                "their headers those of the rows left." % (
+                    target.name, totals["blank_rows"], totals["blank_tables"],
+                    os.path.basename(paths.get("table_headers") or "table-headers.csv")))
         if totals["links"] or totals["replaced"]:
             say("%s: %d bare link(s) given a ScreenTip and %d a replacement, as %s says." % (
                 target.name, totals["links"], totals["replaced"],
@@ -970,14 +982,35 @@ def setting(target, key, default=False):
         return default
 
 
+def table_decisions(deck, tables):
+    """{(slide id, shape id): its decision} for each table of a deck that
+    a row of table-headers.csv decides, for its copy's check: the copy's
+    table is its original's, by its slide and its shape, where its key
+    changes with its blank rows deleted. A shape whose id its slide
+    repeats is left to its key."""
+    out = {}
+    for slide in deck.slides:
+        shapes = [s for s in slide.all_shapes() if s.id]
+        repeated = {i for i, n in Counter(s.id for s in shapes).items() if n > 1}
+        for shape in shapes:
+            if shape.table is not None and shape.id not in repeated \
+                    and shape.table.key() in tables:
+                out[(slide.slide_id, shape.id)] = tables[shape.table.key()]
+    return out
+
+
 def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, orders=None,
                  links=None, restricted=None):
     """The output check, on the copies: what's left to do in each, a table
     the sidecar says has no headers not counted against it, nor a slide
-    put in the order the sidecar gives. Returns the number of copies that
+    put in the order the sidecar gives. copies: (target, deck, the copy,
+    its original's table_decisions()). Returns the number of copies that
     couldn't be read back."""
     found, unreadable = [], 0
-    for target, name, destination in copies:
+    for target, name, destination, by_shape in copies:
+        def decided(slide, shape, by_shape=by_shape):
+            value = by_shape.get((slide.slide_id, shape.id))
+            return value if value is not None else tables.get(shape.table.key())
         try:
             deck = pptxparse.read(destination)
         except Exception as exc:
@@ -986,7 +1019,7 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
             continue
         found += pptxcheck.check(deck, os.path.join(os.path.basename(target.output_dir), name),
                                  kind="pptx", alt_max_chars=alt_max_chars,
-                                 alt_placeholders=alt_placeholders, tables=tables,
+                                 alt_placeholders=alt_placeholders, tables=decided,
                                  orders=pptxremediate.slide_orders(
                                      orders or {}, pptxremediate.deck_name(name)),
                                  links=pptxremediate.decided_links(links or {}),

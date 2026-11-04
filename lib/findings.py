@@ -235,6 +235,10 @@ CHECKS = OrderedDict([
     ("pptx-decorative-with-alt", ("a shape marked decorative that still has alt text, which a "
                                   "converter may read", "note", "WCAG 2.0 SC 1.1.1 (A)",
                                   "sidecar")),
+    ("pptx-table-header-row-blank", ("a table whose Header Row is checked over a first row "
+                                     "with nothing in it, which PowerPoint's checker counts "
+                                     "as a header row and has no headers to announce",
+                                     "error", "WCAG 2.0 SC 1.3.1 (A)", "sidecar")),
     ("pptx-master-image-no-alt", ("a picture on a layout or master with no alt text and not "
                                   "marked decorative; PowerPoint's checker doesn't look there, "
                                   "but a converted copy may show it", "note",

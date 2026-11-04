@@ -13,7 +13,9 @@ docxremediate.py does for Word:
   object, a group, a shape) by its slide and shape id, as a copy of a
   picture can be too, cropped to show another part of its image;
 - a table's header row and column, PowerPoint's firstRow and firstCol,
-  for the table whose content hash the sidecar names;
+  for the table whose content hash the sidecar names, its blank rows at
+  the top (pptxparse.Table.blank_rows) deleted first, so that the value
+  is the headers of the rows left, as the page has them;
 - a title for a slide that has none: the heading the slide shows made its
   title in place, its look kept, as PowerPoint's Set as Slide Title makes
   it (pptxtitle.py), when the title is that heading's text, or that text
@@ -109,6 +111,14 @@ def start_tag(name):
 
 CNVPR = start_tag("p:cNvPr")
 TBLPR = start_tag("a:tblPr")
+TR = start_tag("a:tr")
+GRAPHIC_FRAME = re.compile(r"<p:graphicFrame(?=[\s>/])")
+# A namespace a part declares, a table row's height, and a frame's
+# height (its p:xfrm's a:ext cy).
+XMLNS = re.compile(r"""\sxmlns:([\w.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+ROW_HEIGHT = re.compile(r"""\sh\s*=\s*["'](\d+)["']""")
+FRAME_EXT = re.compile(r"<p:xfrm\b[^>]*>(?:(?!</p:xfrm>).)*?"
+                       r"""<a:ext\b[^>]*?\scy\s*=\s*["'](\d+)["']""", re.S)
 # A shape with nothing in it, as Pandoc writes one for a field its layout
 # has no placeholder for.
 EMPTY_SHAPE = re.compile(r"<p:(sp|pic|graphicFrame|grpSp|cxnSp)%s(?:/>|>\s*</p:\1\s*>)" % ATTRS)
@@ -346,6 +356,77 @@ def set_alt(xml, shape_id, alt, decorative):
     return xml, len(spans)
 
 
+def _frame_of(xml, start):
+    """(start, end) of the p:graphicFrame whose cNvPr starts at start, or
+    None when that cNvPr is another kind of shape's, as a Fallback's
+    picture of a table is."""
+    begins = [m.start() for m in GRAPHIC_FRAME.finditer(xml, 0, start)]
+    if not begins or xml.find("</p:graphicFrame>", begins[-1], start) >= 0:
+        return None
+    end = xml.find("</p:graphicFrame>", start)
+    return (begins[-1], end) if end >= 0 else None
+
+
+def _blank_tr(row, xml):
+    """Whether a table row's XML holds nothing, as pptxparse.blank_row says
+    of it, the row read with the namespaces its part declares; a row that
+    can't be read holds something."""
+    declared = {}
+    for match in XMLNS.finditer(xml):
+        declared.setdefault(match.group(1), match.group(2) if match.group(2) is not None
+                            else match.group(3))
+    wrapped = "<row %s>%s</row>" % (" ".join('xmlns:%s="%s"' % (prefix, html.escape(uri))
+                                             for prefix, uri in declared.items()), row)
+    try:
+        tr = ET.fromstring(wrapped).find(pptxparse.q("a:tr"))
+    except ET.ParseError:
+        return False
+    return tr is not None and pptxparse.blank_row(tr)
+
+
+def delete_blank_rows(xml, shape_id, count):
+    """xml with a table's first count rows deleted, its blank rows
+    (pptxparse.Table.blank_rows), and its frame made as much shorter as
+    their heights say, their cells' color and borders with them: in every
+    copy of the frame, Choice and Fallback, or, should one not have them
+    blank, or no row after them, in none. A row's height of 0, which some
+    writers give every row, says nothing, and a copy whose rows say one
+    gives it to them all: PowerPoint's Choice may have 0 where its
+    Fallback has the heights. Returns (xml, the rows deleted from the
+    table, count or 0, and why none were, or None)."""
+    edits = []
+    for start, _end, _attrs, _closing in _cnvpr_spans(xml, shape_id):
+        frame = _frame_of(xml, start)
+        if frame is None:
+            continue
+        table = start_tag("a:tbl").search(xml, start, frame[1])
+        if table is None or table.group(2):
+            return xml, 0, "a copy of its frame holds no table"
+        rows = []
+        for tr in TR.finditer(xml, table.end(), frame[1]):
+            close = xml.find("</a:tr>", tr.end(), frame[1])
+            if tr.group(2) or close < 0:
+                return xml, 0, "a copy of its frame has a row that can't be read"
+            rows.append((tr.start(), close + len("</a:tr>"), tr.group(1)))
+            if len(rows) > count:
+                break
+        if not all(_blank_tr(xml[a:b], xml) for a, b, _ in rows[:count]):
+            return xml, 0, ("a copy of its frame, its Choice or its Fallback, has something in "
+                            "those rows")
+        if len(rows) <= count:
+            return xml, 0, ("a copy of its frame, its Choice or its Fallback, has no row after "
+                            "them")
+        height = sum(int(h) for _, _, attrs in rows[:count] for h in ROW_HEIGHT.findall(attrs))
+        edits.append((frame, rows[0][0], rows[count - 1][1], height))
+    height = max((edit[3] for edit in edits), default=0)
+    for (frame_start, _frame_end), cut_start, cut_end, _height in reversed(edits):
+        xml = xml[:cut_start] + xml[cut_end:]
+        ext = FRAME_EXT.search(xml, frame_start, cut_start)
+        if ext and height and int(ext.group(1)) > height:
+            xml = xml[:ext.start(1)] + str(int(ext.group(1)) - height) + xml[ext.end(1):]
+    return xml, count if edits else 0, None
+
+
 def set_headers(xml, shape_id, headers):
     """xml with a table's firstRow and firstCol as decided: the value is
     the table's headers, whole, so each sets both of PowerPoint's
@@ -354,9 +435,10 @@ def set_headers(xml, shape_id, headers):
     column = "1" if headers in ("first-column", "both") else None
     count = 0
     for start, end, _attrs, _closing in reversed(_cnvpr_spans(xml, shape_id)):
-        frame_end = xml.find("</p:graphicFrame>", end)
-        if frame_end < 0:
+        frame = _frame_of(xml, start)
+        if frame is None:
             continue
+        frame_end = frame[1]
         table = start_tag("a:tbl").search(xml, end, frame_end)
         if table is None or table.group(2):
             continue
@@ -1028,7 +1110,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     core_title as their title when they have none, or, when it's True, the
     first slide's title, the sidecar's if the slide has none of its own.
     problems, a list, is told each order not written, by its slide's key,
-    and each font not replaced, by the deck's name, and why. equations:
+    and each font not replaced and each table decided and not written, by
+    the deck's name, and why. equations:
     whether each equation gets the characters it means, as
     math.repair_equations gives a Word file's, its bars kept limits
     (docxremediate.BAR). fonts: {typeface: the font in its place, or None
@@ -1059,7 +1142,8 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
               "titles": 0, "titles_in_place": 0, "language": 0, "core_title": 0, "repaired": 0,
               "skipped": 0, "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0,
               "links": 0, "replaced": 0, "equations_repaired": 0, "equation_characters": 0,
-              "equations_kept": 0, "relanguaged": 0,
+              "equations_kept": 0, "relanguaged": 0, "blank_rows": 0, "blank_tables": 0,
+              "blank_refused": 0,
               "fonts_replaced": 0, "fonts_unembedded": 0}
     # A titled slide's row replaces its title only when another slide in
     # the deck has it too: a title the author gave since stands.
@@ -1120,9 +1204,29 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             if shape.table is not None:
                 headers = tables.get(shape.table.key())
                 if headers in HEADERS:
-                    xml, n = set_headers(text_of(part), shape.id, headers)
-                    if n:
+                    # Its blank rows go first, so the value is the
+                    # headers of the rows left, as the page has them.
+                    xml, deleted, why = delete_blank_rows(text_of(part), shape.id,
+                                                          shape.table.blank_rows) \
+                        if shape.table.blank_rows else (text_of(part), 0, None)
+                    if shape.table.blank_rows and not deleted:
+                        # The value is for the table without those rows,
+                        # so none of it is written.
+                        counts["blank_refused"] += 1
+                        if problems is not None:
+                            problems.append((deck, "%s's table %s is left as it is in the copy, "
+                                             "its table-headers.csv row not written there, since "
+                                             "%s; the page leaves its blank rows at the top out, "
+                                             "and has the row's headers" % (
+                                                 "slide %d" % slide.number if slide is not None
+                                                 else part, shape.name or shape.id, why)))
+                        continue
+                    xml, n = set_headers(xml, shape.id, headers)
+                    if n or deleted:
                         texts[part] = xml
+                        counts["blank_rows"] += deleted
+                        counts["blank_tables"] += bool(deleted)
+                    if n:
                         counts["header_rows"] += headers in ("first-row", "both")
                         counts["header_columns"] += headers in ("first-column", "both")
         if slide is not None and links:

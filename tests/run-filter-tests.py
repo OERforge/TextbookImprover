@@ -63,6 +63,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+import pandocversion  # noqa: E402
 
 NEEDED = ("metadata", "tables", "tables-b", "math", "media-a", "media-b")
 
@@ -126,7 +128,7 @@ class Converted:
             self._pandoc([
                 "-f", "json", "-t", "html5", name + ".filtered.json",
                 "-o", name + ".html",
-                "--standalone", "--ascii", "--math-method=mathml",
+                "--standalone", "--ascii", *pandocversion.mathml(),
                 "--lua-filter", os.path.join(BIN, "header-includes.lua"),
                 "-M", "lang=en",
             ], environment, work)
@@ -1208,7 +1210,7 @@ def case_intermediate(work):
         Converted._pandoc([
             "-f", "json", "-t", "html5", name + ".json",
             "-o", name + ".direct.html",
-            "--standalone", "--ascii", "--math-method=mathml",
+            "--standalone", "--ascii", *pandocversion.mathml(),
             "-M", "lang=en",
             "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
             "--lua-filter", os.path.join(BIN, "header-includes.lua"),
@@ -1257,8 +1259,9 @@ def main():
         sys.exit("pandoc is not on the path.")
 
     # The same requirement convert.py enforces. Without this check an
-    # older Pandoc fails with "Unknown option --math-method", which says
-    # nothing about the actual problem.
+    # older Pandoc runs the cases and fails them where it reads or writes
+    # differently (3.6 and older write a grid table without its cell spans),
+    # which says nothing about the actual problem.
     version = subprocess.run(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):

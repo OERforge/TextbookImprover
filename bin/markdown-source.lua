@@ -1236,7 +1236,7 @@ function Meta(meta)
   if meta.author == nil and meta['header-includes'] ~= nil then
     local text = pandoc.utils.stringify(meta['header-includes'])
     local raw = pandoc.write(pandoc.Pandoc({}, pandoc.Meta({
-      ['header-includes'] = meta['header-includes'] })), 'html')
+      ['header-includes'] = meta['header-includes'] })), 'html', { html_math_method = 'mathml' })
     local author = (text .. raw):match('<meta name="author" content="([^"]*)"')
     if author and author ~= '' then
       meta.author = pandoc.MetaString(author)

@@ -93,6 +93,7 @@ try:
     import mathstyle
     import notes as notes_lib
     import pagefooter
+    import pandocversion
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
@@ -2712,7 +2713,7 @@ def render_fragment(source, out):
     if not source:
         return None
     run(["pandoc", "-f", "markdown-implicit_figures", "-t", "html5",
-         "--ascii", source, "-o", out])
+         "--ascii", source, "-o", out] + pandocversion.mathml())
     return out
 
 
@@ -5100,9 +5101,10 @@ def render_html(target, pages, base, fragments, language, env):
     header-includes metadata -- the author <meta>, a split page's
     provenance -- instead of adding to it.
 
-    --math-method=mathml rather than --mathml, which Pandoc 3.11
-    deprecated. MathML is now the default, so the option is stated only
-    to keep the intent visible.
+    Math is MathML (pandocversion.mathml): --math-method=mathml from
+    Pandoc 3.11 on, which made MathML the default and deprecated
+    --mathml, and --mathml in 3.9 and 3.10, whose default is plain text
+    and which have no --math-method.
 
     --embed-resources is deliberately NOT used. Base64 data URIs inflate
     every page and Brightspace does not render them reliably from an
@@ -5122,7 +5124,8 @@ def render_html(target, pages, base, fragments, language, env):
         stem = os.path.basename(page)[:-len(INTERMEDIATE)]
         out = os.path.join(target.output_dir, stem + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
-                   "--standalone", "--ascii", "--math-method=mathml"] + deck + highlighting.ARGS + [
+                   "--standalone", "--ascii", *pandocversion.mathml(), *deck,
+                   *highlighting.ARGS,
                    "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
@@ -5208,8 +5211,8 @@ def add_menu(target, tree, titles, written, hand, work, others=None):
     with open(source, "w", encoding="utf-8") as fh:
         json.dump(doc, fh)
     listing = subprocess.run(["pandoc", "-f", "json", "-t", "html5", source,
-                              "--ascii"], capture_output=True, text=True,
-                             check=True).stdout
+                              "--ascii"] + pandocversion.mathml(), capture_output=True,
+                             text=True, check=True).stdout
     order = [stem for stem in flatten_pages(tree)]
     for path in written:
         stem = os.path.basename(path)[:-5]
@@ -5513,7 +5516,7 @@ def write_generated(target, tree, titles, api, base, work, fragments,
             json.dump(doc, fh)
         out = os.path.join(target.output_dir, name + ".html")
         command = ["pandoc", "-f", "json", "-t", "html5", source, "-o", out,
-                   "--standalone", "--ascii",
+                   "--standalone", "--ascii", *pandocversion.mathml(),
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
         run(command, env=with_fragments(env, fragments), cwd=base)
         written.append(out)
@@ -5565,7 +5568,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
                     + [w]]]}]}, fh)
         out = os.path.join(target.output_dir, "notes.html")
         command = ["pandoc", "-f", "json", "-t", "html5", source,
-                   "-o", out, "--standalone", "--ascii",
+                   "-o", out, "--standalone", "--ascii", *pandocversion.mathml(),
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
                    "-M", "pagetitle=" + (heading or "Notes")]
         run(command, env=with_fragments(env, fragments), cwd=base)

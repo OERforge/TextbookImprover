@@ -79,6 +79,7 @@ from lxml import etree
 from lxml import html as lxml_html
 
 from epubsource import sniff
+import pandocversion
 
 from .cnxml import E, append_text, code_lines
 from .mathml import MATHML
@@ -708,7 +709,7 @@ def _through_pandoc(pandoc, formulas):
         source = "\n\n".join(f"\\({tex}\\)" for tex in texs)
         try:
             done = subprocess.run([pandoc, "-f", "latex", "-t", "html",
-                                   "--mathml"], input=source,
+                                   *pandocversion.mathml(pandoc)], input=source,
                                   capture_output=True, text=True, timeout=120)
         except (OSError, subprocess.SubprocessError):
             return None

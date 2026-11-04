@@ -48,6 +48,8 @@ BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+import pandocversion  # noqa: E402
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
 
 MULTI = """\
@@ -373,7 +375,7 @@ WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page -- The Site</tit
 """
 
 
-def run_in(directory, contents=None):
+def run_in(directory, contents=None, env=None):
     if contents is not None:
         with open(os.path.join(directory, "project.yaml"), "w",
                   encoding="utf-8") as fh:
@@ -382,7 +384,7 @@ def run_in(directory, contents=None):
     return subprocess.run(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
         cwd=directory, capture_output=True, text=True,
-        stdin=subprocess.DEVNULL)
+        stdin=subprocess.DEVNULL, env=env)
 
 
 def same_pages(one, two):
@@ -2775,19 +2777,75 @@ NARROW_GROUP = """<!DOCTYPE html><html lang="en"><head><title>Forms</title></hea
 """
 
 
+# A table whose groups are rows across it, its bands, each heading the
+# rows below it: as tables.bands: column has them, the band a header cell
+# spanning its rows in a first column of its own.
+BALANCE_BANDS = """<!DOCTYPE html><html lang="en"><head><title>Money</title></head>
+<body><main><h1>Money</h1>
+<table><caption>Table 1.1 A Balance</caption>
+<thead><tr><th>Item</th><th>Amount</th></tr></thead>
+<tbody>
+<tr><td colspan="2">Assets</td></tr>
+<tr><td>Cash</td><td>5</td></tr>
+<tr><td>Savings</td><td>7</td></tr>
+<tr><td colspan="2">Liabilities</td></tr>
+<tr><td>Loans</td><td>3</td></tr>
+<tr><td>Bonds</td><td>2</td></tr></tbody></table>
+</main></body></html>
+"""
+
+
+# A table that's all head rows, which table-headers.csv says has none: the
+# filter makes it a body of them (demote_head).
+HEAD_ROWS_ONLY = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head>
+<body><main><h1>Heads</h1>
+<table><caption>Table 2.1 Rates</caption>
+<thead><tr><th>Year</th><th>Rate</th></tr><tr><th>2025</th><th>4%</th></tr></thead></table>
+</main></body></html>
+"""
+HEAD_ROWS_ONLY_KEY = "83137db8429a1b219a4557b72ff31bccec58911ec0d94edbface1f5272914b54"
+
+
 def case_narrow_group(work):
     """A part of a split table laid out on fewer columns than the table:
-    a column no cell of the part begins in is closed up."""
-    os.makedirs(work)
-    with open(os.path.join(work, "forms.html"), "w", encoding="utf-8") as fh:
-        fh.write(NARROW_GROUP)
-    with open(os.path.join(work, "conversion.yaml"), "w",
-              encoding="utf-8") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
-    run_in(work, "  contents:\n    - forms\n")
-    page = read(work, "html", "forms.html") if exists(
-        work, "html", "forms.html") else ""
+    a column no cell of the part begins in is closed up. And the book
+    converted where Pandoc has no pandoc.TableBody, as 3.9 has none
+    (3.10 added it), comes out the same, its tables' bands split,
+    grouped, and a column (tables.bands), and a table of head rows alone
+    declared to have none: the table filter makes their bodies, and Lua
+    stopped on a call of nil."""
+    # Pandoc 3.9's Lua, as far as this goes: an init.lua in the user data
+    # folder, which Pandoc runs before a filter, takes the constructor away.
+    data = os.path.join(work, "xdg")
+    os.makedirs(os.path.join(data, "pandoc"))
+    with open(os.path.join(data, "pandoc", "init.lua"), "w", encoding="utf-8") as fh:
+        fh.write("pandoc.TableBody = nil\n")
+    books = {}
+    for name, env in (("book", None), ("without", dict(os.environ, XDG_DATA_HOME=data))):
+        books[name] = os.path.join(work, name)
+        os.makedirs(books[name])
+        for page, text in (("forms", NARROW_GROUP), ("money", BALANCE_BANDS),
+                           ("heads", HEAD_ROWS_ONLY)):
+            with open(os.path.join(books[name], page + ".html"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(books[name], "table-headers.csv"), "w", encoding="utf-8") as fh:
+            fh.write("key,headers,split-at,caption-rows,part-captions,source,label\n"
+                     + HEAD_ROWS_ONLY_KEY + ",none,,,,heads.html,Table 2.1 Rates\n")
+        with open(os.path.join(books[name], "conversion.yaml"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("targets:\n  html:\n    format: html\n"
+                     "  grouped:\n    format: html\n    tables:\n      bands: group\n"
+                     "  columned:\n    format: html\n    tables:\n      bands: column\n")
+        run_in(books[name], "  contents:\n    - forms\n    - money\n    - heads\n", env=env)
+    book = books["book"]
+    page = read(book, "html", "forms.html") if exists(
+        book, "html", "forms.html") else ""
     parts = re.findall(r"<table.*?</table>", page, re.S)
+    grouped = read(book, "grouped", "forms.html") if exists(
+        book, "grouped", "forms.html") else ""
+    columned = read(book, "columned", "money.html") if exists(
+        book, "columned", "money.html") else ""
+    heads = read(book, "html", "heads.html") if exists(book, "html", "heads.html") else ""
     return [
         # The second part's cells each spanned two columns, columns 2 and 4
         # began in no cell: the Nu checker's "Table column 2 established
@@ -2797,6 +2855,14 @@ def case_narrow_group(work):
          lambda: len(parts) == 2 and "colspan" not in parts[1]
          and re.findall(r'<col style="width: (\d+)%"', parts[1]) == ["50", "50"]
          and len(re.findall(r"<col ", parts[0])) == 4),
+        ("without pandoc.TableBody, as in Pandoc 3.9, the book comes out the same, its "
+         "tables' parts split, grouped, and its bands a column of row headers, and a table "
+         "of head rows declared to have none a body of them",
+         lambda: grouped.count("<tbody") == 2
+         and columned.count('scope="rowgroup"') == 2
+         and heads.count("<td") == 4 and "<th" not in heads.split("<table", 1)[-1]
+         and all(same_pages(os.path.join(book, target), os.path.join(books["without"], target))
+                 for target in ("html", "grouped", "columned"))),
     ]
 
 def case_scheme_case(work):
@@ -3369,8 +3435,8 @@ def case_empty_rows(work):
 
     def back(source, reader):
         """The MathML Pandoc makes of the target's file read back."""
-        done = subprocess.run(["pandoc", "-f", reader, "-t", "html", "--mathml"], input=source,
-                              capture_output=True, text=True)
+        done = subprocess.run(["pandoc", "-f", reader, "-t", "html", *pandocversion.mathml()],
+                              input=source, capture_output=True, text=True)
         return done.stdout if done.returncode == 0 else ""
     md_back, adoc_back = back(md, "markdown"), back(adoc, "asciidoc")
     rows = r"<mtr>\s*<mtd[^>]*>\s*</mtd>\s*</mtr>"

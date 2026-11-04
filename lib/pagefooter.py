@@ -53,6 +53,8 @@ import os
 import re
 import subprocess
 
+import pandocversion
+
 # A link's target with a scheme, which a page that isn't the book's own
 # HTML can follow: a relative one names a file the target doesn't carry.
 ABSOLUTE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
@@ -101,7 +103,8 @@ def html(value, base):
     text = markdown(value, base)
     if text is None:
         return None
-    out = _pandoc(["-f", "markdown-implicit_figures", "-t", "html5"], text).strip()
+    out = _pandoc(["-f", "markdown-implicit_figures", "-t", "html5", *pandocversion.mathml()],
+                  text).strip()
     return out or None
 
 
@@ -176,7 +179,7 @@ def xhtml(value, base):
     doc = _ast(value, base)
     if doc is None:
         return None
-    out = _pandoc(["-f", "json", "-t", "html5"], json.dumps(doc)).strip()
+    out = _pandoc(["-f", "json", "-t", "html5", *pandocversion.mathml()], json.dumps(doc)).strip()
     return "<footer>\n%s\n</footer>" % out
 
 

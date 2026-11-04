@@ -47,16 +47,16 @@ the page's AST to the XML in document order, which is the order Pandoc
 writes it; a rule that finds nothing to match changes nothing.
 """
 
-import functools
 import hashlib
 import html
 import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import zipfile
+
+import pandocversion
 
 W_URI = "http://schemas.microsoft.com/office/word"
 SETTING = ('<w:compatSetting w:name="compatibilityMode" w:uri="%s" '
@@ -1298,16 +1298,10 @@ def _numbering(paragraph):
     return (m.group(2), m.group(1)) if m else None
 
 
-@functools.lru_cache(maxsize=None)
 def pandoc_version():
     """The version of the Pandoc on the path, as a tuple of numbers; () when
     there's none."""
-    try:
-        words = subprocess.run(["pandoc", "--version"], capture_output=True,
-                               text=True).stdout.split()
-    except OSError:
-        return ()
-    return tuple(int(p) for p in re.findall(r"\d+", words[1] if len(words) > 1 else "")[:3])
+    return pandocversion.version()
 
 
 def continuations_indented():

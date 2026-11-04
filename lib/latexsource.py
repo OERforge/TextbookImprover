@@ -67,6 +67,7 @@ import struct
 import subprocess
 
 from names import case_match
+import pandocversion
 
 # A page marker, a paragraph of its own the reader keeps as text, put
 # before each \include in the copy and cut at afterwards; and one after
@@ -7418,8 +7419,8 @@ def probe(copy, preamble, macros, filter_path, extra=""):
                           cwd=copy, capture_output=True, text=True)
     if read.returncode != 0:
         return set()
-    html = subprocess.run(["pandoc", "-f", "json", "-t", "html",
-                           "--math-method=mathml"], input=read.stdout,
+    html = subprocess.run(["pandoc", "-f", "json", "-t", "html", *pandocversion.mathml()],
+                          input=read.stdout,
                           capture_output=True, text=True).stdout
     parts = re.split(PROBE_MARK + r"(\d+)", html)
     after = {int(parts[k]): parts[k + 1] for k in range(1, len(parts) - 1, 2)}

@@ -2011,6 +2011,210 @@ def check_unique_ids():
     ]
 
 
+# A table whose bodies have attributes of their own, which the table filter
+# keeps where it makes a body again, as it does for a cell of white space,
+# which it empties.
+BODY_ATTRIBUTES = ('<table><thead><tr><th>Name</th><th>Value</th></tr></thead>'
+                   '<tbody class="assets" id="assets"><tr><td>Cash</td><td>350</td></tr>'
+                   '<tr><td>Bonds</td><td><strong>&#160;</strong></td></tr></tbody>'
+                   '<tbody class="debts"><tr><td>Loans</td><td>562</td></tr></tbody></table>')
+
+
+def check_without_table_body():
+    """The table filter on a Pandoc without pandoc.TableBody, as 3.9 is
+    (3.10 added it): a data folder's init.lua takes it away, and each
+    table comes out as it does with it, a layout table, a table split at
+    its groups' header rows, and the tables whose cells of white space
+    are emptied, which is every table, their bodies' attributes kept.
+    The filter called it, and Lua stopped on a call of nil."""
+    work = scratch("no-table-body-")
+    with open(os.path.join(work, "init.lua"), "w", encoding="utf-8") as fh:
+        fh.write("pandoc.TableBody = nil\n")
+    probe = os.path.join(work, "probe.lua")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write("function Pandoc(doc)\n"
+                 "  return pandoc.Pandoc({ pandoc.Para(tostring(pandoc.TableBody)) })\n"
+                 "end\n")
+    filter_path = os.path.join(ROOT, "bin", "figures-and-tables.lua")
+
+    def render(markup, without):
+        done = subprocess.run(["pandoc", "-f", "html", "-t", "html", "--lua-filter", filter_path]
+                              + (["--data-dir", work] if without else []),
+                              input=markup, capture_output=True, text=True)
+        return done.returncode, done.stdout
+    pages = (PLAIN_CELL, WITH_TEXT, grouped_table(), GIVES_WAY, BODY_ATTRIBUTES)
+    with_it = [render(page, False) for page in pages]
+    without = [render(page, True) for page in pages]
+    gone = subprocess.run(["pandoc", "-f", "html", "-t", "plain", "--lua-filter", probe,
+                           "--data-dir", work], input="<p>x</p>", capture_output=True,
+                          text=True).stdout.strip()
+    return [
+        ("a data folder's init.lua takes pandoc.TableBody away, as Pandoc 3.9 has none",
+         lambda: gone == "nil"),
+        ("and the table filter writes each table as it does with it",
+         lambda: all(code == 0 and out for code, out in without) and without == with_it
+         and 'id="assets" class="assets"' in without[-1][1]),
+    ]
+
+
+def check_pandoc_math_option():
+    """MathML is asked for by the Pandoc's version (pandocversion.mathml):
+    with --mathml in 3.9 and 3.10, which have no --math-method and stop
+    on it, and with --math-method=mathml from 3.11, which added it and
+    deprecated --mathml, warning on every run."""
+    import pandocversion
+    work = scratch("pandoc-versions-")
+    said = {}
+    for version in ("3.9", "3.10.1", "3.11", "3.13"):
+        path = os.path.join(work, "pandoc-" + version)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho 'pandoc %s'\necho 'Features: +server +lua'\n" % version)
+        os.chmod(path, 0o755)
+        said[version] = (pandocversion.version(path), pandocversion.mathml(path))
+    return [
+        ("Pandoc 3.9 and 3.10.1 are asked for MathML with --mathml",
+         lambda: said["3.9"] == ((3, 9), ["--mathml"])
+         and said["3.10.1"] == ((3, 10, 1), ["--mathml"])),
+        ("and 3.11 and 3.13 with --math-method=mathml",
+         lambda: said["3.11"] == ((3, 11), ["--math-method=mathml"])
+         and said["3.13"] == ((3, 13), ["--math-method=mathml"])),
+    ]
+
+
+# The formats whose math is written by Pandoc's math method: a page, an
+# EPUB, and a presentation in HTML, with or without extensions.
+HTML_FORMATS = r"(?:html[45]?|epub[23]?|revealjs|chunkedhtml|s5|slidy|slideous|dzslides)(?:[+-]\w+)*"
+# A Pandoc call's command line that names such a format, as two items or
+# one ("-t", "html5+smart"; "--to=html").
+WRITES_PAGES = re.compile(r'"(?:-t|--to|-w|--write)",\s*"%s"|"(?:--to=|--write=|-t|-w)%s"'
+                          % (HTML_FORMATS, HTML_FORMATS))
+# A list that's a Pandoc command line, and one that names its output format.
+PANDOC_LIST = re.compile(r'\[\s*(?:"pandoc"|pandoc)\s*,')
+NAMES_FORMAT = re.compile(r'"(?:-t|--to|-w|--write)"|"(?:--to=|--write=|-t|-w)\w'
+                          r'|"-D|"--print-default|"--version"|"lua"')
+LUA_WRITE = re.compile(r"\bpandoc\.write\(")
+
+
+def _around(text, at, opening, closing):
+    """The bracketed part of text holding position at, from its opening
+    bracket to its closing one, and where that closing one is."""
+    depth, start = 0, at
+    while start > 0:
+        start -= 1
+        if text[start] == closing:
+            depth += 1
+        elif text[start] == opening:
+            if depth == 0:
+                break
+            depth -= 1
+    depth, end = 0, at
+    while end < len(text):
+        if text[end] == opening:
+            depth += 1
+        elif text[end] == closing:
+            if depth == 0:
+                break
+            depth -= 1
+        end += 1
+    return text[start:end + 1], end
+
+
+def _arguments(call):
+    """A Lua call's arguments, its text from ( to ), split at its commas
+    outside brackets and strings."""
+    out, depth, quote, current = [], 0, None, ""
+    for i, ch in enumerate(call[1:-1]):
+        if quote:
+            current += ch
+            if ch == quote and call[i] != "\\":
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(current.strip())
+            current = ""
+            continue
+        current += ch
+    return out + [current.strip()]
+
+
+def _none_of(found):
+    """A check that passes where nothing was found, and names what was."""
+    def predicate():
+        if found:
+            raise AssertionError(", ".join(found))
+        return True
+    return predicate
+
+
+def check_math_asked_for():
+    """Pandoc 3.9 and 3.10 write math as plain text unless asked for
+    MathML, and stop on --math-method, which 3.11 added when it made
+    MathML the default; so every Pandoc call in bin/, lib/, and util/
+    that writes a page, an EPUB, or a presentation in HTML asks for it by
+    version, pandocversion.mathml() in its list or added to it where the
+    list ends, and none names either option itself; every Pandoc command
+    line there names its output format, so that none writes HTML for its
+    output's extension unseen; and every pandoc.write in a filter whose
+    format is HTML, or isn't written out, gives html_math_method. And no
+    filter calls pandoc.TableBody, which 3.9 hasn't either, but through
+    figures-and-tables.lua's own TableBody."""
+    unasked, unnamed, writes, bodies, seen = [], [], [], [], [0, 0]
+    for folder in ("bin", "lib", "util"):
+        for top, _, files in os.walk(os.path.join(ROOT, folder)):
+            for name in sorted(files):
+                path = os.path.join(top, name)
+                where = os.path.relpath(path, ROOT)
+                if not name.endswith((".py", ".lua")):
+                    continue
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+
+                def line(at):
+                    return "%s:%d" % (where, text.count("\n", 0, at) + 1)
+                if name.endswith(".py"):
+                    for m in WRITES_PAGES.finditer(text):
+                        seen[0] += 1
+                        command, end = _around(text, m.start(), "[", "]")
+                        rest = text[end + 1:text.find("\n", end + 1)]
+                        if "pandocversion.mathml(" not in command + rest:
+                            unasked.append(line(m.start()))
+                    for m in PANDOC_LIST.finditer(text):
+                        command, _ = _around(text, m.start() + 1, "[", "]")
+                        # A list of no options written out, as build-epub.py's
+                        # ["pandoc", argument], is left alone.
+                        if re.search(r'"-', command) and not NAMES_FORMAT.search(command):
+                            unnamed.append(line(m.start()))
+                    if name != "pandocversion.py" and re.search(r'"--math(?:-method|ml)\b', text):
+                        unasked.append(where + " names the option")
+                    continue
+                for m in LUA_WRITE.finditer(text):
+                    seen[1] += 1
+                    call, _ = _around(text, m.end(), "(", ")")
+                    given = _arguments(call)
+                    form = given[1] if len(given) > 1 else ""
+                    literal = re.fullmatch(r"""(['"])(.*)\1""", form)
+                    if (not literal or re.fullmatch(HTML_FORMATS, literal.group(2))) \
+                            and "html_math_method" not in call:
+                        writes.append(line(m.start()))
+                if re.search(r"\bpandoc\.TableBody\s*[({]", text):
+                    bodies.append(where)
+    return [
+        ("every Pandoc call that writes a page, an EPUB, or a presentation in HTML asks for "
+         "MathML by Pandoc's version, and none names --math-method or --mathml",
+         lambda: seen[0] >= 10 and _none_of(unasked)()),
+        ("every Pandoc command line names its output format", _none_of(unnamed)),
+        ("every pandoc.write of HTML in a filter asks for MathML",
+         lambda: seen[1] >= 10 and _none_of(writes)()),
+        ("and no filter calls pandoc.TableBody", _none_of(bodies)),
+    ]
+
+
 def check_shortdoi():
     """util/shortdoi.py against a local stand-in for the shortDOI service:
     the DOIs without a Replacement get https://doi.org/ and the shortDOI,
@@ -3149,6 +3353,18 @@ def check_note_mark():
     ]
 
 
+# A page of raw code elements where the Markdown reader reads raw HTML, and
+# where it doesn't, for markdown-reader.lua.
+READER_PAGE = ('---\ntitle: "Using <code>open(\\"x\\")</code>"\n---\n\n'
+               'Escaped: \\<code>"esc"</code>.\n\n'
+               'Quoted attribute: <code title="a < b /> c">"q"</code>.\n\n'
+               'Nested: <code>a <code>"b"</code> c</code>.\n\n'
+               'Self-closing: <code /> and "smart" </code>.\n\n'
+               'Upper: <CODE>"up"</CODE>.\n\n'
+               'Own: <tv0-1>a tag of the reader\'s name</tv0-1>.\n\n'
+               'Two lines: <code>"one\ntwo"</code>.\n')
+
+
 def check_markdown_reader():
     """markdown-reader.lua: a raw <code> and its kin taken as written where
     the Markdown reader reads raw HTML, an attribute's quoted '<' and '/>'
@@ -3158,16 +3374,9 @@ def check_markdown_reader():
     closed, a closing tag after it no element's, and over two lines; smart
     punctuation outside it as before. Outside quotes, the attribute's '<'
     would end the tag, and its '/>' close it."""
-    text = ('---\ntitle: "Using <code>open(\\"x\\")</code>"\n---\n\n'
-            'Escaped: \\<code>"esc"</code>.\n\n'
-            'Quoted attribute: <code title="a < b /> c">"q"</code>.\n\n'
-            'Nested: <code>a <code>"b"</code> c</code>.\n\n'
-            'Self-closing: <code /> and "smart" </code>.\n\n'
-            'Upper: <CODE>"up"</CODE>.\n\n'
-            'Own: <tv0-1>a tag of the reader\'s name</tv0-1>.\n\n'
-            'Two lines: <code>"one\ntwo"</code>.\n')
     done = subprocess.run(["pandoc", "-f", os.path.join(ROOT, "bin", "markdown-reader.lua"),
-                           "-t", "json", "-s"], input=text, capture_output=True, text=True)
+                           "-t", "json", "-s"], input=READER_PAGE, capture_output=True,
+                          text=True)
     doc = json.loads(done.stdout) if done.returncode == 0 else {"blocks": [], "meta": {}}
     paras = {}
     for block in doc["blocks"]:
@@ -3214,6 +3423,58 @@ def check_markdown_reader():
          lambda: tables["cjk"][0] == ['漢字"k"', "and", "wor", "ds", "b"]
          and "1 raw code element(s) taken as written" in tables["cjk"][1]
          and tables["watch"][0][1:] == ["and", "wor", "ds", "b"]),
+    ]
+
+
+# Pandoc 3.9's pandoc.read, for a data folder's init.lua: no
+# pandoc.types.Sources, and a list read only of Pandoc's own Source
+# objects, as 3.9's peekSources reads one (Lua/Marshal/Sources.hs); 3.9.0.1
+# added the one and took a list of names and texts too.
+SOURCES_39 = ("pandoc.types.Sources = nil\n"
+              "local read = pandoc.read\n"
+              "pandoc.read = function(input, ...)\n"
+              "  if type(input) == 'table' then\n"
+              "    for _, item in ipairs(input) do\n"
+              "      if type(item) ~= 'userdata' then\n"
+              "        error('Source expected, got ' .. type(item))\n"
+              "      end\n"
+              "    end\n"
+              "  end\n"
+              "  return read(input, ...)\n"
+              "end\n")
+
+
+def check_markdown_reader_39():
+    """markdown-reader.lua on Pandoc 3.9's pandoc.read, which takes a list
+    only of its own Source objects, and with no pandoc.types.Sources, as
+    3.9 has none: a page with raw code is read as a later Pandoc reads it,
+    the files' texts given as one string. The reader gave a list of names
+    and texts, and 3.9 stopped ("Source expected, got table")."""
+    work = scratch("reader-39-")
+    with open(os.path.join(work, "init.lua"), "w", encoding="utf-8") as fh:
+        fh.write(SOURCES_39)
+    reader = os.path.join(ROOT, "bin", "markdown-reader.lua")
+
+    def read(extra):
+        done = subprocess.run(["pandoc", "-f", reader, "-t", "json", "-s"] + extra,
+                              input=READER_PAGE, capture_output=True, text=True)
+        return done.returncode, done.stdout
+    later, older = read([]), read(["--data-dir", work])
+    probe = os.path.join(work, "probe.lua")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write("function Pandoc(doc)\n"
+                 "  local ok = pcall(pandoc.read, { { name = 'a', text = 'x' } }, 'markdown')\n"
+                 "  return pandoc.Pandoc({ pandoc.Para(tostring(pandoc.types.Sources) .. ' '\n"
+                 "    .. tostring(ok)) })\n"
+                 "end\n")
+    gone = subprocess.run(["pandoc", "-f", "markdown", "-t", "plain", "--lua-filter", probe,
+                           "--data-dir", work], input="x", capture_output=True,
+                          text=True).stdout.strip()
+    return [
+        ("a data folder's init.lua gives pandoc.read 3.9's sources, a list of names and "
+         "texts refused, and takes pandoc.types.Sources away", lambda: gone == "nil false"),
+        ("and the Markdown reader reads a page of raw code as it does with a later Pandoc",
+         lambda: older[0] == 0 and older == later and '"t":"Code"' in later[1]),
     ]
 
 
@@ -6571,6 +6832,11 @@ GROUPS = [
     ("layout tables", check_layout_tables),
     ("a group's own header rows", check_group_heads),
     ("unique ids", check_unique_ids),
+    ("the table filter on a Pandoc without pandoc.TableBody, as 3.9 is",
+     check_without_table_body),
+    ("the Markdown reader on Pandoc 3.9's pandoc.read", check_markdown_reader_39),
+    ("MathML asked for by Pandoc's version", check_pandoc_math_option),
+    ("MathML asked for in every call that writes HTML", check_math_asked_for),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),
     ("the project's sample", check_project_sample),

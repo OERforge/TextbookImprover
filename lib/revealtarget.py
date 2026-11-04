@@ -86,6 +86,7 @@ import subprocess
 import tempfile
 
 import highlighting
+import pandocversion
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
@@ -272,7 +273,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
             fh.write("<script>\n" + js + "</script>\n")
         width, height = frame(shape)
         command = ["pandoc", "-f", "json", "-t", "revealjs", "-s", intermediate, "-o", out,
-                   "--math-method=mathml", "--slide-level", str(level),
+                   *pandocversion.mathml(), "--slide-level", str(level),
                    "--reference-location=section",
                    "-V", f"revealjs-url={REVEALJS_URL}", "-V", f"theme={THEME}",
                    "-V", f"width={width}", "-V", f"height={height}",

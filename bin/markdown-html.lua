@@ -119,7 +119,7 @@ end
 
 local function as_html(list, inline)
   local blocks = inline and { pandoc.Plain(list) } or list
-  return pandoc.write(pandoc.Pandoc(blocks), 'html')
+  return pandoc.write(pandoc.Pandoc(blocks), 'html', { html_math_method = 'mathml' })
 end
 
 -- A note goes through HTML and back as a span holding its place, and is

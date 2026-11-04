@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 sys.path.insert(0, HERE)
 import fakeverapdf  # noqa: E402
 import outputcheck  # noqa: E402
+import pandocversion  # noqa: E402
 import pdfcheck  # noqa: E402
 
 GOOD = """<!DOCTYPE html><html lang="en"><head><title>A page</title></head>
@@ -352,7 +353,7 @@ def main():
                 fh.write(KEPT)
             for out in ("kept-out.html", "kept.epub"):
                 subprocess.run(["pandoc", "kept.html", "--standalone",
-                                "--math-method=mathml", "-o", out], cwd=work, check=True)
+                                *pandocversion.mathml(), "-o", out], cwd=work, check=True)
             kept_page = outputcheck.check_html_files([os.path.join(work, "kept-out.html")])
             kept_book = outputcheck.check_epub(os.path.join(work, "kept.epub"))
             cases += [

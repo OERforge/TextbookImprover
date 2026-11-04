@@ -37,6 +37,14 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ]]
 
+-- A table's body: pandoc.TableBody, which Pandoc 3.10 added, or in 3.9 the
+-- plain table of its four fields that 3.9's documentation gives, which
+-- later releases take too.
+local TableBody = pandoc.TableBody or function(body, head, row_head_columns, attr)
+  return { body = body, head = head or {}, row_head_columns = row_head_columns or 0,
+           attr = attr or pandoc.Attr() }
+end
+
 -- Words that introduce a caption, as a comma-separated list. Books differ:
 -- OpenStax labels tables "Table 2.1", while other sources label everything
 -- "Figure 1.1" including tables, and some use "Exhibit". Set these through
@@ -1433,7 +1441,7 @@ local function demote_head(tbl)
   tbl.head = pandoc.TableHead({}, tbl.head.attr)
   local body = tbl.bodies[1]
   if body == nil then
-    tbl.bodies = { pandoc.TableBody(rows, {}, 0, pandoc.Attr()) }
+    tbl.bodies = { TableBody(rows, {}, 0, pandoc.Attr()) }
     return
   end
   local merged = {}
@@ -1936,7 +1944,7 @@ local function close_empty_columns(tbl)
     for c = 2, body.row_head_columns or 0 do
       if gone[c] then row_heads = row_heads - 1 end
     end
-    bodies[b] = pandoc.TableBody(rows, heads, row_heads, body.attr)
+    bodies[b] = TableBody(rows, heads, row_heads, body.attr)
   end
   return pandoc.Table(tbl.caption, specs,
     pandoc.TableHead(narrowed(tbl.head.rows, head_at, 0), tbl.head.attr),
@@ -2121,7 +2129,7 @@ local function split_table(tbl, bands, part_captions, apply, head_leads)
       headed = true
     end
     local head = pandoc.TableHead(head_rows, tbl.head.attr)
-    local body = pandoc.TableBody(segment, {},
+    local body = TableBody(segment, {},
       model and model.row_head_columns or 0, pandoc.Attr())
     -- The table's foot, its notes and sources, comes after its last part,
     -- where every part had lost it.
@@ -2198,7 +2206,7 @@ local function group_parts(parts, tbl, label)
       end
     end
     local body = part.table.bodies[1]
-    bodies[#bodies + 1] = pandoc.TableBody(body.body, head_rows,
+    bodies[#bodies + 1] = TableBody(body.body, head_rows,
       body.row_head_columns, body.attr)
   end
   local caption = tbl.caption
@@ -2275,7 +2283,7 @@ local function column_parts(parts, tbl, label)
       local cells = pandoc.List({ group })
       cells:extend(lead.cells)
       rows[1] = pandoc.Row(cells, lead.attr)
-      bodies[#bodies + 1] = pandoc.TableBody(rows, {},
+      bodies[#bodies + 1] = TableBody(rows, {},
         body.row_head_columns + 1, body.attr)
     end
   end
@@ -2452,7 +2460,7 @@ local function layout_rows(tbl)
   local attr = tbl.bodies[1] and tbl.bodies[1].attr or pandoc.Attr()
   tbl.head = pandoc.TableHead({}, tbl.head.attr)
   tbl.foot = pandoc.TableFoot({}, tbl.foot.attr)
-  tbl.bodies = { pandoc.TableBody(rows, {}, 0, attr) }
+  tbl.bodies = { TableBody(rows, {}, 0, attr) }
 end
 
 local function layout_table(tbl)
@@ -3432,8 +3440,8 @@ local function empty_white_cells(tbl)
   end
   local head, foot, bodies = emptied(tbl.head.rows), emptied(tbl.foot.rows), {}
   for b, body in ipairs(tbl.bodies) do
-    bodies[b] = pandoc.TableBody(emptied(body.body), emptied(body.head),
-                                 body.row_head_columns or 0, body.attr)
+    bodies[b] = TableBody(emptied(body.body), emptied(body.head),
+                          body.row_head_columns or 0, body.attr)
   end
   if not any then return nil end
   return pandoc.Table(tbl.caption, tbl.colspecs, pandoc.TableHead(head, tbl.head.attr),

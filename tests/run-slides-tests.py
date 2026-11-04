@@ -11,7 +11,8 @@ shape a check or a decision is about is there on purpose, and reads back
 what the code wrote. A slides run of PowerPoint decks needs no Pandoc,
 and runs here without one on the PATH too; the case of a deck beside a
 book's pages, whose book needs Pandoc 3.9 or later, and the cases that
-convert a deck skip without it, a deck's PDF without LuaLaTeX,
+convert a deck skip without it, a deck rebuilt on a template and the
+round trip without 3.10.1, a deck's PDF without LuaLaTeX,
 ltx-talk, or the packages the deck loads too, and the reading of its
 slides without pikepdf. The rest needs nothing but the standard
 library, and PyYAML where it runs convert.py.
@@ -4599,9 +4600,12 @@ def reference_deck(path):
 
 def case_rebuild(work):
     """A pptx target on a PowerPoint deck, given a template, rebuilds the
-    deck on it, and says what that loses."""
+    deck on it, and says what that loses. The deck rebuilt is a deck's
+    PowerPoint file, which needs Pandoc 3.10.1 (convert.py's
+    PPTX_PANDOC); with an older one its checks are skipped."""
     if not pandoc_ok():
         return
+    rebuilds = pptx_pandoc_ok()
     folder = converted_folder(work, "targets:\n  again:\n    format: pptx\n    slides:\n"
                                     "      reference_doc: template.pptx\n  plain:\n"
                                     "    format: pptx\n")
@@ -4609,13 +4613,15 @@ def case_rebuild(work):
     result = convert(folder, "--quick")
     out = result.stderr
     rebuilt = os.path.join(folder, "again", "Reader.pptx")
-    yield "the deck is rebuilt on the template, and the run says what's lost and what it's for", \
-        result.returncode == 0 and os.path.isfile(rebuilt) and "rebuilds 1 PowerPoint deck(s) " \
-        "on slides.reference_doc, template.pptx" in out and "It's for moving decks onto a " \
-        "template" in out, out[-900:]
-    titles = [s.title for s in pptxparse.read(rebuilt).slides] if os.path.isfile(rebuilt) else []
-    yield "its slides are the deck's, the title slide first", \
-        titles[:3] == ["A Course of Talks", "Part One", "Formatting"], titles
+    if rebuilds:
+        yield "the deck is rebuilt on the template, and the run says what's lost and what " \
+            "it's for", result.returncode == 0 and os.path.isfile(rebuilt) \
+            and "rebuilds 1 PowerPoint deck(s) on slides.reference_doc, template.pptx" in out \
+            and "It's for moving decks onto a template" in out, out[-900:]
+        titles = [s.title for s in pptxparse.read(rebuilt).slides] \
+            if os.path.isfile(rebuilt) else []
+        yield "its slides are the deck's, the title slide first", \
+            titles[:3] == ["A Course of Talks", "Part One", "Formatting"], titles
     yield "and the target without one writes nothing", \
         "target plain is format pptx, and nothing is written for it" in out \
         and not os.path.exists(os.path.join(folder, "plain")), out[:600]

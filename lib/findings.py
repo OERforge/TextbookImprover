@@ -39,6 +39,7 @@ import json
 import os
 from collections import Counter, OrderedDict
 
+import pandocversion
 import sidecars
 import wcag
 
@@ -515,8 +516,8 @@ def render_html(markdown_path, html_path, css_path=None):
     stylesheet embedded when it is given."""
     import subprocess
     import sys
-    command = ["pandoc", os.path.abspath(markdown_path),
-               "-o", os.path.abspath(html_path), "--standalone",
+    command = ["pandoc", os.path.abspath(markdown_path), "-t", "html5",
+               *pandocversion.mathml(), "-o", os.path.abspath(html_path), "--standalone",
                "--metadata", "lang=en", "--metadata", "pagetitle=Audit"]
     if css_path and os.path.exists(css_path):
         command += ["--css", os.path.abspath(css_path), "--embed-resources"]
@@ -536,7 +537,7 @@ def render_docx(markdown_path, docx_path, compat_tool=None):
     import subprocess
     import sys
     try:
-        subprocess.run(["pandoc", os.path.abspath(markdown_path), "-o",
+        subprocess.run(["pandoc", os.path.abspath(markdown_path), "-t", "docx", "-o",
                         os.path.abspath(docx_path), "--metadata",
                         "lang=en"], check=True, capture_output=True,
                        text=True)

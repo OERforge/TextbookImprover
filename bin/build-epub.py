@@ -67,6 +67,7 @@ from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
 import highlighting  # noqa: E402
 import languages  # noqa: E402
 import pagefooter  # noqa: E402
+import pandocversion  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page,
@@ -976,7 +977,7 @@ def build(base, name, resolved, keep, intermediates=None):
             # One file per page: split at every level a page heading uses.
             f"--split-level={assembly.depth}",
             f"--toc-depth={toc_depth}",
-            "--math-method=mathml",
+            *pandocversion.mathml(),
             # Without a title page the title is the package's dc:title, and
             # the book's first heading says it (title_page).
             "--epub-title-page=%s" % ("true" if title_page else "false"),

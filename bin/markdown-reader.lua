@@ -340,6 +340,19 @@ local function link_targets(doc)
   return targets
 end
 
+-- What pandoc.read is given for the files marked: a list of their names
+-- and texts, which Pandoc takes from 3.9.0.1 on, when it added
+-- pandoc.types.Sources; 3.9 takes a list only of its own Source objects,
+-- which a filter can't make, or a string, so there the texts are one
+-- string, a blank line between files, as Pandoc joins files given
+-- together, and its messages name no file.
+local function readable(sources)
+  if pandoc.types.Sources then return sources end
+  local texts = {}
+  for _, source in ipairs(sources) do texts[#texts + 1] = source.text end
+  return table.concat(texts, '\n\n')
+end
+
 function Reader(input, opts)
   local plain = pandoc.read(input, 'markdown', opts)
   local texts = {}
@@ -351,7 +364,7 @@ function Reader(input, opts)
                               text = mark(source.text, originals, markers, numbers, prefix) }
   end
   if #originals == 0 then return plain end
-  local doc = pandoc.read(sources, 'markdown', opts)
+  local doc = pandoc.read(readable(sources), 'markdown', opts)
   -- Each tag the reader kept as raw HTML made a span of its number, with
   -- an attribute no span in the source has (free_prefix); a tag left is
   -- text to the reader, in code or a comment, as many times as Pandoc

@@ -917,7 +917,7 @@ def case_language(work):
         ("and the run drafts its row, found in its preamble",
          lambda: os.path.exists(drafted)
          and "notas,es,notas.tex: its preamble,TI," in read(work, "languages-new.csv")
-         and "notas es (its file)" in result.stdout + result.stderr),
+         and "notas in es (its file)" in result.stdout + result.stderr),
     ]
 
 
@@ -973,8 +973,9 @@ def case_page_languages(work):
     in a copy without tagging, which builds; none in a book that declares
     no language for pages in the default, nor for pages in its files'
     language, which its copy is in, or in its preamble's region of the
-    default's language; and a copy made from a copy given the languages
-    decided now, its block replaced."""
+    default's language; the run's note on them naming no PDF of the whole
+    book where it's built from the book's own files; and a copy made from
+    a copy given the languages decided now, its block replaced."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import texremediate
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
@@ -1256,6 +1257,12 @@ def case_page_languages(work):
              "the master's own text" in built["pdf-book"][1]
          and "so the PDF has them in the book's language" in built["pdf-book"][1]
          and "and the PDF tags one in its own once it's a file" in built["pdf-book"][1]),
+        ("and its note on the pages names no PDF of the whole book, which is built from "
+         "its own files, nor anything else the run doesn't make",
+         lambda: skip(why) if why else
+         re.search(r"5 pages are in a different language than the book \(en-US\): .*\. "
+                   r"Every output marks each in its own language\.$",
+                   built["pdf-book"][1], re.M)),
         ("a document that \\include-s nothing is in its page's language whole, its "
          "\\DocumentMetadata's, in its PDF and its copy, and from \\begin{document} in its "
          "copy without tagging",

@@ -3018,12 +3018,44 @@ def variant_languages(base, target, raw, project):
         settle_page_language(path, LANGUAGES[stem])
 
 
-def report_languages(project, reports, paths):
+def book_packaged(targets, base):
+    """Whether the run's packaging step builds the book's cartridge: an
+    html target's pages for the packager to read, and the book named where
+    the packager reads it, in project.yaml or a project: block in
+    packaging.yaml; named in conversion.yaml alone, or nowhere, it isn't
+    (build-cartridge.py's unnamed), as the third and fourth reviews found
+    the note saying otherwise."""
+    return (os.path.isfile(CARTRIDGE_TOOL) and any(t.format == "html" for t in targets)
+            and (os.path.isfile(os.path.join(base, PROJECT_NAME))
+                 or bool(oerconfig.inline_project(os.path.join(base, PACKAGING_NAME)))))
+
+
+def whole_book_outputs(targets, latex_book, packaged):
+    """What a run makes of the whole book that keeps the book's language,
+    as the note on pages in another language names them: its EPUB, its
+    cartridge (from an html target's pages, where the run packages the
+    book: packaged, book_packaged), and
+    its PDF from the pages; a LaTeX book's PDF from its own files is in
+    its copy's language, which can be its preamble's (the second review:
+    babel's French, with no project.language, made it French). Decks make
+    none: each deck's outputs, its PDF too, are in its language, and they
+    aren't packaged."""
+    if DECK_RUN:
+        return []
+    formats = {t.format for t in targets}
+    return ((["its EPUB"] if "epub3" in formats else [])
+            + (["its cartridge"] if packaged and "html" in formats else [])
+            + (["its PDF"] if any(t.format == "pdf" and not (
+                latex_book and str(t["pdf.from"]) == "book") for t in targets) else []))
+
+
+def report_languages(project, reports, paths, wholes=()):
     """languages-new.csv: a drafted row for each page in another language
     than the project's, by what its file says, that the sidecar has no
     row for, or no file when there's none; a note naming every page in
     another language and where its language came from; and a warning for
-    each row that names no page. Once a run."""
+    each row that names no page. wholes: what the run makes of the whole
+    book (whole_book_outputs), none in a slides run. Once a run."""
     if LANGUAGE_REPORTED:
         return
     LANGUAGE_REPORTED.append(True)
@@ -3044,13 +3076,24 @@ def report_languages(project, reports, paths):
             os.remove(report)
     if other:
         said = {"sidecar": sidecar, "file": "its file", "producer": "its producer's property"}
-        listed = [f"{LANGUAGE_NAMES.get(stem, stem)} {d.language} ({said[d.source]})"
+        listed = [f"{LANGUAGE_NAMES.get(stem, stem)} in {d.language} ({said[d.source]})"
                   for stem, d in other]
-        say(f"NOTE: {len(other)} page(s) are in another language than the book's, {book}"
+        # Said plainly (Rob, 2026-11-05, of "Each target marks each one so":
+        # "opaque"): what every output does with such a page, and what
+        # stands for the whole book, the EPUB's language, the cartridge's,
+        # and the book's PDF's own, which keep the book's.
+        one = len(other) == 1
+        say(f"NOTE: {'1 page is' if one else f'{len(other)} pages are'} in a different "
+            f"language than the book ({book}"
             + ("" if LANGUAGE_DECLARED else ", the default, since no file declares "
-               "project.language") + ": " + ", ".join(listed[:6])
-            + (", ..." if len(listed) > 6 else "") + ". Each target marks each one so, "
-            "and the book's packages keep the book's language.")
+               "project.language") + "): " + ", ".join(listed[:6])
+            + (", ..." if len(listed) > 6 else "") + ". Every output marks "
+            + ("it in that language" if one else "each in its own language")
+            # Only what the run makes of the whole book.
+            + ("." if not wholes else
+               "; the book as a whole, in " + (" and ".join(wholes) if len(wholes) < 3 else
+                                                 ", ".join(wholes[:-1]) + ", and " + wholes[-1])
+               + f", stays {book}."))
         spoken = {languages.language_of(d.language) for _, d in other}
         if not LANGUAGE_DECLARED and len(other) == len(LANGUAGES) and len(spoken) == 1:
             common = Counter(d.language for _, d in other).most_common(1)[0][0]
@@ -6557,7 +6600,8 @@ def main():
             pages_by_dir[target.pages_dir] = split_pages(
                 target, pages, paths, reports,
                 splitting=any(int(t["pages.split_level"]) > 0 for t in targets))
-        report_languages(project, reports, paths)
+        report_languages(project, reports, paths, wholes=whole_book_outputs(
+            targets, bool(master), book_packaged(targets, base)))
         # Formulas in running text the pages set in display style, kept so
         # by the targets that ask (math.display_style_in_text, math-repair.lua).
         line = display_style_said(targets)

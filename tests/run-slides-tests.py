@@ -4200,7 +4200,7 @@ def case_deck_languages(work):
     drafted = rows_of(os.path.join(folder, "languages-new.csv"))
     yield "checked only, the decks' languages are reported, as a slides run writes its " \
         "reports before it converts", \
-        checked.returncode == 0 and "3 page(s) are in another language than the book's" \
+        checked.returncode == 0 and "3 pages are in a different language than the book" \
         in checked.stderr and len(first_drafted) == 2, checked.stderr[-800:]
     yield "the decks are copied and converted", result.returncode == 0, said[-600:]
     yield "a copy is given OpenStax's language in place of the US English its runs, its " \
@@ -4231,8 +4231,9 @@ def case_deck_languages(work):
                                                          "english")]
     yield "the run names the decks in another language than the book's, and drafts a row for " \
         "each its own file put there", \
-        "3 page(s) are in another language than the book's, en, the default" in said \
-        and "row de (languages.csv)" in said \
+        "3 pages are in a different language than the book (en, the default" in said \
+        and "row in de (languages.csv)" in said \
+        and re.search(r"Every output marks each in its own language\.$", said, re.M) \
         and sorted(r[:2] for r in drafted) == [["francais", "fr-FR"], ["openstax-es", "es"]], \
         (drafted, said[-1200:])
 

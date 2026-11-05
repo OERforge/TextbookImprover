@@ -6456,10 +6456,14 @@ def case_page_languages(work):
          and "lang: fr-CA" in read(work, "src", "chapitre.md")
          and "lang: fr\n" not in read(work, "src", "chapitre.md")
          and "lang: de" in read(work, "src", "deutsch.md")),
-        ("the run names each page in another language and where its language came from",
-         lambda: "4 page(s) are in another language than the book's, de" in said
-         and "chapitre fr-CA (languages.csv)" in said and "espanol es-ES (its file)" in said
-         and "funciones es (its producer's property)" in said and "about it (its file)" in said),
+        ("the run names each page in another language and where its language came from, "
+         "and the book as a whole in what the run makes of it, an EPUB and a cartridge",
+         lambda: "4 pages are in a different language than the book (de)" in said
+         and "chapitre in fr-CA (languages.csv)" in said and "espanol in es-ES (its file)" in said
+         and "funciones in es (its producer's property)" in said
+         and "about in it (its file)" in said
+         and "Every output marks each in its own language; the book as a whole, in its "
+             "EPUB and its cartridge, stays de." in said),
         ("languages-new.csv drafts a row for each one a file put there that the sidecar has "
          "none for, saying where it was found",
          lambda: drafted[0] == ["source", "language", "found", "drafted-by", "reviewed"]
@@ -6612,7 +6616,7 @@ def case_variant_languages(work):
          and "Gedruckt" in read(work, "print", "deutsch.html")),
         ("a page only a variant gives is in its own, and the run names it",
          lambda: lang("print", "nur.html") == "it"
-         and "nur it (its file)" in result.stdout + result.stderr),
+         and "nur in it (its file)" in result.stdout + result.stderr),
     ]
 
 
@@ -8671,6 +8675,15 @@ def case_book_name(work):
     named_conv = ("project:\n  identifier: org.example.conv\n"
                   "  title: The Conv Book\n  contents: [two, one]\n")
     conv, conv_run, conv_said = book("conv", {"conversion.yaml": named_conv + both})
+    # The same with a page in French: the note names the EPUB, not the
+    # cartridge the run doesn't build.
+    conv_fr, conv_fr_run, conv_fr_said = book("conv-fr", {
+        "conversion.yaml": named_conv + both,
+        "two.md": "---\ntitle: Deux\nlang: fr\n---\n\n# Deux\n\nPlus.\n"})
+    # And named nowhere, with an html target alone: none at all.
+    bare_fr, bare_fr_run, bare_fr_said = book("bare-fr", {
+        "conversion.yaml": "targets:\n  html:\n    format: html\n",
+        "two.md": "---\ntitle: Deux\nlang: fr\n---\n\n# Deux\n\nPlus.\n"})
     conv2, conv2_run, conv2_said = book("conv2", {
         "conversion.yaml": named_conv + both,
         "packaging.yaml": "defaults:\n  version: \"2.0\"\n"})
@@ -8789,6 +8802,16 @@ def case_book_name(work):
          and conv_run.returncode == 0 and "NOTE" not in conv_said
          and "nothing is packaged" in conv_said
          and not exists(conv, "imsmanifest.xml")),
+        ("and its note on a page in another language names its EPUB as the whole book, "
+         "and no cartridge",
+         lambda: conv_fr_run.returncode == 0 and "nothing is packaged" in conv_fr_said
+         and "Every output marks it in that language; the book as a whole, in its EPUB, "
+             "stays en." in conv_fr_said),
+        ("and with the book named nowhere, it names no cartridge, the packager having no "
+         "name for one",
+         lambda: re.search(r"two in fr \(its file\)\. Every output marks it in that "
+                           r"language\.$", bare_fr_said, re.M)
+         and not exists(bare_fr, "imsmanifest.xml")),
         ("with a packaging.yaml that doesn't name it, packaging stops, saying "
          "conversion.yaml names it, and the project's sample carries its values",
          lambda: conv2_run.returncode != 0

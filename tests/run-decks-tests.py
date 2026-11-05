@@ -2102,9 +2102,11 @@ def case_languages(work):
         checks.append(("and its PowerPoint file's text",
                        lambda: runs("allemand") == {"de"} and runs("english") == {"en-US"}))
     checks += [
-        ("the run names the deck in another language and drafts its row",
-         lambda: "1 page(s) are in another language than the book's, en-US: allemand de "
-         "(its file)" in result.stderr
+        ("the run names the deck in another language and drafts its row, and says every "
+         "output marks it so, with none for the whole book",
+         lambda: re.search(r"1 page is in a different language than the book \(en-US\): "
+                           r"allemand in de \(its file\)\. Every output marks it in that "
+                           r"language\.$", result.stderr, re.M)
          and rows_of(os.path.join(work, "languages-new.csv"))[0][:2] == ["allemand", "de"]),
     ]
     if ready:

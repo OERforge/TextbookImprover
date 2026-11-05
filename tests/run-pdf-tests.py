@@ -1909,8 +1909,12 @@ def build_blank_lines(work):
 # notes book has them. A heading's underscores, which aren't a blank, and
 # a formula's runs of no-break spaces, as texmath writes Introductory
 # Business Statistics 2e's radical over rows of them (Table B2), spaces
-# around a word in a formula, plain and bold, and a formula of spaces
-# alone between two words.
+# around a word in a formula, plain and bold, a formula of spaces alone
+# between two words and between two letters, and a space in each of
+# three boxes side by side, each a paragraph of its own, so that no
+# line breaks within it; in raw LaTeX, which Pandoc's reader doesn't
+# take for a formula, around a word and alone; and in a heading, whose
+# bookmark Pandoc's writer gives the formula as its LaTeX.
 DRAWN_BLANKS = ("# Lines\n\n## Fill in the ________\n\nBlanks drawn as lines:\n\n"
                 "1. Population ____\n2. Statistic ________\n\n"
                 "The Rating of Perceived Exertion (RPE) is an example of ________________\n\n"
@@ -1940,10 +1944,15 @@ DRAWN_BLANKS = ("# Lines\n\n## Fill in the ________\n\nBlanks drawn as lines:\n\
                 "078164062862089986280\n\n"
                 "2718281828459045235360287471352662497757247093699959574966967627724\\ ____\n\n"
                 "A radical over two rows of no-break spaces, as Table B2 has it: "
-                "$\\sqrt{\\begin{matrix}\\text{~~} \\\\ \\text{~~~~~~}\\end{matrix}}$, and "
-                "spaces around a word in a formula: $x\\text{~~~or~~~}y$, in bold: "
-                "$\\textbf{~~~or~~~}$, and a formula of spaces alone, Spacesonly "
-                "$\\text{~~~~}$ between two words.\n\n"
+                "$\\sqrt{\\begin{matrix}\\text{~~} \\\\ \\text{~~~~~~}\\end{matrix}}$.\n\n"
+                "Aroundword $x\\text{~~~or~~~}y$ spaces around a word.\n\n"
+                "Inbold $\\textbf{~~~or~~~}$ in bold.\n\n"
+                "Spacesonly $\\text{~~~~}$ between two words.\n\n"
+                "Joined$\\text{~~}$word, a formula of spaces alone between two letters.\n\n"
+                "Threeboxes $\\text{~}\\text{~}\\text{~}x$ a space in each of three boxes.\n\n"
+                "Rawaround `\\(a\\text{~~~and~~~}b\\)`{=latex} in raw LaTeX.\n\n"
+                "Rawonly `\\(\\text{~~~~}\\)`{=latex} between two words.\n\n"
+                "## Spaced $a\\text{~~~to~~~}b$ heading\n\n"
                 "[^1]: Noteblank ________ in a note.\n")
 
 # IBM Plex Serif's underscore, in thousandths of an em, upright, italic,
@@ -2062,6 +2071,12 @@ def drawn_blanks_checks(lines_path, glyphs_path, source, more):
     rules = pdftext.rule_boxes(lines_path) if built else []
     spans = pdftext.span_marks(lines_path, "blank") if built else []
     held = {mark for _, _, marks in spans for mark in marks}
+    # The text of each line the PDF of lines shows, a line to a line.
+    shown = {}
+    for page, baseline, _left, _right, char in (pdftext.glyph_boxes(lines_path) if built
+                                                 else []):
+        shown.setdefault((page, baseline), []).append(char)
+    spaced_text = "\n".join("".join(chars) for chars in shown.values())
 
     def ink(blank):
         """Where a run of underscores' ink is: (page index, foot, top, left,
@@ -2203,16 +2218,22 @@ def drawn_blanks_checks(lines_path, glyphs_path, source, more):
          and any("café__" in r[6] for r in underscore_runs(lines_path))),
         ("and every other character is where it was",
          lambda: built and others(lines_path) == others(glyphs_path)),
-        ("a run of no-break spaces in text in a formula keeps one of them, the rest a "
-         "phantom, so the text has one space for it, and no run of three, as Table B2's "
-         "radical over two rows of them and spaces around a word, plain and bold, have it; "
-         "a formula of nothing but spaces, between two words, keeps none",
-         lambda: built and "\\sqrt{\\begin{matrix}\\text{~\\hphantom{~}} \\\\ "
-         "\\text{~\\hphantom{~~~~~}}\\end{matrix}}" in source
-         and "x\\text{~\\hphantom{~~}or~\\hphantom{~~}}y" in source
-         and "\\textbf{~\\hphantom{~~}or~\\hphantom{~~}}" in source
-         and "\\text{\\hphantom{~~~~}}" in source
-         and not any(found[2].isspace() for found in repeated_runs(lines_path))),
+        ("a run of no-break spaces in text in a formula is one space in the PDF's text, "
+         "and there's no run of three, as Table B2's radical over two rows of them and "
+         "spaces around a word have it, plain, bold, in raw LaTeX, and in a heading; a "
+         "formula of nothing but spaces between two words has none, in raw LaTeX too, and "
+         "one between two letters one; and the formulas are as written, the heading's "
+         "bookmark with no phantom in it",
+         lambda: built and not any(found[2].isspace() for found in repeated_runs(lines_path))
+         and all(re.search(pattern, spaced_text) for pattern in (
+             r"Aroundword \S or \S spaces", r"Inbold  or  in", r"Spacesonly  between",
+             r"Joined word,", r"Rawaround \S and \S in", r"Rawonly  between",
+             r"Spaced \S to \S heading"))
+         and "\\sqrt{\\begin{matrix}\\text{~~} \\\\ \\text{~~~~~~}\\end{matrix}}" in source
+         and "x\\text{~~~or~~~}y" in source and "\\textbf{~~~or~~~}" in source
+         and "\\(a\\text{~~~and~~~}b\\)" in source
+         and any(title.startswith("Spaced") and "phantom" not in title
+                 for title in outline_titles(pypdf.PdfReader(lines_path)))),
         ("in a face HarfBuzz shapes, as a book's metadata file can ask for, two blanks are "
          "drawn as lines in its underscore's measure, in one Span, with no space character "
          "between them",

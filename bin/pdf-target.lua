@@ -128,11 +128,6 @@
 --    the writer set its columns at, so each line is a paragraph of the
 --    cell (below).
 --
--- 21. A run of no-break spaces in text in a formula, which put a space
---    character in the PDF's text for each, side by side: one of them
---    kept, the rest a phantom, and in a formula of nothing but such
---    spaces, none kept (Math, below).
---
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -690,8 +685,9 @@ end
 -- capitals), a script's (after ^ or _) seven tenths of that, as TeX sets
 -- it in smaller type, a command that sets type or space rather than
 -- drawing (\mathbf, \text, \left) none, and two for the space around
--- each operator or relation; \hphantom, which one_space (below) writes
--- for spaces' room, none, what's in its braces counted as it is.
+-- each operator or relation; \hphantom, which takes the room of what's in
+-- its braces and draws nothing, none, what's in its braces counted as it
+-- is.
 local DRAWS_NOTHING = {
   mathbf = true, mathrm = true, mathit = true, mathsf = true, mathtt = true,
   mathcal = true, mathbb = true, mathfrak = true, mathscr = true, mathnormal = true,
@@ -2650,50 +2646,15 @@ local function unpadded(tex)
   return table.concat(out)
 end
 
--- A run of no-break spaces in text in a formula, as texmath writes an
--- mtext's (\text{~~~or~~~}), keeps its width but puts one space in the
--- page's text, as a run of spaces between words in a paragraph does. Each
--- is a space between words to tagpdf, which puts a space character in the
--- page's text for each: Introductory Business Statistics 2e's table of
--- symbols shows the square root's sign alone, over two rows of such text
--- that make room under it (\text{~~~~~~}), and veraPDF's WCAG 2.2 machine
--- check 1.3.1-2 reports the six spaces side by side as spaces used to lay
--- out the page. The run's first space is kept and the rest are an
--- \hphantom, which takes their room and puts nothing in the page. A
--- formula of nothing but such text, which can stand between two words
--- for a space to fill in, keeps none, a space either side of it in the
--- paragraph already: one kept made three side by side. The commands are
--- those texmath writes for an mtext, \text, and \textbf, \textit, and
--- \texttt for bold, italic, and monospace text, and \mbox, \textrm,
--- \textup, \textnormal, \textmd, \textsf, and \textsl, each looked for
--- by name, so that it's found inside another's braces, as there inside
--- \sqrt's. A formula in raw LaTeX in a Markdown page isn't a formula to
--- Pandoc, and is left as it is.
-local SPACE_TEXT = { 'text', 'mbox', 'textrm', 'textup', 'textnormal', 'textmd',
-                     'textbf', 'textit', 'textsl', 'textsf', 'texttt' }
-local function spaces_only(tex)
-  local rest = tex
-  for _, name in ipairs(SPACE_TEXT) do
-    rest = rest:gsub('\\' .. name .. '%f[^%a]%s*(%b{})', function(group)
-      if group:sub(2, -2):match('^[~%s]*$') then return '' end
-    end)
-  end
-  return rest:match('^%s*$') ~= nil and tex:find('~', 1, true) ~= nil
-end
-local function one_space(tex)
-  local none = spaces_only(tex)
-  for _, name in ipairs(SPACE_TEXT) do
-    tex = tex:gsub('(\\' .. name .. '%f[^%a]%s*)(%b{})', function(command, group)
-      if none then return command .. '{\\hphantom' .. group .. '}' end
-      local inner = (' ' .. group:sub(2, -2)):gsub('([^\\])~(~+)', '%1~\\hphantom{%2}')
-      return command .. '{' .. inner:sub(2) .. '}'
-    end)
-  end
-  return tex
-end
-
+-- A run of spaces in a formula's text (\text{~~~or~~~}) is left as it is:
+-- the PDF's text has one space for it, as tagged LaTeX sets the formula
+-- (latexbuild's PDF_MACROS), whether it's a formula to Pandoc or raw
+-- LaTeX in a Markdown page. Rewritten here, the run's first space kept
+-- and the rest an \hphantom, a heading's bookmark, where the writer gives
+-- a formula as its LaTeX, had the \hphantom, and raw LaTeX was left as it
+-- was.
 local function Math(math)
-  local text = unpadded(one_space(math.text):gsub('\\pmb%f[^%a]', '\\symbfit')
+  local text = unpadded(math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
     :gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n'))
   if math.mathtype == 'DisplayMath' and text:match('^%s*\\begin%s*{eqnarray%*}') then
     return pandoc.RawInline('latex', text)

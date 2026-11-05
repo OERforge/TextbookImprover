@@ -4022,6 +4022,126 @@ PDF_MACROS = r"""\ExplSyntaxOn
   \NewDocumentCommand\OERBlank{m}{\OERBlankSpan{#1}}
   \NewDocumentCommand\OERBlanks{mm}{\OERBlankSpan[#1]{#2}}
 \fi
+% A run of spaces in a formula's text, as texmath writes an mtext's
+% (\text{~~~or~~~}), puts one space in the page's text and keeps its
+% width, as a run of spaces between words in a paragraph does. tagpdf
+% puts a space character in the text for each space between words it
+% finds as a box or a paragraph is made (its attribute for that), a
+% no-break space among them, and Introductory Business Statistics 2e's
+% table of symbols shows the square root's sign alone, over two rows of
+% such text that make room under it (\text{~~~~~~}), whose six spaces
+% side by side veraPDF's WCAG 2.2 machine check 1.3.1-2 reports as spaces
+% used to lay out the page. Once a formula is set
+% (post_mlist_to_hlist_filter), each space after a run's first is given
+% no character (tagpdf's attribute for that, which it reads as it puts
+% the characters in, as the blanks' code above sets it), a run going on
+% through penalties, kerns, rules, and spaces tagpdf gives no character,
+% and into a box and out of it, as a formula's text is in a box of its
+% own, and ending at a character. And a formula of nothing but spaces,
+% which can stand between two words for a space to fill in, is given
+% none where a space with a character stands beside it on its line,
+% as each page is shipped out, before tagpdf puts the characters in:
+% with one, it and the paragraph's spaces either side of it were three
+% side by side. pdf-target.lua had rewritten the formula, its first space
+% kept and the rest an \hphantom, which left a formula in raw LaTeX in a
+% Markdown page as it was, Pandoc's reader not taking it for a formula,
+% and put the \hphantom in a heading's bookmark, where Pandoc's writer
+% gives a formula as its LaTeX (\texorpdfstring). An untagged PDF has no
+% attribute to read, and nothing is done.
+\ifdefined\directlua
+  \directlua{
+    local GLYPH, GLUE, KERN, PENALTY = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("penalty")
+    local HLIST, VLIST, DISC, MATH = node.id("hlist"), node.id("vlist"), node.id("disc"), node.id("math")
+    local function tagged()
+      local attributes = luatexbase.attributes
+      return attributes.g__tag_interwordspace_attr, attributes.g__tag_interwordspaceOff_attr
+    end
+    local function spaced(n, space, off)
+      return n.id == GLUE and node.has_attribute(n, space, 1) and not node.has_attribute(n, off)
+    end
+    local lettered
+    local function writes(n)
+      if n.id == GLYPH then return true end
+      if n.id == HLIST or n.id == VLIST then return n.head and lettered(n.head) end
+      if n.id == DISC then
+        return (n.pre and lettered(n.pre)) or (n.post and lettered(n.post)) or (n.replace and lettered(n.replace))
+      end
+      return false
+    end
+    lettered = function(head)
+      for n in node.traverse(head) do
+        if writes(n) then return true end
+      end
+      return false
+    end
+    local function collapse(head, space, off, run)
+      for n in node.traverse(head) do
+        if spaced(n, space, off) then
+          if run then node.set_attribute(n, off, 1) end
+          run = true
+        elseif (n.id == HLIST or n.id == VLIST) and n.head then
+          run = collapse(n.head, space, off, run)
+        elseif writes(n) then
+          run = false
+        end
+      end
+      return run
+    end
+    local function gather(n, space, off, found)
+      if spaced(n, space, off) then
+        table.insert(found, n)
+      elseif (n.id == HLIST or n.id == VLIST) and n.head then
+        for m in node.traverse(n.head) do gather(m, space, off, found) end
+      end
+    end
+    local function beside(n, way, space, off)
+      local m = n[way]
+      while m and (m.id == PENALTY or m.id == KERN) do m = m[way] end
+      return m and spaced(m, space, off)
+    end
+    local function alone(head, space, off)
+      local n = head
+      while n do
+        if n.id == MATH and n.subtype == 0 then
+          local close = n.next
+          while close and not (close.id == MATH and close.subtype == 1) do close = close.next end
+          if close then
+            local found, inked, m = {}, false, n.next
+            while m and not (m == close) do
+              if writes(m) then inked = true end
+              gather(m, space, off, found)
+              m = m.next
+            end
+            if not inked and found[1] and (beside(n, "prev", space, off) or beside(close, "next", space, off)) then
+              for _, glue in ipairs(found) do node.set_attribute(glue, off, 1) end
+            end
+            n = close
+          end
+        elseif (n.id == HLIST or n.id == VLIST) and n.head then
+          alone(n.head, space, off)
+        end
+        n = n.next
+      end
+    end
+    if luatexbase.callbacktypes.post_mlist_to_hlist_filter then
+      luatexbase.add_to_callback("post_mlist_to_hlist_filter", function(head)
+        local space, off = tagged()
+        if head and space and off then collapse(head, space, off, false) end
+        return true
+      end, "oer.formula.spaces")
+    end
+    if luatexbase.callbacktypes.pre_shipout_filter then
+      luatexbase.add_to_callback("pre_shipout_filter", function(box)
+        local space, off = tagged()
+        if box.head and space and off then alone(box.head, space, off) end
+        return true
+      end, "oer.formula.spaces")
+      if luatexbase.declare_callback_rule then
+        luatexbase.declare_callback_rule("pre_shipout_filter", "oer.formula.spaces", "before", "tagpdf")
+      end
+    end
+  }
+\fi
 """ + LINE_BREAK_SPACE + FIT_MACROS
 
 

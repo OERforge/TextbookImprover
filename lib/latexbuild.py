@@ -435,7 +435,8 @@ CODE_SPACES = r"""\makeatletter
 # it, didn't reach; a book's text is in babel's family for its language,
 # loaded when the text is set, which it did reach, but read before the
 # faces, it comes before whatever loads one first. A deck's template
-# reads it before its faces too.
+# reads it before its faces too, and a LaTeX book's tagged copy just after
+# its \DocumentMetadata (texremediate.STATIC_FONTS).
 STATIC_FONTS = r"""\ifdefined\directlua
 \directlua{
   if not oerfonts and fonts and fonts.constructors and fonts.constructors.trytosharefont then

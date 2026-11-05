@@ -533,6 +533,20 @@ LUATEX85 = ("% Written for LaTeX's tagging, built with LuaLaTeX: pdfTeX's comman
             "% LuaTeX lacks, and \\pdfoutput, which a test for pdfTeX looks for, as the\n"
             "% luatex85 package gives them to LuaTeX. pdfLaTeX builds as before.\n"
             "\\ifdefined\\directlua\\RequirePackage{luatex85}\\fi\n")
+# A face with a STAT table that isn't a variable font embedded from its own
+# file by LuaLaTeX, not as luaotfload embeds a variable face, which Acrobat
+# said it couldn't extract (latexbuild.STATIC_FONTS): just after
+# \DocumentMetadata, before the class, since luaotfload settles how a face
+# is embedded when it first loads it, and a class, a package, or the book's
+# own fontspec setting can load one. Every tagged copy has it, as a book's
+# PDF from its pages does: whether a face has the table isn't known until
+# LuaLaTeX loads it (TeX Live's josefin package sets Josefin Sans, which has
+# one, by fontspec), and another face is embedded as before.
+STATIC_FONTS = ("% Written for LuaLaTeX, which builds this copy: a face with a STAT table\n"
+                "% that isn't a variable font embedded from its own file, not as luaotfload\n"
+                "% embeds a variable font, which Acrobat said it couldn't extract. Any other\n"
+                "% face is embedded as before, and pdfLaTeX builds as before.\n"
+                + latexbuild.STATIC_FONTS)
 NEWTHEOREM = re.compile(r"\\newtheorem\s*\{(\w+)\}")
 STARRED_THEOREM = re.compile(r"\\newtheorem\*\s*\{(\w+)\*\}\s*\{[^}]*\}")
 CENTERLINE = re.compile(r"\\centerline(?![A-Za-z@])")
@@ -1785,6 +1799,10 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             + text[after:]
         if shimmed:
             counts["shims"] = ", ".join(shimmed)
+    # First after \DocumentMetadata, before anything loads a face; not again
+    # in a copy made from a copy.
+    if after is not None and "oerfonts = {" not in text:
+        text = text[:after] + STATIC_FONTS + text[after:]
     texts[master] = text
     return counts
 

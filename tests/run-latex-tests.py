@@ -1473,6 +1473,8 @@ def case_source(work):
 
     tagged = read(work, "tagged", "notes.tex") \
         if os.path.exists(os.path.join(work, "tagged", "notes.tex")) else ""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import texremediate
 
     def build(tree, engine, text=None, passes=1):
         """The author's tree with tree laid over it (and notes.tex as text,
@@ -1698,9 +1700,11 @@ def case_source(work):
          lambda: fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build",
                                            "keys-older")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
-        ("tagging: \\DocumentMetadata, the book's language, pdfTeX's option and setting out",
+        ("tagging: \\DocumentMetadata, the book's language, the font setting just after it, "
+         "pdfTeX's option and setting out",
          lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
-                                   "\\documentclass[12pt]{article}")
+                                   + texremediate.STATIC_FONTS
+                                   + "\\documentclass[12pt]{article}")
          and "\\pdfcompresslevel" not in tagged),
         ("tagging: the starred theorem defined only when tagging hasn't",
          lambda: "\\ifcsname thm*\\endcsname\\else\\newtheorem*{thm*}{Theorem}\\fi" in tagged),
@@ -1827,6 +1831,67 @@ def case_own_fonts(work):
          and "\\renewcommand{\\boldsymbol}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
          and "\\renewcommand{\\pmb}[1]{\\symbfit{#1}}" in read(bold, "tagged", "notes.tex")
          and "bold italic" in bold_said and bold_builds()),
+    ]
+
+
+def case_static_face(work):
+    """A tagged copy of a book that sets its face with fontspec, Josefin
+    Sans, which has a STAT table and isn't a variable font: built with
+    LuaLaTeX, the face is embedded from its file, as in a book's PDF from
+    its pages (latexbuild.STATIC_FONTS, which the copy reads just after
+    \\DocumentMetadata), not as luaotfload embeds a variable font, whose
+    accented letters have no parts. Skipped where TeX hasn't Josefin Sans
+    (TeX Live's josefin)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{fontspec}\n"
+                 "\\setmainfont{JosefinSans}[Extension=.ttf, UprightFont=*-Regular, "
+                 "BoldFont=*-Bold]\n\\begin{document}\n"
+                 "Accented letters, \u0177 and \u012b, and in bold, \\textbf{\u0177}.\n"
+                 "\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
+    result = convert(work)
+    copy = os.path.join(work, "tagged", "notes.tex")
+
+    def embedded():
+        why = why_no_tex("no lualatex to build the copy", "lualatex")
+        if why:
+            return skip(why)
+        found = shutil.which("kpsewhich") and subprocess.run(
+            ["kpsewhich", "JosefinSans-Regular.ttf"], capture_output=True, text=True,
+            stdin=subprocess.DEVNULL).stdout.strip()
+        if not found:
+            return skip("Josefin Sans isn't installed (TeX Live's josefin); a face with a STAT "
+                        "table that isn't a variable font isn't checked")
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return skip("no pikepdf to read the PDF's fonts")
+        import pdftext
+        tree = os.path.join(work, "build")
+        os.makedirs(tree)
+        shutil.copy(copy, os.path.join(tree, "notes.tex"))
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "notes.tex"], cwd=tree, capture_output=True, text=True,
+                              timeout=300)
+        path = os.path.join(tree, "notes.pdf")
+        if not built_or_why(done.returncode == 0 and os.path.exists(path), done.stdout):
+            return False
+        glyphs = pdftext.truetype_glyphs(path)
+
+        def accented(face):
+            """Whether the face, as the PDF embeds it, draws a letter from
+            its parts, each part drawn."""
+            drawn = {number for number, _parts in glyphs.get(face, [])}
+            whole = [parts for _number, parts in glyphs.get(face, []) if parts]
+            return bool(whole) and all(part in drawn for parts in whole for part in parts)
+        return accented("JosefinSans-Regular") and accented("JosefinSans-Bold")
+    return [
+        ("a tagged copy of a book that sets a face with a STAT table that isn't a variable "
+         "font, Josefin Sans, embeds it from its file under LuaLaTeX, an accented letter "
+         "drawn from its parts, each part drawn, in its regular and its bold",
+         lambda: result.returncode == 0 and os.path.exists(copy) and embedded()),
     ]
 
 
@@ -7195,6 +7260,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("an SVG picture the latex target can't make a PDF", case_unmade_svg),
          ("a table tagged as a division of paragraphs", case_layout_tables),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
+         ("a face with a STAT table that isn't a variable font", case_static_face),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("a list's item that opens with fancyvrb's code", case_code_label),

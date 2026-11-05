@@ -3125,6 +3125,39 @@ def check_book_template():
     ]
 
 
+def check_tagged_copy_fonts():
+    """A LaTeX book's tagged copy (texremediate.tag) reads the font setting
+    (texremediate.STATIC_FONTS) first after \\DocumentMetadata, the one it
+    adds or the book's own, before the class, and a copy made from a copy
+    has it once."""
+    import texremediate
+    book = ("\\documentclass{article}\n\\usepackage{fontspec}\n"
+            "\\setmainfont{JosefinSans-Regular.ttf}\n\\begin{document}\nText.\n"
+            "\\end{document}\n")
+    added = {"book.tex": book}
+    texremediate.tag(added, "book.tex", "en")
+    again = dict(added)
+    texremediate.tag(again, "book.tex", "en")
+    own = {"book.tex": "\\DocumentMetadata{pdfversion=2.0}\n" + book}
+    texremediate.tag(own, "book.tex", "en")
+
+    def first(text):
+        """Whether the setting comes just after the first line, the
+        copy's \\DocumentMetadata."""
+        rest = text.split("\n", 1)[1]
+        return text.startswith("\\DocumentMetadata{") \
+            and rest.startswith(texremediate.STATIC_FONTS)
+    return [
+        ("a tagged copy reads the font setting just after the \\DocumentMetadata it adds, "
+         "before the class",
+         lambda: first(added["book.tex"])),
+        ("and just after the book's own \\DocumentMetadata",
+         lambda: first(own["book.tex"])),
+        ("a copy made from a copy has it once",
+         lambda: again["book.tex"].count(texremediate.STATIC_FONTS) == 1),
+    ]
+
+
 def check_code_fit_report():
     """The build's reports of what FIT_MACROS fitted and what's still too
     wide, read from what LaTeX said, with blocks of code among them, each
@@ -7116,6 +7149,7 @@ GROUPS = [
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),
+    ("a LaTeX book's tagged copy, the font setting before its class", check_tagged_copy_fonts),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

@@ -93,6 +93,16 @@ import pdftext  # noqa: E402
 LATIN_MODERN = ("mainfont: Latin Modern Roman\nsansfont: Latin Modern Sans\n"
                 "monofont: Latin Modern Mono\nmathfont: Latin Modern Math\n")
 
+# The environment of a build whose checks measure its fill-in blanks'
+# underscores, where they are, how many, and whether they overlap: the
+# book's, the notes book's, and the fit book's. A build draws a blank as a
+# line where its underscores' ink is, and OER_BLANK_GLYPHS, which only the
+# suites set, leaves the underscores (latexbuild.PDF_MACROS); the drawn
+# blanks' book (build_drawn_blanks) checks the lines against them.
+def glyph_blanks(environment=None):
+    return dict(environment or os.environ, OER_BLANK_GLYPHS="1")
+
+
 # The book class's own page, where the PDF target's default would have
 # its own (bin/pdf-layout.yaml): 10pt type, justified, in the class's
 # margins, which the checks of the book and the notes book measure lines
@@ -967,7 +977,8 @@ def pikepdf_open(path):
 def build_notes(work):
     """NOTES_CAPTIONS, NOTES_CELLS, NOTES_HEADINGS, and NOTES_PAIRS, built
     tagged, to PDF/UA-2, with a list of figures, and untagged, on the
-    default page, each in Latin Modern (LATIN_MODERN): (the tagged PDF's
+    default page, each in Latin Modern (LATIN_MODERN), the blanks drawn as
+    underscores (glyph_blanks): (the tagged PDF's
     path, the untagged one's, what the run said, the tagged one's
     LaTeX). pypdf's
     text of an untagged PDF in IBM Plex runs its words together, which
@@ -990,7 +1001,8 @@ def build_notes(work):
                  "  plain:\n    format: pdf\n    pdf:\n      standard: []\n"
                  "      metadata: plain.md\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
-                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                               env=glyph_blanks())
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target", "pdf"],
         work)
     tex = os.path.join(work, "pdf", "book.tex")
@@ -1754,7 +1766,8 @@ FIT_ONE = (
 def build_fit(work):
     """FIT_ONE on the default page, in Latin Modern (LATIN_MODERN), its
     tables counted in characters (OER_MEASURES none), as its cases are set
-    for them, where a build counts in what it measures of the page: (the
+    for them, where a build counts in what it measures of the page, and its
+    blanks drawn as underscores (glyph_blanks): (the
     PDF's path, what the run said,
     its LaTeX, and LuaLaTeX's log of its LaTeX run as a third run would
     be, the aux saying two had gone before and fitted nothing)."""
@@ -1768,7 +1781,7 @@ def build_fit(work):
         fh.write(LATIN_MODERN)
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
-    characters = dict(os.environ, OER_MEASURES="none")
+    characters = glyph_blanks(dict(os.environ, OER_MEASURES="none"))
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL, env=characters)
@@ -1878,6 +1891,349 @@ def build_blank_lines(work):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
     return os.path.join(work, "pdf", "org.example.bars.pdf"), source
+
+
+# Fill-in blanks as a build draws them, as lines (latexbuild.PDF_MACROS),
+# on the default page, in the default's faces: in a list; at the end of a
+# paragraph, fitting its line and too long for it, drawn shorter; two with
+# a space between them, as Microbiology asks for an answer of two words,
+# two with a no-break space, two with a thin space and a space, and one
+# beside a bold one; one beside an italic one, nothing between them, and
+# one beside one in a span, in the same face, nothing between them; one in
+# italics, whose underscore is set to the left of where it stands; one in
+# a table's cell and one in a note; one of three underscores, and blanks
+# of three and of two side by side in a table's cells, as Introductory
+# Business Statistics 2e's contingency tables have them, and Python's
+# __init__ and a word outside ASCII joined to two, whose underscores
+# aren't one; and two joined to a number too long for any line, as the
+# notes book has them. A heading's underscores, which aren't a blank, and
+# a formula's runs of no-break spaces, as texmath writes Introductory
+# Business Statistics 2e's radical over rows of them (Table B2), spaces
+# around a word in a formula, plain and bold, and a formula of spaces
+# alone between two words.
+DRAWN_BLANKS = ("# Lines\n\n## Fill in the ________\n\nBlanks drawn as lines:\n\n"
+                "1. Population ____\n2. Statistic ________\n\n"
+                "The Rating of Perceived Exertion (RPE) is an example of ________________\n\n"
+                "Core nations are also known as __________________\n\n"
+                "A blank too long for its line: " + "_" * 88 + " and words after it.\n\n"
+                "The ________ ________ prevents access of microbes in the blood, an answer "
+                "of two words.\n\n"
+                "Nobreak ________ ________ two blanks with a no-break space between "
+                "them.\n\n"
+                "Boldpair " + "\\_" * 8 + " **" + "\\_" * 8 + "** a blank and a bold one with a "
+                "space between them.\n\n"
+                "Thinpair " + "\\_" * 8 + "  " + "\\_" * 8 + " two blanks with a thin space "
+                "and a space between them.\n\n"
+                "Sidebyside " + "\\_" * 8 + "*" + "\\_" * 8 + "* a blank and an italic one "
+                "with nothing between them.\n\n"
+                "Spanpair " + "\\_" * 8 + "[" + "\\_" * 8 + "]{.x} two blanks in one face "
+                "with nothing between them, the second in a span.\n\n"
+                "*Italicblank ________ set in italics.*\n\n"
+                "A blank in a note.[^1] There are ___ outcomes, a blank of three.\n\n"
+                "| Label | Blank | Another |\n|-------|-------|-------|\n"
+                "| Cellblank | ________________ | |\n| Threecells | ___ | ___ |\n\n"
+                "| Total | Summer | Rainy | Winter |\n|-------|-------|-------|-------|\n"
+                "| Twocells | __ | __ | __ |\n\n"
+                "Python's \\_\\_init\\_\\_ keeps its underscores, which aren't a blank, and "
+                "so does Nonascii café\\_\\_.\n\n"
+                "________\\ 31415926535897932384626433832795028841971693993751058209749445923"
+                "078164062862089986280\n\n"
+                "2718281828459045235360287471352662497757247093699959574966967627724\\ ____\n\n"
+                "A radical over two rows of no-break spaces, as Table B2 has it: "
+                "$\\sqrt{\\begin{matrix}\\text{~~} \\\\ \\text{~~~~~~}\\end{matrix}}$, and "
+                "spaces around a word in a formula: $x\\text{~~~or~~~}y$, in bold: "
+                "$\\textbf{~~~or~~~}$, and a formula of spaces alone, Spacesonly "
+                "$\\text{~~~~}$ between two words.\n\n"
+                "[^1]: Noteblank ________ in a note.\n")
+
+# IBM Plex Serif's underscore, in thousandths of an em, upright, italic,
+# and bold (IBMPlexSerif-Regular.otf, -Italic.otf, and -Bold.otf, as TeX
+# Live 2026 has them, read with fontTools): its advance, its ink's left
+# and right ends, and its ink's foot and top.
+PLEX_UNDERSCORE = {"upright": (564, 25, 539, -157, -102),
+                   "italic": (523, -79, 410, -152, -106),
+                   "bold": (560, 27, 533, -174, -84)}
+
+# Blanks in other faces and in an untagged PDF, each a book of its own,
+# built as a build draws them: in a face HarfBuzz shapes, as a book's
+# pdf.metadata file can ask for (mainfont, Renderer=HarfBuzz), whose
+# underscore HarfBuzz measures, so they're drawn as lines too; in a face
+# loaded from TeX's own metrics (ec-lmr10, in raw LaTeX), which has no
+# measure, so they keep their underscores and the space between them, and
+# the build warns; and in an untagged PDF (pdf.standard empty), which has
+# no ActualText to give their text, so they keep theirs, and nothing is
+# said of them. And one in a face stretched wider (FakeStretch), whose
+# underscore is wider by as much and no thicker.
+DRAWN_FACES = ("# Faces\n\nHarfpair ________ ________ two blanks in a face HarfBuzz "
+               "shapes.\n\n`\\begingroup\\font\\tfmface=ec-lmr10 \\tfmface{}`{=latex}Tfmpair "
+               "________ ________ two blanks in a face loaded from metrics."
+               "`\\endgroup`{=latex}\n\n"
+               "`\\begingroup\\addfontfeatures{FakeStretch=1.5}`{=latex}Wideone ________ "
+               "one blank in a face stretched wider.`\\endgroup`{=latex}\n")
+DRAWN_UNTAGGED = ("# Untagged\n\nPlainpair ________ ________ two blanks in an untagged PDF, "
+                  "and Plainone ________ one.\n")
+
+
+def build_drawn_blanks(work):
+    """DRAWN_BLANKS as a book's one page, on the default page, built twice:
+    its blanks drawn as lines, as a build draws them, and as underscores
+    (OER_BLANK_GLYPHS), as the checks of the book, the notes book, and the
+    fit book measure them; and DRAWN_FACES and DRAWN_UNTAGGED, as a build
+    draws them: (the PDF of lines, the PDF of underscores, the first's
+    LaTeX, {"faces" and "untagged": (the PDF, what its build said)})."""
+    found = {}
+    pdf = "targets:\n  pdf:\n    format: pdf\n"
+    for name, page, targets, environment in (
+            ("lines", DRAWN_BLANKS, pdf, None), ("glyphs", DRAWN_BLANKS, pdf, glyph_blanks()),
+            ("faces", DRAWN_FACES, pdf + "    pdf:\n      metadata: faces.yaml\n", None),
+            ("untagged", DRAWN_UNTAGGED, pdf + "    pdf:\n      standard: []\n", None)):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "lines.md"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: Lines\n  identifier: org.example.lines\n"
+                     "  language: en-US\n  contents:\n    - lines\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(targets)
+        with open(os.path.join(folder, "faces.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("mainfont: IBM Plex Serif\nmainfontoptions:\n  - Renderer=HarfBuzz\n")
+        done = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], folder, environment)
+        found[name] = (os.path.join(folder, "pdf", "org.example.lines.pdf"),
+                       done.stdout + done.stderr)
+    folder = os.path.join(work, "lines")
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], folder)
+    source = ""
+    tex = os.path.join(folder, "pdf", "book.tex")
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return (found["lines"][0], found["glyphs"][0], source,
+            {"faces": found["faces"], "untagged": found["untagged"]})
+
+
+def underscore_runs(path):
+    """Each run of underscores a page shows, side by side on a line, in
+    the order shown, one ending where the next underscore doesn't touch it,
+    as in the next column, or is in another face: (page index, baseline,
+    the first's left, the last's right, one's advance, how many, the line's
+    text, and the face's name)."""
+    lines = {}
+    for page, baseline, left, right, char, face in pdftext.glyph_boxes(path, faces=True):
+        lines.setdefault((page, baseline), []).append((left, right, char, face))
+    found = []
+    for (page, baseline), glyphs in lines.items():
+        text, run = "".join(g[2] for g in glyphs), []
+        for glyph in glyphs + [(0, 0, "", "")]:
+            if run and not (glyph[2] == "_" and glyph[0] < run[-1][1] + 0.5
+                            and glyph[3] == run[-1][3]):
+                found.append((page, baseline, run[0][0], run[-1][1], run[0][1] - run[0][0],
+                              len(run), text, run[0][3]))
+                run = []
+            if glyph[2] == "_":
+                run.append(glyph)
+    return found
+
+
+def repeated_runs(path):
+    """Where a page's text, as shown, has five or more of one character
+    side by side on a line, a space aside, or three or more spaces, as
+    veraPDF's WCAG 2.2 machine checks 1.3.1-1 and 1.3.1-2 find them, which
+    chain a structure's text so, a digit's run aside, and an artifact's
+    text left out, as they leave it: [(page index, the line's text, the
+    character, how many)]."""
+    lines = {}
+    for page, baseline, _left, _right, char in pdftext.glyph_boxes(path, artifacts=False):
+        lines.setdefault((page, baseline), []).append(char)
+    found = []
+    for (page, _baseline), chars in lines.items():
+        text = "".join(chars)
+        for match in re.finditer(r"(\s)\s{2,}|([^\s\d])\2{4,}", text):
+            found.append((page, text, match.group(0)[0], len(match.group(0))))
+    return found
+
+
+def drawn_blanks_checks(lines_path, glyphs_path, source, more):
+    """The drawn blanks' checks (build_drawn_blanks)."""
+    built = os.path.exists(lines_path) and os.path.exists(glyphs_path)
+    runs = underscore_runs(glyphs_path) if built else []
+    blanks = [r for r in runs if "Fill in the" not in r[6] and "init" not in r[6]
+              and "café" not in r[6] and "Spanpair" not in r[6]]
+    rules = pdftext.rule_boxes(lines_path) if built else []
+    spans = pdftext.span_marks(lines_path, "blank") if built else []
+    held = {mark for _, _, marks in spans for mark in marks}
+
+    def ink(blank):
+        """Where a run of underscores' ink is: (page index, foot, top, left,
+        right), in its face's measure."""
+        page, baseline, left, right, advance, _count, _text, face = blank
+        em, start, end, foot, top = PLEX_UNDERSCORE[
+            "italic" if "Italic" in face else "bold" if "Bold" in face else "upright"]
+        scale = advance / em
+        return (page, baseline + foot * scale, baseline + top * scale, left + start * scale,
+                right - (em - end) * scale)
+
+    def drawn_at(blank):
+        """The lines drawn in a blank's Span where its underscores' ink was,
+        within 0.02 points at each edge."""
+        page, foot, top, left, right = ink(blank)
+        return [r for r in rules if r[0] == page and (r[0], r[5]) in held
+                and max(abs(r[1] - foot), abs(r[2] - top), abs(r[3] - left),
+                        abs(r[4] - right)) < 0.02]
+
+    def others(path):
+        """Every character a page shows but an underscore or a space, where
+        it's shown."""
+        return [(page, baseline, round(left, 2), char)
+                for page, baseline, left, _right, char in pdftext.glyph_boxes(path)
+                if char not in ("_", " ")]
+
+    def span_pair():
+        """The Spanpair line's two lines (above)."""
+        pair = [r for r in runs if "Spanpair" in r[6]]
+        if len(pair) != 1 or pair[0][5] != 16:
+            return False
+        page, foot, top, left, right = ink(pair[0])
+        drawn = sorted((r for r in rules if r[0] == page and abs(r[1] - foot) < 0.02
+                        and abs(r[2] - top) < 0.02 and left - 0.02 < r[3] < right),
+                       key=lambda r: r[3])
+        owners = [[n for n, (_, _, marks) in enumerate(spans) if (r[0], r[5]) in marks]
+                  for r in drawn]
+        return (len(drawn) == 2 and abs(drawn[0][3] - left) < 0.02
+                and abs(drawn[1][4] - right) < 0.02
+                and all(len(o) == 1 for o in owners) and owners[0] != owners[1])
+
+    faces_path, faces_said = more["faces"]
+    untagged_path, untagged_said = more["untagged"]
+
+    def lines_of(path):
+        """{(page index, baseline): the line's text}."""
+        lines = {}
+        for page, baseline, _left, _right, char in pdftext.glyph_boxes(path):
+            lines[(page, baseline)] = lines.get((page, baseline), "") + char
+        return lines
+
+    def harfbuzz_drawn():
+        """The Harfpair line's two blanks as two lines in IBM Plex Serif's
+        measure, as HarfBuzz gives it, whatever the type's size: as far
+        below the baseline, as long, and as thick as the underscores' ink,
+        to a hundredth, in one Span, "blank blank", and the line's text
+        with no underscore and no three spaces side by side."""
+        found = [(key, text) for key, text in lines_of(faces_path).items()
+                 if text.startswith("Harfpair")]
+        if len(found) != 1:
+            return False
+        (page, baseline), text = found[0]
+        em, start, end, foot, top = PLEX_UNDERSCORE["upright"]
+        thick = top - foot
+        drawn = [r for r in pdftext.rule_boxes(faces_path)
+                 if r[0] == page and r[1] < baseline < r[2] + 3]
+        marks = [marks for said, own, marks in pdftext.span_marks(faces_path, "blank")
+                 if said == "blank blank" and own == ""]
+        return (len(drawn) == 2 and len(marks) == 1
+                and all((r[0], r[5]) in marks[0] for r in drawn)
+                and all(abs((baseline - r[1]) / (r[2] - r[1]) / (-foot / thick) - 1) < 0.01
+                        and abs((r[4] - r[3]) / (r[2] - r[1])
+                                / ((8 * em - start - (em - end)) / thick) - 1) < 0.01
+                        for r in drawn)
+                and "_" not in text and not re.search(r"\s{3}", text))
+
+    def stretched():
+        """The Wideone line's blank as one line as far below the baseline
+        and as thick as IBM Plex Serif's underscore, and half as long again,
+        to a hundredth."""
+        found = [key for key, text in lines_of(faces_path).items() if text.startswith("Wideone")]
+        if len(found) != 1:
+            return False
+        page, baseline = found[0]
+        em, start, end, foot, top = PLEX_UNDERSCORE["upright"]
+        thick = top - foot
+        drawn = [r for r in pdftext.rule_boxes(faces_path)
+                 if r[0] == page and r[1] < baseline < r[2] + 3]
+        return (len(drawn) == 1
+                and abs((baseline - drawn[0][1]) / (drawn[0][2] - drawn[0][1])
+                        / (-foot / thick) - 1) < 0.01
+                and abs((drawn[0][4] - drawn[0][3]) / (drawn[0][2] - drawn[0][1])
+                        / (1.5 * (8 * em - start - (em - end)) / thick) - 1) < 0.01)
+
+    def metrics_kept():
+        """The Tfmpair line's two blanks kept as underscores, two runs of
+        eight with a space between them, and the build's warning."""
+        found = [text for text in lines_of(faces_path).values() if text.startswith("Tfmpair")]
+        return (len(found) == 1 and "________ ________" in found[0]
+                and "2 fill-in blank(s) are underscores in the PDF" in faces_said
+                and "2 in " in faces_said)
+    return [
+        ("a fill-in blank is drawn as a line where its underscores' ink was, each end, its "
+         "foot, and its top, in a list, at a paragraph's end, drawn shorter, in italics, in "
+         "bold, beside an italic one, in a table's cell, in a note, of three underscores, of "
+         "three and of two side by side in a table's cells, and joined to a number, each line "
+         "in its blank's Span",
+         lambda: built and len(blanks) == 26
+         and [len(drawn_at(blank)) for blank in blanks] == [1] * 26
+         and sum(1 for r in rules if (r[0], r[5]) in held) == 28),
+        ("and two blanks side by side in one face, nothing between them, the second in a "
+         "span, are two lines, each in its own blank's Span, together where the underscores' "
+         "ink was",
+         lambda: built and span_pair()),
+        ("and its Span holds no character, its ActualText \"blank\" what a screen reader "
+         "says, and blanks with nothing but spaces between them, a space, a no-break space, "
+         "or a thin space and a space, are one Span, \"blank blank\", a bold one among them "
+         "too",
+         lambda: built and [(said, text) for said, text, _ in spans]
+         == [("blank", "")] * 5 + [("blank blank", "")] * 4 + [("blank", "")] * 15
+         and "\\OERBlanks{2}{" + "\\_" * 8 + " " + "\\_" * 8 + "}" in source
+         and "\\OERBlanks{2}{" + "\\_" * 8 + "~" + "\\_" * 8 + "}" in source
+         and "\\OERBlanks{2}{" + "\\_" * 8 + " \\textbf{" + "\\_" * 8 + "}}" in source
+         and "\\OERBlanks{2}{" + "\\_" * 8 + "\\hphantom{\u2009} " + "\\_" * 8 + "}" in source
+         and "\\OERBlank{" + "\\_" * 8 + "}\\emph{\\OERBlank{" + "\\_" * 8 + "}}" in source),
+        ("so the text has no run of five of a character but a space, nor of three spaces, "
+         "where veraPDF's WCAG checks 1.3.1-1 and 1.3.1-2 found the underscores' runs, the "
+         "blanks of three and of two in a row's cells as runs of six among them, and the "
+         "spaces around and between two blanks; a heading's underscores, which aren't a "
+         "blank, are drawn as they were, on the contents page and over the section",
+         lambda: built and sorted(repeated_runs(lines_path))
+         == sorted(found for found in repeated_runs(glyphs_path)
+                   if found[2] != "_" or "Fill in the" in found[1])
+         and sum(1 for found in repeated_runs(glyphs_path) if found[2] == "_") == 22
+         and [(r[0], r[5]) for r in runs if "Fill in the" in r[6]] == [(0, 8), (2, 8)]),
+        ("and a run of two underscores joined to a word isn't a blank: Python's __init__ "
+         "keeps them, and so does a word outside ASCII",
+         lambda: built and any("__init__" in r[6] for r in underscore_runs(lines_path))
+         and any("café__" in r[6] for r in underscore_runs(lines_path))),
+        ("and every other character is where it was",
+         lambda: built and others(lines_path) == others(glyphs_path)),
+        ("a run of no-break spaces in text in a formula keeps one of them, the rest a "
+         "phantom, so the text has one space for it, and no run of three, as Table B2's "
+         "radical over two rows of them and spaces around a word, plain and bold, have it; "
+         "a formula of nothing but spaces, between two words, keeps none",
+         lambda: built and "\\sqrt{\\begin{matrix}\\text{~\\hphantom{~}} \\\\ "
+         "\\text{~\\hphantom{~~~~~}}\\end{matrix}}" in source
+         and "x\\text{~\\hphantom{~~}or~\\hphantom{~~}}y" in source
+         and "\\textbf{~\\hphantom{~~}or~\\hphantom{~~}}" in source
+         and "\\text{\\hphantom{~~~~}}" in source
+         and not any(found[2].isspace() for found in repeated_runs(lines_path))),
+        ("in a face HarfBuzz shapes, as a book's metadata file can ask for, two blanks are "
+         "drawn as lines in its underscore's measure, in one Span, with no space character "
+         "between them",
+         lambda: os.path.exists(faces_path) and harfbuzz_drawn()),
+        ("and in a face stretched wider, a blank's line is as far below the baseline and as "
+         "thick as the face's underscore, and as long as the underscores stretched",
+         lambda: os.path.exists(faces_path) and stretched()),
+        ("in a face loaded from TeX's own metrics, which has no measure of its underscore, "
+         "two blanks keep their underscores and the space between them, and the build says "
+         "how many it kept, and in which face",
+         lambda: os.path.exists(faces_path) and metrics_kept()),
+        ("in an untagged PDF, with no ActualText to give a blank's text, the blanks keep "
+         "their underscores, nothing is drawn, and nothing is said of them",
+         lambda: os.path.exists(untagged_path)
+         and [r[5] for r in underscore_runs(untagged_path)] == [8, 8, 8]
+         and not pdftext.rule_boxes(untagged_path)
+         and "fill-in blank" not in untagged_said),
+    ] + ([("veraPDF finds nothing in the PDF of blanks drawn as lines",
+           lambda: built and not pdfcheck.run_verapdf(
+               outputcheck.find_validator("verapdf"), lines_path))]
+         if shutil.which("verapdf") or os.environ.get("VERAPDF") else [])
 
 
 # Tables ruled row by row (class row-rules), as the CNX unpacker classes
@@ -4406,10 +4762,11 @@ def run(arguments, cwd, environment=None):
 
 
 def build(work):
-    """The book converted by convert.py, then its LaTeX written again on
-    its own so the division commands can be counted."""
+    """The book converted by convert.py, its blanks drawn as underscores
+    (glyph_blanks), then its LaTeX written again on its own so the
+    division commands can be counted."""
     write_book(work)
-    converted = run(["python3", os.path.join(BIN, "convert.py")], work)
+    converted = run(["python3", os.path.join(BIN, "convert.py")], work, glyph_blanks())
     pdf = os.path.join(work, "pdf", "org.example.pdf.pdf")
     if not os.path.exists(pdf):
         raise RuntimeError("no PDF was written:\n" + converted.stderr[-3000:])
@@ -5432,7 +5789,9 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
     """The fit book's checks (build_fit): what latexbuild's FIT_MACROS did
     with each table and formula too wide for its line. The default page's
     text runs from 72 to 540 points across a paper 612 wide, its type 12
-    points, 11.96 of the PDF's; a quarter inch is 18 points."""
+    points, 11.96 of the PDF's; a quarter inch is 18 points. Its fill-in
+    blanks are drawn as underscores (glyph_blanks), which the checks
+    count."""
     reader = pypdf.PdfReader(fit_path) if os.path.exists(fit_path) else None
     lines = glyph_lines(fit_path) if reader else {}
 
@@ -6446,8 +6805,8 @@ def fancy_checks(fancy_path, fancy_said):
 
 # The folders the books are built in, each the main book's (work) with its
 # suffix: the PDF/UA-1, untagged, notes, footer, headings, sized, fancy, default,
-# preamble, AAA, fit, two-column, evaluation bar's, languages, rules,
-# code, code margins, code tall, math font, and measured books are built
+# preamble, AAA, fit, two-column, evaluation bar's, drawn blanks', languages,
+# rules, code, code margins, code tall, math font, and measured books are built
 # beside it (build_ua1 to build_measured), and the default book's copy,
 # built again where TeX lacks a file of IBM Plex's (build_default). The
 # cleanup removes them and --keep names them, from this one list, and a
@@ -6456,9 +6815,9 @@ def fancy_checks(fancy_path, fancy_said):
 # message each had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
-                "-aaa-lacking", "-fit", "-columns", "-bars", "-languages", "-rules", "-code",
-                "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured", "-ams",
-                "-doctoc")
+                "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
+                "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured",
+                "-ams", "-doctoc")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -6597,6 +6956,7 @@ def checks(work, jobs=1):
             fitted = pool.submit(build_fit, work + "-fit")
             columned = pool.submit(build_fit_columns, work + "-columns")
             barred = pool.submit(build_blank_lines, work + "-bars")
+            drawn = pool.submit(build_drawn_blanks, work + "-drawn")
             spoken = pool.submit(build_languages, work + "-languages")
             ruled = pool.submit(build_rules, work + "-rules")
             coded = pool.submit(build_code, work + "-code")
@@ -6619,6 +6979,7 @@ def checks(work, jobs=1):
             fit_path, fit_said, fit_source, fit_third = fitted.result()
             columns_path, columns_said, columns_wrapped_path = columned.result()
             bars_path, bars_source = barred.result()
+            drawn_path, drawn_glyphs_path, drawn_source, drawn_more = drawn.result()
             languages_path = spoken.result()
             rules_path = ruled.result()
             (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
@@ -6644,6 +7005,8 @@ def checks(work, jobs=1):
         fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
         columns_path, columns_said, columns_wrapped_path = build_fit_columns(work + "-columns")
         bars_path, bars_source = build_blank_lines(work + "-bars")
+        drawn_path, drawn_glyphs_path, drawn_source, drawn_more = build_drawn_blanks(
+            work + "-drawn")
         languages_path = build_languages(work + "-languages")
         rules_path = build_rules(work + "-rules")
         (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
@@ -6940,10 +7303,11 @@ def checks(work, jobs=1):
         # is drawn shorter, its underscores overlapping, to end where the
         # line of 345 points does, its spaces their natural width (3.32
         # points, where TeX had shrunk them to 2.21), and the build doesn't
-        # name the line, which LaTeX had reported as too wide; every
-        # underscore is drawn still, each blank a Span whose ActualText,
-        # "blank", is what a screen reader says. A blank that fits is left
-        # as it is.
+        # name the line, which LaTeX had reported as too wide; each blank a
+        # Span whose ActualText, "blank", is what a screen reader says. A
+        # blank that fits is left as it is. The book's blanks are drawn as
+        # underscores (glyph_blanks), which these checks count; a build
+        # draws a line where their ink is (drawn_blanks_checks).
         ("a fill-in blank that runs past its line ends where the line does, its spaces "
          "their natural width, and the build doesn't name the line",
          lambda: (lambda found: found is not None and abs(found[0] - 345) < 1
@@ -7479,6 +7843,7 @@ def checks(work, jobs=1):
          lambda: os.path.exists(bars_path)
          and [abs(up - down) < 3 for up, down in bar_limits(bars_path)] == [True, True]),
     ]
+    items += drawn_blanks_checks(drawn_path, drawn_glyphs_path, drawn_source, drawn_more)
     items += language_checks(languages_path)
     items += rules_checks(rules_path)
     items += code_checks(code_path, latin_code_path, code_said, margins_path, margins_said,

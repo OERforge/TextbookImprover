@@ -4491,6 +4491,7 @@ def deck_pdfs(target, stems, names, base, language):
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
+    kept = {}
     unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
     untied, step_links, unsettled = {}, {}, []
     for stem, result in results:
@@ -4523,6 +4524,8 @@ def deck_pdfs(target, stems, names, base, language):
         for character, n in latexbuild.missing_characters(
                 result["log"].splitlines())[0].items():
             missing[character] = missing.get(character, 0) + n
+        for face, n in latexbuild.kept_blanks(result["log"]).items():
+            kept[face] = kept.get(face, 0) + n
         for option in (result["talkify"] or {}).get("dropped", []):
             if option not in dropped:
                 dropped.append(option)
@@ -4549,6 +4552,10 @@ def deck_pdfs(target, stems, names, base, language):
         say(latexbuild.missing_warning(
             missing, "A font that has them, loaded in a deck's header-includes, would "
             "draw them."))
+    if kept:
+        say(latexbuild.kept_blanks_warning(
+            kept, "An OpenType or TrueType face, loaded in a deck's header-includes, has "
+            "the measure."))
     if dropped:
         say("NOTE: frame options ltx-talk has no key for were left out of the PDFs: "
             + ", ".join(dropped) + ".")

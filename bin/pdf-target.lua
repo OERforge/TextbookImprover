@@ -110,11 +110,12 @@
 --    size, wider than its line or not: scaled to fit, as one with
 --    neither is (below).
 --
--- 18. A fill-in blank, a run of four or more underscores, which TeX can't
+-- 18. A fill-in blank, a run of underscores, which TeX can't
 --    break, so a line ending in one ran into the margin: marked, for
 --    latexbuild's PDF_MACROS to draw shorter where it runs past its line,
---    and to tag as a Span whose ActualText is "blank", which a screen
---    reader says in place of the underscores (below).
+--    to draw as a line, and to tag as a Span whose ActualText is "blank",
+--    which a screen reader says in its place, blanks with only spaces
+--    between them, a bold or italic one among them too, one Span (below).
 --
 -- 19. A table, or a formula that TeX can't break, too wide for its line,
 --    which ran into the margin or past the paper's edge: numbered, for
@@ -126,6 +127,11 @@
 --    out of the cell, empty to a screen reader: given the equal widths
 --    the writer set its columns at, so each line is a paragraph of the
 --    cell (below).
+--
+-- 21. A run of no-break spaces in text in a formula, which put a space
+--    character in the PDF's text for each, side by side: one of them
+--    kept, the rest a phantom, and in a formula of nothing but such
+--    spaces, none kept (Math, below).
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -589,11 +595,11 @@ end
 -- as its TeX shows, and two more for each operator or relation, which
 -- TeX sets with space around it; a picture, which the writer scales to
 -- its column, a line, and no word. A formula's words are the pieces TeX
--- can't break it into (formula_pieces). A fill-in blank, a run of four or
--- more underscores, is three in a word, as PDF_MACROS draws one too long
--- for its line shorter, to three at the least: counted whole, a long
--- blank's column took the line from the next column's longest word, and
--- the table was set smaller for it.
+-- can't break it into (formula_pieces). A fill-in blank (blank_groups,
+-- below) is three underscores at most in a word, as PDF_MACROS draws one
+-- too long for its line shorter, to three at the least: counted whole, a
+-- long blank's column took the line from the next column's longest word,
+-- and the table was set smaller for it.
 local SPACED = { times = true, cdot = true, div = true, pm = true, mp = true,
                  le = true, leq = true, ge = true, geq = true, ne = true,
                  neq = true, approx = true, equiv = true, to = true,
@@ -684,7 +690,8 @@ end
 -- capitals), a script's (after ^ or _) seven tenths of that, as TeX sets
 -- it in smaller type, a command that sets type or space rather than
 -- drawing (\mathbf, \text, \left) none, and two for the space around
--- each operator or relation.
+-- each operator or relation; \hphantom, which one_space (below) writes
+-- for spaces' room, none, what's in its braces counted as it is.
 local DRAWS_NOTHING = {
   mathbf = true, mathrm = true, mathit = true, mathsf = true, mathtt = true,
   mathcal = true, mathbb = true, mathfrak = true, mathscr = true, mathnormal = true,
@@ -695,6 +702,7 @@ local DRAWS_NOTHING = {
   Bigl = true, Bigr = true, biggl = true, biggr = true, limits = true, nolimits = true,
   mathop = true, mathrel = true, mathbin = true, mathord = true, label = true,
   tag = true, nonumber = true, notag = true, begin = true, ['end'] = true,
+  hphantom = true,
 }
 
 local function formula_length(tex)
@@ -1038,8 +1046,8 @@ local function formula_measure(tex)
   return formula_width(tex) * MATH_WIDTH
 end
 
--- A fill-in blank, a run of four or more underscores the blank pass
--- marks (blanks, below), counts as three in a cell's longest word, the
+-- A fill-in blank, a run of underscores the blank pass
+-- marks (blank_groups, below), counts as three at most in a cell's longest word, the
 -- shortest LaTeX draws it to fit its column, and whole in the cell's
 -- length, as it's drawn where there's room. Underscores the pass leaves
 -- alone, in code, a link, an underline, a strikeout, or a mark, LaTeX
@@ -1339,11 +1347,11 @@ end
 -- as many as its TeX shows, and two more for each operator or relation,
 -- which TeX sets with space around it; a picture, which the writer scales
 -- to its column, a line, and no word. A formula's words are the pieces
--- TeX can't break it into (formula_pieces). A fill-in blank, a run of four
--- or more underscores, is three in a word, as PDF_MACROS draws one too long
--- for its line shorter, to three at the least: counted whole, a long
--- blank's column took the line from the next column's longest word, and
--- the table was set smaller for it.
+-- TeX can't break it into (formula_pieces). A fill-in blank (blank_groups,
+-- below) is three underscores at most in a word, as PDF_MACROS draws one
+-- too long for its line shorter, to three at the least: counted whole, a
+-- long blank's column took the line from the next column's longest word,
+-- and the table was set smaller for it.
 --
 -- Block by block, a list's items each by itself, as LaTeX sets them, at
 -- the room its depth leaves (list_room) and its line's indentation added
@@ -2642,8 +2650,50 @@ local function unpadded(tex)
   return table.concat(out)
 end
 
+-- A run of no-break spaces in text in a formula, as texmath writes an
+-- mtext's (\text{~~~or~~~}), keeps its width but puts one space in the
+-- page's text, as a run of spaces between words in a paragraph does. Each
+-- is a space between words to tagpdf, which puts a space character in the
+-- page's text for each: Introductory Business Statistics 2e's table of
+-- symbols shows the square root's sign alone, over two rows of such text
+-- that make room under it (\text{~~~~~~}), and veraPDF's WCAG 2.2 machine
+-- check 1.3.1-2 reports the six spaces side by side as spaces used to lay
+-- out the page. The run's first space is kept and the rest are an
+-- \hphantom, which takes their room and puts nothing in the page. A
+-- formula of nothing but such text, which can stand between two words
+-- for a space to fill in, keeps none, a space either side of it in the
+-- paragraph already: one kept made three side by side. The commands are
+-- those texmath writes for an mtext, \text, and \textbf, \textit, and
+-- \texttt for bold, italic, and monospace text, and \mbox, \textrm,
+-- \textup, \textnormal, \textmd, \textsf, and \textsl, each looked for
+-- by name, so that it's found inside another's braces, as there inside
+-- \sqrt's. A formula in raw LaTeX in a Markdown page isn't a formula to
+-- Pandoc, and is left as it is.
+local SPACE_TEXT = { 'text', 'mbox', 'textrm', 'textup', 'textnormal', 'textmd',
+                     'textbf', 'textit', 'textsl', 'textsf', 'texttt' }
+local function spaces_only(tex)
+  local rest = tex
+  for _, name in ipairs(SPACE_TEXT) do
+    rest = rest:gsub('\\' .. name .. '%f[^%a]%s*(%b{})', function(group)
+      if group:sub(2, -2):match('^[~%s]*$') then return '' end
+    end)
+  end
+  return rest:match('^%s*$') ~= nil and tex:find('~', 1, true) ~= nil
+end
+local function one_space(tex)
+  local none = spaces_only(tex)
+  for _, name in ipairs(SPACE_TEXT) do
+    tex = tex:gsub('(\\' .. name .. '%f[^%a]%s*)(%b{})', function(command, group)
+      if none then return command .. '{\\hphantom' .. group .. '}' end
+      local inner = (' ' .. group:sub(2, -2)):gsub('([^\\])~(~+)', '%1~\\hphantom{%2}')
+      return command .. '{' .. inner:sub(2) .. '}'
+    end)
+  end
+  return tex
+end
+
 local function Math(math)
-  local text = unpadded(math.text:gsub('\\pmb%f[^%a]', '\\symbfit')
+  local text = unpadded(one_space(math.text):gsub('\\pmb%f[^%a]', '\\symbfit')
     :gsub('\n%s*\n(%s*\\end%s*{)', '\n{}\n%1'):gsub('\n%s*\n', '\n'))
   if math.mathtype == 'DisplayMath' and text:match('^%s*\\begin%s*{eqnarray%*}') then
     return pandoc.RawInline('latex', text)
@@ -2943,34 +2993,190 @@ local function box_rules(div)
   }
 end
 
--- A fill-in blank, a run of four or more underscores in the text (Sociology's
--- quiz asks "Core nations are also known as __________________"): the
+-- A fill-in blank, a run of underscores in the text (Sociology's quiz
+-- asks "Core nations are also known as __________________"): the
 -- writer's \_ each, in \OERBlank, which marks them, so that PDF_MACROS
 -- can draw a blank that runs past the end of its line shorter, to end
--- where the line does, and tags each a Span whose ActualText is "blank".
--- A run of three or fewer is never drawn shorter, so it isn't marked.
--- Last, so the text the other passes read (a link's
--- /Contents) has the underscores. Not in a link's text, an image's
--- description, a heading, or the metadata, whose plain text the writer
--- takes as well (a bare address's \url, alt=, a bookmark's
--- \texorpdfstring, pdftitle), and where the mark, raw LaTeX, would leave
--- the underscores out. Nor in what lua-ul draws a line under or through
--- or a highlight behind (\ul, \st, \hl), which it draws as the line is
--- made, before the blank could be drawn shorter: the line would still
--- run past the margin.
-local function blanks(str)
-  if not str.text:find('____', 1, true) then return nil end
-  local out, rest = pandoc.Inlines{}, str.text
-  while true do
-    local first, last = rest:find('____+')
-    if not first then break end
-    if first > 1 then out:insert(pandoc.Str(rest:sub(1, first - 1))) end
-    out:insert(pandoc.RawInline('latex',
-      '\\OERBlank{' .. ('\\_'):rep(last - first + 1) .. '}'))
-    rest = rest:sub(last + 1)
+-- where the line does, and as a line, and tags each a Span whose
+-- ActualText is "blank". A run of three or fewer is never drawn shorter,
+-- three being the least a blank is drawn at, but it's a blank all the
+-- same: Introductory Business Statistics 2e's contingency tables have
+-- cells of three underscores and of two, side by side, which ran together
+-- in the text as six, which veraPDF's WCAG 2.2 machine check 1.3.1-1
+-- reports as text used to draw. A run of two is a blank only where it
+-- stands apart, as those cells' and "( __ , __ )" have it, and not where
+-- it's joined to a letter or a digit, as Python's __init__ has two, or to
+-- any character outside ASCII, whose letters Lua's patterns can't tell
+-- from its punctuation ("café__" is left as it is, and so is "“__”"), or
+-- to emphasis, a formula, or anything else that isn't text. Last, so the
+-- text the other passes read (a link's /Contents) has the underscores.
+-- Not in a link's text, an image's description, a heading, or the
+-- metadata, whose plain text the writer takes as well (a bare address's
+-- \url, alt=, a bookmark's \texorpdfstring, pdftitle), and where the mark,
+-- raw LaTeX, would leave the underscores out. Nor in what lua-ul draws a
+-- line under or through or a highlight behind (\ul, \st, \hl), which it
+-- draws as the line is made, before the blank could be drawn shorter: the
+-- line would still run past the margin.
+--
+-- Blanks with nothing but spaces between them, as Microbiology asks "The
+-- ________ ________ prevents access of microbes in the blood" for an
+-- answer of two words, are one Span (\OERBlanks{2}{...}), whose
+-- ActualText is "blank" for each, and so are blanks set in bold or
+-- italics alone among them (**________**). The spaces are any of the
+-- writer's: a space or a line's end in the source, and a no-break space
+-- or any other of Unicode's spaces in the text, each as the writer writes
+-- it (~ a no-break space, \, a narrow one), or as itself in a phantom, its
+-- room and no character (a thin space, an em space); PDF_MACROS gives a
+-- space between two blanks it draws no space character in the page's
+-- text. Drawn as lines, the blanks have no characters, and the spaces
+-- before, between, and after two of them were three side by side in the
+-- text, which veraPDF's WCAG 2.2 machine check 1.3.1-2 reports as spaces
+-- used to lay out the page.
+local function underscores(n)
+  return ('\\_'):rep(n)
+end
+
+-- Unicode's spaces (Zs), and each as LaTeX between blanks.
+local function separator(code)
+  return code == 0xA0 or code == 0x1680 or (code >= 0x2000 and code <= 0x200A)
+    or code == 0x202F or code == 0x205F or code == 0x3000
+end
+
+local function separator_latex(text)
+  local out = {}
+  for _, code in utf8.codes(text) do
+    if code == 0xA0 then
+      out[#out + 1] = '~'
+    elseif code == 0x202F then
+      out[#out + 1] = '\\,'
+    else
+      out[#out + 1] = '\\hphantom{' .. utf8.char(code) .. '}'
+    end
   end
-  if rest ~= '' then out:insert(pandoc.Str(rest)) end
-  return out
+  return table.concat(out)
+end
+
+-- A Str's text in parts: runs of underscores, of spaces, and of the rest.
+local function parts_of(text)
+  local parts, kind, start = {}, nil, 1
+  for at, code in utf8.codes(text) do
+    local this = (code == 95 and 'under') or (separator(code) and 'space') or 'text'
+    if this ~= kind then
+      if kind then parts[#parts + 1] = { kind = kind, text = text:sub(start, at - 1) } end
+      kind, start = this, at
+    end
+  end
+  if kind then parts[#parts + 1] = { kind = kind, text = text:sub(start) } end
+  return parts
+end
+
+-- The LaTeX for emphasis or bold with nothing in it but a run of three or
+-- more underscores (in another, perhaps), as the writer writes them; nil
+-- for anything else.
+local WRAPS = { Emph = '\\emph{', Strong = '\\textbf{' }
+local function wrapped(inline)
+  local open = WRAPS[inline.t]
+  if not open or #inline.content ~= 1 then return nil end
+  local inner = inline.content[1]
+  local latex = (inner.t == 'Str' and inner.text:match('^___+$') and underscores(#inner.text))
+    or wrapped(inner)
+  return latex and open .. latex .. '}' or nil
+end
+
+-- Whether a part beside a run of two joins it to a word (above): its
+-- character beside the run a letter, a digit, or outside ASCII, or it not
+-- text at all.
+local function joins(token, its_end)
+  if not token then return false end
+  if token.kind == 'text' then
+    local c = its_end and token.text:sub(-1) or token.text:sub(1, 1)
+    return c:match('[%w\128-\255]') ~= nil
+  end
+  return token.kind == 'other' or token.kind == 'wrapped'
+end
+
+local function blank_groups(inlines)
+  local any = false
+  for _, inline in ipairs(inlines) do
+    if (inline.t == 'Str' and inline.text:find('__', 1, true)) or wrapped(inline) then
+      any = true
+      break
+    end
+  end
+  if not any then return nil end
+  local tokens = {}
+  for _, inline in ipairs(inlines) do
+    if inline.t == 'Str' then
+      for _, part in ipairs(parts_of(inline.text)) do tokens[#tokens + 1] = part end
+    elseif inline.t == 'Space' or inline.t == 'SoftBreak' then
+      tokens[#tokens + 1] = { kind = 'space', inline = inline }
+    else
+      local latex = wrapped(inline)
+      tokens[#tokens + 1] = { kind = latex and 'wrapped' or 'other', latex = latex, inline = inline }
+    end
+  end
+  for k, token in ipairs(tokens) do
+    if token.kind == 'under' then
+      local n = #token.text
+      local apart = not (joins(tokens[k - 1], true) or joins(tokens[k + 1], false))
+      token.kind = (n > 2 or (n == 2 and apart)) and 'blank' or 'text'
+    end
+  end
+  local function member(token)
+    return token and (token.kind == 'blank' or token.kind == 'wrapped')
+  end
+  local out, pending, changed, k = pandoc.Inlines{}, {}, false, 1
+  local function flush()
+    if #pending > 0 then
+      out:insert(pandoc.Str(table.concat(pending)))
+      pending = {}
+    end
+  end
+  while k <= #tokens do
+    local token, last, count = tokens[k], k, 0
+    if member(token) then
+      count = 1
+      while true do
+        local m = last + 1
+        while tokens[m] and tokens[m].kind == 'space' do m = m + 1 end
+        if m == last + 1 or not member(tokens[m]) then break end
+        count, last = count + 1, m
+      end
+    end
+    if count > 1 then
+      flush()
+      local latex = {}
+      for m = k, last do
+        local part = tokens[m]
+        if part.kind == 'blank' then
+          latex[#latex + 1] = underscores(#part.text)
+        elseif part.kind == 'wrapped' then
+          latex[#latex + 1] = part.latex
+        elseif part.inline then
+          latex[#latex + 1] = ' '
+        else
+          latex[#latex + 1] = separator_latex(part.text)
+        end
+      end
+      out:insert(pandoc.RawInline('latex',
+        '\\OERBlanks{' .. count .. '}{' .. table.concat(latex) .. '}'))
+      changed, k = true, last + 1
+    else
+      if token.kind == 'blank' then
+        flush()
+        out:insert(pandoc.RawInline('latex', '\\OERBlank{' .. underscores(#token.text) .. '}'))
+        changed = true
+      elseif token.inline then
+        flush()
+        out:insert(token.inline)
+      else
+        pending[#pending + 1] = token.text
+      end
+      k = k + 1
+    end
+  end
+  flush()
+  if changed then return out end
 end
 
 -- A formula FIT_MACROS fits (19): a display formula the writer wraps in
@@ -3120,7 +3326,7 @@ return {
         traverse = 'topdown', Image = skip, Header = skip, Link = skip,
         Underline = skip, Strikeout = skip,
         Span = function(span) if span.classes:includes('mark') then return span, false end end,
-        Str = blanks }
+        Inlines = blank_groups }
       return doc
     end },
   { Code = mark_code },

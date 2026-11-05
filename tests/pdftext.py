@@ -159,6 +159,8 @@ class _Font:
     def __init__(self, font):
         ranges, self.chars = [], {}
         self.widths, self.default = {}, 0.0
+        base = str(font.get("/BaseFont", "")) if font is not None else ""
+        self.name = base.lstrip("/").split("+")[-1]
         if font is not None and font.get("/Subtype") == "/Type0":
             descendants = font.get("/DescendantFonts")
             descendant = descendants[0] if isinstance(descendants, pikepdf.Array) \
@@ -292,12 +294,15 @@ def _times(m, n):
             m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]]
 
 
-def glyph_boxes(path):
+def glyph_boxes(path, artifacts=True, faces=False):
     """[(page index, baseline, left, right, character)] for each glyph a
     page's own content shows, in the order shown, in points: where it
     starts and ends along its line, from the text and current matrices,
     the font's widths, and the spacing operators. For text set upright,
-    as LaTeX sets it; a form XObject's text isn't read."""
+    as LaTeX sets it; a form XObject's text isn't read. With artifacts
+    false, a glyph in an artifact's marked content is left out, as a
+    reading of the structure's text leaves it; with faces true, each ends
+    with its font's name, as /BaseFont has it without a subset's tag."""
     boxes, fonts = [], {}
 
     def font_of(font):
@@ -312,10 +317,14 @@ def glyph_boxes(path):
             group = resources.get("/Font") if isinstance(resources, pikepdf.Dictionary) else None
             state = {"ctm": [1, 0, 0, 1, 0, 0], "font": None, "size": 0.0, "Tc": 0.0,
                      "Tw": 0.0, "Th": 1.0, "TL": 0.0}
-            saved, tm, line = [], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0]
+            saved, tm, line, marked = [], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], []
             for instruction in pikepdf.parse_content_stream(page.obj):
                 operands, operator = instruction.operands, str(instruction.operator)
-                if operator == "q":
+                if operator in ("BMC", "BDC") and operands:
+                    marked.append(str(operands[0]))
+                elif operator == "EMC" and marked:
+                    marked.pop()
+                elif operator == "q":
                     saved.append(dict(state))
                 elif operator == "Q" and saved:
                     state = saved.pop()
@@ -355,9 +364,11 @@ def glyph_boxes(path):
                         for code, length in font.codes(bytes(item)):
                             width = font.widths.get(code, font.default) / 1000
                             at = _times(tm, state["ctm"])
-                            boxes.append((n, round(at[5], 3), at[4],
-                                          at[4] + width * size * scale * at[0],
-                                          font.chars.get(code, "?")))
+                            if artifacts or "/Artifact" not in marked:
+                                boxes.append((n, round(at[5], 3), at[4],
+                                              at[4] + width * size * scale * at[0],
+                                              font.chars.get(code, "?"))
+                                             + ((font.name,) if faces else ()))
                             space = state["Tw"] if length == 1 and code == 32 else 0
                             tm = _times([1, 0, 0, 1, (width * size + state["Tc"] + space) * scale, 0],
                                         tm)
@@ -562,6 +573,114 @@ def level_rules(path):
                     points, box = [], None
                 elif op in ("n", "B", "B*", "b", "b*"):
                     points, box = [], None
+    return found
+
+
+def rule_boxes(path):
+    """[(page index, bottom, top, left, right, MCID, artifact)] for each
+    level rule a page's own content draws, in points from the page's foot
+    and left edge: a line stroked from one point to another at the same
+    height, as LuaTeX draws a rule thinner than a big point, as thick as
+    the line's width, or a filled rectangle wider than it's tall; the MCID
+    of the marked content it's drawn in (None outside any, or in one with
+    none), and whether that's an artifact's."""
+    found = []
+
+    def at(ctm, x, y):
+        return (ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5])
+
+    def mcid_of(resources, operands):
+        properties = operands[1] if len(operands) > 1 else None
+        if isinstance(properties, pikepdf.Name):
+            group = resources.get("/Properties") \
+                if isinstance(resources, pikepdf.Dictionary) else None
+            properties = group.get(properties) if isinstance(group, pikepdf.Dictionary) else None
+        mcid = properties.get("/MCID") if isinstance(properties, pikepdf.Dictionary) else None
+        return int(mcid) if mcid is not None else None
+
+    def rule(n, x0, x1, bottom, top, marked):
+        mcid = next((m for _, m in reversed(marked) if m is not None), None)
+        found.append((n, round(bottom, 3), round(top, 3), round(min(x0, x1), 3),
+                      round(max(x0, x1), 3), mcid, any(tag == "/Artifact" for tag, _ in marked)))
+
+    with pikepdf.open(path) as pdf:
+        for n, page in enumerate(pdf.pages):
+            resources = page.obj.get("/Resources")
+            ctm, width, saved, marked, points, box = [1, 0, 0, 1, 0, 0], 1.0, [], [], [], None
+            for operands, op in pikepdf.parse_content_stream(page):
+                op = str(op)
+                if op == "q":
+                    saved.append((list(ctm), width))
+                elif op == "Q" and saved:
+                    ctm, width = saved.pop()
+                elif op == "cm" and len(operands) == 6:
+                    ctm = _times([float(x) for x in operands], ctm)
+                elif op == "w" and operands:
+                    width = float(operands[0])
+                elif op == "BMC" and operands:
+                    marked.append((str(operands[0]), None))
+                elif op == "BDC" and operands:
+                    marked.append((str(operands[0]), mcid_of(resources, operands)))
+                elif op == "EMC" and marked:
+                    marked.pop()
+                elif op == "m" and len(operands) == 2:
+                    points, box = [at(ctm, *(float(v) for v in operands))], None
+                elif op == "l" and points and len(operands) == 2:
+                    points.append(at(ctm, *(float(v) for v in operands)))
+                elif op == "re" and len(operands) == 4:
+                    points, box = [], [float(v) for v in operands]
+                elif op in ("S", "s"):
+                    if len(points) == 2 and abs(points[0][1] - points[1][1]) < 0.01 \
+                            and abs(points[0][0] - points[1][0]) > 0.01:
+                        thick = width * abs(ctm[3])
+                        rule(n, points[0][0], points[1][0], points[0][1] - thick / 2,
+                             points[0][1] + thick / 2, marked)
+                    points, box = [], None
+                elif op in ("f", "F", "f*"):
+                    if box and abs(box[2]) > abs(box[3]):
+                        (x0, y0), (x1, y1) = at(ctm, box[0], box[1]), \
+                            at(ctm, box[0] + box[2], box[1] + box[3])
+                        rule(n, x0, x1, min(y0, y1), max(y0, y1), marked)
+                    points, box = [], None
+                elif op in ("n", "B", "B*", "b", "b*"):
+                    points, box = [], None
+    return found
+
+
+def span_marks(path, said):
+    """For each Span whose ActualText begins with said, in reading order:
+    its ActualText, its own text (own_text), and the (page index, MCID) of
+    each piece of its marked content, and of any element's inside it."""
+    texts = marked_text(path)
+    found = []
+    with pikepdf.open(path) as pdf:
+        pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+
+        def marks_of(element, marks):
+            kids = element.get("/K")
+            kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+            for kid in kids:
+                if isinstance(kid, pikepdf.Dictionary) and "/MCID" in kid:
+                    where = kid.get("/Pg") or element.get("/Pg")
+                    marks.append((pages[where.objgen], int(kid.MCID)))
+                elif isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    marks_of(kid, marks)
+                elif isinstance(kid, int) and element.get("/Pg") is not None:
+                    marks.append((pages[element.Pg.objgen], int(kid)))
+            return marks
+
+        def walk(element):
+            if isinstance(element, pikepdf.Array):
+                for kid in element:
+                    walk(kid)
+            elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
+                if element.S == "/Span" and str(element.get("/ActualText", "")).startswith(said):
+                    found.append((str(element.ActualText), own_text(element, texts, pages),
+                                  marks_of(element, [])))
+                if element.get("/K") is not None:
+                    walk(element.K)
+
+        walk(pdf.Root.StructTreeRoot.K)
     return found
 
 

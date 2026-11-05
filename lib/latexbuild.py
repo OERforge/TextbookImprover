@@ -3445,33 +3445,43 @@ PDF_MACROS = r"""\ExplSyntaxOn
       }
       { }
   }
-% A fill-in blank (\OERBlank, below): its underscores in a bookmark and in
-% a structure element's title.
+% A fill-in blank (\OERBlank, below), and blanks with only spaces between
+% them (\OERBlanks, their number and them): their underscores in a
+% bookmark and in a structure element's title.
 \text_declare_purify_equivalent:Nn \OERBlank { \use:n }
+\text_declare_purify_equivalent:Nn \OERBlanks { \use_ii:nn }
 \AddToHook { package / hyperref / after }
-  { \pdfstringdefDisableCommands { \cs_set:Npn \OERBlank #1 {#1} } }
-% And in the text, a Span whose ActualText is "blank", which a screen
-% reader should say in place of the underscores, and copying give, where
-% a screen reader was left to read them as its punctuation setting has
-% it; untagged, the underscores alone. The underscores are drawn, and
-% marked, as before.
-\NewDocumentCommand \OERBlankSpan { m }
+  {
+    \pdfstringdefDisableCommands
+      {
+        \cs_set:Npn \OERBlank #1 {#1}
+        \cs_set:Npn \OERBlanks #1#2 {#2}
+      }
+  }
+% And in the text, a Span whose ActualText is "blank", for each blank it
+% holds, which a screen reader should say in place of the blank, and
+% copying give, where a screen reader was left to read the underscores as
+% its punctuation setting has it; untagged, the underscores alone.
+\tl_new:N \l__oer_blank_tl
+\NewDocumentCommand \OERBlankSpan { O{1} m }
   {
     \cs_if_exist:NTF \tag_mc_end_push:
       {
+        \tl_set:Nx \l__oer_blank_tl
+          { blank \prg_replicate:nn { #1 - 1 } { \c_space_tl blank } }
         \mode_leave_vertical:
         \tag_mc_end_push:
-        \tag_struct_begin:n { tag = Span , actualtext = blank }
+        \tag_struct_begin:n { tag = Span , actualtext = \l__oer_blank_tl }
         \tag_mc_begin:n { }
-        #1
+        #2
         \tag_mc_end:
         \tag_struct_end:
         \tag_mc_begin_pop:n { }
       }
-      { #1 }
+      { #2 }
   }
 \ExplSyntaxOff
-""" + PICTURE_PATHS + r"""% A fill-in blank, a run of four or more underscores pdf-target.lua marks
+""" + PICTURE_PATHS + r"""% A fill-in blank, a run of underscores pdf-target.lua marks
 % (\OERBlank), that runs past the end of its line into the margin: TeX
 % can't break a run of underscores, and Sociology's chapter 19 quiz had a
 % question whose blank ran 24 points past its line. Once a paragraph's
@@ -3531,13 +3541,53 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % function runs first, LaTeX running them last registered first) measures
 % a blank as no more than three underscores, as this draws it, so a blank
 % too long for its column doesn't of itself set its table in smaller
-% type. The Lua is written without a percent sign, a hash, a tilde, or a
+% type.
+%
+% As each page is shipped out, before tagpdf marks its content (the
+% callback rule below; LaTeX would run it first anyway, as registered
+% first), each blank in a tagged PDF is drawn as a line, a rule where its
+% underscores' ink was: from the first's ink to the last's, at the height
+% and as thick as one's, in its Span's marked content, the kerns either
+% side keeping the line of text as wide as it was. The underscores are
+% taken out, so the page's text has no character for the blank, which its
+% Span's ActualText still gives: veraPDF's WCAG 2.2 machine check 1.3.1-1,
+% which reads the text's characters, not ActualText, found each blank of
+% five or more underscores (PDF4WCAG, on Introductory Business Statistics
+% 2e's exercises) as text used to draw. A run of underscores ends where
+% its face or its marked content does, so that a blank and a bold one
+% beside it are two lines, each its own face's. The ink is the face's own
+% measure of its underscore: what luaotfload keeps of it for a face it
+% shapes itself (descriptions, in the face's units), or HarfBuzz's for one
+% HarfBuzz shapes (Renderer=HarfBuzz), across scaled by the underscore's
+% width and up by its depth, as the face sets them. A face with neither,
+% as one loaded from TeX's own metrics has, keeps its underscores, and the
+% log names it and says how many blanks were kept in it, after the last
+% page (enddocument/afterlastpage, as LINE_LENGTH reports), which
+% build-pdf.py and a deck's build report: written from LuaTeX's stop_run
+% callback, it took the place of LuaTeX's own last lines, "Output written
+% on" and the PDF's pages among them, which a deck's build reads. An untagged PDF keeps them too, with no
+% ActualText to give the blank's text (no marked content: tagpdf's
+% attribute for it unset), and so do a LuaTeX too old for
+% pre_shipout_filter and a build with OER_BLANK_GLYPHS set, which the
+% suites set for the checks that count underscores. Where blanks have
+% nothing but spaces between them (\OERBlanks, a Span for all of them), a
+% space between two that are drawn is given no space character in the
+% text (tagpdf's attribute for that, which it reads as it puts the
+% characters in), since with the blanks' characters gone, the spaces
+% before, between, and after two of them were three side by side, which
+% veraPDF's check 1.3.1-2 reports as spaces used to lay out the page; a
+% no-break space's penalty, a kern, and a phantom's empty box are let pass
+% between them, as pdf-target.lua writes them.
+%
+% The Lua is written without a percent sign, a hash, a tilde, or a
 % backslash, which TeX would read as its own, and without a comment,
 % which would run on to the end, TeX joining the lines.
 \ifdefined\directlua
   \newattribute\OERBlankAttribute
   \NewDocumentCommand\OERBlank{m}
     {\leavevmode\OERBlankSpan{\setattribute\OERBlankAttribute{1}#1\unsetattribute\OERBlankAttribute}}
+  \NewDocumentCommand\OERBlanks{mm}
+    {\leavevmode\OERBlankSpan[#1]{\setattribute\OERBlankAttribute{1}#2\unsetattribute\OERBlankAttribute}}
   \directlua{
     local attribute = luatexbase.attributes.OERBlankAttribute
     local GLYPH, GLUE, KERN, HLIST, PENALTY = node.id("glyph"), node.id("glue"), node.id("kern"), node.id("hlist"), node.id("penalty")
@@ -3774,9 +3824,123 @@ PDF_MACROS = r"""\ExplSyntaxOn
       end
       return true
     end, "oer.blanks")
+    local VLIST, RULE = node.id("vlist"), node.id("rule")
+    local inks = {}
+    oerblanks = { kept = {} }
+    local function measured(char, box, advance)
+      if not (char and box and type(advance) == "number" and advance > 0 and box[4] > box[2]) then
+        return false
+      end
+      local across = char.width / advance
+      local up = across
+      if box[2] < 0 and (char.depth or 0) > 0 then
+        up = char.depth / (0 - box[2])
+      elseif box[4] > 0 and (char.height or 0) > 0 then
+        up = char.height / box[4]
+      end
+      return { left = math.floor(box[1] * across + 0.5),
+        right = math.floor((advance - box[3]) * across + 0.5),
+        bottom = math.floor(box[2] * up + 0.5), top = math.floor(box[4] * up + 0.5) }
+    end
+    local function ink_of(fid)
+      if inks[fid] == nil then
+        local data = font.getfont(fid)
+        local char = data and data.characters and data.characters[95]
+        local shape = data and data.descriptions and data.descriptions[95]
+        inks[fid] = false
+        if shape then
+          inks[fid] = measured(char, shape.boundingbox, shape.width)
+        else
+          local loaded = fonts and fonts.hashes and fonts.hashes.identifiers and fonts.hashes.identifiers[fid]
+          local shaper = loaded and loaded.hb and loaded.hb.shared and loaded.hb.shared.font
+          if char and char.index and shaper then
+            local got, extents = pcall(shaper.get_glyph_extents, shaper, char.index)
+            local gave, advance = pcall(shaper.get_glyph_h_advance, shaper, char.index)
+            if got and gave and type(extents) == "table" then
+              inks[fid] = measured(char, { extents.x_bearing, extents.y_bearing + extents.height,
+                extents.x_bearing + extents.width, extents.y_bearing }, advance)
+            end
+          end
+        end
+      end
+      return inks[fid]
+    end
+    local function underscore(n)
+      return n.id == GLYPH and n.char == 95 and node.has_attribute(n, attribute, 1)
+    end
+    local function ruled(head, mc, off)
+      local n, drawn, between = head, false, nil
+      while n do
+        local stop = n.next
+        if (n.id == HLIST or n.id == VLIST) and n.head then
+          n.head = ruled(n.head, mc, off)
+          drawn, between = false, nil
+        elseif n.id == GLUE and drawn and node.has_attribute(n, attribute, 1) then
+          between = between or {}
+          table.insert(between, n)
+        elseif underscore(n) then
+          local last, mark = n, node.has_attribute(n, mc)
+          while stop and (stop.id == KERN or (underscore(stop) and stop.font == n.font
+              and node.has_attribute(stop, mc) == mark)) do
+            if stop.id == GLYPH then last = stop end
+            stop = stop.next
+          end
+          local ink = mark and ink_of(n.font)
+          if ink then
+            local before, line, after = node.new(KERN), node.new(RULE), node.new(KERN)
+            before.kern, after.kern = ink.left, ink.right
+            line.width = node.dimensions(n, last.next) - ink.left - ink.right
+            line.height, line.depth = ink.top, 0 - ink.bottom
+            before.attr, line.attr, after.attr = n.attr, n.attr, n.attr
+            local gone, beyond = n, last.next
+            head = node.insert_before(head, n, before)
+            head = node.insert_after(head, before, line)
+            head = node.insert_after(head, line, after)
+            while gone and not (gone == beyond) do
+              local next_one = gone.next
+              head = node.remove(head, gone)
+              node.free(gone)
+              gone = next_one
+            end
+            if off and between then
+              for _, glue in ipairs(between) do node.set_attribute(glue, off, 1) end
+            end
+            drawn, between = true, nil
+          else
+            if mark then oerblanks.kept[n.font] = (oerblanks.kept[n.font] or 0) + 1 end
+            drawn, between = false, nil
+          end
+        elseif not (n.id == PENALTY or n.id == KERN
+            or (n.id == HLIST and node.has_attribute(n, attribute, 1))) then
+          drawn, between = false, nil
+        end
+        n = stop
+      end
+      return head
+    end
+    if luatexbase.callbacktypes.pre_shipout_filter and not os.getenv("OER_BLANK_GLYPHS") then
+      luatexbase.add_to_callback("pre_shipout_filter", function(box)
+        local mc = luatexbase.attributes.g__tag_mc_cnt_attr
+        if box.head and mc then
+          box.head = ruled(box.head, mc, luatexbase.attributes.g__tag_interwordspaceOff_attr)
+        end
+        return true
+      end, "oer.blanks.rules")
+      if luatexbase.declare_callback_rule then
+        luatexbase.declare_callback_rule("pre_shipout_filter", "oer.blanks.rules", "before", "tagpdf")
+      end
+    end
   }
+  \AddToHook{enddocument/afterlastpage}{\directlua{
+    for fid, count in pairs(oerblanks.kept) do
+      local data = font.getfont(fid)
+      texio.write_nl("term and log", "TextbookImprover blanks kept: " .. tostring(count) .. ", in the face")
+      texio.write_nl("term and log", tostring(data and (data.psname or data.name) or fid))
+      texio.write_nl("term and log", "")
+    end}}
 \else
   \NewDocumentCommand\OERBlank{m}{\OERBlankSpan{#1}}
+  \NewDocumentCommand\OERBlanks{mm}{\OERBlankSpan[#1]{#2}}
 \fi
 """ + LINE_BREAK_SPACE + FIT_MACROS
 
@@ -3981,6 +4145,33 @@ def overfull_warning(found, where="PDF"):
             + f", {widest[0]:,.0f} points too wide"
             + (f"; on {len(pages)} page(s), widest first: " + page_list(pages) if pages else "")
             + ".")
+
+
+# What PDF_MACROS says it kept of the fill-in blanks it draws as lines,
+# at the end of a run: how many, in a face whose underscore it couldn't
+# measure, named on the line after (its PostScript name, which fits a
+# line of TeX's log).
+KEPT_BLANKS = re.compile(r"^TextbookImprover blanks kept: (\d+), in the face\n(\S.*)$", re.M)
+
+
+def kept_blanks(output):
+    """{face: how many} of the fill-in blanks PDF_MACROS kept as
+    underscores, in LaTeX's output."""
+    kept = {}
+    for count, face in KEPT_BLANKS.findall(output):
+        kept[face.strip()] = kept.get(face.strip(), 0) + int(count)
+    return kept
+
+
+def kept_blanks_warning(kept, advice):
+    """One line for what kept_blanks found, or None."""
+    if not kept:
+        return None
+    return (f"WARNING: {sum(kept.values())} fill-in blank(s) are underscores in the PDF, "
+            "not lines, as TextbookImprover couldn't measure the underscore in their face ("
+            + ", ".join(f"{n} in {face}" for face, n in sorted(kept.items()))
+            + "): veraPDF's WCAG 2.2 machine check 1.3.1-1 reports a blank of five or more "
+            "underscores as text used to draw. " + advice)
 
 
 # What FIT_MACROS says it fitted on a run: how many of the tables,

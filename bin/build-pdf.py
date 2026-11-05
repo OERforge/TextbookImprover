@@ -1700,6 +1700,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             line = latexbuild.overfull_warning(latexbuild.overfull_lines(said, source, owners))
             if line:
                 print(line, file=sys.stderr)
+            # Blanks kept as underscores, in a face without the measure.
+            line = latexbuild.kept_blanks_warning(
+                latexbuild.kept_blanks(said), "An OpenType or TrueType face (mainfont in "
+                "the pdf.metadata file) has the measure.")
+            if line:
+                print(line, file=sys.stderr)
         missing, others = latexbuild.missing_characters(result.stderr.splitlines())
         if others:
             print("\n".join(others), file=sys.stderr)

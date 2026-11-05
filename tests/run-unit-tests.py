@@ -3082,6 +3082,48 @@ def check_fitted_blanks():
     ]
 
 
+def check_book_template():
+    """Pandoc's LaTeX template with the font setting read before its fonts
+    (latexbuild.book_template): STATIC_FONTS's lines just before the line
+    that loads the fonts' packages, and the template Pandoc's own but for
+    them; a template without that line taken as it is, the run warned of
+    what that leaves; and the setting's Lua with nothing TeX would read as
+    its own, since TeX reads it before Lua does."""
+    import latexbuild
+    lua = latexbuild.STATIC_FONTS.split("\\directlua{", 1)[1].rsplit("}", 1)[0]
+    work = tempfile.mkdtemp(prefix="unit-template-")
+    atexit.register(shutil.rmtree, work, True)
+    said = []
+    made = latexbuild.book_template(work, said.append) if shutil.which("pandoc") else None
+    own = subprocess.run(["pandoc", "-D", "latex"], capture_output=True,
+                         text=True).stdout.split("\n") if made else []
+    lines = open(made, encoding="utf-8").read().split("\n") if made else []
+    setting = latexbuild.STATIC_FONTS.rstrip("\n").split("\n")
+    at = lines.index(latexbuild.FONTS_PARTIAL) if latexbuild.FONTS_PARTIAL in lines else -1
+    # A Pandoc whose template hasn't the line.
+    real, warned = latexbuild.subprocess.run, []
+    latexbuild.subprocess.run = lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout="\\documentclass{book}\n$body$\n", stderr="")
+    try:
+        lacking = latexbuild.book_template(work, warned.append)
+    finally:
+        latexbuild.subprocess.run = real
+    return [
+        ("the font setting comes just before the line that loads the fonts' packages, the "
+         "template Pandoc's own but for it",
+         lambda: not shutil.which("pandoc")
+         or (at > len(setting) and lines[at - len(setting):at] == setting
+             and lines[:at - len(setting)] + lines[at:] == own and not said)),
+        ("a template without that line is taken as it is, and the run warns of what that "
+         "leaves",
+         lambda: lacking is None and len(warned) == 1
+         and warned[0].startswith("WARNING: Pandoc's LaTeX template has no $fonts.latex()$ line")
+         and "embedded without its hinting" in warned[0]),
+        ("the setting's Lua has no percent sign, hash, tilde, or backslash, and no comment",
+         lambda: lua.strip() and not re.search(r"[%#~\\]|--", lua)),
+    ]
+
+
 def check_code_fit_report():
     """The build's reports of what FIT_MACROS fitted and what's still too
     wide, read from what LaTeX said, with blocks of code among them, each
@@ -7072,6 +7114,7 @@ GROUPS = [
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
+    ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

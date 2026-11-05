@@ -1646,6 +1646,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         environment["OER_MEASURES"] = measures or "none"
         if not measures and why:
             print(unmeasured_warning(why), file=sys.stderr)
+        # Pandoc's template with the font setting read before its faces
+        # (latexbuild.STATIC_FONTS), for the LaTeX the PDF is made from.
+        template = latexbuild.book_template(work)
+        filters = filters + (["--template", template] if template else [])
         if keep or latex_only:
             # The LaTeX as the PDF was made from it, for reading when
             # something needs explaining; not needed to build.
@@ -1776,8 +1780,12 @@ def write_latex(base, name, resolved, project, document, out_dir):
         environment["OER_MEASURES"] = measures or "none"
         if why:
             print(unmeasured_warning(why), file=sys.stderr)
+        # Pandoc's template with the font setting read before its faces
+        # (latexbuild.STATIC_FONTS), as the PDF target's is.
+        template = latexbuild.book_template(work)
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
-                              + filters, cwd=base, env=environment,
+                              + filters + (["--template", template] if template else []),
+                              cwd=base, env=environment,
                               capture_output=True, text=True)
         sys.stderr.write(done.stderr)
         if done.returncode:

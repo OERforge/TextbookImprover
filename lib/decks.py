@@ -952,7 +952,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             json.dump(doc, fh)
         tex = os.path.join(work, "deck.tex")
         standards = [str(s).strip() for s in standards if str(s).strip()] or ["ua-2"]
-        macros = latexbuild.PDF_MACROS
+        # The font setting first, read before the template's faces.
+        macros = latexbuild.STATIC_FONTS + latexbuild.PDF_MACROS
         if code_wrap is not None:
             macros = latexbuild.code_wrap_latex(code_wrap) + macros
         # Picture mode in LaTeX's own fonts, where picture_paths is off.

@@ -3768,10 +3768,16 @@ LACKING_PLEX = ("import importlib.util, sys\n"
 # naming a font in the book's own folder, which its options give a Path
 # (fonts/BookMath.otf, a copy of IBM Plex Math), whose formulas were set
 # in Latin Modern Math, the run saying TeX lacked the font, since
-# fontspec's test of a name takes no options.
+# fontspec's test of a name takes no options. And a file naming a face
+# with a STAT table that isn't a variable font (STATIC_FACE), TeX Live's
+# Josefin Sans, where TeX has it, which luaotfload takes for a variable
+# font, so that its glyphs were embedded from luaotfload's copy of them,
+# an accented letter drawn whole and its parts filled with other glyphs
+# (latexbuild.STATIC_FONTS): Acrobat said it couldn't extract such a face,
+# Noto Sans 2.008's, in Introductory Business Statistics 2e's PDF.
 MATH_FONT_BOOK = ("# Formulas\n\nA formula, $x^2 + y_1 = z$, and a display:\n\n"
                   "$$\\sum_{i=1}^n a_i = \\frac{1}{2}$$\n\nA script capital, "
-                  "$\\mathcal{A} + x$.\n")
+                  "$\\mathcal{A} + x$.\n\nAccented letters, ŷ and ī, **and in bold, ŷ**.\n")
 MATH_RANGE = "header-includes:\n  - \\setmathfont[range=\\mathcal]{latinmodern-math.otf}\n"
 MATH_FONT_TARGETS = (
     ("missing", "mathfont: NoSuchMath-Regular.otf\n"),
@@ -3779,16 +3785,21 @@ MATH_FONT_TARGETS = (
     ("ranged", "mathfont: IBMPlexMath-Regular.otf\n" + MATH_RANGE),
     ("defaulted", MATH_RANGE),
     ("pathed", "mathfont: BookMath.otf\nmathfontoptions:\n  - Path=fonts/\n"))
+STATIC_FACE = ("static", "mainfont: JosefinSans\nmainfontoptions:\n  - Extension=.ttf\n"
+               "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n  - ItalicFont=*-Italic\n"
+               "  - BoldItalicFont=*-BoldItalic\n")
 
 
 def build_math_font(work):
     """MATH_FONT_BOOK as a target for each of MATH_FONT_TARGETS, its
-    metadata file the target's: ({target: its PDF's path}, what the run
-    said). The pathed target's font is a copy of IBM Plex Math's file,
-    where TeX finds one."""
+    metadata file the target's, and STATIC_FACE's where TeX has Josefin
+    Sans: ({target: its PDF's path}, what the run said). The pathed
+    target's font is a copy of IBM Plex Math's file, where TeX finds one."""
+    targets = MATH_FONT_TARGETS + ((STATIC_FACE,) if font_installed("JosefinSans-Regular.ttf")
+                                   else ())
     os.makedirs(os.path.join(work, "fonts"))
     for name, text in [("formulas.md", MATH_FONT_BOOK)] + [
-            (target + ".yaml", meta) for target, meta in MATH_FONT_TARGETS]:
+            (target + ".yaml", meta) for target, meta in targets]:
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     plex = subprocess.run(["kpsewhich", "IBMPlexMath-Regular.otf"], capture_output=True,
@@ -3802,10 +3813,10 @@ def build_math_font(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n" + "".join(
             f"  {target}:\n    format: pdf\n    pdf:\n      metadata: {target}.yaml\n"
-            for target, _meta in MATH_FONT_TARGETS))
+            for target, _meta in targets))
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
     return ({target: os.path.join(work, target, "org.example.formulas.pdf")
-             for target, _meta in MATH_FONT_TARGETS},
+             for target, _meta in targets},
             converted.stdout + converted.stderr)
 
 
@@ -5462,6 +5473,29 @@ def math_font_checks(paths, said):
          and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
                                        "by unicode-math must be an\n")
          and noto("") == ""),
+    ] + static_face_checks(paths.get("static"))
+
+
+def static_face_checks(path):
+    """The checks of STATIC_FACE's target, its PDF at path, or None where
+    TeX hasn't Josefin Sans, whose checks are then skipped."""
+    if path is None:
+        print("  skip  Josefin Sans isn't installed (TeX Live's josefin); a face with a STAT "
+              "table that isn't a variable font isn't checked")
+        return []
+
+    def accented(face):
+        """Whether the face, as the PDF embeds it, draws a letter from its
+        parts, each part drawn."""
+        glyphs = (pdftext.truetype_glyphs(path) if os.path.exists(path) else {}).get(face, [])
+        drawn = {number for number, _parts in glyphs}
+        whole = [parts for _number, parts in glyphs if parts]
+        return bool(whole) and all(part in drawn for parts in whole for part in parts)
+    return [
+        ("a face with a STAT table that isn't a variable font is embedded from its file, an "
+         "accented letter drawn from its parts, each part drawn, Josefin Sans in its regular "
+         "and its bold",
+         lambda: accented("JosefinSans-Regular") and accented("JosefinSans-Bold")),
     ]
 
 

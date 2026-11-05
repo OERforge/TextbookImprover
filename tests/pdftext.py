@@ -750,3 +750,48 @@ def base_fonts(path):
         for page in pdf.pages:
             walk(page.obj.get("/Resources"), frozenset())
     return names
+
+
+def truetype_glyphs(path):
+    """Each TrueType font program a PDF embeds (FontFile2), by its font
+    name, a subset's tag taken off: its glyphs that draw something, each
+    (number, its parts' numbers where it's drawn from parts, as an accented
+    letter can be, else None), read from the font's own tables (loca and
+    glyf) by the OpenType specification."""
+    import struct
+    found = {}
+    with pikepdf.open(path) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary) or obj.get("/Type") != "/FontDescriptor" \
+                    or "/FontFile2" not in obj:
+                continue
+            data = obj.FontFile2.read_bytes()
+            tables = {}
+            for i in range(struct.unpack(">H", data[4:6])[0]):
+                tag, _sum, offset, length = struct.unpack(">4sLLL", data[12 + 16 * i:28 + 16 * i])
+                tables[tag.decode("latin-1")] = data[offset:offset + length]
+            count = struct.unpack(">H", tables["maxp"][4:6])[0]
+            long_offsets = struct.unpack(">h", tables["head"][50:52])[0]
+            loca = struct.unpack(">%d%s" % (count + 1, "L" if long_offsets else "H"),
+                                 tables["loca"][:(count + 1) * (4 if long_offsets else 2)])
+            loca = [n if long_offsets else 2 * n for n in loca]
+            glyphs = []
+            for number in range(count):
+                record = tables["glyf"][loca[number]:loca[number + 1]]
+                if len(record) < 10:
+                    continue
+                parts, at = None, 10
+                if struct.unpack(">h", record[:2])[0] < 0:
+                    parts = []
+                    while True:
+                        flags, part = struct.unpack(">HH", record[at:at + 4])
+                        parts.append(part)
+                        at += 4 + (4 if flags & 0x0001 else 2) \
+                            + (2 if flags & 0x0008 else 4 if flags & 0x0040
+                               else 8 if flags & 0x0080 else 0)
+                        if not flags & 0x0020:
+                            break
+                glyphs.append((number, parts))
+            name = str(obj.get("/FontName", "")).lstrip("/")
+            found[name.split("+", 1)[1] if re.match(r"[A-Z]{6}\+", name) else name] = glyphs
+    return found

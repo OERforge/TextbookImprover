@@ -24,6 +24,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ENGINE = "lualatex"
@@ -405,6 +406,85 @@ CODE_SPACES = r"""\makeatletter
 \fi
 \makeatother
 """
+
+
+# A face with no axes to vary is embedded from its own file, as LuaTeX
+# embeds any face, where luaotfload would embed it as it does a variable
+# face, from its own copy of the outlines. luaotfload 3.29 gives a face it
+# loads in node mode a glyph stream provider wherever its font loader found
+# variable data in it (luaotfload-features.lua, its patch of
+# trytosharefont), and the loader counts a STAT table as variable data
+# (readers.stat), which a static face can have: Noto Sans 2.008's regular
+# and bold have one, its italics don't, and nor does TeX Live's Noto Sans
+# (2.005); all of TeX Live's Josefin Sans have one. Such a face's glyphs
+# were written from luaotfload's copy of them: without their hinting, an
+# accented letter drawn whole, not from its parts, and each part LuaTeX
+# still added to the subset for the letter (its tt_glyf.c) filled with
+# whatever glyph the face has at the number LuaTeX gave the part, at the
+# part's width: in Introductory Business Statistics 2e's PDF, the parts of
+# its ī and ŷ were the face's straight quote, at sign, and caret.
+# Acrobat said of that face that it couldn't extract it ("Some characters
+# may not display or print correctly"), and didn't name its italics,
+# embedded from their files. A face whose variable data has no axes, which
+# only a variable face's table fvar gives, is embedded from its file now;
+# a variable face, or a named instance of one, as luaotfload has it. Read
+# before the template loads a face (book_template): luaotfload settles how
+# a face is embedded when it first loads it, and fontspec loads one where
+# the template sets it. Without babel, the text was set in the face
+# \setmainfont had loaded, which the setting in the header-includes, after
+# it, didn't reach; a book's text is in babel's family for its language,
+# loaded when the text is set, which it did reach, but read before the
+# faces, it comes before whatever loads one first. A deck's template
+# reads it before its faces too.
+STATIC_FONTS = r"""\ifdefined\directlua
+\directlua{
+  if not oerfonts and fonts and fonts.constructors and fonts.constructors.trytosharefont then
+    oerfonts = { share = fonts.constructors.trytosharefont }
+    fonts.constructors.trytosharefont = function(target, tfmdata)
+      oerfonts.share(target, tfmdata)
+      local resources = tfmdata and tfmdata.resources
+      local data = resources and resources.variabledata
+      local properties = target.properties
+      if target.streamprovider and data and not data.axis
+          and not (properties and properties.instance) then
+        target.streamprovider = nil
+      end
+    end
+  end
+}
+\fi
+"""
+
+# The line of Pandoc's LaTeX template that loads the packages a face is
+# set with (unicode-math, and fontspec with it), before the faces the
+# metadata names, the same in Pandoc 3.9 (by its source), 3.12.1, and 3.13.
+FONTS_PARTIAL = "$fonts.latex()$"
+
+
+def book_template(work, warn=None):
+    """The path of Pandoc's own LaTeX template with STATIC_FONTS read before
+    its fonts (FONTS_PARTIAL), written in the folder work, for --template:
+    the same template but for that, its partials Pandoc's own. None where
+    the template hasn't the line, or Pandoc can't give it, which a warning
+    says (warn, which prints to stderr by default): the build then takes
+    Pandoc's template as it is."""
+    warn = warn or (lambda line: print(line, file=sys.stderr))
+    done = subprocess.run(["pandoc", "-D", "latex"], capture_output=True, text=True)
+    lines = done.stdout.split("\n") if done.returncode == 0 else []
+    if FONTS_PARTIAL not in lines:
+        warn("WARNING: Pandoc's LaTeX template has no " + FONTS_PARTIAL + " line to read "
+             "TextbookImprover's font setting before, so a face with a STAT table that "
+             "isn't a variable font, as Noto Sans 2.008's regular and bold are, is embedded "
+             "without its hinting, as luaotfload embeds a variable font, and Acrobat may "
+             "say it can't extract it.")
+        return None
+    at = lines.index(FONTS_PARTIAL)
+    # Pandoc's template language takes a dollar sign as $$.
+    lines[at:at] = STATIC_FONTS.replace("$", "$$").rstrip("\n").split("\n")
+    path = os.path.join(work, "book.latex")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
 
 
 # A page meant to meet WCAG 1.4.8 (AAA), as bin/pdf-layout-wcag-aaa.yaml

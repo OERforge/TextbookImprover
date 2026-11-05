@@ -921,6 +921,394 @@ def case_language(work):
     ]
 
 
+# A book in en-US whose second chapter, \include-d as ch02.tex, is French by
+# languages.csv and defines a macro the fourth uses, and is followed by an
+# English file of sections only, in its chapter; whose third, in a folder,
+# is Spanish, \input-s a file of the same name, and goes on in the master's
+# text after its file, as the pages take it; whose fourth, after a French
+# file that opens a part and an English chapter the master sets in it, is
+# English, in the part, \input-ing another file of the third's name; and
+# whose master's own text, a preface and a chapter it sets between the
+# files, is Italian and German.
+LANGUAGES_MASTER = (
+    "\\documentclass{book}\n\\title{Two Languages}\n\\author{An Author}\n"
+    "\\begin{document}\n\\maketitle\nA preface the master sets itself.\n\n"
+    "\\include{ch01}\n\\include{ch02.tex}\n\\include{ch02-glossary}\n"
+    "\\include{parts/ch03}\nExercises for the third chapter, set in the master.\n\n"
+    "\\chapter{Notes}\nNotes the master sets itself.\n\n\\include{part2}\n"
+    "\\chapter{Interlude}\nAn interlude the master sets, in English.\n\n"
+    "\\include{ch04}\n\\end{document}\n")
+LANGUAGES_FILES = {
+    "ch01.tex": "\\chapter{Prices}\nPrices rise when demand grows.\n",
+    "ch02.tex": "\\chapter{Les prix}\n\\newcommand\\carried{a macro the fourth chapter uses}\n"
+                "Les prix montent quand la demande cro\u00eet.\n",
+    "ch02-glossary.tex": "\\section{Glossary}\nA glossary in English, after the French "
+                         "chapter.\n",
+    "part2.tex": "\\part{Deuxi\u00e8me partie}\nUne partie en fran\u00e7ais.\n",
+    "parts/ch03.tex": "\\chapter{Los costos}\nLos costos suben.\n\n\\input{exercises/ch03}\n\n"
+                      "M\u00e1s costos.\n",
+    "exercises/ch03.tex": "Ejercicios.\n",
+    "ch04.tex": "\\chapter{Costs}\nCosts come back in English, with \\carried.\n\n"
+                "\\input{solutions/ch03}\n",
+    "solutions/ch03.tex": "Solutions to the third chapter, in English.\n",
+}
+
+
+def case_page_languages(work):
+    """A LaTeX book's pages in another language than the book's, in its copy
+    and in its PDF built from its own files: each \\include-d file's page
+    tagged in its language by hooks around reading the file and set back
+    after it, in no group, so what a file defines reaches the files after
+    it, a file of the same name it \\input-s in it, one another chapter
+    \\input-s not; every other file's page in the book's, so an English
+    file of sections after a French chapter, or an English chapter after a
+    French file that opens a part, isn't French from what's around it; what
+    the master sets after the file in the chapter's section in it too, as
+    the pages take it, but a chapter the master sets itself in the book's,
+    in a French part too; each file as the reading took it, one a master
+    in a folder \\include-s with a dot in its name, and of a conditional's
+    two the one it took; a document that \\include-s nothing in its
+    page's language whole, its \\DocumentMetadata's; a page of the
+    master's own text named, since no file of its own holds it; the same
+    in a copy without tagging, which builds; none in a book that declares
+    no language for pages in the default, nor for pages in its files'
+    language, which its copy is in, or in its preamble's region of the
+    default's language; and a copy made from a copy given the languages
+    decided now, its block replaced."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import texremediate
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+
+    def book_at(path, files, rows, targets, language="en-US", exists_ok=False):
+        os.makedirs(path, exist_ok=exists_ok)
+        for name, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(path, name)), exist_ok=True)
+            with open(os.path.join(path, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+            fh.write("source,language,found,drafted-by,reviewed\n" + rows)
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.languages\n  title: Two Languages\n"
+                     + (f"  language: {language}\n" if language else ""))
+        with open(os.path.join(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
+            fh.write("targets:\n" + targets)
+        done = convert(path)
+        return done.returncode, done.stdout + done.stderr
+
+    copies = ("  copy:\n    format: source\n    tagging: \"on\"\n"
+              "  plain:\n    format: source\n    tagging: \"off\"\n")
+    files = dict(LANGUAGES_FILES, **{"book.tex": LANGUAGES_MASTER})
+    rows = "ch02,fr,,,\nch03,es,,,\nbook-1,de,,,\nbook,it,,,\npart2,fr,,,\n"
+    book = os.path.join(work, "book")
+    status, said = book_at(book, files, rows, copies)
+    master = read(book, "copy", "book.tex") if status == 0 else ""
+    plain = read(book, "plain", "book.tex") if status == 0 else ""
+    hooks = ("\\ExplSyntaxOff\n\\TIQbooklanguage{en-US}\n\\TIQfilelanguage{/ch01.tex}{en-US}\n"
+             "\\TIQfilelanguage{/ch02.tex}{fr}\n\\TIQfilelanguage{/ch02-glossary.tex}{en-US}\n"
+             "\\TIQfilelanguage{parts/ch03.tex}{es}\n\\TIQfilelanguage{/part2.tex}{fr}\n"
+             "\\TIQfilelanguage{/ch04.tex}{en-US}\n")
+
+    # The copy made from the copy, laid over the author's tree, with ch02 in
+    # Canadian French and no row for ch03.
+    again = os.path.join(work, "again")
+    laid = dict(files)
+    if status == 0:
+        laid.update({name: read(book, "copy", name) for name in files})
+    again_status, again_said = book_at(again, laid, "ch02,fr-CA,,,\n",
+                                       "  copy:\n    format: source\n    tagging: \"on\"\n")
+    again_master = read(again, "copy", "book.tex") if again_status == 0 else ""
+
+    # A book that declares no language, its pages in the default.
+    plainly = os.path.join(work, "undeclared")
+    plainly_status, _ = book_at(plainly, files, "",
+                                "  copy:\n    format: source\n    tagging: \"on\"\n", None)
+    plainly_master = read(plainly, "copy", "book.tex") if plainly_status == 0 else ""
+
+    # One that declares no language whose files say French: its copy in
+    # French, every page with it.
+    french = os.path.join(work, "french")
+    french_status, french_said = book_at(
+        french, dict(files, **{"book.tex": LANGUAGES_MASTER.replace(
+            "\\documentclass{book}\n", "\\documentclass{book}\n\\usepackage[french]{babel}\n")}),
+        "", "  copy:\n    format: source\n    tagging: \"on\"\n", None)
+    french_master = read(french, "copy", "book.tex") if french_status == 0 else ""
+
+    # One in American English by babel, in the default's English: none either.
+    american = os.path.join(work, "american")
+    american_status, american_said = book_at(
+        american, dict(files, **{"book.tex": LANGUAGES_MASTER.replace(
+            "\\documentclass{book}\n", "\\documentclass{book}\n\\usepackage[american]{babel}\n")}),
+        "", copies, None)
+    american_copies = [read(american, target, "book.tex") if american_status == 0 else ""
+                       for target in ("copy", "plain")]
+
+    # Editions: a master in a folder that \include-s a file with a dot in
+    # its name, and the instructor's answers or the student's by a
+    # conditional, the reading taking the instructor's, Spanish, and then
+    # an index, in the book's language, LaTeX's back matter closing the
+    # answers' section.
+    editions = os.path.join(work, "editions")
+    os.makedirs(editions)
+    with open(os.path.join(editions, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("defaults:\n  latex:\n    main: src/book.tex\n")
+    editions_status, editions_said = book_at(editions, {
+        "src/book.tex": "\\documentclass{book}\n\\usepackage{ifthen}\n\\newboolean{instructor}\n"
+                        "\\setboolean{instructor}{true}\n\\title{Editions}\n\\author{An Author}\n"
+                        "\\begin{document}\n\\maketitle\n\\include{week1}\n\\include{week1.5}\n"
+                        "\\ifthenelse{\\boolean{instructor}}{\\include{instructor/answers}}"
+                        "{\\include{student/answers}}\n\\backmatter\n\\begin{theindex}\n"
+                        "\\item apple, 1\n\\end{theindex}\n\\end{document}\n",
+        "src/week1.tex": "\\chapter{Week one}\nThe first week.\n",
+        "src/week1.5.tex": "\\chapter{Semaine un et demi}\nUne semaine en fran\u00e7ais.\n",
+        "src/instructor/answers.tex": "\\chapter{Respuestas}\nLas respuestas del profesor.\n",
+        "src/student/answers.tex": "\\chapter{Answers}\nThe student's answers.\n"},
+        "week1.5,fr,,,\nanswers,es,,,\n",
+        "  copy:\n    format: source\n    tagging: \"on\"\n"
+        + ("" if why else "  pdf:\n    format: pdf\n"), exists_ok=True)
+    editions_master = read(editions, "copy", "src", "book.tex") if editions_status == 0 else ""
+
+    # The PDF from the book's own files, and a document that \include-s
+    # nothing, Spanish whole.
+    built = {}
+    if not why:
+        built["pdf-book"] = book_at(os.path.join(work, "pdf-book"), files, rows,
+                                    "  pdf:\n    format: pdf\n")
+        built["notes"] = book_at(
+            os.path.join(work, "notes"),
+            {"notes.tex": "\\documentclass{book}\n\\begin{document}\n\\chapter{Repaso}\n"
+                          "Un texto.\n\\end{document}\n"},
+            "notes,es,,,\n", "  pdf:\n    format: pdf\n" + copies)
+
+    def tags(name, pdf, path=None):
+        """[(H1, H2, or P, its /Lang or the nearest element's around it, or
+        the catalog's)] in the structure's order, from the first heading on
+        (an article's section is an H1), of the PDF at path, else name's
+        pdf; None where pikepdf isn't installed."""
+        try:
+            import pikepdf
+        except ImportError:
+            return None
+        path = path or os.path.join(work, name, "pdf", pdf)
+        if not os.path.exists(path):
+            return []
+        out = []
+        with pikepdf.open(path) as done:
+            tree = done.Root.StructTreeRoot
+            roles = {str(k): str(v) for k, v in dict(tree.get("/RoleMap", {})).items()}
+
+            def walk(node, around):
+                kids = node.get("/K")
+                for kid in (kids if isinstance(kids, pikepdf.Array) else
+                            [] if kids is None else [kids]):
+                    if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                        lang = str(kid.Lang) if "/Lang" in kid else around
+                        kind = roles.get(str(kid.S), str(kid.S))
+                        if kind in ("/H1", "/H2", "/P"):
+                            out.append((kind[1:], lang))
+                        walk(kid, lang)
+            walk(tree, str(done.Root.get("/Lang")))
+        first = next((i for i, (kind, _) in enumerate(out) if kind != "P"), len(out))
+        return out[first:]
+
+    def pdf_check(name, pdf, expected, status=None):
+        if why:
+            return skip(why)
+        found = tags(name, pdf)
+        if found is None:
+            return skip("no pikepdf to read the PDF's structure")
+        return (built[name][0] if status is None else status) == 0 and found == expected
+
+    def text_of(name, pdf):
+        if why:
+            return None
+        if not shutil.which("pdftotext"):
+            return None
+        path = os.path.join(work, name, "pdf", pdf)
+        return subprocess.run(["pdftotext", path, "-"], capture_output=True,
+                              text=True).stdout if os.path.exists(path) else ""
+
+    def builds(folder, name):
+        """Whether a copy without tagging, the languages in it, builds as
+        the author's own does, with pdfLaTeX."""
+        if not os.path.exists(os.path.join(folder, name)):
+            return False
+        done = subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode",
+                               "-halt-on-error", name], cwd=folder,
+                              capture_output=True, text=True, timeout=300,
+                              stdin=subprocess.DEVNULL)
+        return done.returncode == 0
+
+    def guarded():
+        if why:
+            return skip(why)
+        notes = os.path.join(work, "notes", "plain")
+        text = read(notes, "notes.tex") if os.path.exists(os.path.join(notes, "notes.tex")) \
+            else ""
+        return "\\AddToHook{begindocument/end}[TIQ/language]{\\TIQpagelanguage{es}}" in text \
+            and "\\DocumentMetadata" not in text and texremediate.LANGUAGES_BEGIN in plain \
+            and builds(notes, "notes.tex") and builds(os.path.join(book, "plain"), "book.tex")
+
+    def tagged_later():
+        """The one-page document's copy without tagging, built with it, as a
+        person may: Spanish throughout, its chapter too, where the hook for
+        the master's own chapters had set it back to the book's (the third
+        review)."""
+        if why:
+            return skip(why)
+        notes = os.path.join(work, "notes", "plain")
+        if not os.path.exists(os.path.join(notes, "notes.tex")):
+            return False
+        with open(os.path.join(notes, "later.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\DocumentMetadata{tagging=on}\n" + read(notes, "notes.tex"))
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "later.tex"], cwd=notes, capture_output=True, text=True,
+                              timeout=300, stdin=subprocess.DEVNULL)
+        found = tags(None, None, os.path.join(notes, "later.pdf"))
+        if found is None:
+            return skip("no pikepdf to read the PDF's structure")
+        return done.returncode == 0 and [lang for _, lang in found] == ["es", "es"]
+
+    notes_said = built.get("notes", (1, ""))[1]
+    return [
+        ("each file's page in another language is tagged in it by hooks around reading "
+         "the file, and every other file's page in the book's, the file named as "
+         "\\include gives it, its folder too, with .tex once",
+         lambda: status == 0 and master.count(texremediate.LANGUAGES_BEGIN) == 1
+         and hooks + texremediate.LANGUAGES_END in master
+         and master.count("\\TIQfilelanguage{") == 6
+         and master.index(texremediate.LANGUAGES_END) < master.index("\n\\begin{document}")),
+        ("and nothing else of the author's changes for it: the chapters as written",
+         lambda: status == 0 and all(read(book, "copy", name) == text
+                                     for name, text in LANGUAGES_FILES.items())),
+        ("the run says which pages it tagged, and names the master's own pages it can't, "
+         "with what would tag the first",
+         lambda: "3 page(s) tagged in their own language as LaTeX reads them (ch02 fr, "
+                 "ch03 es, part2 fr)" in said
+         and "WARNING: copy: 2 page(s) in a language of their own (book it, book-1 de) are "
+             "the master's own text" in said
+         and "the copy tags one in its own once it's a file the master \\include-s, its row "
+             "in languages.csv named for that file" in said),
+        ("a copy without tagging gets them too, to be tagged where it's built with its "
+         "tagging, and the run says so",
+         lambda: status == 0 and plain.count(texremediate.LANGUAGES_BEGIN) == 1
+         and hooks + texremediate.LANGUAGES_END in plain and "\\DocumentMetadata" not in plain
+         and "3 page(s) marked in their own language (ch02 fr, ch03 es, part2 fr), which "
+             "LaTeX tags where the copy is built with its tagging" in said
+         and "WARNING: plain: 2 page(s) in a language of their own (book it, book-1 de)"
+             in said and "and the copy marks one in its own once it's a file" in said),
+        ("a book that declares no language has none for its pages in the default",
+         lambda: plainly_status == 0 and "\\DocumentMetadata" in plainly_master
+         and texremediate.LANGUAGES_BEGIN not in plainly_master),
+        ("nor one in its files' language throughout, which its copy is in, no page of the "
+         "master's own text named",
+         lambda: french_status == 0 and "\\DocumentMetadata{lang=fr," in french_master
+         and texremediate.LANGUAGES_BEGIN not in french_master
+         and "the master's own text" not in french_said),
+        ("nor one whose preamble is in another region of the default's language, tagged "
+         "or not",
+         lambda: american_status == 0 and "\\DocumentMetadata{lang=en-US," in american_copies[0]
+         and not any(texremediate.LANGUAGES_BEGIN in copy for copy in american_copies)
+         and "in their own language" not in american_said
+         and "the master's own text" not in american_said),
+        ("each file as the reading took it: one a master in a folder \\include-s with a dot "
+         "in its name, and of a conditional's two the one the reading took, the other in "
+         "the book's",
+         lambda: editions_status == 0
+         and "\\TIQbooklanguage{en-US}\n\\TIQfilelanguage{/week1.tex}{en-US}\n"
+             "\\TIQfilelanguage{/week1.5.tex}{fr}\n"
+             "\\TIQfilelanguage{instructor/answers.tex}{es}\n"
+             "\\TIQfilelanguage{student/answers.tex}{en-US}\n" in editions_master
+         and "2 page(s) tagged in their own language as LaTeX reads them (answers es, "
+             "week1.5 fr)" in editions_said
+         and "WARNING" not in editions_said),
+        ("and in its PDF, the index after the answers in the book's, set back as their file "
+         "ends",
+         lambda: pdf_check("editions", "org.example.languages.pdf", [
+             ("H1", "en-US"), ("P", "en-US"), ("H1", "fr"), ("P", "fr"), ("H1", "es"),
+             ("P", "es"), ("P", "en-US"), ("P", "en-US")], editions_status)),
+        ("a copy made from a copy has the languages decided now, its old ones gone",
+         lambda: again_status == 0
+         and again_master.count(texremediate.LANGUAGES_BEGIN) == 1
+         and "\\TIQfilelanguage{/ch02.tex}{fr-CA}\n" in again_master
+         and "\\TIQfilelanguage{parts/ch03.tex}{en-US}\n" in again_master
+         and "\\TIQfilelanguage{/part2.tex}{en-US}\n" in again_master
+         and "}{fr}" not in again_master and "}{es}" not in again_master),
+        ("the PDF from the book's own files has each file's page in its language, the "
+         "file of that name it \\inputs and the master's text after it too, every other "
+         "file's in the book's, after a French chapter or in a French part, its file of "
+         "the third's name too, a chapter the master sets in the book's, in the French "
+         "part too, and what the second defines reaches the fourth",
+         lambda: pdf_check("pdf-book", "org.example.languages.pdf", [
+             ("H1", "en-US"), ("P", "en-US"), ("H1", "fr"), ("P", "fr"),
+             ("H2", "en-US"), ("P", "en-US"),
+             ("H1", "es"), ("P", "es"), ("P", "es"), ("P", "es"), ("P", "es"),
+             ("H1", "en-US"), ("P", "en-US"), ("P", "fr"), ("P", "fr"),
+             ("H1", "en-US"), ("P", "en-US"),
+             ("H1", "en-US"), ("P", "en-US"), ("P", "en-US")])
+         and (text_of("pdf-book", "org.example.languages.pdf") is None or
+              "a macro the fourth chapter uses" in text_of(
+                  "pdf-book", "org.example.languages.pdf"))),
+        ("and its run says so, and names what it can't reach in the PDF",
+         lambda: skip(why) if why else
+         "3 page(s) tagged in their own language (ch02 fr, ch03 es, part2 fr)"
+         in built["pdf-book"][1]
+         and "WARNING: pdf: 2 page(s) in a language of their own (book it, book-1 de) are "
+             "the master's own text" in built["pdf-book"][1]
+         and "so the PDF has them in the book's language" in built["pdf-book"][1]
+         and "and the PDF tags one in its own once it's a file" in built["pdf-book"][1]),
+        ("a document that \\include-s nothing is in its page's language whole, its "
+         "\\DocumentMetadata's, in its PDF and its copy, and from \\begin{document} in its "
+         "copy without tagging",
+         lambda: pdf_check("notes", "org.example.languages.pdf", [("H1", "es"), ("P", "es")])
+         and "1 page(s) tagged in their own language as LaTeX reads them (notes es)"
+             in notes_said
+         and read(work, "notes", "copy", "notes.tex").startswith(
+             "\\DocumentMetadata{lang=es, pdfstandard=ua-2, tagging=on}\n")
+         and texremediate.LANGUAGES_BEGIN not in read(work, "notes", "copy", "notes.tex")),
+        ("and a copy without tagging builds with them", guarded),
+        ("and the document's built with tagging later is in its page's language, its "
+         "chapter too", tagged_later),
+        ("a file named with a macro gets no hook, nor a book whose only page in another "
+         "language is one, and of two files of one page's name the later is the page",
+         lambda: texremediate.page_languages_block(
+             "book.tex", [("\\chapters/ch05", "main"), ("ch06", "main")],
+             {"ch05": "fr", "ch06": "de"}, "de") == ("", [], [("ch05", "fr", "named")])
+         and texremediate.page_languages_block(
+             "book.tex", [("a/intro", "main"), ("b/intro", "main")], {"intro": "fr"}, "en")[0]
+         .endswith("\\TIQfilelanguage{a/intro.tex}{en}\n\\TIQfilelanguage{b/intro.tex}{fr}\n"
+                   + texremediate.LANGUAGES_END)),
+        ("a file is named as LaTeX's hooks see it: its folder as written, .tex once, no "
+         "quotes, and its spaces",
+         lambda: texremediate.included_file_key("ch02.tex") == "/ch02.tex"
+         and texremediate.included_file_key("parts/ch03") == "parts/ch03.tex"
+         and texremediate.included_file_key("./ch04") == "./ch04.tex"
+         and texremediate.included_file_key('"two words"') == "/two words.tex"
+         and texremediate.included_file_key("\\chapters/ch05") is None
+         and texremediate.included_file_key("ch{05}") is None),
+        ("a copy is tagged where its master's \\DocumentMetadata says tagging=on or names a "
+         "testphase that turns it on, not one that says off or draft, sets only the PDF's "
+         "version, or is a comment",
+         lambda: texremediate.tags_itself("\\DocumentMetadata{lang=en, tagging = {on}}\n")
+         and texremediate.tags_itself("\\DocumentMetadata{testphase=latest}\n")
+         and texremediate.tags_itself("\\DocumentMetadata{testphase={phase-III,math}}\n")
+         and not texremediate.tags_itself("\\DocumentMetadata{testphase=math}\n")
+         and not texremediate.tags_itself("\\DocumentMetadata{tagging=draft}\n")
+         and not texremediate.tags_itself("\\DocumentMetadata{tagging=off}\n")
+         and not texremediate.tags_itself("\\DocumentMetadata{pdfversion=2.0}\n")
+         and not texremediate.tags_itself("% \\DocumentMetadata{tagging=on}\n")
+         and texremediate.tags_itself("\\DocumentMetadata{\n  tagging=on % LuaLaTeX\n}\n")),
+        ("a document's language goes into its \\DocumentMetadata as the author wrote it, "
+         "its lines and comments kept",
+         lambda: texremediate.with_document_language(
+             "\\DocumentMetadata{\n  lang=en-US,\n  tagging=on % LuaLaTeX\n}\n", "es")
+         == "\\DocumentMetadata{\n  lang=es,\n  tagging=on % LuaLaTeX\n}\n"
+         and texremediate.with_document_language(
+             "\\DocumentMetadata{pdfversion=2.0 % two\n}\n", "es")
+         == "\\DocumentMetadata{lang=es, pdfversion=2.0 % two\n}\n"
+         and texremediate.with_document_language("\\documentclass{book}\n", "es") is None),
+    ]
+
+
 def case_unbuilt(work):
     """A file the book's own build makes, not made yet: the run stops."""
     os.makedirs(os.path.join(work, "figures"))
@@ -7253,6 +7641,8 @@ def case_no_contents(work):
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
+         ("a LaTeX book's pages in another language, in its copy and its PDF",
+          case_page_languages),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),
@@ -7287,6 +7677,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
 
 # The longest cases, started first when they run side by side.
 SLOW = {"a LaTeX book's PDF, from its own LaTeX", "a book made its own way, as OpenIntro is",
+        "a LaTeX book's pages in another language, in its copy and its PDF",
         "the latex target", "a book of documents built on their own",
         "a book's citations and its bibliography", "a book set with packages tagging can't take"}
 

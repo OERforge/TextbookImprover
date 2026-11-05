@@ -1116,6 +1116,8 @@ PAGE_SOURCES = {}
 DISPLAY_STYLE_KEPT = {}
 DISPLAY_STYLE_VARIANTS = {}
 LATEX_LANGUAGES = {}
+# {master: {its \include's index in the reading's order: the page it is}}.
+LATEX_PAGE_FILES = {}
 LANGUAGES = {}
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # A slides run of decks written in Markdown: each .md a deck, read and
@@ -1517,11 +1519,15 @@ def read_latex_to_json(base, masters, env, work, titles=None):
         part_levels = {level for level, name in levels.items() if name == "part"}
         chapter_level = next((level for level, name in levels.items()
                               if name == "chapter"), None)
+        includes = []
         pages = latexsource.cut_pages(doc, prep["order"], master_stem,
                                       prep["front_role"],
-                                      part_levels | {chapter_level})
+                                      part_levels | {chapter_level}, includes)
         own, empty, held, group = [], [], [], None
-        for stem, role, blocks, master_own in pages:
+        # Each page a file is, by its \include's place in the master, for
+        # the copy to tag the file the hooks read as that page.
+        LATEX_PAGE_FILES[master] = {}
+        for (stem, role, blocks, master_own), include in zip(pages, includes):
             stem = safe_stem(stem)
             blocks, hoisted = latexsource.hoist_headings(
                 blocks, set(prep["counters"]["theorems"]) | {"proof"})
@@ -1586,6 +1592,8 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                            "meta": page_meta, "blocks": blocks}, fh)
             own.append(stem)
             PAGE_SOURCES[stem] = ("latex", master)
+            if include is not None:
+                LATEX_PAGE_FILES[master][include] = stem
             if master_own:
                 held.append(stem)
             # A bibliography the run wrote out as a page of its own is one,
@@ -3684,7 +3692,7 @@ def warn_math_keep(sidecar, kept_file, off=()):
 
 
 def remediate_sources(target, base, docs, paths, env, html_stems=(), language=None,
-                      work=None, markdown=(), latex_parts=(), outputs=()):
+                      work=None, markdown=(), latex_parts=(), outputs=(), book_language=None):
     """A target with format source: the book's own files, remediated, one
     copy each in the target's folder under the source's name. A Word file
     gets what a person decided in the sidecars written into it, and nothing
@@ -3693,7 +3701,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     the same (lib/htmlremediate.py), and lang when it has none; a Markdown
     file the same, edited where each element is and confirmed against
     Pandoc's reading (lib/mdremediate.py); a LaTeX book's files the alt
-    text, as keys LaTeX's tagging reads (lib/texremediate.py). AsciiDoc
+    text, as keys LaTeX's tagging reads (lib/texremediate.py), and each
+    page's language where it isn't the copy's, for its tagging to read
+    (book_language, the book's, the copy's where it says none). AsciiDoc
     sources aren't written yet. outputs: the targets' folders, which hold
     no file of the book's."""
     os.makedirs(target.output_dir, exist_ok=True)
@@ -3798,7 +3808,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                 base, target.output_dir, one, one_files, page_alts, tagging=tagging,
                 language=language, headers=decisions, definitions=definitions,
                 definitions_name=LATEX_MACROS, seen=seen, mathml=mathml,
-                written=written_files, picture_paths=pictures))
+                written=written_files, picture_paths=pictures,
+                page_languages=latex_page_languages(stems), book_language=book_language,
+                page_files=LATEX_PAGE_FILES.get(one)))
             written_files.update(one_files)
             files += [f for f in one_files if f not in files]
         counts["unplaced"] = len(counts.get("unplaced_keys", []))
@@ -3861,6 +3873,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             + (f" {counts['headers_untagged']} table header decision(s) weren't written: "
                "a declaration needs LaTeX's tagging, which this copy doesn't have "
                "(tagging: \"on\")." if counts.get("headers_untagged") else "")
+            + page_languages_said(counts)
             + (" Made to build with LaTeX's tagging, with LuaLaTeX: "
                + ("\\DocumentMetadata added" if counts.get("tag_metadata")
                   else f"its own \\DocumentMetadata given {counts['tag_metadata_added']}"
@@ -3957,6 +3970,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                "were left alone." if counts.get("pspicture") else ""))
         warn_stand_ins(target.name, [counts] + [c for _, _, c in others], "the copy")
         warn_own_contents(target.name, [counts] + [c for _, _, c in others], "the copy")
+        warn_page_languages(target.name, counts, "the copy")
         if others:
             say(f"{target.name}: the book's other master(s) written too, "
                 + "; ".join(f"{name}" + (f" with {only} file(s) only it reaches" if only
@@ -4036,6 +4050,65 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "text doesn't hold them as many times as Pandoc reads them, as when the same "
             "syntax also appears inside code.")
     return written
+
+
+def latex_page_languages(stems):
+    """{page: language} for a LaTeX master's pages, as decided once for
+    every target (LANGUAGES), that aren't the project's: its copy tags
+    each in another language than the copy's in its own, and every other
+    a file begins in the copy's (texremediate.page_languages_block), as
+    the PDF from the pages marks each page in another than the book's
+    (build-pdf.py's in_language). A page given the project's language is
+    in the book's, which in the copy is the copy's own: its preamble's
+    American English (babel's american, en-US) beside the project's
+    default, en, had every page tagged en and warned of as another."""
+    return {stem: LANGUAGES[stem].language for stem in stems
+            if stem in LANGUAGES and LANGUAGES[stem].source != "project"}
+
+
+def listed_languages(pages):
+    """Pages as a message lists them: ch02 fr, ch03 es, the first six."""
+    return ", ".join(f"{p} {lang}" for p, lang, *_ in pages[:6]) + (
+        ", ..." if len(pages) > 6 else "")
+
+
+def page_languages_said(counts):
+    """The part of a LaTeX copy's message about its pages in a language of
+    their own: tagged in it, or in a copy without tagging marked to be."""
+    marked = counts.get("languages_marked") or []
+    untagged = counts.get("languages_untagged") or []
+    return ((f" {len(marked)} page(s) tagged in their own language as LaTeX reads them "
+             f"({listed_languages(marked)})." if marked else "")
+            + (f" {len(untagged)} page(s) marked in their own language "
+               f"({listed_languages(untagged)}), which LaTeX tags where the copy is built "
+               "with its tagging (tagging: \"on\")." if untagged else ""))
+
+
+def warn_page_languages(name, counts, where):
+    """The warnings for a LaTeX copy's pages in a language of their own
+    that it can't mark (texremediate.page_languages_block); where: the
+    copy, or the PDF built from it. The way to have the copy tag one is
+    a file of its own: \\tagpdfsetup in the master where one begins, the
+    first advice, is set back at its \\chapter by the block's hook for the
+    master's own chapters (the third review)."""
+    unmarked = counts.get("languages_unmarked") or []
+    for why, said, remedy in (
+            ("own", "the master's own text, before its first \\include or set between "
+                    "them (a part or a chapter it sets itself), with no file of its own "
+                    "for LaTeX's hooks around reading a file",
+             "once it's a file the master \\include-s, its row in languages.csv named "
+             "for that file"),
+            ("named", "\\include-d by a name holding a macro, a brace, a comment, or a "
+                      "parameter, which the copy can't name as LaTeX's hooks around "
+                      "reading a file see it",
+             "once the master names its file without one")):
+        pages = [(p, lang) for p, lang, w in unmarked if w == why]
+        if pages:
+            say(f"WARNING: {name}: {len(pages)} page(s) in a language of their own ("
+                + listed_languages(pages) + f") are {said}, so {where} has them in the "
+                "book's language. pdf.from: pages builds a PDF with each in its own, and "
+                f"{where} {'tags' if counts.get('languages_tagged') else 'marks'} one in "
+                f"its own {remedy}.")
 
 
 def warn_stand_ins(name, all_counts, where):
@@ -4291,11 +4364,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             base, build, master, files, alts, tagging=True, language=language,
             headers=headers, definitions=definitions, definitions_name=LATEX_MACROS,
             seen=seen, standard=standards, written=written_files,
-            picture_paths=str(target["picture_paths"]) == "on"))
+            picture_paths=str(target["picture_paths"]) == "on",
+            page_languages=latex_page_languages(stems), book_language=project["language"],
+            page_files=LATEX_PAGE_FILES.get(master)))
         written_files.update(files)
     counts["unplaced"] = len(counts.get("unplaced_keys", []))
     warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
     warn_own_contents(target.name, [counts], "the copy LaTeX builds")
+    warn_page_languages(target.name, counts, "the PDF")
     # The book's PDF figures with their fonts embedded, in the copy LaTeX
     # builds, where the output folders aren't.
     embed_figures(target, build, build, (), "the copy LaTeX builds")
@@ -4380,6 +4456,9 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             f"marked artifact, {counts.get('header_rows', 0)} table(s) with a header row "
             f"and {counts.get('header_columns', 0)} with a header column declared, a "
             "person's or the census's, "
+            + (f"{len(counts['languages_marked'])} page(s) tagged in their own language ("
+               + listed_languages(counts["languages_marked"]) + "), "
+               if counts.get("languages_marked") else "")
             + (f"{counts['layout_tables']} layout table(s) tagged as a division of "
                "paragraphs, " if counts.get("layout_tables") else "")
             + ("each formula with its MathML, " if counts.get("tag_math") or
@@ -6518,7 +6597,7 @@ def main():
                 written[target.name] = remediate_sources(
                     target, base, docs, paths, env, html_stems,
                     language if LANGUAGE_DECLARED else None, work, markdown,
-                    latex_parts, [t.output_dir for t in targets])
+                    latex_parts, [t.output_dir for t in targets], project["language"])
             if target.format in SOURCE_TARGETS or target.format == "docx":
                 written[target.name] = render_markdown(
                     target, [p for p in pages_by_dir[target.pages_dir]

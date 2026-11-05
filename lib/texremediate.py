@@ -32,6 +32,20 @@ the conversion, so a decision reaches the element it was made about.
 - **Files a build makes.** A file beside a same-named xfig source (`.fig`)
   is fig2dev's, and running the book's build again would write over what's
   written into it; such files are counted, so the run can say so.
+- **A page in another language.** In every copy, a page in another
+  language than the copy's (languages.csv, or its file) is marked to be
+  tagged in its own where the copy is built with LaTeX's tagging: hooks
+  LaTeX runs around reading a file, in the master's preamble, set LaTeX's
+  own key for a language (`text/lang`) as the page's `\\include`-d file
+  begins and set it back as it ends, and then every other page a file
+  begins, and each chapter the master sets itself, is set to the copy's,
+  so none is in another's from the section around it; a document
+  that `\\include`-s nothing is in its page's language, its
+  `\\DocumentMetadata`'s, or from `\\begin{document}` where it has none.
+  No file of the author's changes but the master's preamble, and built
+  without tagging, nothing is tagged. A page of the master's own text,
+  before its first `\\include` or a part or chapter it sets between them,
+  has no file of its own for the hooks, and is counted.
 
 The copy holds every .tex file the master reaches, at the same relative
 paths and with the same file modes, ready to be laid over the author's
@@ -42,8 +56,10 @@ import os
 import re
 import shutil
 
+import languages
 import latexbuild
 import latexsource
+import names
 
 GENERATED_FROM = (".fig", ".xfig")
 INCLUDEGRAPHICS = re.compile(r"\\includegraphics\s*(\[[^]]*\])?\s*\{([^}]*)\}")
@@ -384,14 +400,301 @@ KEYS_SKIPPED = r"""% Written for LaTeX's tagging, which reads the alt and artifa
 \catcode`\@=\TIQatcode\relax
 """
 
+# A page in another language than the copy's (languages.csv, or its file),
+# tagged in its own by LaTeX's key for a language (text/lang, which every
+# structure element opened while it's set takes as its /Lang): set as LaTeX
+# begins to read the page's \include-d file and set back as the file ends,
+# by hooks LaTeX runs around reading every file (file/before, file/after),
+# which look the file up as \include gave it (\CurrentFilePath/
+# \CurrentFile), so nothing of the author's but the master's preamble
+# changes. Once one page needs it, every page an \include begins gets its
+# language, the copy's for one in the copy's: an element with no /Lang
+# takes the one around it, so with only the French pages set (Round 27's
+# first patch, as its review found), an English file of sections after a
+# French chapter was in that chapter's section, French, and so was every
+# chapter after a French file that opens a part, in the part. Set back, the
+# language is none, so what the master sets after a file, in the section
+# the file opened, is in that section's language, as the pages take it for
+# the file's page (in a class without chapters, a section the master sets
+# after a section's file is one of its own, in the book's language, where
+# the pages take it as the file's: measured with article); but a chapter
+# the master sets itself is a page of its own (latexsource.cut_pages), so
+# LaTeX's hook before \chapter (cmd/chapter/before) sets it to the copy's
+# where no page's file is being read: in a part a French file opens, the
+# master's own English chapter had been French (the second review). A
+# part the master sets is one of the book's, in the book's language, as
+# set back. The pages' files are as the reading took them (page_files),
+# not by name: an \include in a conditional's branch the reading didn't
+# take, or a name with a dot in it, had given a page's language to
+# another file (the second review). LaTeX's hooks for an
+# \include-d file by name (include/ch02/before) don't run for a file in a
+# folder (\include{parts/ch03}), and its hooks for a file by its name alone
+# (file/ch03.tex/before) run for every file of that name, so another
+# chapter's solutions/ch03.tex would have taken ch03's language too. Not a
+# group around the file, which would end what the file defines for the
+# files after it: a chapter that defines a macro a later one uses stopped
+# LaTeX in a group ("Undefined control sequence"). Measured on TeX Live
+# 2026 (LaTeX 2026-06-01, tagpdf 2026-10-08): the chapter's section, its
+# heading, the heading's label ("Chapter 2", the class's, in the language
+# babel gives it), and its text take the language; a contents entry, set
+# elsewhere, keeps the book's. The key is there wherever the master has a
+# \DocumentMetadata, which tags only where its tagging is on (the second
+# review measured a version alone, tagging=draft, and testphase); without
+# one, nothing is set, and the copy builds as before. The block begins
+# and ends with these lines, so a copy made from a copy has it replaced.
+LANGUAGES_BEGIN = "% Written for LaTeX's tagging: a page in another language than the book's\n"
+LANGUAGES_END = "% End of the pages' languages.\n"
+LANGUAGES_SETUP = r"""% (languages.csv) is tagged in its own, set as LaTeX starts to read the
+% page's file and set back when the file ends, and every other page a file
+% begins, and each chapter the master sets itself, in the book's; not in
+% a group, which would end what the file defines for the files after it.
+% Without tagging, nothing is tagged.
+\ExplSyntaxOn
+\prop_gclear_new:N \g__tiq_language_prop
+\tl_clear_new:N \l__tiq_language_tl
+\tl_clear_new:N \l__tiq_language_file_tl
+\tl_gclear_new:N \g__tiq_language_book_tl
+\bool_if_exist:NF \g__tiq_language_file_bool { \bool_new:N \g__tiq_language_file_bool }
+\bool_gset_false:N \g__tiq_language_file_bool
+\cs_set_protected:Npn \TIQpagelanguage #1
+  {
+    \keys_if_exist:nnT { __tag / setup } { text / lang }
+      { \tagpdfsetup { text / lang = {#1} } }
+  }
+\cs_set_protected:Npn \TIQfilelanguage #1#2
+  { \prop_gput:Nnn \g__tiq_language_prop {#1} {#2} }
+\cs_set_protected:Npn \TIQbooklanguage #1
+  { \tl_gset:Nn \g__tiq_language_book_tl {#1} }
+\cs_set_protected:Npn \__tiq_language_file:
+  { \tl_set:Nx \l__tiq_language_file_tl { \CurrentFilePath / \CurrentFile } }
+\AddToHook { file / before } [ TIQ / language ]
+  {
+    \__tiq_language_file:
+    \prop_get:NVNT \g__tiq_language_prop \l__tiq_language_file_tl \l__tiq_language_tl
+      {
+        \bool_gset_true:N \g__tiq_language_file_bool
+        \exp_args:NV \TIQpagelanguage \l__tiq_language_tl
+      }
+  }
+\AddToHook { file / after } [ TIQ / language ]
+  {
+    \__tiq_language_file:
+    \prop_if_in:NVT \g__tiq_language_prop \l__tiq_language_file_tl
+      {
+        \par \TIQpagelanguage { }
+        \bool_gset_false:N \g__tiq_language_file_bool
+      }
+  }
+\cs_set_protected:Npn \__tiq_language_own:
+  {
+    \bool_if:NF \g__tiq_language_file_bool
+      { \exp_args:NV \TIQpagelanguage \g__tiq_language_book_tl }
+  }
+\AddToHook { cmd / chapter / before } [ TIQ / language ] { \__tiq_language_own: }
+\ExplSyntaxOff
+"""
+FILE_LANGUAGE = "\\TIQfilelanguage{%s}{%s}\n"
+BOOK_LANGUAGE = "\\TIQbooklanguage{%s}\n"
+DOCUMENT_LANGUAGE = "\\AddToHook{begindocument/end}[TIQ/language]{\\TIQpagelanguage{%s}}\n"
+LANGUAGES_BLOCK = re.compile(re.escape(LANGUAGES_BEGIN) + r".*?" + re.escape(LANGUAGES_END),
+                             re.S)
+# What an \include's name can't hold for the copy to name the file as
+# LaTeX's hooks see it: a macro, which LaTeX expands, or a brace, a
+# comment, or a parameter, which TeX reads otherwise.
+NOT_A_NAME = re.compile(r"[\\{}%#]")
+LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*")
+
+
+def included_file_key(argument):
+    """The file an \\include names, as LaTeX's hooks around reading it see
+    it (\\CurrentFilePath/\\CurrentFile): its folder as written, a slash,
+    and its name with .tex, which \\include takes off and puts back, and
+    without the quotes LaTeX drops ("parts/ch03.tex", "/ch02.tex" for one
+    beside the master, "/two words.tex" for "two words"); None for one
+    that holds a macro, a brace, a comment, or a parameter."""
+    name = argument.strip().replace('"', "")
+    if name.endswith(".tex"):
+        name = name[:-len(".tex")]
+    if not name or NOT_A_NAME.search(name):
+        return None
+    folder, _, file = name.rpartition("/")
+    return folder + "/" + file + ".tex" if file.strip() else None
+
+
+def language_marks(page_languages, reference):
+    """{page: language} of page_languages ({page: language}) for each page
+    whose language is a tag and another than reference's."""
+    return {page: lang for page, lang in page_languages.items()
+            if LANGUAGE_TAG.fullmatch(lang or "") and not languages.same_tag(lang, reference)}
+
+
+def metadata_braces(text):
+    """(where its brace opens, where it closes, just past it) of a master's
+    \\DocumentMetadata, the first in its code, or None where it has none."""
+    for m in latexsource.code_matches(DOCUMENT_METADATA, text):
+        open_at = m.end()
+        while open_at < len(text) and text[open_at].isspace():
+            open_at += 1
+        if text[open_at:open_at + 1] != "{":
+            continue
+        close = latexsource.matching_brace(text, open_at)
+        if close >= 0:
+            return open_at, close
+    return None
+
+
+def metadata_items(inner):
+    """[(key, value, (where the value begins, where it ends))] of a
+    \\DocumentMetadata's keys, inner its text between the braces, a comment
+    in it read as TeX reads one, to its line's end: written over, a key on
+    a line ending in a comment had taken the brace after it for the
+    comment's (the third review)."""
+    masked = re.sub(r"(?<!\\)%[^\n]*", lambda m: " " * len(m.group(0)), inner)
+    items, depth, start = [], 0, 0
+    for at, ch in enumerate(masked + ","):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            key, equals, value = masked[start:at].partition("=")
+            if key.strip():
+                begins = start + len(key) + len(equals)
+                items.append((key.strip(), value.strip(),
+                              (begins + len(value) - len(value.lstrip()),
+                               begins + len(value.rstrip()))))
+            start = at + 1
+    return items
+
+
+def metadata_keys(text):
+    """[(key, value)] of a master's \\DocumentMetadata (metadata_braces),
+    or None where it has none."""
+    braces = metadata_braces(text)
+    if braces is None:
+        return None
+    return [(key, value.strip("{}").strip())
+            for key, value, _ in metadata_items(text[braces[0] + 1:braces[1] - 1])]
+
+
+# What testphase turns tagging on with, measured on TeX Live 2026
+# (LuaLaTeX, a structure tree written): phase-I, phase-II, phase-III, and
+# latest, where math or table alone writes none.
+TESTPHASE_TAGGING = re.compile(r"\b(?:phase-(?:I|II|III)|latest)\b")
+
+
+def tags_itself(text):
+    """Whether a master builds with LaTeX's tagging: its \\DocumentMetadata
+    says tagging=on, as a copy made to build with it does (tag), or names
+    a testphase that turns it on, as books written for tagging in 2024
+    did. One that says tagging=off or draft, has no such key, or only sets
+    the PDF's version, builds untagged."""
+    keys = dict(metadata_keys(text) or [])
+    if "tagging" in keys:
+        return keys["tagging"] == "on"
+    return bool(TESTPHASE_TAGGING.search(keys.get("testphase", "")))
+
+
+def with_document_language(text, lang):
+    """text with its master's \\DocumentMetadata (metadata_braces) in lang:
+    its lang's value replaced where it has one, else lang= put first, the
+    rest as the author wrote it, comments and lines too; or None where it
+    has none to change."""
+    braces = metadata_braces(text)
+    if braces is None:
+        return None
+    inside = braces[0] + 1
+    items = metadata_items(text[inside:braces[1] - 1])
+    for key, _, (begins, ends) in items:
+        if key == "lang":
+            return text[:inside + begins] + lang + text[inside + ends:]
+    return text[:inside] + "lang=%s" % lang + (", " if items else "") + text[inside:]
+
+
+def page_languages_block(master, outline, page_languages, reference, page_files=None):
+    """(block, marked, unmarked) for a copy: the lines for its preamble
+    that tag, where it's built with LaTeX's tagging, each page of
+    page_languages ({page: language}, the master's) in another language
+    than reference (the copy's own) in its own, the pages as they're cut
+    (latexsource.cut_pages). A page an \\include begins is tagged by the
+    hooks around reading its file, and once one is, every other file is
+    too, and each chapter the master sets itself, in reference, so none is
+    in another's from the section or part around it; a document
+    that \\include-s nothing, one page, is tagged from \\begin{document}.
+    outline: the master's [(\\include's argument, role)] as LaTeX reads them
+    (latexsource.book_outline), its macros' \\include-s written out;
+    page_files: {index in outline: the page the reading made of that
+    \\include}, the reading's own (convert.py's LATEX_PAGE_FILES), else
+    each file's page named as cut_pages names it. A file the reading made
+    no page of, as one in a conditional's branch it didn't take, is in
+    reference, and of two files one page is made of, the page is the
+    later, as the pages have it, and the earlier is in reference. marked:
+    [(page, language)]; unmarked: [(page, language, why)], why "own" for a
+    page of the master's own text (before its first \\include, or a part
+    or chapter it sets between them) and "named" for a file an \\include
+    names with a macro, a brace, a comment, or a parameter, which the
+    block can't name as LaTeX's hooks see it."""
+    marks = language_marks(page_languages, reference)
+    if not marks:
+        return "", [], []
+    if page_files is None or any(index >= len(outline) for index in page_files):
+        page_files = {index: names.safe_stem(
+            os.path.splitext(os.path.basename(argument.strip()))[0])
+            for index, (argument, _) in enumerate(outline)}
+    last = {page: index for index, page in sorted(page_files.items())}
+    lines, marked, unmarked, reached = [BOOK_LANGUAGE % reference], [], [], set()
+    for index, (argument, _) in enumerate(outline):
+        key = included_file_key(argument)
+        page = page_files.get(index)
+        if page is None or last[page] != index:
+            # No page, or not the page: the later file of its name is.
+            if key is not None:
+                lines.append(FILE_LANGUAGE % (key, reference))
+            continue
+        reached.add(page)
+        if key is None:
+            # Defensive: a run stops on such a name, which reaches no file
+            # (latexsource.reached), before any copy is made.
+            if page in marks:
+                unmarked.append((page, marks[page], "named"))
+            continue
+        lang = marks.get(page, reference)
+        lines.append(FILE_LANGUAGE % (key, lang))
+        if page in marks:
+            marked.append((page, lang))
+    stem = names.safe_stem(os.path.splitext(os.path.basename(master))[0])
+    for page, lang in sorted(marks.items()):
+        if page in reached:
+            continue
+        if page == stem and not outline:
+            # The document is the page, its chapters too.
+            lines[0] = BOOK_LANGUAGE % lang
+            lines.append(DOCUMENT_LANGUAGE % lang)
+            marked.append((page, lang))
+        else:
+            unmarked.append((page, lang, "own"))
+    if not marked:
+        return "", marked, unmarked
+    return LANGUAGES_BEGIN + LANGUAGES_SETUP + "".join(lines) + LANGUAGES_END, marked, unmarked
+
 
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
               headers=None, definitions=None, definitions_name="", seen=None,
-              mathml=True, standard=("ua-2",), written=(), picture_paths=True):
+              mathml=True, standard=("ua-2",), written=(), picture_paths=True,
+              page_languages=None, book_language="en", page_files=None):
     """Write a remediated copy of each file in files (relative to base) to
     out_dir at the same relative path. alts: {key: alt, or None for
     decorative} (htmlremediate.alt_rows); tagging: made to build with
-    LaTeX's tagging (tag), the book's language its lang; headers:
+    LaTeX's tagging (tag), the book's language its lang; page_languages:
+    {page: language} for the master's pages, as decided for every target,
+    each in another language than the copy's (its preamble's, else
+    book_language) marked in its own (page_languages_block), in every
+    copy, since its tagging may come later, and a document of one page in
+    it whole, as its \\DocumentMetadata's where it has one: in
+    languages_marked where the copy builds with LaTeX's tagging
+    (tags_itself), else in languages_untagged, and in languages_unmarked
+    one it can't; page_files: {index of the master's \\include: its
+    page}, as the reading made them (page_languages_block); headers:
     {place: headers}, a person's table-header decisions, declared for
     tagging when the copy is tagged (declare), since without tagging
     \\tagpdfsetup isn't defined and the build stops; seen: the keys of
@@ -481,6 +784,42 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         for key, n in tag(texts, master, language, mathml, standard, base,
                           picture_paths).items():
             totals["tag_" + key] = n
+    # The pages' languages, as decided now: a copy made from a copy has its
+    # block written again, or taken out where no page needs one. In every
+    # copy, tagged or not: built without LaTeX's tagging, the block sets
+    # nothing, and built with it, as a person may build any copy, it's
+    # there (Rob, 2026-11-05: "we rewrite the language everywhere that's
+    # applicable"). Against the copy's own language, its \DocumentMetadata's
+    # or its preamble's, which a page's elements take where the block
+    # gives them none.
+    texts[master] = LANGUAGES_BLOCK.sub("", texts[master])
+    begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, texts[master])
+    reference = languages.tag(latexsource.preamble_language(
+        latexsource.split_master(texts[master])[0])) or languages.tag(book_language) or "en"
+    marks = language_marks(page_languages or {}, reference)
+    if begin and marks and master not in written:
+        expanded = {name: originals[name] for name in files}
+        latexsource.expand_include_macros(expanded, files, {})
+        outline, _ = latexsource.book_outline(latexsource.split_master(expanded[master])[1])
+        stem = names.safe_stem(os.path.splitext(os.path.basename(master))[0])
+        one = None if outline or stem not in marks else \
+            with_document_language(texts[master], marks[stem])
+        if one is not None:
+            # A document of one page, in its page's language whole: its
+            # \DocumentMetadata's, which its title and bookmarks take too,
+            # where the hook gave them the book's (the second review).
+            texts[master] = one
+            block, marked, unmarked = "", [(stem, marks[stem])], []
+        else:
+            block, marked, unmarked = page_languages_block(
+                master, outline, page_languages, reference, page_files)
+        if block:
+            at = begin[0].start()
+            texts[master] = texts[master][:at] + block + texts[master][at:]
+        tagged_copy = tags_itself(texts[master])
+        totals["languages_marked" if tagged_copy else "languages_untagged"] = marked
+        totals["languages_unmarked"] = unmarked
+        totals["languages_tagged"] = int(tagged_copy)
     for name in files:
         if name in written:
             continue

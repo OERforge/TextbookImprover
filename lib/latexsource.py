@@ -7141,10 +7141,11 @@ def take_divisions(node, found):
     return node
 
 
-def cut_pages(doc, order, master_stem, front_role, split_levels=()):
+def cut_pages(doc, order, master_stem, front_role, split_levels=(), indices=None):
     """The whole book's document cut into pages at the markers: a list of
     (stem, role, blocks, own), own true for a page of the master's own
-    text. What comes before the first \\include is the master's own page,
+    text, and in indices, where it's given, each page's \\include, as its
+    index in order, or None for one of the master's own text. What comes before the first \\include is the master's own page,
     named for it, when it holds anything. Where the master's text begins
     again after an \\include, it goes on with that file's page (the review
     exercises OpenIntro Statistics \\input-s after each chapter), until a
@@ -7154,7 +7155,7 @@ def cut_pages(doc, order, master_stem, front_role, split_levels=()):
     between two \\include-s had landed at the end of the chapter before,
     and titled its page. A master that \\include-s nothing is one page."""
     taken = {master_stem} | {os.path.splitext(os.path.basename(p))[0] for p, _ in order}
-    pages = [[master_stem, front_role, [], True]]
+    pages = [[master_stem, front_role, [], True, None]]
     role, before_appendices, own, count = "main", "main", True, 0
     queue, at = lift_markers(doc["blocks"]), 0
     while at < len(queue):
@@ -7185,7 +7186,7 @@ def cut_pages(doc, order, master_stem, front_role, split_levels=()):
                 if m.group(1) == MARKER:
                     path, file_role = order[int(m.group(2))]
                     stem = os.path.splitext(os.path.basename(path))[0]
-                    pages.append([stem, file_role, [], False])
+                    pages.append([stem, file_role, [], False, int(m.group(2))])
                     own = False
                 else:
                     own = True
@@ -7197,9 +7198,12 @@ def cut_pages(doc, order, master_stem, front_role, split_levels=()):
                 if name not in taken:
                     break
             taken.add(name)
-            pages.append([name, role, [], True])
+            pages.append([name, role, [], True, None])
         pages[-1][2].append(block)
-    return [tuple(p) for p in pages if p[2] or not p[3]]
+    kept = [p for p in pages if p[2] or not p[3]]
+    if indices is not None:
+        indices[:] = [p[4] for p in kept]
+    return [tuple(p[:4]) for p in kept]
 
 
 def hoist_headings(blocks, keep=()):

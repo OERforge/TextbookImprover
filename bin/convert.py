@@ -3917,6 +3917,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                "a declaration needs LaTeX's tagging, which this copy doesn't have "
                "(tagging: \"on\")." if counts.get("headers_untagged") else "")
             + page_languages_said(counts)
+            + babel_said(counts)
             + (" Made to build with LaTeX's tagging, with LuaLaTeX: "
                + ("\\DocumentMetadata added" if counts.get("tag_metadata")
                   else f"its own \\DocumentMetadata given {counts['tag_metadata_added']}"
@@ -4020,6 +4021,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          else ", which reaches no file the others don't")
                             + f", {c.get('described', 0)} image(s) and drawing(s) given alt "
                             f"text and {c.get('decorative', 0)} marked artifact"
+                            + babel_said_short(c)
                             for name, only, c in others)
                 + (", each made to build with LaTeX's tagging as the book's is"
                    + ("; luatex85 loaded for LuaLaTeX in "
@@ -4125,6 +4127,42 @@ def page_languages_said(counts):
             + (f" {len(untagged)} page(s) marked in their own language "
                f"({listed_languages(untagged)}), which LaTeX tags where the copy is built "
                "with its tagging (tagging: \"on\")." if untagged else ""))
+
+
+def babel_listed(found):
+    """babel's commands for a passage's language, as a message lists
+    them, each language's count, the most first: french 5, latin 2, the
+    first six."""
+    ordered = sorted(found.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{name} {n}" for name, n in ordered[:6]) + (
+        ", ..." if len(ordered) > 6 else "")
+
+
+def babel_said(counts):
+    """The part of a LaTeX copy's message about the book's own babel
+    commands that set a passage's language (texremediate's BABEL_SETUP):
+    each passage tagged in it, or in a copy without tagging marked to
+    be."""
+    marked = counts.get("babel_marked") or {}
+    untagged = counts.get("babel_untagged") or {}
+    return ((f" {sum(marked.values())} of babel's commands for a passage's language "
+             f"({babel_listed(marked)}), each passage tagged in its language as LaTeX reads it, "
+             "where babel or the table has a tag for it, and a \\selectlanguage's inside a "
+             "paragraph from the next paragraph on." if marked else "")
+            + (f" {sum(untagged.values())} of babel's commands for a passage's language "
+               f"({babel_listed(untagged)}), each passage marked to be tagged in its language, "
+               "which LaTeX does where the copy is built with its tagging (tagging: \"on\")."
+               if untagged else ""))
+
+
+def babel_said_short(counts):
+    """babel_said for a line of the book's other masters."""
+    found = counts.get("babel_marked") or counts.get("babel_untagged")
+    if not found:
+        return ""
+    return (f", {sum(found.values())} of babel's commands for a passage's language, each "
+            "passage " + ("tagged" if counts.get("babel_marked") else "marked to be tagged")
+            + " in its language")
 
 
 def warn_page_languages(name, counts, where):
@@ -4302,6 +4340,11 @@ def unplaced_warning(name, counts, paths, where):
 
 
 UNDEFINED = re.compile(r"(Reference|Citation) `([^']+)' on page \d+ undefined")
+# texremediate.BABEL_SETUP's warning for a language of babel's with no tag,
+# its name on the warning's first line, the words after it on that line
+# or the next, as LaTeX breaks a warning's lines.
+BABEL_UNTAGGED = re.compile(r"Package TIQ Warning: babel's language (\S+)\s+(?:\(TIQ\)\s+)?has"
+                            r"\s+(?:\(TIQ\)\s+)?no\b")
 
 
 def pdf_env():
@@ -4452,9 +4495,15 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
 
     os.makedirs(target.output_dir, exist_ok=True)
     written, pages, unnamed, missing, unresolved = [], 0, 0, {}, {"reference": [], "citation": []}
+    untagged = []
     for master, ok, pdf, log in results:
         if not ok:
             continue
+        # A language of babel's with no tag, which its passages aren't
+        # tagged in (texremediate.BABEL_SETUP's warning).
+        for language in BABEL_UNTAGGED.findall(log):
+            if language not in untagged:
+                untagged.append(language)
         # What LaTeX couldn't resolve, which the PDF prints as ?? or [?].
         for kind, name in UNDEFINED.findall(log):
             if name not in unresolved[kind.lower()]:
@@ -4488,6 +4537,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                 if cites else "") if part)
             + ". A label the book doesn't define, or a bibliography file that isn't "
             "beside it, would; the book's own build prints them the same way.")
+    if untagged:
+        say(f"WARNING: {target.name}: babel has no language tag for "
+            + ", ".join(untagged[:5]) + (", ..." if len(untagged) > 5 else "")
+            + ", so the PDF has the passages the book's babel commands put in "
+            + ("it" if len(untagged) == 1 else "them") + " in the language around them. "
+            "babel takes a language's tag from the locale it loads the language from: "
+            "the name of one of babel's own locales, or one imported for it "
+            "(\\babelprovide[import=...]), would give it one.")
     if written:
         say((f"Wrote {written[0]}: " if len(masters) == 1 else
              f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each of the "
@@ -4502,6 +4559,11 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             + (f"{len(counts['languages_marked'])} page(s) tagged in their own language ("
                + listed_languages(counts["languages_marked"]) + "), "
                if counts.get("languages_marked") else "")
+            + (f"{sum(counts['babel_marked'].values())} of babel's commands for a passage's "
+               f"language ({babel_listed(counts['babel_marked'])}), each passage tagged in its "
+               "language where babel or the table has a tag for it, and a \\selectlanguage's "
+               "inside a paragraph from the next paragraph on, "
+               if counts.get("babel_marked") else "")
             + (f"{counts['layout_tables']} layout table(s) tagged as a division of "
                "paragraphs, " if counts.get("layout_tables") else "")
             + ("each formula with its MathML, " if counts.get("tag_math") or

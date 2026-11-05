@@ -1316,6 +1316,585 @@ def case_page_languages(work):
     ]
 
 
+
+# A book whose own babel commands set its passages' languages: in its first
+# chapter, French words opening a paragraph and inside it, by
+# \foreignlanguage, babeltags' \textfr, and babel's alias francais, Latin,
+# a locale \babelprovide imports, a language with no locale of its own,
+# a German paragraph by otherlanguage, French words in a section's
+# heading, \selectlanguage's French and English after it, and a page with
+# the section's title in its running head; a second
+# chapter whose file selects French before its heading; a third that
+# languages.csv puts in Spanish, babel's English throughout, with an
+# English quotation and an English word; and a fourth the master selects
+# French for before its \include, and a chapter of its own after it.
+BABEL_MASTER = (
+    "\\documentclass{book}\n\\usepackage[french,ngerman,english]{babel}\n"
+    "\\babelprovide[import]{latin}\n\\babelprovide{klingon}\n\\babeltags{fr = french}\n"
+    "\\title{Languages by Babel}\n\\author{An Author}\n\\begin{document}\n\\maketitle\n"
+    "\\tableofcontents\n\\include{ch01}\n\\include{ch02}\n\\include{ch03}\n"
+    "\\selectlanguage{french}\n\\include{ch04}\n\\chapter{Annexe}\nUne annexe que le "
+    "ma\\^itre pose.\n\\selectlanguage{english}\n\\end{document}\n")
+BABEL_FILES = {
+    "ch01.tex": "\\chapter{One}\n\\foreignlanguage{french}{Bonjour}, she said, and went on in "
+                "English, with \\textfr{un mot}, \\foreignlanguage{francais}{un autre}, "
+                "\\foreignlanguage{latin}{et cetera}, and \\foreignlanguage{klingon}{Qapla'}.\n\n"
+                "\\begin{otherlanguage}{ngerman}\nEin Absatz auf Deutsch.\n"
+                "\\end{otherlanguage}\n\nAfter the German passage, English again.\n\n"
+                "\\section{Le \\foreignlanguage{french}{titre}}\n\\selectlanguage{french}\n"
+                "Texte apr\\`es selectlanguage.\n\n\\selectlanguage{english}\nBack in English.\n"
+                "% \\foreignlanguage{ngerman}{in a comment}\n\n\\newpage\nAnother page.\n\n"
+                "\\newpage\nA page with the section's title over it.\n",
+    "ch02.tex": "\\selectlanguage{french}\n\\chapter{Deux}\nUn chapitre en fran\\c{c}ais.\n"
+                "\\selectlanguage{english}\n",
+    "ch03.tex": "\\chapter{Tres}\nUn cap\\'itulo en espa\\~nol.\n\n"
+                "\\begin{otherlanguage}{english}\nAn English quotation.\n\\end{otherlanguage}\n\n"
+                "Otra vez en espa\\~nol, con una \\foreignlanguage{english}{word}.\n",
+    "ch04.tex": "\\chapter{Quatre}\nUn chapitre que le ma\\^itre met en fran\\c{c}ais.\n",
+}
+
+def structure_tree(path):
+    """Each structure element of the tagged PDF at path but its Spans, in
+    order, as its role with its ancestors' ("/Document/Sect/Part/P"), a
+    Span's own left out too, so a Span in one PDF and not another changes
+    nothing, and a paragraph left inside one does; None where pikepdf isn't
+    installed, [] for no PDF."""
+    try:
+        import pikepdf
+    except ImportError:
+        return None
+    if not os.path.exists(path):
+        return []
+    found = []
+    with pikepdf.open(path) as done:
+        root = done.Root.get("/StructTreeRoot")
+        if root is None:
+            return []
+        roles = {str(k): str(v) for k, v in dict(root.get("/RoleMap", {})).items()}
+
+        def walk(node, chain):
+            kids = node.get("/K")
+            for kid in (kids if isinstance(kids, pikepdf.Array) else
+                        [] if kids is None else [kids]):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    kind = roles.get(str(kid.S), str(kid.S))
+                    here = chain if kind == "/Span" else chain + kind
+                    if kind != "/Span":
+                        found.append(here)
+                    walk(kid, here)
+        walk(root, "")
+    return found
+
+
+# The Spans the inline book's PDF has in another language than what's
+# around them (case_babel_languages).
+INLINE_SPANS = [("fr", "un mot"), ("de", "ein Wort"), ("fr", "Un paragraphe qui continue."),
+                ("fr", "un mot11Une note mit Wort. encore"), ("de", "mit Wort"),
+                ("fr", "deux mots zwei Worte"), ("de", "zwei Worte"), ("fr", "une formule"),
+                ("fr", "une autre"), ("fr", "maison Haus"), ("de", "Haus"), ("fr", "chat"),
+                ("fr", "d\u00e9j\u00e0 vu"), ("fr", "un tableau ")]
+
+
+def pdf_structure(path):
+    """[(role, its own /Lang or None, its language, its text, the language
+    around it)] for each structure element of the tagged PDF at path, in
+    order, the catalog's language around the first, from poppler's
+    pdfinfo -struct-text and pikepdf; None where either is missing, [] for
+    no PDF."""
+    try:
+        import pikepdf
+    except ImportError:
+        return None
+    if not shutil.which("pdfinfo"):
+        return None
+    if not os.path.exists(path):
+        return []
+    own = {}
+    with pikepdf.open(path) as done:
+        catalog = str(done.Root.get("/Lang") or "")
+
+        def walk(node):
+            kids = node.get("/K")
+            for kid in (kids if isinstance(kids, pikepdf.Array) else
+                        [] if kids is None else [kids]):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    if "/ID" in kid and "/Lang" in kid:
+                        own[str(kid.ID)] = str(kid.Lang)
+                    walk(kid)
+        walk(done.Root.StructTreeRoot)
+    out = subprocess.run(["pdfinfo", "-struct-text", path], capture_output=True,
+                         timeout=120).stdout.decode("utf-8", "replace")
+    elements, open_ones = [], []
+    for line in out.splitlines():
+        indent = len(line) - len(line.lstrip())
+        element = re.match(r"\s*(\w+) <(ID\.\d+)>", line)
+        text = re.match(r'\s*"(.*)"\s*$', line)
+        if not element and not text:
+            continue
+        while open_ones and open_ones[-1][0] >= indent:
+            open_ones.pop()
+        if element:
+            around = elements[open_ones[-1][1]][2] if open_ones else catalog
+            lang = own.get(element.group(2))
+            elements.append([element.group(1), lang, lang or around, "", around])
+            open_ones.append((indent, len(elements) - 1))
+        else:
+            for _, at in open_ones:
+                elements[at][3] += text.group(1)
+    return [tuple(e) for e in elements]
+
+
+def case_babel_languages(work):
+    """A LaTeX book's passages its own babel commands set the language of,
+    in its copy and its PDF built from its own files: in the master's
+    preamble, hooks babel runs as it selects a language, so nothing else
+    of the author's changes; tagged in it as LaTeX reads them, a paragraph
+    or more by LaTeX's key for a language, a heading or a whole chapter
+    too, and \\foreignlanguage's words a Span of their own, the paragraph
+    they open keeping its own; each language's tag the table's, babel's
+    alias's too, else babel's own, and one with neither named; the
+    language babel restores after a passage not set, so a page
+    languages.csv puts in Spanish is Spanish after an English quotation
+    in it; every word where it was without them; the same in a copy
+    without tagging, which builds with pdfLaTeX; none where every command
+    names the copy's language and every page is in it, nor in a book that
+    doesn't load babel, but in a page in another language, a passage in
+    the copy's; the run counting them by language; and a copy made from a
+    copy given them once."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import texremediate
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+
+    def book_at(path, files, rows, targets, exists_ok=False, language=None):
+        os.makedirs(path, exist_ok=exists_ok)
+        for name, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(path, name)), exist_ok=True)
+            with open(os.path.join(path, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+            fh.write("source,language,found,drafted-by,reviewed\n" + rows)
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.babel\n  title: Languages by Babel\n"
+                     + (f"  language: {language}\n" if language else ""))
+        with open(os.path.join(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
+            fh.write("targets:\n" + targets)
+        done = convert(path)
+        return done.returncode, done.stdout + done.stderr
+
+    copies = ("  copy:\n    format: source\n    tagging: \"on\"\n"
+              "  plain:\n    format: source\n    tagging: \"off\"\n")
+    files = dict(BABEL_FILES, **{"book.tex": BABEL_MASTER})
+    book = os.path.join(work, "book")
+    status, said = book_at(book, files, "ch03,es,,,\n",
+                           copies + ("" if why else "  pdf:\n    format: pdf\n"))
+    master = read(book, "copy", "book.tex") if status == 0 else ""
+    plain = read(book, "plain", "book.tex") if status == 0 else ""
+    counted = ("15 of babel's commands for a passage's language (french 6, english 5, "
+               "francais 1, klingon 1, latin 1, ngerman 1), each passage")
+
+    # The copy made from the copy, laid over the author's tree.
+    again = os.path.join(work, "again")
+    laid = dict(files)
+    if status == 0:
+        laid.update({name: read(book, "copy", name) for name in files})
+    again_status, _ = book_at(again, laid, "ch03,es,,,\n",
+                              "  copy:\n    format: source\n    tagging: \"on\"\n")
+    again_master = read(again, "copy", "book.tex") if again_status == 0 else ""
+
+    # A book in English whose babel commands name only English, with no
+    # page in another language; and one with a page languages.csv puts in
+    # Spanish, which opens with babel's \selectlanguage{english}, the
+    # language babel is in already, and holds an English quotation, in
+    # another language than the page's. Each project declares American
+    # English, which babel takes its main language from in a tagged copy,
+    # american, where the books' option is english (the fifth review).
+    english_status, english_said = book_at(os.path.join(work, "english"), {
+        "book.tex": "\\documentclass{book}\n\\usepackage[english]{babel}\n\\begin{document}\n"
+                    "\\include{one}\n\\include{two}\n\\end{document}\n",
+        "one.tex": "\\selectlanguage{english}\n\\chapter{One}\nIn English.\n",
+        "two.tex": "\\selectlanguage{english}\n\\chapter{Two}\nIn English too.\n"}, "",
+        "  copy:\n    format: source\n    tagging: \"on\"\n", language="en-US")
+    english_master = read(work, "english", "copy", "book.tex") if english_status == 0 else ""
+    paged = os.path.join(work, "english-page")
+    paged_status, paged_said = book_at(paged, {
+        "book.tex": "\\documentclass{book}\n\\usepackage[english]{babel}\n"
+                    "\\begin{document}\n\\include{one}\n\\include{two}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nIn English.\n",
+        "two.tex": "\\selectlanguage{english}\n\\chapter{Dos}\nEn espa\\~nol.\n\n"
+                   "\\begin{otherlanguage}{english}\nA quotation.\n\\end{otherlanguage}\n\n"
+                   "M\\'as espa\\~nol.\n"}, "two,es,,,\n",
+        "  copy:\n    format: source\n    tagging: \"on\"\n"
+        + ("" if why else "  pdf:\n    format: pdf\n"), language="en-US")
+    paged_master = read(paged, "copy", "book.tex") if paged_status == 0 else ""
+
+    # One in Canadian French by its \DocumentMetadata, babel's French, a
+    # language of the table's without the region, whose first chapter's
+    # file ends in English, the master setting text after it, and a page
+    # languages.csv puts in English.
+    canadian = os.path.join(work, "canadian")
+    canadian_status, _ = (1, "") if why else book_at(canadian, {
+        "book.tex": "\\DocumentMetadata{lang=fr-CA}\n\\documentclass{book}\n"
+                    "\\usepackage[english,french]{babel}\n\\begin{document}\n\\include{un}\n"
+                    "Text the master sets after the file.\n\n\\include{two}\n\\end{document}\n",
+        "un.tex": "\\chapter{Un}\nEn fran\\c{c}ais du Canada.\n\n\\selectlanguage{english}\n"
+                  "In English at the chapter's end.\n",
+        "two.tex": "\\chapter{Two}\nIn English, with a \\foreignlanguage{french}{mot}.\n"},
+        "two,en,,,\n", "  pdf:\n    format: pdf\n")
+
+    # One whose babel doesn't begin a paragraph before it selects the
+    # language of \foreignlanguage's words, as babel does where LaTeX has
+    # no \GetDocumentProperties.
+    older = os.path.join(work, "older")
+    older_status, _ = (1, "") if why else book_at(older, {
+        "book.tex": "\\documentclass{book}\n\\usepackage[french,english]{babel}\n"
+                    "\\makeatletter\n\\let\\bbl@beforeforeign\\@empty\n\\makeatother\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nA first paragraph.\n\n"
+                   "\\foreignlanguage{french}{Bonjour}, she said.\n"}, "",
+        "  pdf:\n    format: pdf\n")
+
+    # One whose babel commands select a language inside a paragraph:
+    # babeltags' declaration in a group, otherlanguage* in a paragraph, an
+    # otherlanguage begun on a paragraph's last line that holds a
+    # paragraph break, a \selectlanguage in the middle of a paragraph and
+    # another after one, a declaration around a note's mark, whose note
+    # holds one of its own, two declarations in one group, a declaration
+    # and \foreignlanguage's words around a display, two declarations in a
+    # table's cell and one in another, one in a list's label, and a
+    # tabular begun inside a declaration's paragraph, each of the last four
+    # a structure LaTeX's tagging ends before the group, the last by its
+    # name, which tagpdf's debug code checks.
+    inline = os.path.join(work, "inline")
+    inline_status, _ = (1, "") if why else book_at(inline, {
+        "book.tex": "\\documentclass{book}\n\\usepackage[french,ngerman,english]{babel}\n"
+                    "\\babeltags{fr = french, de = ngerman}\n\\begin{document}\n"
+                    "\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nA {\\fr un mot} here.\n\n"
+                   "B \\begin{otherlanguage*}{ngerman}ein Wort\\end{otherlanguage*} there.\n\n"
+                   "C text\n\\begin{otherlanguage}{french}\nUn paragraphe qui continue.\n\n"
+                   "Un second.\n\\end{otherlanguage}\n\nD after.\n\n"
+                   "E mid \\selectlanguage{french}suite en fran\\c{c}ais.\n\n"
+                   "F le paragraphe suivant.\n\n\\selectlanguage{english}\nG back.\n\n"
+                   "H {\\fr un mot\\footnote{Une note {\\de mit Wort}.} encore} end.\n\n"
+                   "I {\\fr deux mots \\de zwei Worte} after.\n\n"
+                   "J {\\fr une formule\n\\[ x = y \\]\net la suite} and English.\n\n"
+                   "K \\foreignlanguage{french}{une autre\n\\[ x = z \\]\net encore} and English.\n\n"
+                   "\\begin{tabular}{ll}\nhouse & \\fr maison \\de Haus\\\\\ncat & \\fr chat\\\\\n"
+                   "\\end{tabular}\n\n"
+                   "\\begin{description}\n\\item[\\fr d\\'ej\\`a vu] the feeling\n"
+                   "\\end{description}\n\n"
+                   "M {\\fr un tableau \\begin{tabular}{l} x \\\\ \\end{tabular} la suite} after.\n\n"
+                   "N last.\n"}, "",
+        "  copy:\n    format: source\n    tagging: \"on\"\n  pdf:\n    format: pdf\n")
+
+    # A book with another master beside its own, which latex.main doesn't
+    # name, whose copy is written too.
+    masters = os.path.join(work, "masters")
+    os.makedirs(masters)
+    with open(os.path.join(masters, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("defaults:\n  latex:\n    main: book.tex\n")
+    masters_status, masters_said = book_at(masters, {
+        "book.tex": "\\documentclass{book}\n\\usepackage[french,english]{babel}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nA \\foreignlanguage{french}{mot}.\n",
+        "answers.tex": "\\documentclass{book}\n\\usepackage[french,english]{babel}\n"
+                       "\\begin{document}\n\\include{two}\n\\end{document}\n",
+        "two.tex": "\\chapter{Answers}\nAn \\foreignlanguage{french}{r\\'eponse} and "
+                   "\\foreignlanguage{french}{une autre}.\n\n\\foreignlanguage{french}{Premier "
+                   "paragraphe.\n\nSecond paragraphe.}\n"}, "",
+        "  copy:\n    format: source\n    tagging: \"on\"\n", exists_ok=True)
+    answers = read(masters, "copy", "answers.tex") if masters_status == 0 else ""
+
+    # A book that marks its passages with polyglossia, not babel.
+    poly_status, poly_said = book_at(os.path.join(work, "polyglossia"), {
+        "book.tex": "\\documentclass{book}\n\\usepackage{polyglossia}\n"
+                    "\\setmainlanguage{english}\n\\setotherlanguage{french}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nA \\foreignlanguage{french}{mot} in French.\n"}, "",
+        "  copy:\n    format: source\n    tagging: \"on\"\n")
+    poly_master = read(work, "polyglossia", "copy", "book.tex") if poly_status == 0 else ""
+
+    pdf = os.path.join(book, "pdf", "org.example.babel.pdf")
+
+    def found():
+        """The PDF's structure (pdf_structure), or a reason to skip."""
+        if why:
+            return why
+        structure = pdf_structure(pdf)
+        if structure is None:
+            return "no pikepdf or pdfinfo to read the PDF's structure"
+        return structure
+
+    def spans():
+        """[(language, text)] of the Spans in another language than what's
+        around them."""
+        structure = found()
+        if isinstance(structure, str):
+            return skip(structure)
+        return status == 0 and [(lang, text) for role, own, lang, text, around in structure
+                                if role == "Span" and own and own != around] == [
+            ("fr", "titre"), ("fr", "Bonjour"), ("fr", "un mot"), ("fr", "un autre"),
+            ("la", "et cetera"), ("fr", "titre"), ("en", "word")]
+
+    def paragraphs():
+        """[(language, first word)] of the paragraphs from the first
+        chapter's on, and the language of the headings of the chapters
+        babel selects French for."""
+        structure = found()
+        if isinstance(structure, str):
+            return skip(structure)
+        texts = [(lang, text.split()[0]) for role, _, lang, text, _ in structure
+                 if role == "P" and text.split()]
+        first = next((i for i, (_, word) in enumerate(texts) if word == "Bonjour,"), len(texts))
+        return status == 0 and texts[first:] == [
+            ("en", "Bonjour,"), ("de", "Ein"), ("en", "After"), ("fr", "Texte"),
+            ("en", "Back"), ("en", "Another"), ("en", "A"), ("fr", "Un"), ("es", "Un"),
+            ("en", "An"), ("es", "Otra"), ("fr", "Un"), ("fr", "Une")] \
+            and [(lang, text.split()[-1]) for role, _, lang, text, _ in structure
+                 if role == "H1" and re.search(r"Deux|Quatre|Annexe", text)] == [
+                ("fr", "Deux"), ("fr", "Quatre"), ("fr", "Annexe")]
+
+    def unmoved(folder, done, engines=("lualatex",)):
+        """Every word of the copy of the book at folder, built with each of
+        engines' tagging (latexmk's -lualatex, -pdf; lualatex+debug with
+        tagpdf's debug code), where the copy built without the block has
+        it, its structure that one's but for the Spans (structure_tree), to
+        the paragraph each element is in, and no more of tagpdf's warnings,
+        which name content left outside its structure ("Relation is not
+        allowed"), or in debug a structure ended by another's name."""
+        if why:
+            return skip(why)
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to place the PDF's words")
+        if done != 0 or not os.path.exists(os.path.join(folder, "copy", "book.tex")):
+            return False
+
+        def words(path):
+            out = subprocess.run(["pdftotext", "-bbox", path, "-"], capture_output=True,
+                                 timeout=120).stdout.decode("utf-8", "replace")
+            return re.findall(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" '
+                              r'yMax="([\d.]+)">([^<]*)</word>', out)
+        for engine in engines:
+            built = {}
+            program, _, debug = engine.partition("+")
+            for name, block_out in (("with", False), ("bare", True)):
+                there = os.path.join(folder, "%s-%s" % (name, engine))
+                if not os.path.exists(os.path.join(there, "book.pdf")):
+                    shutil.copytree(os.path.join(folder, "copy"), there, dirs_exist_ok=True)
+                    text = read(folder, "copy", "book.tex")
+                    if block_out:
+                        text = texremediate.BABEL_BLOCK.sub("", text)
+                    if debug:
+                        text = re.sub(r"\A(\\DocumentMetadata\{[^}\n]*)\}\n",
+                                      r"\1, debug={tagpdf}}\n"
+                                      r"\\AtBeginDocument{\\tagpdfsetup{debug/log=v}}\n", text)
+                        if "debug={tagpdf}" not in text:
+                            return False
+                    with open(os.path.join(there, "book.tex"), "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    subprocess.run(["latexmk", "-" + program, "-interaction=nonstopmode",
+                                    "-halt-on-error", "book.tex"], cwd=there,
+                                   capture_output=True, text=True, timeout=600,
+                                   stdin=subprocess.DEVNULL)
+                if not os.path.exists(os.path.join(there, "book.pdf")):
+                    return False
+                built[name] = (os.path.join(there, "book.pdf"), [
+                    re.sub(r"\s*\[on line \d+\]|\s*on input line \d+", "", warning)
+                    for warning in re.findall(r"tagpdf(?: DEBUG)? Warning: [^\n]*",
+                                              read(there, "book.log"))])
+            one, other = words(built["with"][0]), words(built["bare"][0])
+            with_block = structure_tree(built["with"][0])
+            if with_block is None:
+                return skip("no pikepdf to read the PDF's structure")
+            if not (len(one) == len(other) > 20
+                    and [w[4] for w in one] == [w[4] for w in other]
+                    and max(abs(float(a) - float(b)) for p, q in zip(one, other)
+                            for a, b in zip(p[:4], q[:4])) < 0.02
+                    and len(with_block) > 10
+                    and with_block == structure_tree(built["bare"][0])
+                    and built["with"][1] == built["bare"][1]):
+                return False
+        return True
+
+    def page_check(path, expected, done, words=None):
+        """Whether a PDF's headings and paragraphs, from its first heading
+        on, are in the languages expected, [(role, language)], and its
+        Spans in another language than what's around them, words."""
+        if why:
+            return skip(why)
+        structure = pdf_structure(path)
+        if structure is None:
+            return skip("no pikepdf or pdfinfo to read the PDF's structure")
+        found = [(role, lang) for role, _, lang, _, _ in structure
+                 if role in ("H1", "H2", "P")]
+        first = next((i for i, (role, _) in enumerate(found) if role != "P"), len(found))
+        return done == 0 and found[first:] == expected and (words is None or [
+            (lang, text) for role, own, lang, text, around in structure
+            if role == "Span" and own and own != around] == words)
+
+    def other_built():
+        """The other master's copy, built with LuaLaTeX: it builds, and its
+        \\foreignlanguage of two paragraphs has its first in a Span, closed
+        before LaTeX's tagging ends the paragraph, which tagpdf warns of
+        otherwise ("Parent-Child 'pdf2:Sect' --> 'MC (realcontent)'.
+        Relation is not allowed!"), and its second a paragraph in French."""
+        if why:
+            return skip(why)
+        folder = os.path.join(masters, "copy")
+        if masters_status != 0 or not os.path.exists(os.path.join(folder, "answers.tex")):
+            return False
+        done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
+                               "-halt-on-error", "answers.tex"], cwd=folder,
+                              capture_output=True, text=True, timeout=600,
+                              stdin=subprocess.DEVNULL)
+        log = read(folder, "answers.log") if os.path.exists(
+            os.path.join(folder, "answers.log")) else ""
+        return done.returncode == 0 and "Relation is not allowed" not in log and page_check(
+            os.path.join(folder, "answers.pdf"),
+            [("H1", "en"), ("P", "en"), ("P", "en"), ("P", "fr")], 0,
+            [("fr", "r\u00e9ponse"), ("fr", "une autre"), ("fr", "Premier paragraphe.")])
+
+    def item_body():
+        """Whether the inline book's list item's body, after a declaration
+        in its label, is in the language around the label, as babel has it."""
+        if why:
+            return skip(why)
+        structure = pdf_structure(os.path.join(inline, "pdf", "org.example.babel.pdf"))
+        if structure is None:
+            return skip("no pikepdf or pdfinfo to read the PDF's structure")
+        return inline_status == 0 and [
+            lang for role, _, lang, _, _ in structure if role == "LBody"] == ["en"]
+
+    def builds(folder):
+        """Whether the copy without tagging builds, as the author's own
+        does, with pdfLaTeX."""
+        if why:
+            return skip(why)
+        if not os.path.exists(os.path.join(folder, "book.tex")):
+            return False
+        done = subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode",
+                               "-halt-on-error", "book.tex"], cwd=folder,
+                              capture_output=True, text=True, timeout=300,
+                              stdin=subprocess.DEVNULL)
+        return done.returncode == 0
+
+    block = texremediate.BABEL_BEGIN + texremediate.BABEL_SETUP + texremediate.babel_table() \
+        + texremediate.BABEL_END
+    return [
+        ("a book whose babel commands set a passage's language gets hooks babel runs as it "
+         "selects one, once, in its master's preamble",
+         lambda: status == 0 and master.count(texremediate.BABEL_BEGIN) == 1
+         and block + "\\begin{document}" in master
+         and "\\AddToHook { babel / * / afterextras } [ TIQ / babel ]" in master
+         and "\\TIQbabeltags{francais=fr, german=de, ngerman=de, spanish=es}\n" in master),
+        ("and nothing else of the author's changes for them: the chapters as written",
+         lambda: status == 0 and all(read(book, "copy", name) == text
+                                     for name, text in BABEL_FILES.items())),
+        ("the run counts them by language, babel's commands for the copy's language in a "
+         "page in another among them, a comment's not",
+         lambda: counted + " tagged in its language as LaTeX reads it, where babel or the "
+         "table has a tag for it, and a \\selectlanguage's inside a paragraph from the next "
+         "paragraph on." in said),
+        ("a copy without tagging gets them too, to be tagged where it's built with its "
+         "tagging, the run says so, and it builds with pdfLaTeX",
+         lambda: status == 0 and block + "\\begin{document}" in plain
+         and "\\DocumentMetadata" not in plain
+         and counted + " marked to be tagged in its language, which LaTeX does where the copy "
+             "is built with its tagging" in said and builds(os.path.join(book, "plain"))),
+        ("in the PDF from the book's own files, \\foreignlanguage's words are each a Span in "
+         "its language, in a paragraph, a heading, and its contents entry, babeltags' and "
+         "babel's alias's French, Latin by babel's own tag, and an English word in the "
+         "Spanish page; a language with no tag has none, nor has the running head over the "
+         "French heading, which babel sets in \\foreignlanguage too", spans),
+        ("a passage of a paragraph is in its language, the paragraph \\foreignlanguage's "
+         "words open keeps its own, what follows a passage is in what's around it, and the "
+         "Spanish page is Spanish after its English quotation; a chapter whose file selects "
+         "French is French, its heading too, and so are a chapter's file the master selects "
+         "French for before its \\include and a chapter the master sets after it",
+         paragraphs),
+        ("the run names the language babel has no tag for",
+         lambda: skip(why) if why else
+         "WARNING: pdf: babel has no language tag for klingon, so the PDF has the passages "
+         "the book's babel commands put in it in the language around them" in said
+         and "Wrote " + pdf + ": " in said
+         and counted + " tagged in its language where babel or the table has a tag for it, "
+             "and a \\selectlanguage's inside a paragraph from the next paragraph on, " in said),
+        ("every word is where the book built without them has it, the structure is the same "
+         "but for the Spans, and tagpdf warns of nothing more", lambda: unmoved(book, status)),
+        ("a copy made from a copy has them once",
+         lambda: again_status == 0 and again_master.count(texremediate.BABEL_BEGIN) == 1
+         and again_master.count(texremediate.BABEL_END) == 1),
+        ("a book whose babel commands name only its language, every page in it, gets none",
+         lambda: english_status == 0 and "\\DocumentMetadata" in english_master
+         and texremediate.BABEL_BEGIN not in english_master
+         and "babel's commands" not in english_said),
+        ("but one with a page in another language gets them, its passage in the book's "
+         "language another than the page's",
+         lambda: paged_status == 0 and paged_master.count(texremediate.BABEL_BEGIN) == 1
+         and "2 of babel's commands for a passage's language (english 2), each passage tagged "
+             "in its language as LaTeX reads it" in paged_said),
+        ("and in its PDF, the Spanish page is Spanish though it opens with babel's "
+         "English, which babel was in already, and its English quotation English",
+         lambda: page_check(os.path.join(paged, "pdf", "org.example.babel.pdf"), [
+             ("H1", "en-US"), ("P", "en-US"), ("H1", "es"), ("P", "es"), ("P", "en"),
+             ("P", "es")], paged_status)),
+        ("a page with no language of its own is in the book's, its region too, where "
+         "babel's commands haven't selected another than babel's main language, and the "
+         "master's text after a file in the one babel is left in there",
+         lambda: page_check(os.path.join(canadian, "pdf", "org.example.babel.pdf"), [
+             ("H1", "fr-CA"), ("P", "fr-CA"), ("P", "en"), ("P", "en"), ("H1", "en"),
+             ("P", "en")], canadian_status, [("fr", "mot")])),
+        ("and where babel doesn't begin a paragraph before it selects the language of "
+         "\\foreignlanguage's words, the paragraph they open keeps its own",
+         lambda: page_check(os.path.join(older, "pdf", "org.example.babel.pdf"), [
+             ("H1", "en"), ("P", "en"), ("P", "en")], older_status, [("fr", "Bonjour")])),
+        ("the book's other master gets them too, and the run counts its own",
+         lambda: masters_status == 0 and answers.count(texremediate.BABEL_BEGIN) == 1
+         and "1 of babel's commands for a passage's language (french 1), each passage tagged "
+             "in its language as LaTeX reads it, where babel or the table has a tag for it, "
+             "and a \\selectlanguage's inside a paragraph from the next paragraph on."
+             in masters_said
+         and "answers.tex with 1 file(s) only it reaches, 0 image(s) and drawing(s) given "
+             "alt text and 0 marked artifact, 3 of babel's commands for a passage's language, "
+             "each passage tagged in its language" in masters_said),
+        ("and that master's copy builds with tagging, a \\foreignlanguage of two paragraphs "
+         "tagged in its language, its Span closed before the paragraph", other_built),
+        ("a passage babel's otherlanguage or babeltags begin inside a paragraph is a Span to "
+         "its group's end, or to where LaTeX's tagging ends the paragraph, a table's cell, or "
+         "a list's label around it, a second its group begins ending there with it; what "
+         "begins after that inside it is in its language, a note's paragraph, the paragraph "
+         "after a display, \\foreignlanguage's words' too, the last paragraph whole, but not "
+         "a list item's body; a \\selectlanguage there sets what begins after the paragraph",
+         lambda: page_check(os.path.join(inline, "pdf", "org.example.babel.pdf"), [
+             ("H1", "en"), ("P", "en"), ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en"),
+             ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en"),
+             ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"),
+             ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en")],
+             inline_status, INLINE_SPANS) and item_body()),
+        ("and that book's copy, built with LuaLaTeX and with pdfLaTeX's tagging, has every "
+         "word and its structure as without them, but for the Spans, and tagpdf warns of "
+         "nothing more, in its debug code too",
+         lambda: unmoved(inline, inline_status, ("lualatex", "pdf", "lualatex+debug"))),
+        ("nor does a book that marks its passages with polyglossia",
+         lambda: poly_status == 0 and texremediate.BABEL_BEGIN not in poly_master
+         and "babel's commands" not in poly_said),
+        ("the commands are counted as babel reads them: an option before the name, a name "
+         "in capitals, babeltags' three, and selectlanguage as an environment; not one in a "
+         "comment, verbatim, named by a macro, or by a macro's parameter",
+         lambda: texremediate.babel_passages({
+             "a.tex": "\\babeltags{fr = french, de=ngerman}\n"
+                      "\\foreignlanguage[date]{ngerman}{vier} \\selectlanguage{French}\n"
+                      "\\textfr{a} \\begin{fr}b\\end{fr} {\\de c} \\textde{d}\n"
+                      "\\begin{selectlanguage}{english}e\\end{selectlanguage}\n"
+                      "% \\foreignlanguage{latin}{in a comment}\n"
+                      "\\verb|\\foreignlanguage{latin}{x}| \\foreignlanguage{\\mylang}{m}\n"
+                      "\\begin{otherlanguage*}{latin}z\\end{otherlanguage*} \\textit{i}\n"
+                      "\\newcommand{\\lang}[2]{\\foreignlanguage{#1}{#2}}\n"},
+             ["a.tex"]) == {"ngerman": 3, "french": 3, "english": 1, "latin": 1}
+         and texremediate.babel_tag("French") == "fr"
+         and texremediate.babel_tag("klingon") is None),
+    ]
+
 def case_unbuilt(work):
     """A file the book's own build makes, not made yet: the run stops."""
     os.makedirs(os.path.join(work, "figures"))
@@ -7650,6 +8229,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
+         ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",
+          case_babel_languages),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),
@@ -7685,6 +8266,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
 # The longest cases, started first when they run side by side.
 SLOW = {"a LaTeX book's PDF, from its own LaTeX", "a book made its own way, as OpenIntro is",
         "a LaTeX book's pages in another language, in its copy and its PDF",
+        "a LaTeX book's passages babel sets the language of, in its copy and its PDF",
         "the latex target", "a book of documents built on their own",
         "a book's citations and its bibliography", "a book set with packages tagging can't take"}
 

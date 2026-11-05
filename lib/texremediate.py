@@ -39,6 +39,7 @@ the conversion, so a decision reaches the element it was made about.
   own key for a language (`text/lang`) as the page's `\\include`-d file
   begins and set it back as it ends, and then every other page a file
   begins, and each chapter the master sets itself, is set to the copy's,
+  or to the one the book's babel commands have selected there (below),
   so none is in another's from the section around it; a document
   that `\\include`-s nothing is in its page's language, its
   `\\DocumentMetadata`'s, or from `\\begin{document}` where it has none.
@@ -46,6 +47,17 @@ the conversion, so a decision reaches the element it was made about.
   without tagging, nothing is tagged. A page of the master's own text,
   before its first `\\include` or a part or chapter it sets between them,
   has no file of its own for the hooks, and is counted.
+- **A passage babel puts in another language.** In every copy of a book
+  that loads babel and marks a passage in another language than the
+  copy's with babel's own commands (`\\foreignlanguage`, `otherlanguage`,
+  `\\selectlanguage`, and the like), hooks babel runs as it selects a
+  language, in the master's preamble, tag the passage in it where the
+  copy is built with LaTeX's tagging: `text/lang` for a paragraph or more,
+  and a Span of its own for `\\foreignlanguage`'s words, or for a passage
+  begun inside a paragraph, to its group's end or the paragraph's; after
+  it, the language around it, not the one babel goes back to. Nothing of
+  the author's changes but the master's preamble, and built without
+  tagging, nothing is tagged.
 
 The copy holds every .tex file the master reaches, at the same relative
 paths and with the same file modes, ready to be laid over the author's
@@ -446,9 +458,10 @@ LANGUAGES_BEGIN = "% Written for LaTeX's tagging: a page in another language tha
 LANGUAGES_END = "% End of the pages' languages.\n"
 LANGUAGES_SETUP = r"""% (languages.csv) is tagged in its own, set as LaTeX starts to read the
 % page's file and set back when the file ends, and every other page a file
-% begins, and each chapter the master sets itself, in the book's; not in
-% a group, which would end what the file defines for the files after it.
-% Without tagging, nothing is tagged.
+% begins, and each chapter the master sets itself, in the book's, or the
+% one the book's babel commands have selected there, where the copy tags
+% those; not in a group, which would end what the file defines for the
+% files after it. Without tagging, nothing is tagged.
 \ExplSyntaxOn
 \prop_gclear_new:N \g__tiq_language_prop
 \tl_clear_new:N \l__tiq_language_tl
@@ -467,12 +480,19 @@ LANGUAGES_SETUP = r"""% (languages.csv) is tagged in its own, set as LaTeX start
   { \tl_gset:Nn \g__tiq_language_book_tl {#1} }
 \cs_set_protected:Npn \__tiq_language_file:
   { \tl_set:Nx \l__tiq_language_file_tl { \CurrentFilePath / \CurrentFile } }
+\cs_set_protected:Npn \__tiq_language_book:
+  {
+    \tl_set_eq:NN \l__tiq_language_tl \g__tiq_language_book_tl
+    \cs_if_exist:NT \__tiq_babel_here:N { \__tiq_babel_here:N \l__tiq_language_tl }
+  }
 \AddToHook { file / before } [ TIQ / language ]
   {
     \__tiq_language_file:
     \prop_get:NVNT \g__tiq_language_prop \l__tiq_language_file_tl \l__tiq_language_tl
       {
         \bool_gset_true:N \g__tiq_language_file_bool
+        \tl_if_eq:NNT \l__tiq_language_tl \g__tiq_language_book_tl
+          { \__tiq_language_book: }
         \exp_args:NV \TIQpagelanguage \l__tiq_language_tl
       }
   }
@@ -481,14 +501,20 @@ LANGUAGES_SETUP = r"""% (languages.csv) is tagged in its own, set as LaTeX start
     \__tiq_language_file:
     \prop_if_in:NVT \g__tiq_language_prop \l__tiq_language_file_tl
       {
-        \par \TIQpagelanguage { }
+        \par
+        \tl_clear:N \l__tiq_language_tl
+        \cs_if_exist:NT \__tiq_babel_here:N { \__tiq_babel_here:N \l__tiq_language_tl }
+        \exp_args:NV \TIQpagelanguage \l__tiq_language_tl
         \bool_gset_false:N \g__tiq_language_file_bool
       }
   }
 \cs_set_protected:Npn \__tiq_language_own:
   {
     \bool_if:NF \g__tiq_language_file_bool
-      { \exp_args:NV \TIQpagelanguage \g__tiq_language_book_tl }
+      {
+        \__tiq_language_book:
+        \exp_args:NV \TIQpagelanguage \l__tiq_language_tl
+      }
   }
 \AddToHook { cmd / chapter / before } [ TIQ / language ] { \__tiq_language_own: }
 \ExplSyntaxOff
@@ -678,6 +704,383 @@ def page_languages_block(master, outline, page_languages, reference, page_files=
     return LANGUAGES_BEGIN + LANGUAGES_SETUP + "".join(lines) + LANGUAGES_END, marked, unmarked
 
 
+# A passage the book's own babel commands put in another language, tagged
+# in it where the copy is built with LaTeX's tagging. babel sets the
+# passage's hyphenation and words and tags nothing (LATEX-NOTES); the
+# pages have \foreignlanguage's and otherlanguage's passages as Pandoc
+# reads them, a span or a div with its language, which the PDF from the
+# pages tags (latexbuild's \oerlang and oerlanguage), and the copy, which
+# is the author's markup, had nothing. babel runs a hook of LaTeX's each
+# time it selects a language, after its own settings for it
+# (babel/*/afterextras): for \selectlanguage, otherlanguage,
+# otherlanguage*, \foreignlanguage*, and \foreignlanguage, and for
+# babeltags' commands, which are these; and another before
+# \foreignlanguage's words (babel/*/foreign), as it sets them with
+# \BabelText (read in babel.sty 26.13). So the block's hooks, in the
+# master's preamble, are all the copy needs. A passage of a paragraph or
+# more has LaTeX's key for a language (text/lang) set as babel selects it,
+# in the group babel's command makes, so what it begins takes it, and the
+# group's end sets it back. A passage otherlanguage or otherlanguage*
+# begins inside a paragraph, as babeltags' {\fr un mot} does, is a Span
+# with its /Lang from there to the group's end, a second the group begins
+# ending there with it, and \foreignlanguage's words are a Span of their
+# own, opened in the paragraph, as \oerlang opens one, so the paragraph
+# keeps its language: with text/lang set as babel selects their language,
+# a paragraph that begins with them took it whole, where babel doesn't
+# begin the paragraph before it selects the language (measured with
+# babel's own command for that emptied; babel 26.13 begins it where LaTeX
+# has \GetDocumentProperties). Where LaTeX's tagging ends a structure
+# around such a Span before that, the Span ends first: the block sets
+# tagpdf's \tag_struct_end: again, once tagging is known, to end any Span
+# of its own that is the structure begun last, since tagpdf's ends the
+# structure begun last, whatever it was begun for (read in tagpdf 1.0h),
+# and so had ended the Span in the paragraph's place, the next paragraph
+# inside the one left open, or in a table's cell's or a list's label's,
+# which veraPDF's PDF/UA-2 profile failed (the sixth review); and
+# \tag_struct_end:n, which names what it ends, as LaTeX's tagging does for
+# a paragraph a tabular begins in, since tagpdf's debug code checks that
+# name first and warned of the Span there (the seventh review). What
+# begins inside the passage is in its language by the key, which the words
+# set too once their Span is open: its next paragraphs, the paragraph
+# after a display, a list, a tabular, a box, or an [H] float inside it,
+# and a note's paragraph; the last paragraph that begins inside it is in
+# it whole, with any words after the passage's end. But where a Span of
+# the block's ends first at another structure's end than a paragraph's
+# text (\UseStructureName{para/textblock}), the key is emptied for the
+# rest of the group, since LaTeX's tagging begins a list item's body in
+# the group of a declaration in its label (\item[\fr d\'ej\`a vu]), whose
+# language babel leaves at the label's end, and the body had been French.
+# \BabelText is set again as a \long macro, since babel's \BabelWrapText
+# makes one that isn't, and stopped LaTeX on words that hold a paragraph
+# break ("Paragraph ended before \BabelText was complete", the fifth
+# review). A \selectlanguage inside a paragraph sets what begins after the
+# paragraph: a Span from it to the paragraph's end was empty where it ends
+# a paragraph, as an author's \selectlanguage{english} at a file's end
+# does. Not a \selectlanguage of a language babel is in already, its
+# region aside, as the block last saw babel's in the group it's in, or
+# babel's main one where it has seen none: babel restores a language so
+# after a group, where the group's end has set text/lang back already, and
+# the page needn't be in babel's language. A page languages.csv puts in
+# Spanish, babel's English throughout, had been English after an English
+# quotation in it, to its end, and from a \selectlanguage{english} at its
+# head, which an author may give every chapter; and by name, under the
+# \DocumentMetadata{lang=en-US} a project in American English gives a
+# tagged copy, babel's main language was american, and the author's
+# english another (the fifth review). Only from begindocument/end: babel
+# selects languages as it reads the .aux file at \begin{document}, where
+# the name of babel's command, which \IfBabelSelectorTF tests, isn't set
+# yet and stopped LaTeX ("Undefined control sequence"), and it selects the
+# book's own there; and not once the last page is out (enddocument/
+# afterlastpage), where it reads the .aux file again. Where the copy tags
+# its pages' languages too (page_languages_block), a page with no language
+# of its own, which those hooks give the book's, is in babel's where babel
+# is in another language than its main one there (\__tiq_babel_here:N), as
+# a \selectlanguage{french} the master sets before a chapter's \include,
+# or before a \chapter of its own, puts it: the page is in the language
+# LaTeX sets it in, as where no page is in another language and those
+# hooks aren't written; a page languages.csv puts in a language begins in
+# it, whatever babel's; and the master's text after a file is in babel's
+# where babel is left in another, where it had been in the file's page's,
+# if a page elsewhere had a row (the fifth review). A language's tag is
+# the table's the reading uses for a preamble's language
+# (latexsource.BABEL), so babel's language for the book is tagged as the
+# reading names the book's language from it, else babel's own
+# (\localeinfo*{tag.bcp47}), latin's la: babel's german is de-1901 by its
+# own and de by the table, and babel's alias francais has no tag of
+# babel's. A language with neither is in the language around it, and
+# LaTeX's log names it (Package TIQ Warning). Measured on TeX Live 2026
+# (LuaLaTeX, babel 26.13): a paragraph set by otherlanguage,
+# otherlanguage*, \foreignlanguage*, or \selectlanguage, a chapter whose
+# file selects French, babeltags' declaration and otherlanguage* inside a
+# paragraph, two in one group, a note inside one, an otherlanguage begun
+# on a paragraph's last line holding a paragraph break, a declaration
+# around a display, around a list, in a table's cell, two there, and in a
+# list's label, and \foreignlanguage's words in a paragraph, heading,
+# contents entry, caption, note, table cell, list label, link, box, and a
+# formula's \text, and around a display, each in its language, the running
+# head over a French section, which babel sets in \foreignlanguage too, an
+# artifact with no Span; every word where it was without the block, to
+# under a hundredth of a point, and the structure the same but for the
+# Spans, which veraPDF's PDF/UA-2 profile passes. Without tagging, nothing
+# is tagged: pdfLaTeX builds the copy as before, TeX Live 2023's (babel
+# 24.1) too. The block begins and ends with these lines, so a copy made
+# from a copy has it replaced.
+BABEL_BEGIN = "% Written for LaTeX's tagging: a passage the book's babel commands put in\n"
+BABEL_END = "% End of babel's languages.\n"
+BABEL_SETUP = r"""% another language is tagged in it, set as babel selects the language and
+% set back as babel's group ends, \foreignlanguage's words a Span of their
+% own, as is a passage begun inside a paragraph, to its group's end or
+% where LaTeX's tagging ends what's around it, and a page in no language
+% of its own in babel's; the language's tag the table's below, else
+% babel's own. Without tagging, nothing is tagged.
+\ExplSyntaxOn
+\prop_gclear_new:N \g__tiq_babel_prop
+\seq_gclear_new:N \g__tiq_babel_warned_seq
+\tl_clear_new:N \l__tiq_babel_tl
+\str_clear_new:N \l__tiq_babel_str
+\str_clear_new:N \l__tiq_babel_part_str
+\str_clear_new:N \l__tiq_babel_here_str
+\str_gclear_new:N \g__tiq_babel_main_str
+\seq_gclear_new:N \g__tiq_babel_open_seq
+\seq_gclear_new:N \g__tiq_babel_struct_seq
+\tl_clear_new:N \l__tiq_babel_id_tl
+\tl_gclear_new:N \g__tiq_babel_text_tl
+\int_if_exist:NF \g__tiq_babel_id_int { \int_new:N \g__tiq_babel_id_int }
+\bool_if_exist:NF \l__tiq_babel_closed_bool { \bool_new:N \l__tiq_babel_closed_bool }
+\bool_if_exist:NF \g__tiq_babel_bool { \bool_new:N \g__tiq_babel_bool }
+\bool_gset_false:N \g__tiq_babel_bool
+\cs_set_protected:Npn \TIQbabeltags #1
+  { \prop_gput_from_keyval:Nn \g__tiq_babel_prop {#1} }
+\cs_set_protected:Npn \__tiq_babel_tag:
+  {
+    \prop_get:NVNF \g__tiq_babel_prop \languagename \l__tiq_babel_tl
+      { \tl_set:Ne \l__tiq_babel_tl { \localeinfo* { tag.bcp47 } } }
+  }
+\cs_set_protected:Npn \__tiq_babel_part:NN #1#2
+  {
+    \tl_if_empty:NTF #1
+      { \str_set:Ne #2 { ? \languagename } }
+      {
+        \str_set:NV #2 #1
+        \regex_replace_once:nnN { \A([A-Za-z]+)(-[A-Za-z]{4})?(-.*)?\Z } { \1\2 } #2
+      }
+  }
+\msg_set:nnn { TIQ } { babel-untagged }
+  { babel's~language~#1~has~no~language~tag:~its~text~is~in~the~language~around~it. }
+\cs_set_protected:Npn \__tiq_babel_warn:n #1
+  {
+    \str_set:Ne \l__tiq_babel_str { #1 : \languagename }
+    \seq_if_in:NVF \g__tiq_babel_warned_seq \l__tiq_babel_str
+      {
+        \seq_gput_right:NV \g__tiq_babel_warned_seq \l__tiq_babel_str
+        \str_set:Ne \l__tiq_babel_str { \languagename }
+        \exp_args:NnnV \msg_warning:nnn { TIQ } { babel- #1 } \l__tiq_babel_str
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_set:n #1
+  { \tagpdfsetup { text / lang = {#1} } }
+\cs_set_protected:Npn \__tiq_babel_select:
+  {
+    \tl_if_empty:NTF \l__tiq_babel_tl
+      { \__tiq_babel_warn:n { untagged } }
+      {
+        \mode_if_horizontal:T { \IfBabelSelectorTF { select } { } { \__tiq_babel_inline: } }
+        \exp_args:NV \__tiq_babel_set:n \l__tiq_babel_tl
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_open:
+  {
+    \int_gincr:N \g__tiq_babel_id_int
+    \seq_gput_right:Nx \g__tiq_babel_open_seq { \int_use:N \g__tiq_babel_id_int }
+    \tag_mc_end_push:
+    \exp_args:Ne \tag_struct_begin:n { tag = Span , lang = \l__tiq_babel_tl }
+    \seq_gput_right:Nx \g__tiq_babel_struct_seq { \tag_get:n { struct_num } }
+    \tag_mc_begin:n { }
+  }
+\cs_set_protected:Npn \__tiq_babel_inline:
+  {
+    \__tiq_babel_open:
+    \cs_gset_protected:cpx { __tiq_babel_close_ \int_use:N \g__tiq_babel_id_int : }
+      { \__tiq_babel_close:n { \int_use:N \g__tiq_babel_id_int } }
+    \exp_args:Nc \group_insert_after:N
+      { __tiq_babel_close_ \int_use:N \g__tiq_babel_id_int : }
+  }
+\cs_set_protected:Npn \__tiq_babel_close:n #1
+  {
+    \seq_if_in:NnT \g__tiq_babel_open_seq {#1}
+      { \__tiq_babel_close_to:n {#1} }
+  }
+\cs_set_protected:Npn \__tiq_babel_pop:
+  {
+    \seq_gpop_right:NN \g__tiq_babel_struct_seq \l__tiq_babel_id_tl
+    \seq_gpop_right:NN \g__tiq_babel_open_seq \l__tiq_babel_id_tl
+  }
+\cs_set_protected:Npn \__tiq_babel_close_one:
+  {
+    \__tiq_babel_pop:
+    \tag_mc_if_in:T { \tag_mc_end: }
+    \__tiq_babel_struct_end:
+    \tag_mc_begin_pop:n { }
+  }
+\cs_set_protected:Npn \__tiq_babel_before_end:
+  {
+    \bool_set_false:N \l__tiq_babel_closed_bool
+    \__tiq_babel_end_inner:
+    \bool_if:NT \l__tiq_babel_closed_bool
+      {
+        \str_if_eq:eeF { \tag_get:n { struct_tag } } { \g__tiq_babel_text_tl }
+          { \__tiq_babel_set:n { } }
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_end_inner:
+  {
+    \seq_get_right:NNT \g__tiq_babel_struct_seq \l__tiq_babel_id_tl
+      {
+        \str_if_eq:eeT { \l__tiq_babel_id_tl } { \tag_get:n { struct_num } }
+          {
+            \bool_set_true:N \l__tiq_babel_closed_bool
+            \__tiq_babel_pop:
+            \tag_mc_if_in:T { \tag_mc_end: }
+            \__tiq_babel_struct_end:
+            \tag_mc_begin_pop:n { }
+            \tag_mc_if_in:T { \tag_mc_end: }
+            \__tiq_babel_end_inner:
+          }
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_close_to:n #1
+  {
+    \__tiq_babel_close_one:
+    \str_if_eq:VnF \l__tiq_babel_id_tl {#1} { \__tiq_babel_close_to:n {#1} }
+  }
+\cs_set_protected:Npn \__tiq_babel_language:
+  {
+    \bool_if:NT \g__tiq_babel_bool
+      {
+        \__tiq_babel_tag:
+        \__tiq_babel_part:NN \l__tiq_babel_tl \l__tiq_babel_part_str
+        \str_if_empty:NT \l__tiq_babel_here_str
+          { \str_set_eq:NN \l__tiq_babel_here_str \g__tiq_babel_main_str }
+        \str_if_eq:NNTF \l__tiq_babel_part_str \l__tiq_babel_here_str
+          { \IfBabelSelectorTF { select } { } { \__tiq_babel_passage: } }
+          {
+            \str_set_eq:NN \l__tiq_babel_here_str \l__tiq_babel_part_str
+            \__tiq_babel_passage:
+          }
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_passage:
+  { \IfBabelSelectorTF { foreign } { } { \__tiq_babel_select: } }
+\cs_set_protected:Npn \__tiq_babel_span:n #1
+  {
+    \mode_leave_vertical:
+    \__tiq_babel_open:
+    \exp_args:NV \__tiq_babel_set:n \l__tiq_babel_tl
+    \exp_args:Ne \__tiq_babel_words:nn { \int_use:N \g__tiq_babel_id_int } {#1}
+  }
+\cs_set:Npn \__tiq_babel_words:nn #1#2 { #2 \__tiq_babel_close:n {#1} }
+\cs_set_protected:Npn \__tiq_babel_words:
+  {
+    \bool_if:NT \g__tiq_babel_bool
+      {
+        \__tiq_babel_tag:
+        \tl_if_empty:NTF \l__tiq_babel_tl
+          { \__tiq_babel_warn:n { untagged } }
+          {
+            \cs_set_eq:NN \__tiq_babel_text:n \BabelText
+            \cs_set:Npn \BabelText ##1 { \__tiq_babel_text:n { \__tiq_babel_span:n {##1} } }
+          }
+      }
+  }
+\cs_set_protected:Npn \__tiq_babel_here:N #1
+  {
+    \bool_if:NT \g__tiq_babel_bool
+      {
+        \__tiq_babel_tag:
+        \__tiq_babel_part:NN \l__tiq_babel_tl \l__tiq_babel_part_str
+        \str_if_eq:NNF \l__tiq_babel_part_str \g__tiq_babel_main_str
+          { \tl_if_empty:NF \l__tiq_babel_tl { \tl_set_eq:NN #1 \l__tiq_babel_tl } }
+      }
+  }
+\AddToHook { babel / * / afterextras } [ TIQ / babel ] { \__tiq_babel_language: }
+\AddToHook { babel / * / foreign } [ TIQ / babel ] { \__tiq_babel_words: }
+\AddToHook { begindocument / end } [ TIQ / babel ]
+  {
+    \bool_lazy_and:nnT
+      { \cs_if_exist_p:N \IfBabelSelectorTF }
+      { \keys_if_exist_p:nn { __tag / setup } { text / lang } }
+      {
+        \__tiq_babel_tag:
+        \__tiq_babel_part:NN \l__tiq_babel_tl \l__tiq_babel_part_str
+        \str_gset_eq:NN \g__tiq_babel_main_str \l__tiq_babel_part_str
+        \bool_gset_true:N \g__tiq_babel_bool
+        \tl_gset:Ne \g__tiq_babel_text_tl
+          {
+            \cs_if_exist:NTF \UseStructureName
+              { \UseStructureName { para / textblock } } { text }
+          }
+        \cs_if_exist:NF \__tiq_babel_struct_end:
+          {
+            \cs_gset_eq:NN \__tiq_babel_struct_end: \tag_struct_end:
+            \cs_gset_protected:Npn \tag_struct_end:
+              { \__tiq_babel_before_end: \__tiq_babel_struct_end: }
+            \cs_gset_eq:NN \__tiq_babel_struct_end:n \tag_struct_end:n
+            \cs_gset_protected:Npn \tag_struct_end:n #1
+              { \__tiq_babel_before_end: \__tiq_babel_struct_end:n {#1} }
+          }
+      }
+  }
+\AddToHook { enddocument / afterlastpage } [ TIQ / babel ]
+  { \bool_gset_false:N \g__tiq_babel_bool }
+\ExplSyntaxOff
+"""
+
+
+def babel_table(table=None):
+    """The block's lines giving the tag for each of babel's names in table
+    (latexsource.BABEL's), a few to a line."""
+    items = ["%s=%s" % pair for pair in (table or latexsource.BABEL).items()]
+    return "".join("\\TIQbabeltags{%s}\n" % ", ".join(items[at:at + 4])
+                   for at in range(0, len(items), 4))
+
+
+BABEL_BLOCK = re.compile(re.escape(BABEL_BEGIN) + r".*?" + re.escape(BABEL_END), re.S)
+# babel's commands for a passage in another language, as the copy counts
+# them: \foreignlanguage and \foreignlanguage*, \selectlanguage, and
+# otherlanguage, otherlanguage*, and selectlanguage as environments, each
+# with its language's name, after an option where it has one ([date]).
+BABEL_COMMAND = re.compile(
+    r"\\(?:foreignlanguage\*?|selectlanguage)(?![A-Za-z@])\s*(?:\[[^]]*\]\s*)?"
+    r"\{\s*([^{}\\%\s#]+)\s*\}"
+    r"|\\begin\s*\{(?:otherlanguage\*?|selectlanguage)\}\s*(?:\[[^]]*\]\s*)?"
+    r"\{\s*([^{}\\%\s#]+)\s*\}")
+# babeltags' names, each for a language (\babeltags{fr = french}), which
+# give it a command for its \foreignlanguage (\textfr) and one for its
+# otherlanguage* (\fr, \begin{fr}).
+BABEL_TAGS_DECLARED = re.compile(r"\\babeltags\s*\{([^{}]*)\}")
+
+
+def babel_tag(name):
+    """The table's tag for one of babel's names for a language
+    (latexsource.BABEL), as written or in lower case, or None."""
+    return latexsource.BABEL.get(name) or latexsource.BABEL.get(name.lower())
+
+
+def babel_passages(texts, files, counted=None):
+    """{babel's name for a language: how many} of the book's own babel
+    commands that set a passage's language (BABEL_COMMAND, and babeltags'
+    for each name a file of files declares), in the code of counted
+    (files where it's None), all in texts, as they're written, a macro's
+    definition among them, though not a name a macro or its parameter
+    gives (\\foreignlanguage{#1}); each name as written, or in lower case
+    where only that is the table's (latexsource.BABEL), as babel takes a
+    name."""
+    tags = {}
+    for name in files:
+        for m in latexsource.code_matches(BABEL_TAGS_DECLARED, texts[name]):
+            for item in m.group(1).split(","):
+                short, _, language = (part.strip() for part in item.partition("="))
+                if re.fullmatch(r"[A-Za-z]+", short) and language:
+                    tags[short] = language
+    babeltags = re.compile(
+        r"\\(?:text)?(%s)(?![A-Za-z@])|\\begin\s*\{(%s)\}" % (("|".join(tags),) * 2)) \
+        if tags else None
+    found = {}
+    for name in files if counted is None else counted:
+        text = texts[name]
+        spans = latexsource.skip_spans(text)
+        named = [m.group(1) or m.group(2)
+                 for m in latexsource.code_matches(BABEL_COMMAND, text, spans)]
+        if babeltags:
+            named += [tags[m.group(1) or m.group(2)]
+                      for m in latexsource.code_matches(babeltags, text, spans)]
+        for language in named:
+            if language not in latexsource.BABEL and language.lower() in latexsource.BABEL:
+                language = language.lower()
+            found[language] = found.get(language, 0) + 1
+    return found
+
+
 def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
               headers=None, definitions=None, definitions_name="", seen=None,
               mathml=True, standard=("ua-2",), written=(), picture_paths=True,
@@ -693,7 +1096,12 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     it whole, as its \\DocumentMetadata's where it has one: in
     languages_marked where the copy builds with LaTeX's tagging
     (tags_itself), else in languages_untagged, and in languages_unmarked
-    one it can't; page_files: {index of the master's \\include: its
+    one it can't; and in every copy of a book that loads babel, each
+    passage its own babel commands set the language of marked to be
+    tagged in it (BABEL_SETUP), where a command names another language
+    than the copy's or a page is in another, the commands counted in
+    babel_marked or babel_untagged as languages_marked's are
+    (babel_passages); page_files: {index of the master's \\include: its
     page}, as the reading made them (page_languages_block); headers:
     {place: headers}, a person's table-header decisions, declared for
     tagging when the copy is tagged (declare), since without tagging
@@ -820,6 +1228,28 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         totals["languages_marked" if tagged_copy else "languages_untagged"] = marked
         totals["languages_unmarked"] = unmarked
         totals["languages_tagged"] = int(tagged_copy)
+    # The passages the book's own babel commands set the language of, as
+    # the book has them now, in every copy as the pages' languages are
+    # (Rob, 2026-11-05: "If an author is running TextbookImprover against
+    # their source, they are expecting us to remediate it"): a copy made
+    # from a copy has its block written again, or taken out where nothing
+    # needs it, as in a book whose commands all name the copy's language
+    # (a \selectlanguage{english} at each chapter's head) and whose pages
+    # are all in it. In a page marked in another, a passage in the copy's
+    # language is in another than the page's. A file another master's copy
+    # wrote is counted there.
+    texts[master] = BABEL_BLOCK.sub("", texts[master])
+    if master not in written and "babel" in preamble_packages(texts, master, base)[0]:
+        begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, texts[master])
+        found = babel_passages(texts, files)
+        if begin and found and (marks or any(
+                not languages.same_language(babel_tag(name) or "", reference)
+                for name in found)):
+            at = begin[0].start()
+            texts[master] = (texts[master][:at] + BABEL_BEGIN + BABEL_SETUP + babel_table()
+                             + BABEL_END + texts[master][at:])
+            totals["babel_marked" if tags_itself(texts[master]) else "babel_untagged"] = \
+                babel_passages(texts, files, [f for f in files if f not in written])
     for name in files:
         if name in written:
             continue

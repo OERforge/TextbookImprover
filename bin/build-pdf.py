@@ -1538,6 +1538,42 @@ def latex_said(log_path):
     return said, source
 
 
+# The plain writer's warning of a formula it can't write as text, as the
+# PDF filter's call gives it for a heading's bookmark (pdf-target.lua,
+# bookmarks), which says the formula is rendered as TeX, when the page
+# sets it and only the bookmark has its TeX. Where texmath can't read the
+# TeX, a command it doesn't know, the line ends with a colon, and texmath's
+# reason follows on lines of their own; Pandoc indents each line of a
+# warning after its first two spaces, a formula's own second line among
+# them (showLogMessage, Logging.hs; logOutput, Class/IO.hs; 3.9, 3.12.1,
+# and 3.13).
+BOOKMARK_WARNING = "[WARNING] Could not convert TeX math {}, rendering as TeX\n"
+
+
+def bookmark_said(stderr, record_path, where="the PDF's bookmarks"):
+    """(Pandoc's stderr without the plain writer's warnings of the
+    formulas in headings the PDF filter left as their TeX in where, from
+    its record at record_path (OER_PDF_RECORD), texmath's reason with
+    each where it gives one, the run's note of them, or None where there
+    are none)."""
+    try:
+        with open(record_path, encoding="utf-8") as fh:
+            kept = json.load(fh).get("bookmark_tex")
+    except (OSError, ValueError, AttributeError):
+        kept = None
+    kept = [str(tex) for tex in kept] if isinstance(kept, list) else []
+    for tex in kept:
+        line = BOOKMARK_WARNING.format(tex)[:-1].replace("\n", "\n  ")
+        stderr = re.sub(re.escape(line) + r"(?::\n(?:  .*\n)*|\n)", "", stderr, count=1)
+    if not kept:
+        return stderr, None
+    shown = list(dict.fromkeys(" ".join(tex.split()) for tex in kept))
+    return stderr, (f"NOTE: {len(kept)} formula(s) in headings are their TeX in {where}, "
+                    "which Pandoc's plain writer can't write as text, as it writes the "
+                    "others: " + "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
+                    + ". The headings set them as formulas.")
+
+
 def build(base, name, resolved, keep, intermediates=None, latex_only=False,
           as_latex=False):
     project = resolved.project
@@ -1650,14 +1686,24 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # (latexbuild.STATIC_FONTS), for the LaTeX the PDF is made from.
         template = latexbuild.book_template(work)
         filters = filters + (["--template", template] if template else [])
+        # What the filter records of the headings' formulas (bookmark_said).
+        record_path = os.path.join(work, "pdf-record.json")
+        environment["OER_PDF_RECORD"] = record_path
         if keep or latex_only:
             # The LaTeX as the PDF was made from it, for reading when
-            # something needs explaining; not needed to build.
-            subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s",
-                            book_json, "-o",
-                            os.path.join(os.path.abspath(out_dir),
-                                         "book.tex")] + filters,
-                           cwd=base, env=environment)
+            # something needs explaining; not needed to build. What
+            # Pandoc said is said by the build after it, when there's one.
+            kept = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s",
+                                   book_json, "-o",
+                                   os.path.join(os.path.abspath(out_dir),
+                                                "book.tex")] + filters,
+                                  cwd=base, env=environment, capture_output=True, text=True)
+            if latex_only:
+                said, note = bookmark_said(kept.stderr, record_path,
+                                           "the bookmarks of a PDF made from the LaTeX")
+                sys.stderr.write(said)
+                if note:
+                    print(note, file=sys.stderr)
             shutil.copy(book_json, os.path.join(out_dir, "book.json"))
         if latex_only:
             print(os.path.abspath(os.path.join(out_dir, "book.tex")))
@@ -1710,9 +1756,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 "the pdf.metadata file) has the measure.")
             if line:
                 print(line, file=sys.stderr)
-        missing, others = latexbuild.missing_characters(result.stderr.splitlines())
+        said, note = bookmark_said(result.stderr, record_path)
+        missing, others = latexbuild.missing_characters(said.splitlines())
         if others:
             print("\n".join(others), file=sys.stderr)
+        if note:
+            print(note, file=sys.stderr)
         if missing:
             # One line, not Pandoc's one warning per occurrence.
             print(latexbuild.missing_warning(
@@ -1783,11 +1832,16 @@ def write_latex(base, name, resolved, project, document, out_dir):
         # Pandoc's template with the font setting read before its faces
         # (latexbuild.STATIC_FONTS), as the PDF target's is.
         template = latexbuild.book_template(work)
+        record_path = os.path.join(work, "pdf-record.json")
         done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
                               + filters + (["--template", template] if template else []),
-                              cwd=base, env=environment,
+                              cwd=base, env=dict(environment, OER_PDF_RECORD=record_path),
                               capture_output=True, text=True)
-        sys.stderr.write(done.stderr)
+        said, note = bookmark_said(done.stderr, record_path,
+                                   "the bookmarks of a PDF made from the LaTeX")
+        sys.stderr.write(said)
+        if note:
+            print(note, file=sys.stderr)
         if done.returncode:
             return done.returncode
     finally:

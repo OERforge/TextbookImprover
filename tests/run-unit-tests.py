@@ -3158,6 +3158,131 @@ def check_tagged_copy_fonts():
     ]
 
 
+def check_bookmark_said():
+    """The PDF build's reading of what the filter records of the formulas
+    in headings it left as their TeX in the bookmarks (build-pdf.py,
+    bookmark_said): the plain writer's warning of each taken out of what
+    Pandoc said, once for each time it's recorded, with texmath's reason
+    on the lines after it where it gives one, and a formula's second line
+    as Pandoc indents it, another formula's warning and another warning's
+    reason kept, and the run's one note naming them; nothing recorded, or
+    no record, and Pandoc's words are as they were, with no note."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+    work = tempfile.mkdtemp(prefix="unit-bookmarks-")
+    atexit.register(shutil.rmtree, work, True)
+    record = os.path.join(work, "record.json")
+    with open(record, "w", encoding="utf-8") as fh:
+        json.dump({"bookmark_tex": ["\\frac{a}{b}", "\\frac{a}{b}", "\\foo{x}",
+                                    "\\frac{a}\n{b}"]}, fh)
+    empty = os.path.join(work, "empty.json")
+    with open(empty, "w", encoding="utf-8") as fh:
+        fh.write('{"bookmark_tex":{}}')
+    warning = build_pdf.BOOKMARK_WARNING
+    stderr = (warning.format("\\frac{a}{b}")
+              + "[WARNING] Could not convert TeX math \\foo{x}, rendering as TeX:\n"
+              "  \\foo{x}\n      ^\n  unexpected control sequence \\foo\n"
+              "[WARNING] Something else:\n  its reason\n"
+              + warning.format("\\frac{a}{b}")
+              + "[WARNING] Could not convert TeX math \\frac{a}\n  {b}, rendering as TeX\n"
+              + warning.format("\\sqrt{x}") + warning.format("\\frac{a}{b}"))
+    said, note = build_pdf.bookmark_said(stderr, record)
+    kept, none = build_pdf.bookmark_said(stderr, empty)
+    missing = build_pdf.bookmark_said(stderr, os.path.join(work, "none.json"))
+    return [
+        ("the plain writer's warnings of the recorded formulas are taken out, once for each "
+         "time recorded, texmath's reason with one and a formula's second line with another, "
+         "and the run's other words, another warning's reason, another formula's warning, "
+         "and a third of a formula recorded twice kept",
+         lambda: said == "[WARNING] Something else:\n  its reason\n"
+         + warning.format("\\sqrt{x}") + warning.format("\\frac{a}{b}")),
+        ("the run says once how many are their TeX in the bookmarks, naming each once",
+         lambda: note == "NOTE: 4 formula(s) in headings are their TeX in the PDF's bookmarks, "
+         "which Pandoc's plain writer can't write as text, as it writes the others: "
+         "\\frac{a}{b}; \\foo{x}; \\frac{a} {b}. The headings set them as formulas."),
+        ("with none recorded, or no record, Pandoc's words are as they were and there's no "
+         "note", lambda: (kept, none) == (stderr, None) and missing == (stderr, None)),
+    ]
+
+
+def check_heading_bookmarks():
+    """The PDF filter's headings' formulas (pdf-target.lua, bookmarks), in
+    the LaTeX it writes: a formula Pandoc's plain writer writes as text is
+    that text in \\texorpdfstring's second argument, the heading's bookmark,
+    its spaces one, a script in parentheses without them, and the formula
+    set as written; one it can't is left to the writer, its TeX, and
+    recorded (OER_PDF_RECORD), a fraction, a command texmath doesn't know,
+    and a formula over two lines, and the build takes Pandoc's warnings of
+    them out of what it said (bookmark_said); one ending in a comment ends
+    with a line end, so the comment doesn't take its \\) with it, as the
+    writer writes one; and a formula outside a heading is the writer's."""
+    if not shutil.which("pandoc"):
+        return [("a heading's formula is its text in the bookmark",
+                 lambda: print("  skip  no pandoc to run the filter") or True)]
+
+    def math(tex):
+        return {"t": "Math", "c": [{"t": "InlineMath"}, tex]}
+
+    def header(*inlines):
+        return {"t": "Header", "c": [2, ["", [], []], list(inlines)]}
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    api = [int(n) for n in subprocess.run(
+        ["pandoc", "-f", "markdown", "-t", "json"], input="x", capture_output=True,
+        text=True).stdout.split('"pandoc-api-version":[', 1)[1].split("]", 1)[0].split(",")]
+    doc = {"pandoc-api-version": api, "meta": {}, "blocks": [
+        header({"t": "Str", "c": "Power"}, {"t": "Space"}, math("x^2 + y_1"),
+               {"t": "Space"}, math("\\bar{x}_n"), {"t": "Space"},
+               math("a\\text{~~~to~~~}b")),
+        header({"t": "Str", "c": "Fraction"}, {"t": "Space"}, math("\\frac{a}{b}")),
+        header({"t": "Str", "c": "Unknown"}, {"t": "Space"}, math("\\foo{x}")),
+        header({"t": "Str", "c": "Lines"}, {"t": "Space"}, math(" \\frac{a}\n{b} ")),
+        header({"t": "Str", "c": "Remarked"}, {"t": "Space"}, math("y % a remark")),
+        header({"t": "Str", "c": "Displayed"}, {"t": "Space"},
+               {"t": "Math", "c": [{"t": "DisplayMath"}, "q^2"]}),
+        {"t": "Para", "c": [math("z^2")]}]}
+    work = tempfile.mkdtemp(prefix="unit-bookmarks-lua-")
+    atexit.register(shutil.rmtree, work, True)
+    record = os.path.join(work, "record.json")
+    done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "--wrap=none", "--lua-filter",
+                           os.path.join(ROOT, "bin", "pdf-target.lua")],
+                          input=json.dumps(doc), capture_output=True, text=True,
+                          env=dict(os.environ, OER_PDF_RECORD=record, OER_MEASURES=""))
+    latex = done.stdout
+    try:
+        with open(record, encoding="utf-8") as fh:
+            kept = json.load(fh).get("bookmark_tex")
+    except (OSError, ValueError):
+        kept = None
+    said, note = load(os.path.join(ROOT, "bin", "build-pdf.py"),
+                      "build_pdf").bookmark_said(done.stderr, record)
+    return [
+        ("a formula the plain writer writes as text is its text in the bookmark, set as "
+         "written, its spaces one and a script without parentheses (Pandoc " + version + ")",
+         lambda: "\\texorpdfstring{\\(x^2 + y_1\\)}{x² + y₁}" in latex
+         and "\\texorpdfstring{\\(\\bar{x}_n\\)}{x̄\\_n}" in latex
+         and "\\texorpdfstring{\\(a\\text{~~~to~~~}b\\)}{a to b}" in latex
+         and "{Power x² + y₁ x̄\\_n a to b}" in latex),
+        ("one it can't write is the writer's, its TeX in the bookmark, and recorded, a "
+         "fraction, a command texmath doesn't know, and a formula over two lines",
+         lambda: "\\texorpdfstring{Fraction \\(\\frac{a}{b}\\)}" in latex
+         and "\\texorpdfstring{Unknown \\(\\foo{x}\\)}" in latex
+         and kept == ["\\frac{a}{b}", "\\foo{x}", "\\frac{a}\n{b}"]),
+        ("and the build takes Pandoc's warnings of them out of what it said, texmath's "
+         "reason with them, and says how many there are",
+         lambda: done.stderr.count("Could not convert TeX math") == 3
+         and "unexpected control sequence" in done.stderr
+         and not any(words in said for words in ("Could not convert TeX math",
+                                                 "unexpected control sequence", "{b}"))
+         and str(note).startswith("NOTE: 3 formula(s) in headings are their TeX")),
+        ("one ending in a comment ends with a line end before its \\), as the writer "
+         "writes one, and a display formula in a heading, and a formula outside one, are "
+         "the writer's",
+         lambda: "\\texorpdfstring{\\(y % a remark\n\\)}{y}" in latex
+         and "\\[q^2\\]" in latex and "texorpdfstring{\\(q" not in latex
+         and "\\(z^2\\)" in latex and "texorpdfstring{\\(z" not in latex),
+    ]
+
+
 def check_code_fit_report():
     """The build's reports of what FIT_MACROS fitted and what's still too
     wide, read from what LaTeX said, with blocks of code among them, each
@@ -7150,6 +7275,9 @@ GROUPS = [
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),
     ("a LaTeX book's tagged copy, the font setting before its class", check_tagged_copy_fonts),
+    ("the PDF build's note of headings' formulas left as TeX in bookmarks", check_bookmark_said),
+    ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
+     check_heading_bookmarks),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

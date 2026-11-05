@@ -2735,6 +2735,77 @@ local function headings_inside(element)
   return element:walk({ Header = function(header) return heading_paragraph(header, true) end })
 end
 
+-- A heading's formula in the heading's bookmark. The writer sets a heading
+-- that holds a formula in \texorpdfstring, whose second argument, which
+-- the bookmark is made from, is the heading's text as Pandoc's stringify
+-- gives it, a formula its TeX (sectionHeader, Writers/LaTeX.hs, 3.9 and
+-- 3.12.1): the bookmark read "Spaced a\text{~~~to~~~}b heading". A formula
+-- Pandoc's plain writer writes as text, in Unicode where texmath can (x²,
+-- α ≤ β, p̂), is that text in the bookmark now: the formula is set in its
+-- place as \texorpdfstring{\(...\)}{text}, the text a Str, which stringify
+-- takes and the writer escapes, the raw LaTeX around it skipped, so the
+-- heading, the contents, and the running head set the formula as before.
+-- The text's spaces are a word's, a run of them one, as the PDF's text has
+-- a formula's run (latexbuild's PDF_MACROS), and a script the plain writer
+-- puts in parentheses, ℝ^(n), is ℝ^n, as deck-pptx.lua makes a formula in
+-- a deck's notes. A formula the plain writer can't write, a fraction's,
+-- which it gives as its TeX between dollar signs, is its TeX in the
+-- bookmark as before; the filter records it (OER_PDF_RECORD), and the run
+-- says so once (build-pdf.py) in place of the plain writer's warning,
+-- which says it's rendered as TeX, of a formula the page sets.
+local bookmark_tex = {}
+
+-- The writer's handleMathComment (Writers/LaTeX.hs): a formula whose last
+-- line holds a comment ends with a line end, so the comment doesn't take
+-- the \) after it.
+local function math_comment(tex)
+  for at = #tex, 1, -1 do
+    local char = tex:sub(at, at)
+    if char == '\n' then return tex end
+    if char == '%' then
+      return tex:sub(at - 1, at - 1) == '\\' and tex or tex .. '\n'
+    end
+  end
+  return tex
+end
+
+local function bookmark_text(math_)
+  local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math_ }) }), 'plain',
+                            { wrap_text = 'none' }):gsub('%s+$', '')
+  local tex = math_.text:match('^%s*(.-)%s*$')
+  if text == '$' .. tex .. '$' then
+    table.insert(bookmark_tex, tex)
+    return nil
+  end
+  text = text:gsub('\226\128[\128-\138]', ' '):gsub('\194\160', ' ')
+    :gsub('([_^])%((%w+)%)', '%1%2'):gsub('%s+', ' ')
+  return (text:gsub('^ ', ''):gsub(' $', ''))
+end
+
+local function bookmarks(doc)
+  doc.blocks = doc.blocks:walk({ Header = function(header)
+    local changed = false
+    header.content = header.content:walk({ Math = function(math_)
+      local text = math_.mathtype == 'InlineMath' and bookmark_text(math_)
+      if not text then return nil end
+      changed = true
+      return { pandoc.RawInline('latex', '\\texorpdfstring{\\(' .. math_comment(math_.text)
+                                  .. '\\)}{'),
+               pandoc.Str(text), pandoc.RawInline('latex', '}') }
+    end })
+    if changed then return header end
+  end })
+  local record = os.getenv('OER_PDF_RECORD') or ''
+  if record ~= '' then
+    local fh = io.open(record, 'w')
+    if fh then
+      fh:write(pandoc.json.encode({ bookmark_tex = bookmark_tex }))
+      fh:close()
+    end
+  end
+  return doc
+end
+
 -- A display formula a LaTeX book numbers (latexsource.resolve_counters):
 -- its TeX holds each row's number as a \tag, which LaTeX sets, so the
 -- numbers set beside it for the pages go. Its labels stay in its TeX, for a
@@ -3293,6 +3364,7 @@ return {
   { Code = mark_code },
   { Pandoc = fit_formulas },
   { Pandoc = fit_code },
+  { Pandoc = bookmarks },
   { DefinitionList = term_braces },
   { Pandoc = counted },
 }

@@ -2223,7 +2223,8 @@ def drawn_blanks_checks(lines_path, glyphs_path, source, more):
          "spaces around a word have it, plain, bold, in raw LaTeX, and in a heading; a "
          "formula of nothing but spaces between two words has none, in raw LaTeX too, and "
          "one between two letters one; and the formulas are as written, the heading's "
-         "bookmark with no phantom in it",
+         "bookmark the formula's text, its runs of spaces one, from LaTeX in which the "
+         "heading sets the formula as written",
          lambda: built and not any(found[2].isspace() for found in repeated_runs(lines_path))
          and all(re.search(pattern, spaced_text) for pattern in (
              r"Aroundword \S or \S spaces", r"Inbold  or  in", r"Spacesonly  between",
@@ -2232,8 +2233,8 @@ def drawn_blanks_checks(lines_path, glyphs_path, source, more):
          and "\\sqrt{\\begin{matrix}\\text{~~} \\\\ \\text{~~~~~~}\\end{matrix}}" in source
          and "x\\text{~~~or~~~}y" in source and "\\textbf{~~~or~~~}" in source
          and "\\(a\\text{~~~and~~~}b\\)" in source
-         and any(title.startswith("Spaced") and "phantom" not in title
-                 for title in outline_titles(pypdf.PdfReader(lines_path)))),
+         and "\\texorpdfstring{\\(a\\text{~~~to~~~}b\\)}{a to b}" in source
+         and "Spaced a to b heading" in outline_titles(pypdf.PdfReader(lines_path))),
         ("in a face HarfBuzz shapes, as a book's metadata file can ask for, two blanks are "
          "drawn as lines in its underscore's measure, in one Span, with no space character "
          "between them",
@@ -3795,10 +3796,18 @@ LACKING_PLEX = ("import importlib.util, sys\n"
 # font, so that its glyphs were embedded from luaotfload's copy of them,
 # an accented letter drawn whole and its parts filled with other glyphs
 # (latexbuild.STATIC_FONTS): Acrobat said it couldn't extract such a face,
-# Noto Sans 2.008's, in Introductory Business Statistics 2e's PDF.
+# Noto Sans 2.008's, in Introductory Business Statistics 2e's PDF. And a
+# heading with formulas Pandoc's plain writer writes as text, one with a
+# script it puts in parentheses, and one it can't, a fraction, whose
+# bookmark has the first two's text and the third's TeX, the run saying so
+# once for each PDF, for a latex target's LaTeX, and for the LaTeX alone
+# (--latex-only), not with the plain writer's warning (pdf-target.lua,
+# bookmarks).
 MATH_FONT_BOOK = ("# Formulas\n\nA formula, $x^2 + y_1 = z$, and a display:\n\n"
                   "$$\\sum_{i=1}^n a_i = \\frac{1}{2}$$\n\nA script capital, "
-                  "$\\mathcal{A} + x$.\n\nAccented letters, ŷ and ī, **and in bold, ŷ**.\n")
+                  "$\\mathcal{A} + x$.\n\nAccented letters, ŷ and ī, **and in bold, ŷ**.\n\n"
+                  "## Scripted $x^2 + \\alpha$, $\\bar{x}_n$, and $\\frac{a}{b}$ heading\n\n"
+                  "After it.\n")
 MATH_RANGE = "header-includes:\n  - \\setmathfont[range=\\mathcal]{latinmodern-math.otf}\n"
 MATH_FONT_TARGETS = (
     ("missing", "mathfont: NoSuchMath-Regular.otf\n"),
@@ -3841,11 +3850,14 @@ def build_math_font(work):
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n" + "".join(
             f"  {target}:\n    format: pdf\n    pdf:\n      metadata: {target}.yaml\n"
-            for target, _meta in targets))
+            for target, _meta in targets) + "  latex:\n    format: latex\n")
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
+    # The LaTeX a PDF is made from, alone, as --latex-only writes it.
+    latex = run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target",
+                 "defaulted"], work)
     return ({target: os.path.join(work, target, "org.example.formulas.pdf")
              for target, _meta in targets},
-            converted.stdout + converted.stderr)
+            converted.stdout + converted.stderr + latex.stdout + latex.stderr)
 
 
 # A book on the default page, in its faces, its tables counted in ems of
@@ -5501,6 +5513,19 @@ def math_font_checks(paths, said):
          and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
                                        "by unicode-math must be an\n")
          and noto("") == ""),
+        ("a heading's formula is its text in the heading's bookmark where Pandoc's plain "
+         "writer writes it as text, x², a script it puts in parentheses without them, and "
+         "its TeX where it can't, a fraction, the run saying so once for each PDF, for the "
+         "latex target, and for --latex-only, not with the plain writer's warning",
+         lambda: os.path.exists(paths["defaulted"])
+         and "Scripted x\u00b2 + \u03b1, x\u0304_n, and \\frac{a}{b} heading"
+         in outline_titles(pypdf.PdfReader(paths["defaulted"]))
+         and said.count("NOTE: 1 formula(s) in headings are their TeX in the PDF's bookmarks, "
+                        "which Pandoc's plain writer can't write as text, as it writes the "
+                        "others: \\frac{a}{b}.") == len(paths)
+         and said.count("NOTE: 1 formula(s) in headings are their TeX in the bookmarks of a "
+                        "PDF made from the LaTeX") == 2
+         and "Could not convert TeX math" not in said),
     ] + static_face_checks(paths.get("static")) + variable_face_checks(paths.get("variable"))
 
 

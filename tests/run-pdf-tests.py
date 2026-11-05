@@ -3809,6 +3809,12 @@ MATH_FONT_TARGETS = (
 STATIC_FACE = ("static", "mainfont: JosefinSans\nmainfontoptions:\n  - Extension=.ttf\n"
                "  - UprightFont=*-Regular\n  - BoldFont=*-Bold\n  - ItalicFont=*-Italic\n"
                "  - BoldItalicFont=*-BoldItalic\n")
+# And a variable font, TeX Live's Junicode VF where TeX has it, which
+# luaotfload embeds from its own copy of the outlines, as it did the static
+# faces: that copy gives an empty glyph an outline of no contours, where a
+# font gives it none, and a tagged PDF draws the space between words, which
+# is what Acrobat said it couldn't extract (latexbuild.STATIC_FONTS).
+VARIABLE_FACE = ("variable", "mainfont: JunicodeVF-Roman.ttf\n")
 
 
 def build_math_font(work):
@@ -3817,7 +3823,8 @@ def build_math_font(work):
     Sans: ({target: its PDF's path}, what the run said). The pathed
     target's font is a copy of IBM Plex Math's file, where TeX finds one."""
     targets = MATH_FONT_TARGETS + ((STATIC_FACE,) if font_installed("JosefinSans-Regular.ttf")
-                                   else ())
+                                   else ()) \
+        + ((VARIABLE_FACE,) if font_installed("JunicodeVF-Roman.ttf") else ())
     os.makedirs(os.path.join(work, "fonts"))
     for name, text in [("formulas.md", MATH_FONT_BOOK)] + [
             (target + ".yaml", meta) for target, meta in targets]:
@@ -5494,7 +5501,29 @@ def math_font_checks(paths, said):
          and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
                                        "by unicode-math must be an\n")
          and noto("") == ""),
-    ] + static_face_checks(paths.get("static"))
+    ] + static_face_checks(paths.get("static")) + variable_face_checks(paths.get("variable"))
+
+
+def variable_face_checks(path):
+    """The checks of VARIABLE_FACE's target, its PDF at path, or None where
+    TeX hasn't Junicode VF, whose checks are then skipped."""
+    if path is None:
+        print("  skip  Junicode VF isn't installed (TeX Live's junicodevf); a variable font's "
+              "empty glyphs aren't checked")
+        return []
+
+    def empty():
+        """The variable font's glyphs given an outline of no contours, or
+        None where the PDF doesn't embed it."""
+        found = pdftext.empty_outlines(path) if os.path.exists(path) else {}
+        names = [name for name in found if name.startswith("JunicodeVF")]
+        return [number for name in names for number in found[name]] if names else None
+    return [
+        ("a variable font, embedded from luaotfload's copy of its outlines, has its empty "
+         "glyphs empty, the space a tagged PDF draws between words among them, not an "
+         "outline of no contours, Junicode VF in its regular",
+         lambda: empty() == []),
+    ]
 
 
 def static_face_checks(path):

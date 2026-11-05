@@ -437,6 +437,22 @@ CODE_SPACES = r"""\makeatletter
 # faces, it comes before whatever loads one first. A deck's template
 # reads it before its faces too, and a LaTeX book's tagged copy just after
 # its \DocumentMetadata (texremediate.STATIC_FONTS).
+#
+# And a face still embedded from luaotfload's copy, a variable font, has
+# its empty glyphs written as a font writes them, with no record at all
+# (loca's two entries equal): luaotfload's copy gives a glyph with no
+# contours a header of its own, zeros, and LuaTeX writes it padded to 12
+# bytes, which Acrobat said it couldn't extract when the PDF drew the
+# space, as a tagged PDF does between words. The static faces' other
+# differences, the missing hinting, the merged composites, and the
+# misfilled parts, made no difference to Acrobat, measured by Rob on the
+# book and on small files with each changed alone (CNX-NOTES, item 177):
+# the book opened cleanly with only those records emptied, and a page of
+# nothing but the space glyph, as built, didn't. The provider's own
+# callback is wrapped where it's registered, under its own name, which
+# luaotfload's HarfBuzz mode registers for both modes; only a TrueType
+# glyph's stream (mode 2) is looked at, one of no more than 12 bytes
+# whose count of contours is 0.
 STATIC_FONTS = r"""\ifdefined\directlua
 \directlua{
   if not oerfonts and fonts and fonts.constructors and fonts.constructors.trytosharefont then
@@ -450,6 +466,22 @@ STATIC_FONTS = r"""\ifdefined\directlua
           and not (properties and properties.instance) then
         target.streamprovider = nil
       end
+    end
+  end
+  if oerfonts and not oerfonts.streams and luatexbase and luatexbase.callback_descriptions then
+    local names = luatexbase.callback_descriptions("glyph_stream_provider") or {}
+    local name = names[1]
+    if name and not names[2] then
+      local provider = luatexbase.remove_from_callback("glyph_stream_provider", name)
+      oerfonts.streams = function(id, index, mode, original)
+        local stream, a, b, c = provider(id, index, mode, original)
+        if mode == 2 and type(stream) == "string" and string.len(stream) <= 12
+            and string.byte(stream, 1) == 0 and string.byte(stream, 2) == 0 then
+          return ""
+        end
+        return stream, a, b, c
+      end
+      luatexbase.add_to_callback("glyph_stream_provider", oerfonts.streams, name)
     end
   end
 }

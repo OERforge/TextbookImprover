@@ -752,6 +752,37 @@ def base_fonts(path):
     return names
 
 
+def empty_outlines(path):
+    """Each TrueType font program a PDF embeds, by its font name, a
+    subset's tag taken off: the glyphs it gives a record of no contours,
+    where the OpenType specification gives an empty glyph no record at all
+    (loca's two entries equal), as luaotfload's copy of a face's outlines
+    gives one (repackpoints) and Acrobat said it couldn't extract when the
+    space was drawn."""
+    import struct
+    found = {}
+    with pikepdf.open(path) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary) or obj.get("/Type") != "/FontDescriptor" \
+                    or "/FontFile2" not in obj:
+                continue
+            data = obj.FontFile2.read_bytes()
+            tables = {}
+            for i in range(struct.unpack(">H", data[4:6])[0]):
+                tag, _sum, offset, length = struct.unpack(">4sLLL", data[12 + 16 * i:28 + 16 * i])
+                tables[tag.decode("latin-1")] = data[offset:offset + length]
+            count = struct.unpack(">H", tables["maxp"][4:6])[0]
+            long_offsets = struct.unpack(">h", tables["head"][50:52])[0]
+            loca = struct.unpack(">%d%s" % (count + 1, "L" if long_offsets else "H"),
+                                 tables["loca"][:(count + 1) * (4 if long_offsets else 2)])
+            loca = [n if long_offsets else 2 * n for n in loca]
+            name = str(obj.get("/FontName", "")).lstrip("/")
+            found[name.split("+", 1)[1] if re.match(r"[A-Z]{6}\+", name) else name] = [
+                number for number in range(count) if loca[number + 1] > loca[number]
+                and struct.unpack(">h", tables["glyf"][loca[number]:loca[number] + 2])[0] == 0]
+    return found
+
+
 def truetype_glyphs(path):
     """Each TrueType font program a PDF embeds (FontFile2), by its font
     name, a subset's tag taken off: its glyphs that draw something, each

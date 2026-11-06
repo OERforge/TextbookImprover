@@ -761,7 +761,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         # both (convert.py, die).
         math["copies_warnings"] = sidecars.keep_warning(
             os.path.basename(paths["math_keep"]), [row for row in keep if row not in kept],
-            "these decks' copies", off + ("math.from_text",)) if paths.get("math_keep") else []
+            "these decks' copies", off + ("math.from_text", "math.minus_in_text")) \
+            if paths.get("math_keep") else []
         # The conversion after writes the report, the pages' repairs with
         # these, and says so (convert.py); it's written here too, unsaid, so
         # that the copies' repairs are on record if the run stops first.
@@ -776,7 +777,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         # Only a run that repairs equations can keep one.
         for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),
                                           [row for row in keep if row not in kept],
-                                          "these decks", off + ("math.from_text",)):
+                                          "these decks",
+                                          off + ("math.from_text", "math.minus_in_text")):
             say(line)
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,

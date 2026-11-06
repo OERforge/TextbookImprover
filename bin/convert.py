@@ -3155,6 +3155,7 @@ def filter_env(target, base, paths, env, reads=None):
         "TABLE_BANDS": str(target["tables.bands"]),
         "MATH_REPAIR_EQUATIONS": "true" if r["math.repair_equations"] else "false",
         "MATH_FROM_TEXT": "true" if r["math.from_text"] else "false",
+        "MATH_MINUS_IN_TEXT": "true" if r["math.minus_in_text"] else "false",
         "MATH_DISPLAY_STYLE_IN_TEXT": "true" if r["math.display_style_in_text"] else "false",
         "MATH_KEEP": MATH_KEEP_PAGES or (reads["math_keep"] if os.path.exists(reads["math_keep"])
                                          else ""),
@@ -3733,9 +3734,10 @@ def deck_math_report(collected, reports, paths, targets, work):
             [key + (after,) for key, after in rows.items()])
     import deckrun
     write_report(merged, reports["math_repaired"], "Kind,Page,Before,After", "math repair(s)",
-                 None, "Each is an equation's characters repaired, or math typed as text made "
-                 "an equation, Before and After in Pandoc's TeX, as a book's are%s; "
-                 "math.repair_equations and math.from_text turn them off."
+                 None, "Each is an equation's characters repaired, math typed as text made an "
+                 "equation, or an en dash in text made a minus sign, Before and After in "
+                 "Pandoc's TeX, as a book's are%s; math.repair_equations, math.from_text, and "
+                 "math.minus_in_text turn them off."
                  % (deckrun.IN_ONE_LINE if (DECK_MATH or {}).get("in_one_line") else ""))
     if DECK_MATH is not None:
         DECK_MATH["reported"] = True
@@ -3799,6 +3801,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     captions = htmlremediate.caption_rows(os.path.join(work, "captions_applied")) if work else {}
     places = docxremediate.math_places(os.path.join(work, "math_places")) \
         if work and target["math.from_text"] else {}
+    minus = docxremediate.minus_places(os.path.join(work, "math_minus_places")) \
+        if work and target["math.minus_in_text"] else {}
     keep_rows = math_keep_rows(paths.get("math_keep"))
     written, totals = [], {}
 
@@ -3822,6 +3826,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          deletions=WORD_DELETIONS,
                                          equations=bool(target["math.repair_equations"]),
                                          places=places.get(stem, []),
+                                         minus=minus.get(stem, []),
                                          keep_equations={b for k, p, b in keep_rows
                                                          if k == "equation" and p in ("", stem)})
         for key, n in counts.items():
@@ -4095,6 +4100,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                if totals.get("equations_repaired") else "")
             + (f", {totals['text_equations']} equation(s) made of math typed as text"
                if totals.get("text_equations") else "")
+            + (f", {totals['text_minus']} en dash(es) in text made a minus sign"
+               if totals.get("text_minus") else "")
             + (f", {totals['equations_kept']} equation(s) kept as they were by the "
                "math-keep sidecar" if totals.get("equations_kept") else "")
             + (f", {totals['layout_tables']} table(s) marked as a layout table"
@@ -4112,6 +4119,11 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
             "math typed as text not written into the Word file: its runs there aren't "
             "what the filter read, or hold a field, a tracked change, a note, or a "
             "picture. They're in math-repaired.csv.")
+    if totals.get("text_minus_left"):
+        say(f"{target.name}: {totals['text_minus_left']} minus sign(s) the pages make of an "
+            "en dash in text not written into the Word file: its runs there aren't what the "
+            "filter read, or hold a field, a tracked change, or a text box. They're in "
+            "math-repaired.csv.")
     if totals.get("captions_left"):
         say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
             "the table, its caption, or the label paragraph beside it isn't what the filter "
@@ -6507,7 +6519,8 @@ def main():
         collected = {key: os.path.join(work, key) for key in
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
-                      "math", "math_places", "math_kept", "title_numbers",
+                      "math", "math_places", "math_minus_places", "math_kept",
+                      "title_numbers",
                       "ids_renamed", "headings_moved", "title_formulas")}
         env = dict(os.environ)
         env.update({
@@ -6523,6 +6536,7 @@ def main():
             "IDS_RENAMED": collected["ids_renamed"],
             "MATH_REPAIRED": collected["math"],
             "MATH_PLACES": collected["math_places"],
+            "MATH_MINUS_PLACES": collected["math_minus_places"],
             "MATH_KEPT": collected["math_kept"],
             "TITLE_NUMBERS": collected["title_numbers"],
             "TITLE_FORMULAS": collected["title_formulas"],
@@ -6831,9 +6845,10 @@ def main():
         else:
             write_report(collected["math"], reports["math_repaired"],
                          "Kind,Page,Before,After", "math repair(s)", None,
-                         "Each is an equation's characters repaired, or math "
-                         "typed as text made an equation; math.repair_equations "
-                         "and math.from_text turn them off.")
+                         "Each is an equation's characters repaired, math "
+                         "typed as text made an equation, or an en dash in text "
+                         "made a minus sign; math.repair_equations, "
+                         "math.from_text, and math.minus_in_text turn them off.")
         write_report(collected["spacers"], reports["spacer_images"],
                      "Image,Source,Width,Action", "spacer image(s) handled")
         write_report(collected["ids_renamed"], reports["ids_renamed"],

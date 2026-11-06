@@ -3,7 +3,7 @@
 -- target gets the repaired page: MathML in HTML and EPUB, LaTeX math in
 -- the PDF, an equation in Word, $...$ in Markdown.
 --
--- Two things, each with a setting to turn it off:
+-- Three things, each with a setting to turn it off:
 --
 -- 1. Inside an equation (math.repair_equations). Word's equation editor
 --    lets an author type a character that looks right and means something
@@ -39,6 +39,12 @@
 --    corpus before this was written: the pattern held for math, and the
 --    one false positive (a year range in a reference, 1773-1799) had no
 --    variable, which the rules above require.
+--
+-- 3. A minus sign typed as an en dash in text (math.minus_in_text): a
+--    negative number's sign, and a difference's in a run of arithmetic
+--    with a relation in it, made a minus sign, since a screen reader
+--    reads an en dash as nothing or as a range. The rules are at the
+--    section's head.
 --
 -- Every change is a row in the report convert.py collects
 -- (MATH_REPAIRED): its kind, the page, the text before, the TeX after.
@@ -785,6 +791,486 @@ local function block_with_inlines(block)
 end
 
 -- ------------------------------------------------------------------------
+-- 3. a minus sign typed as an en dash, in text
+
+-- An en dash written for a minus sign in a page's text, not in an
+-- equation: OpenStax's books write a negative number so, –$922.0, and a
+-- difference, $1,046 – $1,562, each with an en dash. NVDA doesn't say an
+-- en dash at its default punctuation level (some, where symbols.dic puts
+-- the en dash at most), and its rule for a negative number says "minus"
+-- before a number after a hyphen or a minus sign, not an en dash
+-- (source/locale/en/symbols.dic), so the number is heard as positive;
+-- and it passes the dash between two numbers on to the synthesizer,
+-- which Rob heard read as a range in Principles of Economics 3e's 23.1,
+-- 2026-11-06. Made a minus sign, as math.repair_equations makes one
+-- inside an equation:
+--   - a sign before a number (a digit, or a currency sign or a decimal
+--     point and a digit) where a range's dash can't be: at the start of
+--     the text or of a sub- or superscript; straight after an opening
+--     parenthesis, bracket, or brace, a relation, an operator, a colon, a
+--     semicolon, a comma, an opening quotation mark, a currency sign
+--     (SIGN_AFTER), or a part's circled letter; or past white space,
+--     after a clause's end (a comma, a semicolon, a colon, or a full stop)
+--     or after a word with no digit or formula in it, not a unit's
+--     (UNIT_START) and not ending in a closing parenthesis or bracket: the
+--     slope is –1.5, (–3, –2), 10 to the –4, 75. –66.4 kJ, ⓒ–8, but not
+--     24 °C –29 °C, 5′–3′, nor 1990–2000.
+--   - a dash between two operands in a run of arithmetic that holds a
+--     relation (=, <, >, and the rest), or that "equal to" or "equals"
+--     opens: 1 – 0.05 = 0.95, and "is equal to $1,046 – $1,562". A run is
+--     the stretches between white spaces made of numbers, a number's
+--     degree sign, operators, relations, currency signs, and formulas, a
+--     number with the letters it multiplies (48 – 3Q), a quantity's word
+--     ($20 billion), or a lone letter (df = n – 1), not a part's label,
+--     (b), up to a comma, a semicolon, a colon, or a full stop that ends a
+--     clause; a dash at its start takes what it subtracts from in the
+--     words before it (the number of cells – 1 = 4), and a sign after a
+--     relation or an operator in it is a sign, after a relation past white
+--     space too (r = – 0.2752). A range has no relation there (1943 – 2020,
+--     $50,000 – $68,999, 13 – 55+), or is of whole numbers, the smaller
+--     first, after a relation with nothing after it (n = 2 – 5), and is
+--     left as written.
+-- Each run of arithmetic a dash is made a minus sign in, or, outside one,
+-- the stretch between white spaces it's in, is a row of the report
+-- (kind minus, Before and After as text), and the keep sidecar's row for
+-- it keeps it as it was. Paragraphs and plain blocks: running text, a
+-- list's items, a table's cells, a caption; and a picture's description.
+-- Measured before it was written on ten of OpenStax's books
+-- (docs/configuration.md, Math).
+
+local MINUS_IN_TEXT = setting('MATH_MINUS_IN_TEXT')
+-- Where each such sign is, for writing it into a Word source (format:
+-- source): the paragraph's text as the filter reads it, and which of its
+-- en dashes, counted from 1.
+local MINUS_PLACES = os.getenv('MATH_MINUS_PLACES')
+local EN_DASH, MINUS_SIGN, FORMULA = 0x2013, 0x2212, 0xFFFC
+local SPACES = {[32] = true, [0xA0] = true, [0x2009] = true, [0x202F] = true}
+local CURRENCY = {[36] = true, [0xA3] = true, [0x20AC] = true, [0xA5] = true}
+local ENDS_RUN = {[44] = true, [59] = true, [58] = true, [46] = true}  -- , ; : .
+local CLOSING = {[41] = true, [93] = true}                              -- ) ]
+-- What can close a clause after its comma or full stop: a parenthesis, a
+-- bracket, a quotation mark.
+local CLOSERS = {[41] = true, [93] = true, [0x201D] = true, [0x2019] = true, [34] = true}
+local ARITHMETIC, RELATION = {}, {}
+for _, ch in ipairs({'.', ',', '%', '\u{00B0}', '(', ')', '[', ']', '+', '-', '*', '/', '^',
+                     '\u{2212}', '\u{2013}', '\u{00D7}', '\u{00B7}', '\u{22C5}',
+                     '\u{00F7}', '\u{00B1}', '$', '\u{00A3}', '\u{20AC}', '\u{00A5}'}) do
+  ARITHMETIC[utf8.codepoint(ch)] = true
+end
+for _, ch in ipairs({'=', '<', '>', '\u{2248}', '\u{2260}', '\u{2264}', '\u{2265}'}) do
+  ARITHMETIC[utf8.codepoint(ch)] = true
+  RELATION[utf8.codepoint(ch)] = true
+end
+
+-- A block's text, a character at a time, as inline_text gives it, each
+-- from a Str with that Str's number in reading order and its place there,
+-- and fresh where it opens a sub- or superscript; a formula is one
+-- character, FORMULA.
+local function characters(inlines)
+  local out, strs = {}, 0
+  local function walk(list, fresh)
+    for _, el in ipairs(list) do
+      local t = el.t
+      if t == 'Str' then
+        strs = strs + 1
+        local k = 0
+        for _, cp in utf8.codes(el.text) do
+          k = k + 1
+          out[#out + 1] = {cp = cp, str = strs, at = k, fresh = fresh}
+          fresh = false
+        end
+      elseif t == 'Space' or t == 'SoftBreak' or t == 'LineBreak' then
+        out[#out + 1] = {cp = 32}
+        fresh = false
+      elseif t == 'Math' then
+        out[#out + 1] = {cp = FORMULA, tex = el.text}
+        fresh = false
+      elseif t == 'Code' then
+        for _, cp in utf8.codes(el.text) do out[#out + 1] = {cp = cp} end
+        fresh = false
+      elseif t == 'Note' or t == 'Image' or t == 'RawInline' then
+        -- None of the paragraph's text, as inline_text has it.
+      elseif t == 'Superscript' or t == 'Subscript' then
+        walk(el.content, true)
+        fresh = false
+      elseif t == 'Quoted' then
+        -- A quotation Pandoc reads as one (a LaTeX source's, an HTML
+        -- source's q), its marks the text's, as a Word source has them.
+        local double = el.quotetype == 'DoubleQuote'
+        out[#out + 1] = {cp = double and 0x201C or 0x2018}
+        walk(el.content, false)
+        out[#out + 1] = {cp = double and 0x201D or 0x2019}
+        fresh = false
+      elseif el.content then
+        walk(el.content, fresh)
+        fresh = false
+      end
+    end
+  end
+  walk(inlines, false)
+  return out
+end
+
+-- The first and last positions of the stretch between white spaces that
+-- position i is in.
+local function token_at(chars, i)
+  local s, e = i, i
+  while s > 1 and not SPACES[chars[s - 1].cp] do s = s - 1 end
+  while e < #chars and not SPACES[chars[e + 1].cp] do e = e + 1 end
+  return s, e
+end
+
+-- The words a quantity is written with (OpenStax's $20 billion), and a
+-- term, a number and the letters of a variable it multiplies (3Q, 0.5Qd),
+-- which a run of arithmetic takes as it takes a number.
+local QUANTITY_WORDS = {thousand = true, million = true, billion = true, trillion = true,
+                        percent = true}
+
+local function quantity_word(chars, s, e)
+  while e >= s and (CLOSERS[chars[e].cp] or ENDS_RUN[chars[e].cp]) do e = e - 1 end
+  local word = {}
+  for k = s, e do
+    if not is_latin(chars[k].cp) then return false end
+    word[#word + 1] = utf8.char(chars[k].cp)
+  end
+  return #word > 0 and QUANTITY_WORDS[table.concat(word):lower()] == true
+end
+
+local function term(chars, s, e)
+  while s <= e and (chars[s].cp == 40 or chars[s].cp == 91) do s = s + 1 end
+  while e >= s and (CLOSERS[chars[e].cp] or ENDS_RUN[chars[e].cp]) do e = e - 1 end
+  local k = s
+  while k <= e and (is_digit(chars[k].cp) or chars[k].cp == 46 or chars[k].cp == 44) do
+    k = k + 1
+  end
+  if k == s or k > e or not is_digit(chars[k - 1].cp) then return false end
+  for j = k, e do
+    if not is_letter(chars[j].cp) then return false end
+  end
+  return true
+end
+
+-- Whether the stretch from s to e is one letter, a variable's name, as a
+-- book types n or x in its text, a parenthesis or a bracket before it and
+-- what closes a clause after it aside ((k – 1.5), q = 1 – p.); but not a
+-- letter in parentheses, (b), which labels a part.
+local function lone_letter(chars, s, e)
+  local opened, closed = false, false
+  while s < e and (chars[s].cp == 40 or chars[s].cp == 91) do s, opened = s + 1, true end
+  while e > s and (CLOSERS[chars[e].cp] or ENDS_RUN[chars[e].cp]) do
+    closed = closed or CLOSING[chars[e].cp] == true
+    e = e - 1
+  end
+  return s == e and is_letter(chars[s].cp) and not (opened and closed)
+end
+
+-- Whether the stretch from s to e is a run's: numbers, operators,
+-- relations, currency signs, and formulas, or a term, a quantity's word,
+-- or a lone letter.
+local function arithmetic(chars, s, e)
+  for k = s, e do
+    local cp = chars[k].cp
+    if not (is_digit(cp) or cp == FORMULA or ARITHMETIC[cp]) then
+      return term(chars, s, e) or quantity_word(chars, s, e) or lone_letter(chars, s, e)
+    end
+  end
+  return true
+end
+
+-- The text from s to e, a formula as its TeX between dollar signs, and
+-- each en dash fixed names a minus sign.
+local function text_of(chars, s, e, fixed)
+  local out = {}
+  for k = s, e do
+    local c = chars[k]
+    if c.tex then
+      out[#out + 1] = '$' .. c.tex .. '$'
+    else
+      out[#out + 1] = utf8.char(fixed and fixed[k] and MINUS_SIGN or c.cp)
+    end
+  end
+  return table.concat(out)
+end
+
+-- Whether a number starts at position i: a digit, or a currency sign or a
+-- decimal point before one.
+local function number_at(chars, i)
+  local c = chars[i]
+  if not c then return false end
+  if is_digit(c.cp) then return true end
+  local d, e = chars[i + 1], chars[i + 2]
+  if c.cp == 46 then return d ~= nil and is_digit(d.cp) end
+  if CURRENCY[c.cp] then
+    return d ~= nil and (is_digit(d.cp) or (d.cp == 46 and e ~= nil and is_digit(e.cp)))
+  end
+  return false
+end
+
+-- What a sign can follow with no white space between: an opening
+-- parenthesis, bracket, or brace, a relation, an operator, a colon, a
+-- semicolon, a comma, an opening quotation mark, or a currency sign.
+local SIGN_AFTER = {}
+for _, ch in ipairs({'(', '[', '{', '=', '<', '>', '\u{2264}', '\u{2265}', '\u{2248}',
+                     '\u{2260}', '+', '\u{00D7}', '\u{00B7}', '\u{22C5}', '/', '\u{00F7}',
+                     '*', '^', '\u{00B1}', ':', ';', ',', '\u{201C}', '\u{2018}', '"',
+                     '$', '\u{00A3}', '\u{20AC}', '\u{00A5}'}) do
+  SIGN_AFTER[utf8.codepoint(ch)] = true
+end
+
+-- What a unit set apart from its number starts with: a degree sign, a
+-- percent sign, a prime, a double prime.
+local UNIT_START = {[0xB0] = true, [37] = true, [0x2032] = true, [0x2033] = true}
+
+-- Whether the en dash at position i is a sign before a number, where a
+-- range's dash can't be.
+local function sign_at(chars, i)
+  if not number_at(chars, i + 1) then return false end
+  if chars[i].fresh or i == 1 then return true end
+  local cp = chars[i - 1].cp
+  -- A part's circled letter too, ⓒ–8, as an answer key gives one.
+  if not SPACES[cp] then return SIGN_AFTER[cp] == true or (cp >= 0x24B6 and cp <= 0x24E9) end
+  local q = i - 1
+  while q >= 1 and SPACES[chars[q].cp] do q = q - 1 end
+  if q < 1 then return true end
+  -- After a list's comma or a clause's end, a number's sign: (–3, –2).
+  if ENDS_RUN[chars[q].cp] then return true end
+  local s = token_at(chars, q)
+  for k = s, q do
+    if is_digit(chars[k].cp) or chars[k].cp == FORMULA then return false end
+  end
+  -- A unit after a number set apart from it, 24 °C –29 °C, is a range's.
+  if UNIT_START[chars[s].cp] then return false end
+  return not CLOSING[chars[q].cp]
+end
+
+-- Whether the stretch ending at position e ends a clause: a comma, a
+-- semicolon, a colon, or a full stop last, or before what closes it.
+local function ends_clause(chars, e)
+  while e >= 1 and CLOSERS[chars[e].cp] do e = e - 1 end
+  return e >= 1 and ENDS_RUN[chars[e].cp] == true
+end
+
+-- The run of arithmetic the stretch from s to e is in, its first and last
+-- positions, or nil when the stretch holds a word.
+local function run_around(chars, s, e)
+  if not arithmetic(chars, s, e) then return nil end
+  local first, last, k = s, e, s - 1
+  while true do
+    while k >= 1 and SPACES[chars[k].cp] do k = k - 1 end
+    if k < 1 or ends_clause(chars, k) then break end
+    local ts = token_at(chars, k)
+    if not arithmetic(chars, ts, k) then break end
+    first, k = ts, ts - 1
+  end
+  k = e + 1
+  while not ends_clause(chars, last) do
+    while k <= #chars and SPACES[chars[k].cp] do k = k + 1 end
+    if k > #chars then break end
+    local _, te = token_at(chars, k)
+    if not arithmetic(chars, k, te) then break end
+    last, k = te, te + 1
+  end
+  return first, last
+end
+
+local function relation_in(chars, first, last)
+  for k = first, last do
+    if RELATION[chars[k].cp] then return true end
+  end
+  -- "equal to" or "equals" just before the run.
+  local words, k = {}, first - 1
+  while #words < 2 do
+    while k >= 1 and SPACES[chars[k].cp] do k = k - 1 end
+    if k < 1 then break end
+    local ts = token_at(chars, k)
+    table.insert(words, 1, text_of(chars, ts, k):lower())
+    k = ts - 1
+  end
+  return words[#words] == 'equals'
+    or (words[#words] == 'to' and words[#words - 1] == 'equal')
+end
+
+-- A whole number's value, the stretch from s to e holding its digits alone
+-- but what closes a clause after it, or nil.
+local function whole_number(chars, s, e)
+  while e >= s and (CLOSERS[chars[e].cp] or ENDS_RUN[chars[e].cp]) do e = e - 1 end
+  if e < s then return nil end
+  local digits = {}
+  for k = s, e do
+    if not is_digit(chars[k].cp) then return nil end
+    digits[#digits + 1] = utf8.char(chars[k].cp)
+  end
+  return tonumber(table.concat(digits))
+end
+
+-- Whether the dash at position i, between the whole numbers from ls to l
+-- and from r on, the smaller first, ends its run's arithmetic, a relation
+-- before it and none after: a range of values, n = 2 – 5.
+local function range_after_relation(chars, i, ls, l, r, last)
+  local rs, re = token_at(chars, r)
+  if rs ~= r or re > last then return false end
+  local a, b = whole_number(chars, ls, l), whole_number(chars, r, re)
+  if not (a and b and a < b) then return false end
+  for k = i + 1, last do
+    if RELATION[chars[k].cp] then return false end
+  end
+  return true
+end
+
+-- Whether the en dash at position i, in the run from first to last, is a
+-- minus sign there: between two operands (a number, a formula, what a
+-- parenthesis, a percent sign, or a degree sign closes, or a lone
+-- letter), white space beside it or not; at the run's start, the words
+-- before it what's subtracted from (the number of cells – 1 = 4 – 1 = 3);
+-- or before a number, after a relation, an operator, or an opening
+-- parenthesis, and past white space after a relation. Not a range of
+-- whole numbers that ends the run, after its relation (range_after_relation).
+local function in_run(chars, i, first, last)
+  local l, r = i - 1, i + 1
+  while l >= 1 and SPACES[chars[l].cp] do l = l - 1 end
+  while r <= #chars and SPACES[chars[r].cp] do r = r + 1 end
+  local right = r <= #chars and chars[r].cp
+  local letter_after = false
+  if r <= #chars then
+    local rs, re = token_at(chars, r)
+    letter_after = rs == r and lone_letter(chars, rs, re)
+  end
+  local operand_after = (r <= last and (number_at(chars, r) or right == FORMULA
+                                        or right == 40 or right == 91)) or letter_after
+  if l < first then
+    if l < 1 then return number_at(chars, i + 1) end
+    return operand_after
+  end
+  local left = chars[l].cp
+  local ls = token_at(chars, l)
+  if is_digit(left) or left == FORMULA or left == 37 or left == 0xB0 or CLOSING[left]
+      or term(chars, ls, l) or quantity_word(chars, ls, l) or lone_letter(chars, ls, l) then
+    return operand_after and not range_after_relation(chars, i, ls, l, r, last)
+  end
+  -- A sign: a relation, an operator, or an opening before it, and after a
+  -- relation, a space after it too (r = – 0.2752).
+  return (r == i + 1 or RELATION[left] == true) and number_at(chars, r)
+end
+
+-- The inlines with each Str whose characters fix names given a minus
+-- sign there, in the order characters() numbers them.
+local function with_signs(list, fix, counter)
+  local out = {}
+  for _, el in ipairs(list) do
+    local t = el.t
+    if t == 'Str' then
+      counter.n = counter.n + 1
+      local at = fix[counter.n]
+      if at then
+        local parts, k = {}, 0
+        for _, cp in utf8.codes(el.text) do
+          k = k + 1
+          parts[k] = utf8.char(at[k] and MINUS_SIGN or cp)
+        end
+        el = pandoc.Str(table.concat(parts))
+      end
+    elseif t ~= 'Note' and t ~= 'Image' and t ~= 'RawInline' and t ~= 'Code'
+        and t ~= 'Math' and el.content then
+      el.content = with_signs(el.content, fix, counter)
+    end
+    out[#out + 1] = el
+  end
+  return out
+end
+
+local minus_places_handle
+local minus_paragraph_number = 0
+
+local function minus_place(number, paragraph, occurrence)
+  if not MINUS_PLACES or MINUS_PLACES == '' then return end
+  if minus_places_handle == nil then
+    minus_places_handle = io.open(MINUS_PLACES, 'a') or false
+  end
+  if minus_places_handle then
+    minus_places_handle:write(table.concat({csv(page), csv(number), csv(paragraph),
+                                            csv(occurrence), csv('\u{2013}'),
+                                            csv('\u{2212}')}, ',') .. '\n')
+  end
+end
+
+-- The en dashes in inlines to make minus signs, by their positions in
+-- characters(inlines), each reported, those the keep sidecar keeps left
+-- out; and the characters.
+local function signs_in(inlines)
+  local chars = characters(inlines)
+  local chosen, order = {}, {}
+  for i, c in ipairs(chars) do
+    if c.cp == EN_DASH and c.str then
+      local s, e = token_at(chars, i)
+      local first, last = run_around(chars, s, e)
+      if first and not relation_in(chars, first, last) then first, last = nil, nil end
+      if (first and in_run(chars, i, first, last)) or sign_at(chars, i) then
+        -- Reported by the run it's in, or outside one, its stretch.
+        local key = first and (first .. ':' .. last) or (s .. ':' .. e)
+        if not chosen[key] then
+          chosen[key] = {first = first or s, last = last or e, at = {}}
+          order[#order + 1] = key
+        end
+        chosen[key].at[i] = true
+      end
+    end
+  end
+  local fixed = {}
+  for _, key in ipairs(order) do
+    local stretch = chosen[key]
+    local before = text_of(chars, stretch.first, stretch.last)
+    if not kept('minus', before) then
+      report('minus', before, text_of(chars, stretch.first, stretch.last, stretch.at))
+      for i in pairs(stretch.at) do fixed[i] = true end
+    end
+  end
+  return fixed, chars
+end
+
+-- The inlines with the minus signs signs_in found, or nil for none.
+local function signed(inlines, fixed, chars)
+  if next(fixed) == nil then return nil end
+  local fix = {}
+  for i in pairs(fixed) do
+    local c = chars[i]
+    fix[c.str] = fix[c.str] or {}
+    fix[c.str][c.at] = true
+  end
+  return with_signs(inlines, fix, {n = 0})
+end
+
+local function minus_in_text(block)
+  local fixed, chars = signs_in(block.content)
+  if next(fixed) == nil then return nil end
+  if MINUS_PLACES and MINUS_PLACES ~= '' then
+    local parts = {}
+    for _, el in ipairs(block.content) do parts[#parts + 1] = inline_text(el) end
+    minus_paragraph_number = minus_paragraph_number + 1
+    local paragraph, n = normalize(table.concat(parts)), 0
+    for i, c in ipairs(chars) do
+      if c.cp == EN_DASH then
+        n = n + 1
+        if fixed[i] then minus_place(minus_paragraph_number, paragraph, n) end
+      end
+    end
+  end
+  block.content = signed(block.content, fixed, chars)
+  return block
+end
+
+-- A picture's description, which a screen reader reads as it reads text:
+-- the same signs, its own stretch of text. A Word source's copy keeps the
+-- descriptions its pictures have, as it keeps them unless the image-alt
+-- sidecar gives one.
+local function minus_in_description(image)
+  local fixed, chars = signs_in(image.caption)
+  local content = signed(image.caption, fixed, chars)
+  if not content then return nil end
+  image.caption = content
+  return image
+end
+
+-- ------------------------------------------------------------------------
 -- display style in running text
 
 -- A formula in running text its HTML page sets in display style, which
@@ -824,6 +1310,10 @@ if REPAIR then
 end
 if FROM_TEXT then
   filters[#filters + 1] = {Para = block_with_inlines, Plain = block_with_inlines}
+end
+if MINUS_IN_TEXT then
+  filters[#filters + 1] = {Para = minus_in_text, Plain = minus_in_text,
+                           Image = minus_in_description}
 end
 filters[#filters + 1] = {Span = display_in_text}
 return filters

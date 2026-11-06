@@ -259,8 +259,9 @@ def read(path, work, pandoc="pandoc", alts=None, tables=None, titles=None, order
     """A deck's intermediate, as a conversion reads it, with the sidecars'
     decisions (as pptxremediate's alt_rows() and the rest read them), and
     its math repaired as the filter repairs a page's, by default: its
-    equations' characters, and math typed as text made equations
-    (math.repair_equations and math.from_text)."""
+    equations' characters, math typed as text made equations, and an en
+    dash in text made a minus sign (math.repair_equations, math.from_text,
+    and math.minus_in_text)."""
     folder = tempfile.mkdtemp(prefix="compare-", dir=work)
     try:
         doc, _record = pptxsource.read(path, folder, folder, alts, tables, titles, orders,
@@ -271,7 +272,7 @@ def read(path, work, pandoc="pandoc", alts=None, tables=None, titles=None, order
         result = subprocess.run([pandoc, "-f", "json", "-t", "json", source,
                                  "--lua-filter=" + MATH_FILTER], capture_output=True, text=True,
                                 env=dict(os.environ, MATH_REPAIR_EQUATIONS="true",
-                                         MATH_FROM_TEXT="true"))
+                                         MATH_FROM_TEXT="true", MATH_MINUS_IN_TEXT="true"))
         if result.returncode == 0:
             doc = json.loads(result.stdout)
     finally:

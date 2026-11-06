@@ -1196,6 +1196,181 @@ def case_declared_formula_title(work):
     ]
 
 
+# Each line one paragraph, its first word its name: OpenStax's en dashes
+# written for minus signs, and the ranges beside them.
+MINUS_TEXT = """\
+Signs: a balance of \u2013$922.0, a slope of \u20131.5, (\u20133, \u20132), \u201c\u20131\u201d, $\u20135, \u24d2\u20138, and 10^\u20134^ m.
+
+Differences: 1 \u2013 0.05 = 0.95, then $28\u2013$40= \u2013$12. and df = n \u2013 1 = 5 \u2013 1 = 4, so q = 1 \u2013 p.
+
+Words: the number of cells \u2013 1 = 4 \u2013 1 = 3, and it is equal to $1,046 \u2013 $1,562, a deficit, and 7 equals 10 \u2013 3.
+
+Terms: P = 48 \u2013 3Q, and ($20 billion \u2013 $40 billion) = $3,030 in all.
+
+Letters: df = n \u2013 1. Then r = \u2013 0.27, y =\u2013 0.28, and 90\u00b0 \u2013 23\u00b0 = 67\u00b0.
+
+Ranges: 1990\u20132000, pages 3\u20135, (1943 \u2013 2020), $50,000 \u2013 $68,999, ages 13 \u2013 55+, n = 4, 1990 \u2013 2000 here, (a) x = 4 (b) 10 \u2013 20, (n = 2 \u2013 5), and 24 \u00b0C \u201329 \u00b0C.
+
+Others: 5\u2032\u20133\u2032, x \u2013 5, (1.03 trillion \u2013 $1.00 trillion) divided by, a word\u20135, x\u20131, \u2013word, a lone \u2013 dash, f(x) \u20132, and `x = \u20135`.
+
+Exponents: 1 \u00d7 10^\u20138^ \u2013 5 \u00d7 10^\u201312^ m.
+
+| Item  | Balance     |
+|-------|-------------|
+| Goods | \u2013$922.0 |
+| Ages  | 5 \u2013 10 |
+
+![A graph near \u20132% of GDP](graph.png)
+"""
+
+
+def minus_run(work, name, settings, reader="markdown-smart-implicit_figures", text=MINUS_TEXT):
+    """MINUS_TEXT through math-repair.lua alone: each paragraph's text by
+    its name, a superscript between carets, the table's cells, the
+    pictures' descriptions, the report's rows, and the places a Word
+    source's copy would get. Read without smart quotes, by default, its
+    quotation marks text, as a Word source's are."""
+    os.makedirs(work, exist_ok=True)
+    source = os.path.join(work, name + ".md")
+    with open(source, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    report = os.path.join(work, name + ".csv")
+    places = os.path.join(work, name + "-places.csv")
+    environment = dict(os.environ, MATH_REPAIRED=report, MATH_MINUS_PLACES=places,
+                       **settings)
+    result = subprocess.run(
+        ["pandoc", "-f", reader, "-t", "json", source,
+         "--lua-filter", os.path.join(BIN, "math-repair.lua")],
+        capture_output=True, text=True, env=environment)
+    texts, alts = [], []
+
+    def text(inlines):
+        parts = []
+        for node in inlines:
+            kind, content = node["t"], node.get("c")
+            if kind == "Str":
+                parts.append(content)
+            elif kind in ("Space", "SoftBreak"):
+                parts.append(" ")
+            elif kind == "Code":
+                parts.append(content[1])
+            elif kind == "Superscript":
+                parts.append("^" + text(content) + "^")
+            elif kind == "Image":
+                alts.append(text(content[1]))
+            elif kind == "Quoted":
+                marks = "\u201c\u201d" if content[0]["t"] == "DoubleQuote" else "\u2018\u2019"
+                parts.append(marks[0] + text(content[1]) + marks[1])
+            elif kind in ("Emph", "Strong", "Span"):
+                parts.append(text(content[-1]))
+        return "".join(parts)
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") in ("Para", "Plain"):
+                texts.append(text(node["c"]))
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(json.loads(result.stdout)["blocks"])
+    rows, places_rows = [], []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8", newline="") as fh:
+            rows = list(csv.reader(fh))
+    if os.path.exists(places):
+        with open(places, encoding="utf-8", newline="") as fh:
+            places_rows = list(csv.reader(fh))
+    named = {t.split(":")[0]: t for t in texts if ":" in t}
+    return named, texts, alts, rows, places_rows
+
+
+def case_minus_in_text(work):
+    """math-repair.lua's math.minus_in_text: an en dash written for a minus
+    sign in text made one, a range's left as written."""
+    named, texts, alts, rows, places = minus_run(work, "on", {})
+    keep_file = os.path.join(work, "keep.csv")
+    with open(keep_file, "w", encoding="utf-8") as fh:
+        fh.write('Kind,Page,Before,After\nminus,,"\u20131.5,","\u22121.5,"\n')
+    kept_file = os.path.join(work, "kept-rows.csv")
+    kept, _, _, _, _ = minus_run(work, "kept", {"MATH_KEEP": keep_file,
+                                                "MATH_KEPT": kept_file})
+    kept_rows = []
+    if os.path.exists(kept_file):
+        with open(kept_file, encoding="utf-8", newline="") as fh:
+            kept_rows = list(csv.reader(fh))
+    _, off_texts, off_alts, off_rows, off_places = minus_run(
+        work, "off", {"MATH_MINUS_IN_TEXT": "false"})
+    # Straight quotation marks, which Pandoc's smart quotes make a quotation of.
+    quoted, _, _, quoted_rows, _ = minus_run(
+        work, "smart", {}, "markdown-implicit_figures",
+        MINUS_TEXT.replace("\u201c", '"').replace("\u201d", '"'))
+    # The sample's paragraphs as written, by name.
+    written = {p.split(":")[0]: p.replace("\n", " ") for p in MINUS_TEXT.split("\n\n")}
+    return [
+        ("a number's sign is a minus sign, after a word, an opening parenthesis, a list's "
+         "comma, a quotation mark, a currency sign, and a part's circled letter, and opening a "
+         "superscript",
+         lambda: named.get("Signs") == "Signs: a balance of \u2212$922.0, a slope of "
+         "\u22121.5, (\u22123, \u22122), \u201c\u22121\u201d, $\u22125, \u24d2\u22128, and "
+         "10^\u22124^ m."),
+        ("a dash between two numbers in a run with a relation is one, spaced or not, and so "
+         "is a sign after a relation, and a lone letter before or after one is an operand, a "
+         "full stop after it too",
+         lambda: named.get("Differences") == "Differences: 1 \u2212 0.05 = 0.95, then "
+         "$28\u2212$40= \u2212$12. and df = n \u2212 1 = 5 \u2212 1 = 4, so q = 1 \u2212 p."),
+        ("words before a run's first dash, and a run \"equal to\" or \"equals\" opens",
+         lambda: named.get("Words") == "Words: the number of cells \u2212 1 = 4 \u2212 1 "
+         "= 3, and it is equal to $1,046 \u2212 $1,562, a deficit, and 7 equals 10 \u2212 3."),
+        ("a lone letter is a run's, a relation before it the run's too, a sign after a "
+         "relation is one past white space, and a degree sign is its number's",
+         lambda: named.get("Letters") == "Letters: df = n \u2212 1. Then r = \u2212 0.27, "
+         "y =\u2212 0.28, and 90\u00b0 \u2212 23\u00b0 = 67\u00b0."),
+        ("a coefficient's term and a quantity's word are a run's",
+         lambda: named.get("Terms") == "Terms: P = 48 \u2212 3Q, and ($20 billion \u2212 "
+         "$40 billion) = $3,030 in all."),
+        ("a range stays a range, spaced or not, one after a relation's clause or a part's "
+         "label too, one of whole numbers, the smaller first, that a relation comes before "
+         "and nothing after, and one a unit's space opens",
+         lambda: named.get("Ranges") == written["Ranges"]),
+        ("and so do a prime's dash, a difference no relation follows, a word's, a letter's, "
+         "a dash before a word, a lone dash, one after a closing parenthesis and a space, and "
+         "code",
+         lambda: named.get("Others") == written["Others"].replace("`", "")),
+        ("an exponent's sign is one, the dash between two such numbers not",
+         lambda: named.get("Exponents") == "Exponents: 1 \u00d7 10^\u22128^ \u2013 5 "
+         "\u00d7 10^\u221212^ m."),
+        ("a table's cell gets its sign, and its range stays",
+         lambda: "\u2212$922.0" in texts and "5 \u2013 10" in texts),
+        ("a picture's description gets its sign",
+         lambda: alts == ["A graph near \u22122% of GDP"]),
+        ("each stretch is a row of kind minus, a difference's the run of arithmetic it's in",
+         lambda: ["minus", "on", "1 \u2013 0.05 = 0.95,", "1 \u2212 0.05 = 0.95,"] in rows
+         and ["minus", "on", "\u2013$922.0", "\u2212$922.0"] in rows
+         and {r[0] for r in rows} == {"minus"}),
+        ("a paragraph's places are its en dashes, counted, for a Word source's copy",
+         lambda: [p[3] for p in places if p[1] == "1"] == [str(n) for n in range(1, 9)]
+         and all(p[0] == "on" and p[4:] == ["\u2013", "\u2212"] for p in places)),
+        ("and only those it makes minus signs: an exponent's, not the range's between them",
+         lambda: [p[3] for p in places if p[2].startswith("Exponents")] == ["1", "3"]),
+        ("a place's paragraph is its text as it was, a superscript's in line with the rest, "
+         "as a Word file's runs have it",
+         lambda: [p[2] for p in places if p[1] == "1"][0]
+         == written["Signs"].replace("^", "")),
+        ("the keep sidecar's row keeps its stretch, and only that",
+         lambda: "a slope of \u20131.5" in kept.get("Signs", "")
+         and "(\u22123" in kept.get("Signs", "") and kept_rows == [["minus", "", "\u20131.5,"]]),
+        ("a quotation Pandoc reads as one has its marks, in the text a row has",
+         lambda: quoted.get("Signs") == named.get("Signs")
+         and ["minus", "smart", "\u201c\u20131\u201d,", "\u201c\u22121\u201d,"] in quoted_rows),
+        ("math.minus_in_text off leaves every dash, and records nothing",
+         lambda: not any("\u2212" in t for t in off_texts + off_alts)
+         and not off_rows and not off_places),
+    ]
+
+
 def case_media(work):
     """Word's content types, alt text, and keys that must stay distinct."""
     out = Converted(work, ["media-a", "media-b"])
@@ -1335,6 +1510,7 @@ CASES = [
     ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
     ("math repaired, and math typed as text", case_math_repair),
+    ("an en dash in text made a minus sign", case_minus_in_text),
     ("a title's formulas as text, after the repairs", case_title_formulas),
     ("a declared title that is its heading's, its formulas as text", case_declared_formula_title),
     ("media naming, alt text, and keys", case_media),

@@ -47,7 +47,8 @@ What it changes, all of it decided elsewhere in the pipeline:
   the rest. Each is written as Pandoc writes the TeX the filter writes, so
   the file reads back as the pages already read. With math.from_text, math
   typed as text made Word's equation where the filter made one in the
-  page (remediate_text_math).
+  page (remediate_text_math); with math.minus_in_text, an en dash in text
+  made a minus sign where the filter made one (remediate_text_minus).
 - **Compatibility mode 15**, only when asked for.
 
 Everything else is left as it was: the XML is edited as text, never parsed
@@ -775,6 +776,144 @@ def remediate_text_math(xml, places, omml):
     return "".join(out), counts, done
 
 
+def minus_places(path):
+    """{page: [(number, paragraph, occurrence, old, new)]} from the rows
+    math-repair.lua wrote for math.minus_in_text, each once, in order: the
+    occurrence-th en dash (old) of the paragraph's text made a minus sign
+    (new)."""
+    import csv
+    out, seen = {}, set()
+    if not path or not os.path.exists(path):
+        return out
+    with open(path, encoding="utf-8", newline="") as fh:
+        for row in csv.reader(fh):
+            if len(row) != 6 or tuple(row) in seen:
+                continue
+            seen.add(tuple(row))
+            page, number, paragraph, occurrence, old, new = row
+            out.setdefault(page, []).append((int(number), paragraph, int(occurrence), old, new))
+    return out
+
+
+def _replace_in_run(run, edits):
+    """(run, how many made): the run with each (offset, old, new) of its
+    text, as _units counts it, made new where the character there is old.
+    Only a <w:t>'s text is edited, so the run's properties, its tabs and
+    breaks, and whatever else it holds stay as they were."""
+    match = RUN.match(run)
+    inner_start, inner_end = match.span(1)
+    inner = match.group(1)
+    wanted = {offset: (old, new) for offset, old, new in edits}
+    pieces, last, pos, made = [], 0, 0, 0
+    for part in RUN_PARTS.finditer(inner):
+        if part.group(1) or part.group(4):
+            continue
+        if part.group(3):
+            pos += 1
+            continue
+        if part.group(2) is None:
+            continue
+        text = html.unescape(part.group(2))
+        hits = [o for o in wanted if pos <= o < pos + len(text)]
+        if hits:
+            chars = list(text)
+            for o in hits:
+                old, new = wanted[o]
+                if chars[o - pos] == old:
+                    chars[o - pos] = new
+                    made += 1
+            start, end = part.span(2)
+            pieces.append(inner[last:start])
+            pieces.append(html.escape("".join(chars), quote=False))
+            last = end
+        pos += len(text)
+    pieces.append(inner[last:])
+    return run[:inner_start] + "".join(pieces) + run[inner_end:], made
+
+
+def _signs_in(para, signs, counts):
+    """The paragraph with each (occurrence, old, new) made where the
+    occurrence-th old character of its text is in a run's text; the others
+    counted as left."""
+    units, raw = _units(para)
+    norm, index = _normalize(raw)
+    begin, owner = [], []
+    for n, unit in enumerate(units):
+        begin.append(len(owner))
+        owner.extend([n] * len(unit[2]))
+    edits = {}
+    for occurrence, old, new in signs:
+        found, at = 0, -1
+        for i, ch in enumerate(norm):
+            if ch == old:
+                found += 1
+                if found == occurrence:
+                    at = i
+                    break
+        n = owner[index[at]] if at >= 0 else None
+        if n is None or units[n][3] != "run":
+            counts["text_minus_left"] += 1
+            continue
+        edits.setdefault(n, []).append((index[at] - begin[n], old, new))
+    if not edits:
+        return para
+    out, pos = [], 0
+    for n in sorted(edits):
+        unit = units[n]
+        run, made = _replace_in_run(para[unit[0]:unit[1]], edits[n])
+        counts["text_minus"] += made
+        counts["text_minus_left"] += len(edits[n]) - made
+        out.append(para[pos:unit[0]])
+        out.append(run)
+        pos = unit[1]
+    out.append(para[pos:])
+    return "".join(out)
+
+
+def remediate_text_minus(xml, places):
+    """places: [(number, paragraph, occurrence, old, new)] for this file.
+    Returns (xml, counts, the numbers of the places' paragraphs written or
+    accounted for). Paragraphs are matched by their text, as
+    remediate_text_math matches them: an equation already there, the
+    file's own or one made of text before this, is one placeholder, and
+    several paragraphs with one text are told apart by the filter's
+    numbers only when there are as many of them here as it recorded."""
+    counts = {"text_minus": 0, "text_minus_left": 0}
+    by_text = {}
+    for number, paragraph, occurrence, old, new in places:
+        by_text.setdefault(paragraph, {}).setdefault(number, []).append((occurrence, old, new))
+    texts = [_normalize(_units(m.group(0))[1])[0] for m in PARAGRAPH.finditer(xml)]
+    present = {}
+    for t in texts:
+        present[t] = present.get(t, 0) + 1
+    seen_here, done = {}, set()
+    out, pos = [], 0
+    for m, norm in zip(PARAGRAPH.finditer(xml), texts):
+        numbers = by_text.get(norm)
+        if not numbers:
+            continue
+        k = seen_here.get(norm, 0)
+        seen_here[norm] = k + 1
+        ordered = sorted(numbers)
+        if present[norm] != len(ordered):
+            if k == 0:
+                counts["text_minus_left"] += sum(len(v) for v in numbers.values())
+                done.update(ordered)
+            continue
+        number = ordered[k]
+        signs = numbers[number]
+        done.add(number)
+        para = m.group(0)
+        if any(marker in para for marker in UNMAPPABLE):
+            counts["text_minus_left"] += len(signs)
+            continue
+        out.append(xml[pos:m.start()])
+        out.append(_signs_in(para, signs, counts))
+        pos = m.end()
+    out.append(xml[pos:])
+    return "".join(out), counts, done
+
+
 def equations_for(texs):
     """{tex: Word's equation for it}, as Pandoc writes each, in one run."""
     import subprocess
@@ -963,17 +1102,20 @@ def remediate_links(xml, rels, titles):
 def remediate(source, destination, tables=None, alts=None, titles=None, compat=False,
               guesses=False, captions=None, replacements=None, language=None,
               headings="keep", deletions="accept", equations=False, places=None,
-              keep_equations=(), replace_language=None):
+              keep_equations=(), replace_language=None, minus=None):
     """Write destination, a copy of source with the decisions applied.
     tables: the pre-pass's resolved list for this file; alts: {relationship
     id: alt or None}; titles: {address: title}; equations: repair the
     characters of Word's equations (math.repair_equations); language, the
     document's default where it has none; replace_language, the language
     the file's own marks say ("" for none), when language replaces it
-    (languages.for_copy). Returns a dict of counts."""
+    (languages.for_copy); places and minus, the filter's places for this
+    file's math typed as text and its minus signs (math_places,
+    minus_places). Returns a dict of counts."""
     counts = {"compat": 0, "links": 0, "equations_repaired": 0,
               "equation_characters": 0, "text_equations": 0,
-              "text_equations_left": 0, "equations_kept": 0, "relanguaged": 0}
+              "text_equations_left": 0, "equations_kept": 0, "relanguaged": 0,
+              "text_minus": 0, "text_minus_left": 0}
     replacing = language and replace_language is not None
     with zipfile.ZipFile(source) as z:
         infos = z.infolist()
@@ -1002,9 +1144,11 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
     # Equations are in notes too. The file's own equations are repaired
     # first, while they're the ones the filter and the keep sidecar saw,
     # counted in order; then text is made equations, the places found by
-    # text in which an equation is one placeholder either way.
+    # text in which an equation is one placeholder either way; then en
+    # dashes are made minus signs, the filter having read each paragraph
+    # with its equations made.
     omml = equations_for([tex for _, _, _, _, tex in places or []])
-    matched = set()
+    matched, minus_matched = set(), set()
     for name in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml"):
         if equations and name in parts:
             # An equation the keep sidecar names, by the TeX Pandoc reads
@@ -1030,9 +1174,20 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
             if new != xml:
                 parts[name] = new.encode("utf-8")
                 changed.add(name)
+        if minus and name in parts:
+            xml = text(name)
+            new, found, seen = remediate_text_minus(xml, minus)
+            counts["text_minus"] += found["text_minus"]
+            counts["text_minus_left"] += found["text_minus_left"]
+            minus_matched |= seen
+            if new != xml:
+                parts[name] = new.encode("utf-8")
+                changed.add(name)
     # A place no paragraph of any part matched is left too.
     counts["text_equations_left"] += sum(1 for number, _, _, _, _ in places or []
                                          if number not in matched)
+    counts["text_minus_left"] += sum(1 for number, _, _, _, _ in minus or []
+                                     if number not in minus_matched)
     # Another language in place of the file's own: every mark of its own
     # in the parts that hold text and its properties, and the default.
     relanguaged = 0

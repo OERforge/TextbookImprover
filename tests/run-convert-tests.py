@@ -5027,6 +5027,89 @@ def case_word_text_math(work):
     ]
 
 
+def case_word_text_minus(work):
+    """format: source writes math.minus_in_text into a Word file: an en dash
+    written for a minus sign made one in the run it's in, the run's
+    formatting kept, a range left as written, as the page beside it has
+    them."""
+    os.makedirs(work)
+    subprocess.run(["pandoc", "-o", os.path.join(work, "mn.docx")], check=True, text=True,
+                   input="# Minus signs\n\n"
+                         "A balance of \u2013$922.0, a slope of **\u20131.5**, and 1 \u2013 0.05 = 0.95 here.\n\n"
+                         "The same: \u20132 here.\n\n"
+                         "The same: \u20132 here.\n\n"
+                         "We know *\u03bc* = 34 and a slope of \u20132.5 here.\n\n"
+                         "A range 1990\u20132000 and pages 3\u20135 stay, and 10^\u20134^ m.\n\n"
+                         "ONE-RUN\n")
+    # Word keeps a run of plain text together, where Pandoc writes a run a
+    # word: two signs in this one.
+    path = os.path.join(work, "mn.docx")
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r"<w:r>(?:(?!</w:r>).)*ONE-RUN</w:t></w:r>",
+                              '<w:r><w:rPr><w:color w:val="C00000" /></w:rPr>'
+                              '<w:t xml:space="preserve">Level \u20130.5 and 3 \u2013 1 = 2 '
+                              'here.</w:t></w:r>',
+                              data.decode("utf-8"), flags=re.S).encode("utf-8")
+            z.writestr(info, data)
+
+    def build(setting):
+        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n" + setting
+                     + "  source:\n    format: source\n" + setting)
+        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                                cwd=work, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+        # Without smart, an en dash read back is one, not --.
+        back = subprocess.run(["pandoc", "-f", "docx", "-t", "markdown-smart", "--wrap=none",
+                               os.path.join(work, "source", "mn.docx")],
+                              capture_output=True, text=True)
+        page = html_lib.unescape(read(work, "html", "mn.html")) \
+            if exists(work, "html", "mn.html") else ""
+        return result.stdout + result.stderr, back.stdout, page
+    said, on, page = build("")
+    with zipfile.ZipFile(os.path.join(work, "source", "mn.docx")) as z:
+        copy = z.read("word/document.xml").decode("utf-8")
+    colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
+    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
+        rows = [(r["Kind"], r["Page"], r["Before"]) for r in csv.DictReader(fh)]
+    # A row of the report, copied, keeps its stretch on the page and in the copy.
+    with open(os.path.join(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([["Kind", "Page", "Before"], ["minus", "mn", "\u20132.5"]])
+    kept_said, kept, kept_page = build("")
+    os.remove(os.path.join(work, "math-keep.csv"))
+    _, off, off_page = build("    math:\n      minus_in_text: false\n")
+    return [
+        ("a sign and a difference are minus signs in the copy, a bold run's too",
+         lambda: "A balance of \u2212\\$922.0, a slope of **\u22121.5**, and 1 \u2212 0.05 = 0.95 here." in on),
+        ("paragraphs with the same text each get their own",
+         lambda: on.count("The same: \u22122 here.") == 2),
+        ("a paragraph with an equation made of math typed as text gets its sign too",
+         lambda: "We know $\\mu = 34$ and a slope of \u22122.5 here." in on),
+        ("a range stays as it was, and an exponent's run gets its sign",
+         lambda: "A range 1990\u20132000 and pages 3\u20135 stay, and 10^\u22124^ m." in on),
+        ("two in one run of text are made in it, its formatting kept",
+         lambda: colored == ["Level \u22120.5 and 3 \u2212 1 = 2 here."]),
+        ("the run says how many it wrote, and none was left",
+         lambda: "9 en dash(es) in text made a minus sign" in said
+         and "not written into the Word file" not in said),
+        ("the page has them, and math-repaired.csv a row of kind minus for each stretch, one "
+         "for a stretch two paragraphs share",
+         lambda: "A balance of \u2212$922.0" in page and "1990\u20132000" in page
+         and ("minus", "mn", "1 \u2013 0.05 = 0.95") in rows
+         and len([r for r in rows if r[0] == "minus"]) == 8),
+        ("a row of math-keep.csv keeps its en dash on the page and in the copy, and only that",
+         lambda: "slope of \u20132.5 here" in kept and "slope of \u20132.5 here" in kept_page
+         and "The same: \u22122 here." in kept and "kept nothing" not in kept_said),
+        ("with math.minus_in_text off, the page's and the copy's text are as they were",
+         lambda: "A balance of \u2013\\$922.0" in off and "\u2212" not in off
+         and "\u2013$922.0" in off_page and "\u2212" not in off_page.split("<body")[-1]),
+    ]
+
+
 def case_source_target(work):
     """format: source: the book's own Word files, remediated into the
     target's folder, with only what a person decided in the sidecars, never
@@ -9049,6 +9132,7 @@ CASES = [
     ("format: source", case_source_target),
     ("format: source repairs Word's equations", case_word_equations),
     ("format: source makes equations of math typed as text in Word", case_word_text_math),
+    ("format: source makes minus signs of en dashes in Word", case_word_text_minus),
     ("word.tracked_deletions and word.headings", case_word_repairs),
     ("format: source for Markdown", case_markdown_source),
     ("format: source for Markdown, a description at its own table",

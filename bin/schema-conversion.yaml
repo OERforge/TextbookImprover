@@ -379,6 +379,21 @@ keys:
           emphasis. Conservative on purpose: text becomes math only when
           it's clearly math.
 
+      minus_in_text:
+        type: bool
+        default: true
+        description: >
+          Make a minus sign (−) of an en dash (–) written for one in text,
+          outside an equation, and in a picture's description: a sign
+          before a number (–$922.0, a slope of –1.5, 10 to the –4) where a
+          range's dash can't be, and a dash between two numbers in a run
+          of arithmetic that holds a relation (=, <, >, and the rest) or
+          that "equal to" or "equals" opens (1 – 0.05 = 0.95). A range is
+          left as written (1990–2000, 1943 – 2020, $50,000 – $68,999).
+          NVDA doesn't say an en dash at its default punctuation level, so
+          a negative number is heard as positive, and it reads one
+          between two numbers as a range.
+
       display_style_in_text:
         type: bool
         default: false

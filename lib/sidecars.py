@@ -910,7 +910,7 @@ def is_address(value):
 # The setting that makes each kind of math-repaired.csv's rows, and so
 # each kind of math-keep.csv's.
 MATH_SETTINGS = {"equation": "math.repair_equations", "expression": "math.from_text",
-                 "symbol": "math.from_text"}
+                 "symbol": "math.from_text", "minus": "math.minus_in_text"}
 
 
 def math_keep_rows(path):

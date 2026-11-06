@@ -5646,6 +5646,18 @@ def add_menu(target, tree, titles, written, hand, work, others=None):
                               "--ascii"] + pandocversion.mathml(), capture_output=True,
                              text=True, check=True).stdout
     order = [stem for stem in flatten_pages(tree)]
+    # A page's title as the contents gives it, where it does, as the menu
+    # has it: the contents page's own, "Contents", which no intermediate
+    # holds, so the pager had named it by its file, "Previous: toc".
+    listed = {}
+
+    def entries(nodes):
+        for kind, a, b in nodes:
+            if kind == "group":
+                entries(b)
+            elif b:
+                listed[a] = b
+    entries(tree)
     for path in written:
         stem = os.path.basename(path)[:-5]
         if stem in hand or not path.endswith(".html") or stem not in order:
@@ -5661,7 +5673,7 @@ def add_menu(target, tree, titles, written, hand, work, others=None):
                                   ("next", index + 1, "Next: ")):
             if 0 <= other < len(order):
                 name = order[other]
-                title = html_escape(titles.get(name) or name)
+                title = html_escape(listed.get(name) or titles.get(name) or name)
                 if name in others:
                     title = '<span lang="%s">%s</span>' % (
                         html_escape(others[name]).replace('"', "&quot;"), title)

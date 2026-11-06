@@ -4659,6 +4659,8 @@ def case_declared_formula_titles(work):
          lambda: "1.1 The x² law" in links("toc") and "1.2 The x² law again" in links("toc")
          and "1.1 The x² law" in links("02-headed")
          and "Previous: The x² law" in links("02-headed")),
+        ("and the pager names the contents page by its title",
+         lambda: "Previous: Contents" in links("01-declared")),
         ("and a cartridge's names, a Word file's title, one for each, and an EPUB chapter's",
          lambda: "1.1 The x² law" in named and "1.2 The x² law again" in named
          and words.get("01-declared") == ["The x² law"]

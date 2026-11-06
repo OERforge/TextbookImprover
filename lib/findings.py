@@ -37,6 +37,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 from collections import Counter, OrderedDict
 
 import pandocversion
@@ -511,26 +512,78 @@ def summary_lines(findings):
     lines.append(f"{len(findings)} finding(s): " + ", ".join(parts) + ".")
     lines.append("")
     for check, count in by_check.most_common():
-        lines.append(f"- `{check}` ×{count}: {describe(check)}")
+        lines.append(f"- {md_code(check)} ×{count}: {describe(check)}")
     return lines
+
+
+# The characters that can start markup in the middle of a line, in
+# Pandoc's Markdown and in GitHub's: an escape, a code span, emphasis, a
+# link or an image, raw HTML or an autolink, an entity, math, a
+# subscript, a superscript or an inline note, and a citation; and in a
+# heading, its closing hashes and its attributes too. A backslash before
+# any of them shows it as it is in both (Pandoc's all_symbols_escapable;
+# CommonMark's backslash escapes).
+MARKDOWN_SPECIAL = frozenset("\\`*_[]<>&$~^@")
+HEADING_SPECIAL = MARKDOWN_SPECIAL | frozenset("#{}")
+# What the report is read as when it's rendered: Markdown with no raw
+# HTML, raw TeX, or raw blocks, which the report never means to hold,
+# and quotation marks and dashes as written.
+REPORT_READER = "markdown-raw_html-raw_tex-raw_attribute-smart"
+
+
+def md_text(text, heading=False):
+    """A file's own text (a heading, alt text, a PDF's title) as literal
+    text in the Markdown report, on one line, each character that could
+    start markup escaped. The report is rendered with Pandoc, which
+    passes raw HTML through, and even without it makes a link of
+    [text](javascript:...) (its manual's note on security), so a page's
+    text had come out of audit.html as markup."""
+    special = HEADING_SPECIAL if heading else MARKDOWN_SPECIAL
+    text = re.sub(r"\s*[\r\n]+\s*", " ", str(text))
+    return "".join("\\" + ch if ch in special else ch for ch in text)
+
+
+def md_code(text):
+    """A file's own text as a code span in the Markdown report, on one
+    line, fenced by one backtick more than its longest run of them."""
+    text = re.sub(r"\s*[\r\n]+\s*", " ", str(text))
+    fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    pad = " " if text[:1] == "`" or text[-1:] == "`" else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
 
 
 def render_html(markdown_path, html_path, css_path=None):
     """The report as a page, through Pandoc, with the pipeline's own
-    stylesheet embedded when it is given."""
+    stylesheet in it when it is given. Read without raw HTML and in
+    Pandoc's sandbox, so nothing but the report and the stylesheet is
+    read, whatever a file's text in it says (md_text keeps it text)."""
     import subprocess
     import sys
-    command = ["pandoc", os.path.abspath(markdown_path), "-t", "html5",
-               *pandocversion.mathml(), "-o", os.path.abspath(html_path), "--standalone",
-               "--metadata", "lang=en", "--metadata", "pagetitle=Audit"]
-    if css_path and os.path.exists(css_path):
-        command += ["--css", os.path.abspath(css_path), "--embed-resources"]
+    import tempfile
+    command = ["pandoc", "-f", REPORT_READER, os.path.abspath(markdown_path),
+               "-t", "html5", *pandocversion.mathml(), "-o", os.path.abspath(html_path),
+               "--standalone", "--sandbox", "--metadata", "lang=en",
+               "--metadata", "pagetitle=Audit"]
+    header = None
     try:
+        if css_path and os.path.exists(css_path):
+            # The sandbox reads no stylesheet --css names, so it's a
+            # header of its own, as --embed-resources had made it.
+            with open(css_path, encoding="utf-8") as fh:
+                css = fh.read()
+            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False,
+                                             encoding="utf-8") as fh:
+                fh.write("<style>\n" + css + "\n</style>\n")
+                header = fh.name
+            command += ["--include-in-header", header]
         subprocess.run(command, check=True, capture_output=True, text=True)
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or str(exc)
         print(f"audit.html not written: {detail.strip()[:200]}",
               file=sys.stderr)
+    finally:
+        if header:
+            os.unlink(header)
 
 
 def render_docx(markdown_path, docx_path, compat_tool=None):
@@ -541,9 +594,9 @@ def render_docx(markdown_path, docx_path, compat_tool=None):
     import subprocess
     import sys
     try:
-        subprocess.run(["pandoc", os.path.abspath(markdown_path), "-t", "docx", "-o",
-                        os.path.abspath(docx_path), "--metadata",
-                        "lang=en"], check=True, capture_output=True,
+        subprocess.run(["pandoc", "-f", REPORT_READER, os.path.abspath(markdown_path),
+                        "-t", "docx", "--sandbox", "-o", os.path.abspath(docx_path),
+                        "--metadata", "lang=en"], check=True, capture_output=True,
                        text=True)
         if compat_tool and os.path.exists(compat_tool):
             subprocess.run([sys.executable, compat_tool, "--set", "15",
@@ -559,7 +612,10 @@ def write_report(path, findings, inputs, sections=None, version="",
                  title="Accessibility audit"):
     """A Markdown report: the header that dates and hashes it, the
     summary, the findings by file, then any sections a checker wants to
-    add (a PDF's metadata, say) as (heading, lines) pairs."""
+    add (a PDF's metadata, say) as (heading, lines) pairs. What comes
+    from a file, its name, a finding's place and detail, is written as
+    text (md_text, md_code); a section's lines are Markdown already, and
+    their checker writes a file's text in them so."""
     findings = [upgrade(f) for f in findings]
     out = [f"# {title}", ""]
     out.append(f"Produced {now()}" + (f" by TextbookImprover {version}"
@@ -568,7 +624,7 @@ def write_report(path, findings, inputs, sections=None, version="",
     out.append("## Inputs")
     out.append("")
     for item in inputs:
-        out.append(f"- `{item['path']}` — {item['bytes']:,} bytes, "
+        out.append(f"- {md_code(item['path'])} — {item['bytes']:,} bytes, "
                    f"SHA-256 `{item['sha256'][:16]}…`")
     out.append("")
     out.append("The hashes say which files this report is about; if a "
@@ -585,24 +641,24 @@ def write_report(path, findings, inputs, sections=None, version="",
         out.append("## Findings")
         out.append("")
         for file, items in by_file.items():
-            out.append(f"### {file}")
+            out.append(f"### {md_text(file, heading=True)}")
             out.append("")
             for f in items:
-                where = f" at `{f.where}`" if f.where and f.where != file \
+                where = f" at {md_code(f.where)}" if f.where and f.where != file \
                     else ""
                 tail = []
                 if f.standard:
-                    tail.append(f.standard)
+                    tail.append(md_text(f.standard))
                 if f.fix and f.fix != "none":
-                    tail.append(f"fix: {f.fix}")
+                    tail.append(f"fix: {md_text(f.fix)}")
                 if f.tool and f.tool != "oer":
-                    tail.append(f"by {f.tool}")
-                out.append(f"- **{f.severity}** `{f.check}`{where}: "
-                           f"{f.detail}" + (f" ({'; '.join(tail)})" if tail
-                                            else ""))
+                    tail.append(f"by {md_text(f.tool)}")
+                out.append(f"- **{md_text(f.severity)}** {md_code(f.check)}{where}: "
+                           f"{md_text(f.detail)}" + (f" ({'; '.join(tail)})" if tail
+                                                     else ""))
             out.append("")
     for heading, lines in (sections or []):
-        out.append(f"## {heading}")
+        out.append(f"## {md_text(heading, heading=True)}")
         out.append("")
         out += lines
         out.append("")

@@ -337,6 +337,61 @@ def case_wcag():
     ]
 
 
+# Text a file holds that is markup in Markdown: a heading's, and a PDF's
+# title. Pandoc passes raw HTML through, and makes a link of [...](...)
+# even without it, so the report wrote them into audit.html as markup.
+HOSTILE = ('The <script>alert(1)</script> tag, <img src=x onerror="alert(2)">, '
+           '[a link](javascript:alert(3)), $x$, \\frac{a}{b}, --verbose, IMG_2041, &lt;')
+
+
+def case_report_text():
+    import html as htmllib
+    d = os.path.join(WORK, "hostile")
+    out = os.path.join(d, "out")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>T</title></head>'
+                 f'<body><h1>T</h1><h3>{htmllib.escape(HOSTILE)}</h3></body></html>\n')
+    try:
+        import pypdf
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.add_metadata({"/Title": '<img src=y onerror="alert(4)"> [t](javascript:alert(5))'})
+        with open(os.path.join(d, "titled.pdf"), "wb") as fh:
+            writer.write(fh)
+        pdf = True
+    except ImportError:
+        pdf = False
+    run([os.path.join(BIN, "audit.py"), d, "-o", out, "--quick", "--force",
+         "--report-html", "--report-docx"], d)
+    md = open(os.path.join(out, "audit.md"), encoding="utf-8").read()
+    page = open(os.path.join(out, "audit.html"), encoding="utf-8").read()
+    with zipfile.ZipFile(os.path.join(out, "audit.docx")) as z:
+        body = z.read("word/document.xml").decode("utf-8")
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    words = re.sub(r"<[^>]+>", "", body)
+    no_pdf = "no pypdf to write a PDF to audit (sudo apt install python3-pypdf)"
+    return [
+        ("a heading's markup is text in audit.md",
+         lambda: "h1 to h3: The \\<script\\>alert(1)\\</script\\> tag" in md),
+        ("and in audit.html: no script, no attribute of the page's, no javascript: link, "
+         "no math",
+         lambda: not re.search(r"<script", page, re.I)
+         and not re.search(r"<[a-z][^>]*\bonerror\s*=", page, re.I)
+         and not re.search(r"<a\b[^>]*javascript", page, re.I)
+         and 'class="math' not in page),
+        ("but its words as written, a backslash, two hyphens, an underscore, and an entity's "
+         "text among them",
+         lambda: htmllib.escape(HOSTILE, quote=False) in page.replace("\n", " ")),
+        ("and in audit.docx, with no link to javascript:",
+         lambda: HOSTILE in htmllib.unescape(words) and "javascript:" not in rels),
+        ("a PDF's title is text too",
+         lambda: "**Title:** \\<img src=y onerror=\"alert(4)\"\\> \\[t\\](javascript:alert(5))"
+         in md and not re.search(r"<img[^>]*onerror", page)
+         if pdf else print("  skip  " + no_pdf) or True),
+    ]
+
+
 def case_check_only():
     d = os.path.join(WORK, "book")
     os.makedirs(d, exist_ok=True)
@@ -386,6 +441,7 @@ def main():
                        ("the source check agrees with the filter",
                         case_agreement),
                        ("the front door", case_front_door),
+                       ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("convert.py --check-only", case_check_only)]:
         print(f"\n{name}")

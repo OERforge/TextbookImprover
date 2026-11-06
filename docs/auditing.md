@@ -39,6 +39,8 @@ The same hashes key `audit-cache.json` beside the report. Run again with nothing
 
 Markdown is the report's own form. `--report-html` also writes `audit.html`, the report as a page with the pipeline's own stylesheet embedded; `--report-docx` also writes `audit.docx`, declared as the current Word format so Word treats it as a current file and its own Accessibility Checker runs on it (Pandoc's own Word output opens in Compatibility Mode, which turns that checker off). The switches are named for the report's format, not the input's: the audit reads any mix of files whatever it writes.
 
+What a file says is text in every form of the report: a heading, alt text, or a PDF's title that holds markup, `<script>` or `[a link](javascript:...)`, is written into `audit.md` with each character that Markdown could read as markup escaped, and shows as written in `audit.html` and `audit.docx`. Pandoc renders them from `audit.md` without raw HTML, raw TeX, or smart punctuation, and in its sandbox (`--sandbox`), so it reads nothing but the report and the stylesheet.
+
 ## `convert.py --check-only`
 
 The conversion's own reports (media unresolved, table headers, captions, alt text, page names) come from the steps before rendering. `convert.py --check-only` runs those steps and stops: no output directory, nothing packaged. It's the audit from the conversion's point of view, with the sidecars applied; `audit.py` is the source's own view, with nothing applied.

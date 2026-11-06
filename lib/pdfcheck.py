@@ -37,7 +37,7 @@ from xml.etree import ElementTree
 
 import alttext
 import wcag
-from findings import Finding, describe_input
+from findings import Finding, describe_input, md_code, md_text
 
 try:
     import pypdf
@@ -526,25 +526,27 @@ def inspect(path):
 
 
 def facts_lines(facts):
-    """The metadata section of a report, from inspect()'s facts."""
+    """The metadata section of a report, from inspect()'s facts, in
+    Markdown, what the file says written as text (findings.md_text)."""
     if not facts:
         return ["(not read)"]
     f = facts
     lines = []
-    lines.append(f"- **File:** `{os.path.basename(f['file']['path'])}`, "
+    lines.append(f"- **File:** {md_code(os.path.basename(f['file']['path']))}, "
                  f"{f['file']['bytes']:,} bytes, {f['pages']} page(s), "
-                 f"PDF {f['pdf-version'] or '?'}"
+                 f"PDF {md_text(f['pdf-version'] or '?')}"
                  + (", encrypted" if f["encrypted"] else ""))
     lines.append(f"- **SHA-256:** `{f['file']['sha256']}`")
-    lines.append(f"- **Title:** {f['title'] or f.get('xmp-title') or '(none)'}"
+    lines.append(f"- **Title:** {md_text(f['title'] or f.get('xmp-title') or '(none)')}"
                  + ("" if f["display-doc-title"] else
                     " (not set to display; viewers show the file name)"))
-    lines.append(f"- **Author:** {f['author'] or f.get('xmp-creator') or '(none)'}")
-    lines.append(f"- **Language:** {f['language'] or f.get('xmp-language') or '(none)'}")
-    lines.append(f"- **Created / modified:** {f['created'] or '?'} / "
-                 f"{f['modified'] or '?'}")
-    lines.append(f"- **Producer / creator:** {f['producer'] or '?'} / "
-                 f"{f['creator'] or '?'}")
+    lines.append(f"- **Author:** {md_text(f['author'] or f.get('xmp-creator') or '(none)')}")
+    lines.append("- **Language:** "
+                 + md_text(f['language'] or f.get('xmp-language') or '(none)'))
+    lines.append(f"- **Created / modified:** {md_text(f['created'] or '?')} / "
+                 f"{md_text(f['modified'] or '?')}")
+    lines.append(f"- **Producer / creator:** {md_text(f['producer'] or '?')} / "
+                 f"{md_text(f['creator'] or '?')}")
     lines.append(f"- **XMP metadata:** {'present' if f['xmp'] else 'none'}")
     claims = []
     if f["claims-pdfua"]:
@@ -563,7 +565,7 @@ def facts_lines(facts):
                     if f["tag-total"] else ""))
     if f["tags"]:
         lines.append("- **Tags by type:** " + ", ".join(
-            f"{k} ×{v}" for k, v in f["tags"].items()))
+            f"{md_text(k)} ×{v}" for k, v in f["tags"].items()))
     lines.append("- **Outline:** "
                  + (f"{f['outline-entries']} bookmark(s), {f['outline-depth']} "
                     f"level(s) deep" if f["outline-entries"] else "none"))
@@ -571,7 +573,7 @@ def facts_lines(facts):
                  + (str(len(f["pages-without-text"])) if f["pages-without-text"]
                     else "none"))
     lines.append(f"- **Fonts:** {len(f['fonts'])}"
-                 + (f", not embedded: {', '.join(f['fonts-not-embedded'])}"
+                 + (f", not embedded: {md_text(', '.join(f['fonts-not-embedded']))}"
                     if f["fonts-not-embedded"] else ", all embedded"))
     return lines
 

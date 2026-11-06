@@ -139,10 +139,11 @@ def audit_one(path, kind, validators, wcag=False, verbose=False):
                 found += more
             for line in lines:
                 print(f"  {line}", file=sys.stderr)
-            # A failed check's line, with --verbose, an item under its rule's.
+            # A failed check's line, with --verbose, an item under its rule's;
+            # each as text, since it may quote the PDF's.
             sections.append((f"{name}: veraPDF's WCAG 2.2 checks",
-                             [f"  - {line.strip()}" if line.startswith("  ") else f"- {line}"
-                              for line in lines]))
+                             [f"  - {fl.md_text(line.strip())}" if line.startswith("  ")
+                              else f"- {fl.md_text(line)}" for line in lines]))
         return found, sections
     return [], []
 

@@ -4499,7 +4499,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
 
     os.makedirs(target.output_dir, exist_ok=True)
     written, pages, unnamed, missing, unresolved = [], 0, 0, {}, {"reference": [], "citation": []}
-    untagged = []
+    untagged, cff2 = [], []
     for master, ok, pdf, log in results:
         if not ok:
             continue
@@ -4508,6 +4508,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         for language in BABEL_UNTAGGED.findall(log):
             if language not in untagged:
                 untagged.append(language)
+        cff2 += [face for face in latexbuild.cff2_faces(log) if face not in cff2]
         # What LaTeX couldn't resolve, which the PDF prints as ?? or [?].
         for kind, name in UNDEFINED.findall(log):
             if name not in unresolved[kind.lower()]:
@@ -4531,6 +4532,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         say(latexbuild.missing_warning(
             missing, "A font that has them, chosen in the book's preamble, would "
             "draw them."))
+    if cff2:
+        say(latexbuild.cff2_warning(cff2, "Choose one in the book's preamble."))
     if unresolved["reference"] or unresolved["citation"]:
         refs, cites = unresolved["reference"], unresolved["citation"]
         say(f"WARNING: LaTeX couldn't resolve {len(refs)} reference(s) and {len(cites)} "
@@ -4679,7 +4682,7 @@ def deck_pdfs(target, stems, names, base, language):
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
-    kept = {}
+    kept, cff2 = {}, []
     unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
     untied, step_links, unsettled = {}, {}, []
     for stem, result in results:
@@ -4714,6 +4717,7 @@ def deck_pdfs(target, stems, names, base, language):
             missing[character] = missing.get(character, 0) + n
         for face, n in latexbuild.kept_blanks(result["log"]).items():
             kept[face] = kept.get(face, 0) + n
+        cff2 += [face for face in latexbuild.cff2_faces(result["log"]) if face not in cff2]
         for option in (result["talkify"] or {}).get("dropped", []):
             if option not in dropped:
                 dropped.append(option)
@@ -4744,6 +4748,8 @@ def deck_pdfs(target, stems, names, base, language):
         say(latexbuild.kept_blanks_warning(
             kept, "An OpenType or TrueType face, loaded in a deck's header-includes, has "
             "the measure."))
+    if cff2:
+        say(latexbuild.cff2_warning(cff2, "Load one in a deck's header-includes."))
     if dropped:
         say("NOTE: frame options ltx-talk has no key for were left out of the PDFs: "
             + ", ".join(dropped) + ".")

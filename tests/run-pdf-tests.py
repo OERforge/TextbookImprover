@@ -3860,6 +3860,248 @@ def build_math_font(work):
             converted.stdout + converted.stderr + latex.stdout + latex.stderr)
 
 
+# A variable font whose outlines are CFF2, made here with fontTools where
+# it's installed (make_cff2_face), with two axes, weight and optical size,
+# its glyphs boxes: the default's 700 high, its strokes 60 wide, heavier at
+# its greatest weight and taller at its greatest optical size. luaotfload's
+# node mode kept no outline of Adobe's Source Serif 4 Variable, its CFF2
+# reader stopping on it, and LuaTeX wrote a CFF program with no glyph in
+# it, which viewers drew as nothing; its HarfBuzz mode wrote each glyph
+# without endchar, which a CFF charstring ends with, and as none of the
+# face's instances where it has two axes or more (latexbuild.STATIC_FONTS).
+# A page in the face is built three ways with LuaLaTeX, each with the font
+# setting: as node mode leaves a face whose outlines it can't read, its
+# glyphs' streams empty (a provider registered first that gives none);
+# in HarfBuzz mode; and in node mode as it is, which reads this face. And
+# a book in it, one target in each mode, whose build warns of the face
+# where HarfBuzz mode writes it.
+CFF2_FACE = "OERTestVariable.otf"
+CFF2_WEIGHT = "OERTestWeight.otf"
+CFF2_TEXT = "Words with spaces between them, and figures 2026."
+CFF2_LOST = (r"""\directlua{
+  local names = luatexbase.callback_descriptions("glyph_stream_provider") or {}
+  local name = names[1]
+  local provider = luatexbase.remove_from_callback("glyph_stream_provider", name)
+  luatexbase.add_to_callback("glyph_stream_provider", function(id, index, mode, original)
+    if mode == 1 then return "" end
+    return provider(id, index, mode, original)
+  end, name)
+}
+""")
+
+
+def make_cff2_face(path, axes=2):
+    """CFF2_FACE written to path with fontTools, or False where it isn't
+    installed: .notdef, the space, and a box for each of ASCII's printing
+    characters, 600 across, hinted, from three masters, the default (weight
+    400, optical size 12: 700 high, strokes 60 wide), weight 900 (strokes
+    160 wide), and optical size 48 (760 high); with axes 1, CFF2_WEIGHT, the
+    weight alone, from the first two, its weight 900 named Black."""
+    try:
+        from fontTools import varLib
+        from fontTools.designspaceLib import (AxisDescriptor, DesignSpaceDocument,
+                                              InstanceDescriptor, SourceDescriptor)
+        from fontTools.fontBuilder import FontBuilder
+        from fontTools.pens.t2CharStringPen import T2CharStringPen
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return False
+    printing = [chr(code) for code in range(33, 127)]
+
+    def master(stroke, height):
+        names = [".notdef", "space"] + ["g%04X" % ord(char) for char in printing]
+        builder = FontBuilder(1000, isTTF=False)
+        builder.setupGlyphOrder(names)
+        builder.setupCharacterMap({32: "space", **{ord(char): "g%04X" % ord(char)
+                                                   for char in printing}})
+        strings, metrics = {}, {}
+        for name in names:
+            pen = T2CharStringPen(600, None)
+            if name != "space":
+                pen.moveTo((50, 0)), pen.lineTo((550, 0)), pen.lineTo((550, height))
+                pen.lineTo((50, height)), pen.closePath()
+                pen.moveTo((50 + stroke, stroke)), pen.lineTo((50 + stroke, height - stroke))
+                pen.lineTo((550 - stroke, height - stroke)), pen.lineTo((550 - stroke, stroke))
+                pen.closePath()
+            string = pen.getCharString()
+            if name != "space":
+                # Stem hints and a hint mask before the outline, which a
+                # charstring's reader must step over, the mask a byte.
+                string.program[1:1] = [0, stroke, height - 2 * stroke, stroke, "hstemhm",
+                                       50, stroke, 500 - 2 * stroke, stroke, "vstemhm",
+                                       "hintmask", bytes([0xF0])]
+            strings[name] = string
+            metrics[name] = (250 if name == "space" else 600, 50)
+        builder.setupCFF("OERTestVariable", {"FullName": "OER Test Variable"}, strings, {})
+        builder.setupHorizontalMetrics(metrics)
+        builder.setupHorizontalHeader(ascent=800, descent=-200)
+        builder.setupNameTable({"familyName": "OER Test Variable", "styleName": "Regular",
+                                "fullName": "OER Test Variable",
+                                "psName": "OERTestVariable"})
+        builder.setupOS2(sTypoAscender=800, usWinAscent=800, usWinDescent=200)
+        builder.setupPost()
+        data = io.BytesIO()
+        builder.save(data)
+        data.seek(0)
+        return TTFont(data)
+    space = DesignSpaceDocument()
+    for tag, name, least, default, most in (("wght", "Weight", 100, 400, 900),
+                                            ("opsz", "Optical size", 8, 12, 48))[:axes]:
+        axis = AxisDescriptor()
+        axis.tag, axis.name = tag, name
+        axis.minimum, axis.default, axis.maximum = least, default, most
+        space.addAxis(axis)
+    for where, stroke, height in (({"Weight": 400, "Optical size": 12}, 60, 700),
+                                  ({"Weight": 900, "Optical size": 12}, 160, 700),
+                                  ({"Weight": 400, "Optical size": 48}, 60, 760))[:axes + 1]:
+        source = SourceDescriptor()
+        source.font, source.location = master(stroke, height), dict(list(where.items())[:axes])
+        space.addSource(source)
+    if axes == 1:
+        black = InstanceDescriptor()
+        black.styleName, black.location = "Black", {"Weight": 900}
+        space.addInstance(black)
+    font, _model, _masters = varLib.build(space)
+    font.save(path)
+    return True
+
+
+def build_cff2_face(work):
+    """The pages and the book CFF2_FACE is set in (make_cff2_face): ({way:
+    (its PDF's path, LaTeX's log)} for lost, harf, and node, and weight and
+    black, CFF2_WEIGHT's weight 900 by its axis and by its name, whose
+    outlines are lost as lost's are, what the book's run said, {target:
+    whether its PDF was written} for the book's harf and node), or None
+    where fontTools or LuaLaTeX isn't there."""
+    if not shutil.which("lualatex"):
+        return None
+    os.makedirs(os.path.join(work, "fonts"))
+    if not (make_cff2_face(os.path.join(work, "fonts", CFF2_FACE))
+            and make_cff2_face(os.path.join(work, "fonts", CFF2_WEIGHT), 1)):
+        return None
+    import latexbuild
+    pages = {}
+    for way, first, face, options in (
+            ("lost", CFF2_LOST, CFF2_FACE, ""), ("harf", "", CFF2_FACE, ",Renderer=HarfBuzz"),
+            ("node", "", CFF2_FACE, ""),
+            ("weight", CFF2_LOST, CFF2_WEIGHT, ",RawFeature={axis={wght=900}}"),
+            ("black", CFF2_LOST, CFF2_WEIGHT, ",RawFeature={instance=Black}")):
+        name = os.path.join(work, way + ".tex")
+        # The fonts by their absolute path, as the book's metadata gives
+        # them: luaotfload keeps a face it has read in its cache with the
+        # path it was read by, and the book's node target, built in another
+        # folder after pages that gave fonts/, found its file nowhere
+        # ("cannot find file ''") and wasn't built.
+        with open(name, "w", encoding="utf-8") as fh:
+            fh.write("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n" + first
+                     + latexbuild.STATIC_FONTS + "\\documentclass{article}\n"
+                     "\\usepackage{fontspec}\n"
+                     f"\\setmainfont{{{face}}}[Path={os.path.join(work, 'fonts')}/{options}]\n"
+                     f"\\begin{{document}}\n{CFF2_TEXT}\n\\end{{document}}\n")
+        run(["lualatex", "-interaction=nonstopmode", "-halt-on-error", way + ".tex"], work)
+        log = os.path.join(work, way + ".log")
+        pages[way] = (os.path.join(work, way + ".pdf"),
+                      open(log, encoding="utf-8", errors="replace").read()
+                      if os.path.exists(log) else "")
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    files = {"chapter.md": f"# A chapter\n\n{CFF2_TEXT}\n",
+             "project.yaml": "project:\n  title: Boxes\n  identifier: org.example.boxes\n"
+                             "  language: en-US\n  contents:\n    - chapter\n",
+             "conversion.yaml": "targets:\n" + "".join(
+                 f"  {way}:\n    format: pdf\n    pdf:\n      metadata: {way}.yaml\n"
+                 for way in ("harf", "node"))}
+    for way, renderer in (("harf", "  - Renderer=HarfBuzz\n"), ("node", "")):
+        files[way + ".yaml"] = (f"mainfont: {CFF2_FACE}\nmainfontoptions:\n"
+                                f"  - Path={os.path.join(work, 'fonts')}/\n" + renderer)
+    for name, text in files.items():
+        with open(os.path.join(book, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], book)
+    built = {way: os.path.exists(os.path.join(book, way, "org.example.boxes.pdf"))
+             for way in ("harf", "node")}
+    return pages, converted.stdout + converted.stderr, built
+
+
+def cff_programs(path):
+    """{glyph: its charstring's program} of each CFF program the PDF at path
+    embeds for CFF2_FACE or CFF2_WEIGHT, read with fontTools, empty where
+    there's none."""
+    from fontTools.cffLib import CFFFontSet
+    programs = {}
+    if not os.path.exists(path):
+        return programs
+    for page in pypdf.PdfReader(path).pages:
+        fonts = resolve(resolve(page.get("/Resources") or {}).get("/Font")) or {}
+        for key in fonts:
+            font = resolve(fonts[key])
+            for each in resolve(font.get("/DescendantFonts")) or [font]:
+                descriptor = resolve(resolve(each).get("/FontDescriptor")) or {}
+                program = descriptor.get("/FontFile3")
+                if program is None or "OERTest" not in str(descriptor.get("/FontName")):
+                    continue
+                fonts_set = CFFFontSet()
+                fonts_set.decompile(io.BytesIO(resolve(program).get_data()), None)
+                strings = fonts_set.topDictIndex[0].CharStrings
+                for name in strings.keys():
+                    charstring = strings[name]
+                    charstring.decompile()
+                    programs[f"{key}/{name}"] = list(charstring.program)
+    return programs
+
+
+def cff2_face_checks(result):
+    """The checks of CFF2_FACE's pages and book (build_cff2_face), or none,
+    said, where it wasn't built."""
+    if result is None:
+        print("  skip  no fontTools or no LuaLaTeX to make and set a CFF2 variable font; "
+              "its embedding isn't checked")
+        return []
+    pages, said, built = result
+    told = "TextbookImprover CFF2 face, 2 axes:\n" + CFF2_FACE
+
+    def drawn(way):
+        """Whether the way's PDF draws its glyphs: each charstring ending with
+        endchar, once, every box with its two contours."""
+        programs = cff_programs(pages[way][0])
+        drawing = [p for p in programs.values() if "rmoveto" in p or "hmoveto" in p
+                   or "vmoveto" in p]
+        return bool(programs) and all(p and p[-1] == "endchar" and p.count("endchar") == 1
+                                      for p in programs.values()) \
+            and len(drawing) >= 10 and all(
+                sum(op in ("rmoveto", "hmoveto", "vmoveto") for op in p) == 2 for p in drawing)
+
+    def high(way, height):
+        """Whether every box the way's PDF draws has height in it: 700 or 760
+        high, or strokes 160 wide, its inner contour 380 across."""
+        drawing = [p for p in cff_programs(pages[way][0]).values() if "hlineto" in p]
+        return bool(drawing) and all(height in p for p in drawing)
+    return [
+        ("a CFF2 variable font whose outlines luaotfload's node mode keeps none of, as it "
+         "kept none of Source Serif 4's, is written as its HarfBuzz mode writes it, each "
+         "glyph drawn and each charstring ending with endchar, and the run names it, with "
+         "its two axes",
+         lambda: drawn("lost") and told in pages["lost"][1]),
+        ("in HarfBuzz mode, each charstring ends with endchar, which that mode leaves off a "
+         "CFF2 face's, and the run names the face",
+         lambda: drawn("harf") and told in pages["harf"][1]),
+        ("one node mode reads is written as node mode reads it, its boxes the default's, 700 "
+         "high, and isn't named",
+         lambda: drawn("node") and high("node", 700)
+         and "TextbookImprover CFF2 face" not in pages["node"][1]),
+        ("a face with one axis, its outlines lost as Source Serif 4's were, is written at the "
+         "weight its axis is set to, or its named instance's, its strokes 160 wide, and "
+         "isn't named, that mode reading its one axis as it should",
+         lambda: drawn("weight") and drawn("black") and high("weight", 160)
+         and high("black", 160) and not high("weight", 60)
+         and "TextbookImprover CFF2 face" not in pages["weight"][1] + pages["black"][1]),
+        ("a book in it is built in both modes, and warns once, for the target that sets it "
+         "in HarfBuzz mode",
+         lambda: built["harf"] and built["node"]
+         and said.count(f"WARNING: {CFF2_FACE} is a variable font in CFF2") == 1),
+    ]
+
+
 # A book on the default page, in its faces, its tables counted in ems of
 # the text's type as the build measures the page and faces
 # (build_measured): code in a table's cell, as the code book has it
@@ -6925,8 +7167,8 @@ def fancy_checks(fancy_path, fancy_said):
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
-                "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-measured",
-                "-ams", "-doctoc")
+                "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
+                "-measured", "-ams", "-doctoc")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7070,6 +7312,7 @@ def checks(work, jobs=1):
             ruled = pool.submit(build_rules, work + "-rules")
             coded = pool.submit(build_code, work + "-code")
             mathed = pool.submit(build_math_font, work + "-mathfont")
+            cff2ed = pool.submit(build_cff2_face, work + "-cff2")
             measured = pool.submit(build_measured, work + "-measured")
             amsed = pool.submit(build_ams, work + "-ams")
             doc_tocced = pool.submit(build_doc_toc, work + "-doctoc")
@@ -7094,6 +7337,7 @@ def checks(work, jobs=1):
             (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
              tall_said, wrap_paths, wrap_said) = coded.result()
             math_paths, math_said = mathed.result()
+            cff2_result = cff2ed.result()
             measured_path, measured_said, measured_source = measured.result()
             ams_path, ams_said = amsed.result()
             doc_toc_path, doc_toc_said = doc_tocced.result()
@@ -7121,6 +7365,7 @@ def checks(work, jobs=1):
         (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
          tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
         math_paths, math_said = build_math_font(work + "-mathfont")
+        cff2_result = build_cff2_face(work + "-cff2")
         measured_path, measured_said, measured_source = build_measured(work + "-measured")
         ams_path, ams_said = build_ams(work + "-ams")
         doc_toc_path, doc_toc_said = build_doc_toc(work + "-doctoc")
@@ -7930,6 +8175,7 @@ def checks(work, jobs=1):
     items += fancy_checks(fancy_path, fancy_said)
     items += default_checks(default_path, default_said, lacking_path, lacking_said)
     items += math_font_checks(math_paths, math_said)
+    items += cff2_face_checks(cff2_result)
     items += measured_checks(measured_path, measured_said, measured_source)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,

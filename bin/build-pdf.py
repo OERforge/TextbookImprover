@@ -1756,6 +1756,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 "the pdf.metadata file) has the measure.")
             if line:
                 print(line, file=sys.stderr)
+            # A CFF2 variable font, drawn as none of its instances.
+            line = latexbuild.cff2_warning(latexbuild.cff2_faces(said),
+                                           "Set one in the pdf.metadata file (mainfont).")
+            if line:
+                print(line, file=sys.stderr)
         said, note = bookmark_said(result.stderr, record_path)
         missing, others = latexbuild.missing_characters(said.splitlines())
         if others:

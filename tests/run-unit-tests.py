@@ -3096,7 +3096,8 @@ def check_book_template():
     that loads the fonts' packages, and the template Pandoc's own but for
     them; a template without that line taken as it is, the run warned of
     what that leaves; and the setting's Lua with nothing TeX would read as
-    its own, since TeX reads it before Lua does."""
+    its own, since TeX reads it before Lua does, nor Pandoc's template, a
+    dollar sign, since the setting is part of the template."""
     import latexbuild
     lua = latexbuild.STATIC_FONTS.split("\\directlua{", 1)[1].rsplit("}", 1)[0]
     work = tempfile.mkdtemp(prefix="unit-template-")
@@ -3127,8 +3128,72 @@ def check_book_template():
          lambda: lacking is None and len(warned) == 1
          and warned[0].startswith("WARNING: Pandoc's LaTeX template has no $fonts.latex()$ line")
          and "embedded without its hinting" in warned[0]),
-        ("the setting's Lua has no percent sign, hash, tilde, or backslash, and no comment",
-         lambda: lua.strip() and not re.search(r"[%#~\\]|--", lua)),
+        ("the setting's Lua has no percent sign, hash, tilde, backslash, or dollar sign, and "
+         "no comment",
+         lambda: lua.strip() and not re.search(r"[%#~\\$]|--", lua)),
+    ]
+
+
+def check_charstring_end():
+    """The font setting's reading of a CFF charstring for whether it ends
+    with endchar (latexbuild.STATIC_FONTS, oerfonts.ended), run with
+    Pandoc's Lua: an outline ending with endchar does, a callsubr too; a
+    width alone, a number whose last byte is endchar's, and a hint mask
+    whose mask byte is, at the end, don't, the mask stepped over by the
+    stems before it, one pair a stem, a width before them not one."""
+    import latexbuild
+    if not shutil.which("pandoc"):
+        return [("a charstring's end is read", lambda: print("  skip  no pandoc to run Lua")
+                 or True)]
+    lua = latexbuild.STATIC_FONTS
+    start = lua.index("oerfonts.ended = function(stream)")
+    end = lua.index("oerfonts.cff2, oerfonts.said", start)
+    cases = {
+        "outline": [189, 22, 14],                            # 50 hmoveto endchar
+        "width": [247, 142],                                 # 250 alone
+        "number": [139, 139, 247, 14],                       # 0 0 122: its byte 14
+        "masked": [139, 199, 179, 199, 18, 19, 14, 189, 22, 14],
+        "mask last": [139, 199, 179, 199, 18, 19, 14],       # hintmask, mask 14
+        "width and stems": [237, 139, 199, 18, 50, 199, 23, 19, 192, 14],
+        "callsubr": [144, 10],
+        "empty": [],
+        "flex": [139, 139, 12, 35],
+        "escaped": [139, 12, 14],                            # neg, its byte 14
+        "shortint": [28, 0, 14],                             # 14, three bytes
+        # Eight stems, then two arguments before the mask, a ninth stem's,
+        # which the mask's second byte, 14, is for.
+        "implicit": [139] * 16 + [18, 139, 139, 19, 255, 14],
+        # Eight stems, a moveto's two arguments, no stem, and a mask of one
+        # byte before endchar.
+        "moved": [139] * 16 + [18, 139, 139, 21, 19, 255, 14],
+    }
+    script = ("local oerfonts = {}\n" + lua[start:end] + "\nlocal cases = {\n" + "".join(
+        f"  {{ {json.dumps(name)}, {{ {', '.join(map(str, data))} }} }},\n"
+        for name, data in cases.items()) + "}\nfor _, case in ipairs(cases) do\n"
+        "  local s = string.char(table.unpack(case[2]))\n"
+        "  print(case[1] .. '=' .. tostring(oerfonts.ended(s)))\nend\n")
+    work = tempfile.mkdtemp(prefix="unit-charstring-")
+    atexit.register(shutil.rmtree, work, True)
+    path = os.path.join(work, "ended.lua")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(script)
+    done = subprocess.run(["pandoc", "lua", path], capture_output=True, text=True)
+    said = dict(line.split("=", 1) for line in done.stdout.splitlines() if "=" in line)
+    return [
+        ("an outline ending with endchar ends with it, and one ending with a callsubr is "
+         "taken to, its subroutine's end its own",
+         lambda: said.get("outline") == "true" and said.get("callsubr") == "true"
+         and said.get("masked") == "true"),
+        ("a width alone, an empty charstring, a flex, and an escaped operator and numbers "
+         "of two bytes and of three whose last byte is endchar's don't end with it",
+         lambda: said.get("width") == "false" and said.get("empty") == "false"
+         and said.get("flex") == "false" and said.get("number") == "false"
+         and said.get("escaped") == "false" and said.get("shortint") == "false"),
+        ("a hint mask's bytes are stepped over, one for up to eight stems, the stems "
+         "counted in pairs, those just before the mask among them and a width and a "
+         "moveto's arguments not, so a mask byte of 14 at the end isn't endchar",
+         lambda: said.get("mask last") == "false" and said.get("width and stems") == "true"
+         and said.get("implicit") == "false" and said.get("moved") == "true"),
     ]
 
 
@@ -7943,6 +8008,7 @@ GROUPS = [
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),
+    ("a CFF charstring's end, as the font setting reads it", check_charstring_end),
     ("a LaTeX book's tagged copy, the font setting before its class", check_tagged_copy_fonts),
     ("the PDF build's note of headings' formulas left as TeX in bookmarks", check_bookmark_said),
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",

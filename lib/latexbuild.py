@@ -450,9 +450,30 @@ CODE_SPACES = r"""\makeatletter
 # the book opened cleanly with only those records emptied, and a page of
 # nothing but the space glyph, as built, didn't. The provider's own
 # callback is wrapped where it's registered, under its own name, which
-# luaotfload's HarfBuzz mode registers for both modes; only a TrueType
-# glyph's stream (mode 2) is looked at, one of no more than 12 bytes
-# whose count of contours is 0.
+# luaotfload's HarfBuzz mode registers for both modes; a TrueType glyph's
+# stream (mode 2) of no more than 12 bytes whose count of contours is 0 is
+# written empty.
+#
+# And a CFF2 face, a variable font whose outlines are PostScript's, is
+# embedded where luaotfload's node mode can't read its outlines. Its font
+# loader stopped on Adobe's Source Serif 4 Variable with a fatal error in
+# its CFF2 reader (p_blend, "attempt to perform arithmetic on a nil
+# value"), and kept no outline, so each glyph's stream (mode 1) was empty
+# and LuaTeX wrote a CFF program with no glyph in it, which a viewer drew
+# as nothing: a page in it showed no text, its page number neither, its
+# text still there to copy. Such a face's glyphs are written as
+# luaotfload's HarfBuzz mode writes them (luaotfload-harf-var-cff2.lua),
+# at the instance or the axes the face was loaded with, as that mode reads
+# them; a face the node mode reads, as it read a small one made with
+# fontTools, is written as it was. Each glyph's stream ends with endchar,
+# which a CFF charstring ends with and the HarfBuzz mode left off every
+# glyph, CFF2 having none. That mode's reading of a face's variation
+# regions stops reading a region at the first axis that rules it out and
+# goes on with the next region from there, so a face with two axes or
+# more is drawn as no instance of it: Source Serif 4's regular and its
+# bold were both drawn as its regular at its smallest optical size. Where
+# that mode writes such a face, the run says so (TextbookImprover CFF2
+# face, cff2_faces), and the build warns.
 STATIC_FONTS = r"""\ifdefined\directlua
 \directlua{
   if not oerfonts and fonts and fonts.constructors and fonts.constructors.trytosharefont then
@@ -473,8 +494,98 @@ STATIC_FONTS = r"""\ifdefined\directlua
     local name = names[1]
     if name and not names[2] then
       local provider = luatexbase.remove_from_callback("glyph_stream_provider", name)
+      oerfonts.ended = function(stream)
+        local i, n, stems, args, last = 1, string.len(stream), 0, 0, 0
+        while i <= n do
+          local b = string.byte(stream, i)
+          if b == 28 then i, args, last = i + 3, args + 1, 0
+          elseif b == 255 then i, args, last = i + 5, args + 1, 0
+          elseif b >= 247 then i, args, last = i + 2, args + 1, 0
+          elseif b >= 32 then i, args, last = i + 1, args + 1, 0
+          elseif b == 12 then i, args, last = i + 2, 0, 0
+          elseif b == 19 or b == 20 then
+            stems = stems + args // 2
+            i, args, last = i + 1 + (stems + 7) // 8, 0, b
+          else
+            if b == 1 or b == 3 or b == 18 or b == 23 then stems = stems + args // 2 end
+            i, args, last = i + 1, 0, b
+          end
+        end
+        return last == 14 or last == 10 or last == 29
+      end
+      oerfonts.cff2, oerfonts.said = {}, {}
+      oerfonts.face = function(id)
+        local known = oerfonts.cff2[id]
+        if known == nil then
+          known = false
+          local hb = luaotfload and luaotfload.harfbuzz
+          local tfm = font.getfont(id)
+          local path = tfm and tfm.filename and string.gsub(tfm.filename, "^harfloaded:", "")
+          if hb and path then
+            local ok, made = pcall(function()
+              local face = tfm.hb and tfm.hb.shared and tfm.hb.shared.face or hb.Face.new(path)
+              local tag, found = hb.Tag.new("CFF2"), false
+              for _, each in ipairs(face:get_table_tags() or {}) do
+                if each == tag then found = true end
+              end
+              if not found then return false end
+              local axes = face:ot_var_get_axis_infos() or {}
+              local made = { axes = rawlen(axes), path = path, harf = tfm.hb and true or false }
+              if not tfm.hb then
+                local shaper = hb.Font.new(face)
+                local instance = tfm.properties and tfm.properties.instance
+                local design
+                if instance and string.find(instance, "=", 1, true) then
+                  design = {}
+                  for _, axis in ipairs(axes) do design[axis.axis_index] = axis.default_value end
+                  for key, value in string.gmatch(instance, "([A-Za-z]+)=([0-9.+-]+)") do
+                    local wanted = string.len(key) <= 4 and hb.Tag.new(key)
+                    for _, axis in ipairs(axes) do
+                      if axis.tag == wanted or string.lower(face:get_name(axis.name_id) or "") == string.lower(key) then
+                        design[axis.axis_index] = tonumber(value)
+                      end
+                    end
+                  end
+                elseif instance then
+                  for _, each in ipairs(face:ot_var_named_instance_get_infos() or {}) do
+                    if string.lower(face:get_name(each.subfamily_name_id) or "") == string.lower(instance) then
+                      design = { face:ot_var_named_instance_get_design_coords(each.index) }
+                    end
+                  end
+                end
+                if design then
+                  shaper:set_var_coords_normalized(face:ot_var_normalize_coords(table.unpack(design)))
+                end
+                made.convert = require("luaotfload-harf-var-cff2")(face, shaper)
+              end
+              return made
+            end)
+            if ok and made then known = made end
+          end
+          oerfonts.cff2[id] = known
+        end
+        return known
+      end
+      oerfonts.tell = function(face)
+        if face.axes > 1 and not oerfonts.said[face.path] then
+          local base = face.path
+          for part in string.gmatch(face.path, "[^/]+") do base = part end
+          oerfonts.said[face.path] = true
+          texio.write_nl("term and log", "TextbookImprover CFF2 face, " .. face.axes .. " axes:")
+          texio.write_nl("term and log", base)
+          texio.write_nl("term and log", "")
+        end
+      end
       oerfonts.streams = function(id, index, mode, original)
         local stream, a, b, c = provider(id, index, mode, original)
+        if mode == 1 and type(stream) == "string" then
+          local face = oerfonts.face(id)
+          if face and (face.harf or stream == "") then
+            if stream == "" and face.convert then stream = face.convert(index) end
+            oerfonts.tell(face)
+          end
+          if not oerfonts.ended(stream) then stream = stream .. string.char(14) end
+        end
         if mode == 2 and type(stream) == "string" and string.len(stream) <= 12
             and string.byte(stream, 1) == 0 and string.byte(stream, 2) == 0 then
           return ""
@@ -4394,6 +4505,29 @@ def kept_blanks(output):
     for count, face in KEPT_BLANKS.findall(output):
         kept[face.strip()] = kept.get(face.strip(), 0) + int(count)
     return kept
+
+
+# A CFF2 face of two axes or more the font setting wrote, as LaTeX's output
+# names it (STATIC_FONTS), which luaotfload draws as no instance of it.
+CFF2_FACES = re.compile(r"^TextbookImprover CFF2 face, (\d+) axes:\n(\S.*)$", re.M)
+
+
+def cff2_faces(output):
+    """The CFF2 faces of two axes or more named in LaTeX's output, each
+    once, in the order named."""
+    return list(dict.fromkeys(face.strip() for _axes, face in CFF2_FACES.findall(output)))
+
+
+def cff2_warning(faces, advice):
+    """One line for what cff2_faces found, or None."""
+    if not faces:
+        return None
+    return ("WARNING: " + ", ".join(faces) + (" is a variable font" if len(faces) == 1
+                                              else " are variable fonts")
+            + " in CFF2, with more than one axis, which luaotfload draws as none of its "
+            "instances, so the PDF's letters may not have the weight or optical size asked "
+            "for. A variable font's TrueType version (.ttf), or its static faces, are drawn "
+            "as they should be. " + advice)
 
 
 def kept_blanks_warning(kept, advice):

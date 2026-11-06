@@ -96,7 +96,9 @@ writer's output:
 - each notes slide has a color map override, the master's mapping, as
   PowerPoint writes one, which the writer leaves out before 3.13: the
   schema has it optional, but Keynote is reported to refuse a deck without
-  it (Pandoc's issue 11935, which 3.13's writer puts right; notes_colors);
+  it (Pandoc's issue 11935, which 3.13's writer puts right), and the latest
+  Keynote (15.4 by its release history) opened this target's deck and not
+  the one 3.12.1 wrote (notes_colors);
 - each run's properties are in the order the schema gives them, where the
   writer puts a link's a:hlinkClick before a color's a:solidFill and a
   code font's a:latin (ordered_properties);
@@ -1896,9 +1898,12 @@ def notes_colors(xml, counts):
     """A notes slide with a color map override, the master's mapping, where
     the writer writes none: the schema has it optional, but Keynote is
     reported to refuse a deck whose notes slide has none, and to open it
-    with one (Pandoc's issue 11935, against 3.12; not tried here). The
-    writer writes one from 3.13 on (commit 25bef2d, #11960),
-    and a notes slide that has one is left as it is.
+    with one (Pandoc's issue 11935, against 3.12). The latest Keynote when
+    tried (15.4 by its release history), and an earlier version, opened
+    this target's deck of a test deck with notes and wouldn't open the one
+    3.12.1 wrote, which differs in more than this (docs/slides.md). The
+    writer writes one from 3.13 on (commit 25bef2d, #11960), and a notes
+    slide that has one is left as it is.
     counts["notes_colors"] counts the notes slides given one."""
     if "<p:clrMapOvr" in xml or "</p:cSld>" not in xml:
         return xml

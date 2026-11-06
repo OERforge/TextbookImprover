@@ -4559,6 +4559,46 @@ def case_formula_titles(work):
     ]
 
 
+def case_numbered_titles(work):
+    """A numbered book's page has its number in its <title> and its own
+    heading, whatever its title holds: a character outside ASCII, which the
+    page writes as a reference (Newton&#x2019;s), a formula, read as its
+    text, and a note, whose mark the title hasn't, where those three had
+    been left without it."""
+    os.makedirs(work)
+    pages = {"01-newton": "# Newton\u2019s Laws\n\nText.\n",
+             "02-limits": "# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\nText.\n",
+             "03-note": "# A heading with a note[^1]\n\nText.\n\n[^1]: The note.\n",
+             "04-plain": "# Plain Laws\n\nText.\n"}
+    for name, text in pages.items():
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.numbered\n  title: Numbered\n"
+                 "  numbering: true\n  contents:\n    - title: Part One\n"
+                 "      items: [01-newton, 02-limits, 03-note, 04-plain]\n")
+    convert(work, "targets:\n  html:\n    format: html\n", project=False, fixtures=())
+
+    def shown(name):
+        page = read(work, "html", name + ".html") if exists(work, "html", name + ".html") else ""
+        title = re.search(r"<title>(.*?)</title>", page, re.S)
+        heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", page, re.S)
+        return (html_lib.unescape(title.group(1)) if title else "",
+                html_lib.unescape(re.sub(r"<[^>]+>", "", heading.group(1))) if heading else "")
+    return [
+        ("a title with a character outside ASCII has its number, in the <title> and the heading",
+         lambda: shown("01-newton") == ("1.1 Newton\u2019s Laws", "1.1 Newton\u2019s Laws")),
+        ("a title with a formula has it, the heading's formula read as its text",
+         lambda: shown("02-limits")[0] == "1.2 Limits a/b and \u211d\u207f"
+         and shown("02-limits")[1].startswith("1.2 Limits")),
+        ("a heading with a note has it, its mark aside",
+         lambda: shown("03-note")[0] == "1.3 A heading with a note"
+         and shown("03-note")[1].startswith("1.3 A heading with a note")),
+        ("and a title of ASCII alone, as before",
+         lambda: shown("04-plain") == ("1.4 Plain Laws", "1.4 Plain Laws")),
+    ]
+
+
 def case_link_titles(work):
     """A link's title survives from every source through every target:
     Markdown and AsciiDoc titles, HTML's title attribute, and Word's
@@ -9189,6 +9229,7 @@ CASES = [
     ("an AsciiDoc target", case_asciidoc_target),
     ("a page title that is also a heading", case_title_id),
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
+    ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("a table whose <thead> holds every row", case_head_only_tables),

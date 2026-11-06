@@ -73,6 +73,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter, OrderedDict
+from html import unescape as html_unescape
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -5418,12 +5419,54 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
     return written
 
 
-def number_page_headings(target, tree, titles):
+TITLE_ELEMENT = re.compile(r"(<title>)(.*?)(</title>)", re.S)
+H1_ELEMENT = re.compile(r"(<h1(?:\s[^>]*)?>)(.*?)(</h1>)", re.S)
+FORMULA_ELEMENT = re.compile(r"<math\b.*?</math>", re.S)
+TEX_ANNOTATION = re.compile(r'<annotation encoding="application/x-tex">(.*?)</annotation>', re.S)
+NOTE_MARK = re.compile(r'<a\b[^>]*\bclass="footnote-ref"[^>]*>.*?</a>', re.S)
+
+
+def html_title_text(fragment, texts=None):
+    """An element's HTML as the text of a title: each formula the text
+    title-formulas.lua noted for it, by the TeX its MathML keeps (texts),
+    else that TeX; a note's mark, the tags, and the entities gone, so that
+    a page Pandoc wrote with --ascii, Newton&#x2019;s, says its title as
+    the title is written."""
+    texts = texts or {}
+
+    def formula(match):
+        found = TEX_ANNOTATION.search(match.group(0))
+        tex = html_unescape(found.group(1)) if found else ""
+        return html_escape(texts.get(tex, tex))
+    text = FORMULA_ELEMENT.sub(formula, NOTE_MARK.sub("", fragment))
+    return " ".join(html_unescape(re.sub(r"<[^>]+>", "", text)).split())
+
+
+def page_formula_texts(pages):
+    """{stem: {TeX: text}}, each page's formulas in its titles and headings
+    as title-formulas.lua noted them, from its intermediate."""
+    found = {}
+    for intermediate in pages:
+        with open(intermediate, encoding="utf-8") as fh:
+            meta = json.load(fh).get("meta", {})
+        texts = meta.get("formula-texts")
+        if texts and texts.get("t") == "MetaMap":
+            found[os.path.basename(intermediate)[:-len(INTERMEDIATE)]] = {
+                tex: meta_text({"text": entry}, "text") for tex, entry in texts["c"].items()}
+    return found
+
+
+def number_page_headings(target, tree, titles, texts=None):
     """The book's numbers on each page's own heading and <title>, when
     the book is numbered: "1.2 Data, Sampling, and Variation", as the
     EPUB's headings and the tables of contents already say. A post-edit
     of the rendered page, since the number is a fact about the book's
-    structure, which the page doesn't know until the tree is built."""
+    structure, which the page doesn't know until the tree is built. The
+    heading is the first <h1> that says the title, as the <title> does,
+    read as text (html_title_text), its formulas by texts ({stem: {TeX:
+    text}}, page_formula_texts): a title that held a character outside
+    ASCII, which the page has as a reference, a formula, or a note had
+    been left without its number."""
     changed = []
 
     def walk(nodes):
@@ -5439,18 +5482,21 @@ def number_page_headings(target, tree, titles):
                 continue
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            title = b or titles.get(a, a)
+            title = " ".join((b or titles.get(a, a)).split())
             number = entry.number
+            own = (texts or {}).get(a, {})
+
+            def numbered(found):
+                return found.group(1) + number + " " + found.group(2) + found.group(3)
             new = text
             # Either may be wrapped across lines by the writer.
-            new = re.sub(r"(<title>)(" + r"\s+".join(map(re.escape, title.split()))
-                         + r")(</title>)",
-                         lambda m: m.group(1) + number + " " + m.group(2)
-                         + m.group(3), new, count=1)
-            new = re.sub(r'(<h1(?:\s[^>]*)?>)(' + r"\s+".join(map(re.escape, title.split()))
-                         + r")(</h1>)",
-                         lambda m: m.group(1) + number + " " + m.group(2)
-                         + m.group(3), new, count=1)
+            found = TITLE_ELEMENT.search(new)
+            if found and html_title_text(found.group(2)) == title:
+                new = new[:found.start()] + numbered(found) + new[found.end():]
+            for found in H1_ELEMENT.finditer(new):
+                if html_title_text(found.group(2), own) == title:
+                    new = new[:found.start()] + numbered(found) + new[found.end():]
+                    break
             if new != text:
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.write(new)
@@ -6797,7 +6843,8 @@ def main():
                     project, pages_by_dir[target.pages_dir],
                     numbering_for(target, project))
                 if numbering_for(target, project):
-                    number_page_headings(target, tree, titles)
+                    number_page_headings(target, tree, titles, page_formula_texts(
+                        pages_by_dir[target.pages_dir]))
                 others = other_languages(pages_by_dir[target.pages_dir], language)
                 written[target.name] += write_generated(
                     target, tree, titles, api, base, work,

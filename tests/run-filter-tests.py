@@ -1159,6 +1159,43 @@ def case_title_formulas(work):
     ]
 
 
+def case_declared_formula_title(work):
+    """A page whose declared title is its H1's words with the formulas as
+    text, as a Markdown copy of a page writes its title, has the H1 for its
+    title heading, shown once, under promote_h1_to_title's default; a
+    declared title that says something else leaves the H1 a heading of its
+    own, as before."""
+    os.makedirs(work, exist_ok=True)
+    pages = {"copy": "---\ntitle: Limits a/b and ℝⁿ\n---\n\n",
+             "other": "---\ntitle: Something else\n---\n\n"}
+    found = {}
+    for name, front in pages.items():
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(front + "# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\nText.\n")
+        result = subprocess.run(
+            ["pandoc", "-f", "markdown", "-t", "json", name + ".md",
+             "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")],
+            capture_output=True, text=True, cwd=work,
+            env=dict(os.environ, PROMOTE_H1_TO_TITLE="if-absent"))
+        found[name] = json.loads(result.stdout)
+
+    def headed(name):
+        return [b for b in found[name]["blocks"] if b["t"] == "Header" and b["c"][0] == 1]
+
+    def title(name):
+        return "".join(i["c"] if i["t"] == "Str" else " "
+                       for i in found[name]["meta"]["title"]["c"])
+    return [
+        ("a declared title that is the H1's words with its formulas as text has the H1 for "
+         "its title heading, shown once, the title as declared",
+         lambda: "title-heading" in found["copy"]["meta"] and not headed("copy")
+         and title("copy") == "Limits a/b and ℝⁿ"),
+        ("one that says something else leaves the H1 a heading of its own",
+         lambda: "title-heading" not in found["other"]["meta"] and len(headed("other")) == 1
+         and title("other") == "Something else"),
+    ]
+
+
 def case_media(work):
     """Word's content types, alt text, and keys that must stay distinct."""
     out = Converted(work, ["media-a", "media-b"])
@@ -1299,6 +1336,7 @@ CASES = [
     ("equations, MathSpeak, and spacers", case_math),
     ("math repaired, and math typed as text", case_math_repair),
     ("a title's formulas as text, after the repairs", case_title_formulas),
+    ("a declared title that is its heading's, its formulas as text", case_declared_formula_title),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),
     ("sidecars Excel saved, with files appended", case_sidecar_marks),

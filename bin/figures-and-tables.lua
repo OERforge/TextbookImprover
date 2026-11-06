@@ -2881,8 +2881,15 @@ end
 local function should_promote_h1(doc, index)
   if PROMOTE_H1_TO_TITLE == 'never' or index == nil then return false end
   if doc.meta.title == nil then return true end
-  if says_title(pandoc.utils.stringify(doc.meta.title),
-                pandoc.utils.stringify(doc.blocks[index].content)) then
+  local declared = pandoc.utils.stringify(doc.meta.title)
+  local content = doc.blocks[index].content
+  -- Or its words with its formulas as text, as a page's title has them,
+  -- which a Markdown copy of the page writes as its declared title: read
+  -- again, "Limits a/b and ℝⁿ" is the title its heading "Limits
+  -- $\frac{a}{b}$ and $\mathbb{R}^n$" says, where the heading had been
+  -- shown under it as one of its own.
+  if says_title(declared, pandoc.utils.stringify(content))
+      or says_title(declared, pandoc.utils.stringify(plain_formulas(content))) then
     return true
   end
   if PROMOTE_H1_TO_TITLE == 'always' then return true end

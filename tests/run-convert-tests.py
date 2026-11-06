@@ -4441,7 +4441,9 @@ def case_formula_titles(work):
     piece's and a chapter's are of the formula as math-repair.lua repaired
     it (title-formulas.lua, after it). A formula that can't be text, a
     binomial, is its TeX between dollar signs, said once, without Pandoc's
-    warning of it; and the texts the filters note reach no output."""
+    warning of it; the texts the filters note reach no output; and the
+    Markdown copy, read again, has its heading for its title heading, its
+    declared title the heading's text."""
     os.makedirs(work)
     with open(os.path.join(work, "01-limits.md"), "w", encoding="utf-8") as fh:
         fh.write("# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\nText.\n\n"
@@ -4480,6 +4482,15 @@ def case_formula_titles(work):
             if os.path.isfile(path) and "formula-texts" in read(path):
                 leaked.append(path)
     copy = read(work, "src", "01-limits.md") if exists(work, "src", "01-limits.md") else ""
+    # The Markdown copy read again as a source, its title the heading's text.
+    again = work + "-again"
+    os.makedirs(again)
+    if copy:
+        with open(os.path.join(again, "01-limits.md"), "w", encoding="utf-8") as fh:
+            fh.write(copy)
+    convert(again, "targets:\n  html:\n    format: html\n", fixtures=())
+    read_again = read(again, "html", "01-limits.html") if exists(again, "html", "01-limits.html") \
+        else ""
     return [
         ("a page's title has its heading's formulas as text, and a piece's the split cut, a "
          "repaired formula's as repaired",
@@ -4504,6 +4515,11 @@ def case_formula_titles(work):
          and "an EPUB chapter's: \\binom{n}{k}." in said and "Could not convert" not in said),
         ("the texts the filters note reach no output",
          lambda: chapters and word_title and copy and not leaked),
+        ("the Markdown copy read again has its heading for its title heading, shown once, "
+         "its title the heading's text",
+         lambda: read_again and len(re.findall(r"<h1\b", read_again)) == 1
+         and html_lib.unescape(re.search(r"<title>(.*?)</title>", read_again).group(1))
+         == "Limits a/b and \u211d\u207f"),
     ]
 
 

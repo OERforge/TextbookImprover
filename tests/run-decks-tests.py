@@ -665,7 +665,8 @@ title: Item Code
 # ltx-talk has no key for, beamer's own command in header-includes, and
 # a color named as xcolor's dvipsnames name it. And a formula's term
 # struck out, which the cancel package draws, and formulas in a slide's
-# title, which its bookmark has as text where it can (deck-pdf.lua).
+# title, which its bookmark has as text where it can (deck-pdf.lua;
+# math-text.lua).
 ODD = """\
 ---
 title: Odd Cases
@@ -712,9 +713,9 @@ $\\frac{\\cancel{3}x}{\\cancel{3}} = x$ and $\\xcancel{2z}$.
 
 Two hyphens in a title, escaped so as to stay two.
 
-# Power $x^2 + y_1$, $\\mathbb{R}^n$, $a\\text{~~~to~~~}b$, and $\\frac{a}{b}$
+# Power $x^2 + y_1$, $\\mathbb{R}^n$, $a\\text{~~~to~~~}b$, $\\frac{a}{b}$, and $\\binom{n}{k}$
 
-Formulas in a title, three Pandoc's plain writer writes as text and one it can't.
+Formulas in a title, four written as text and one that can't be.
 
 [^a]: The first note.
 [^c]: The caption's note.
@@ -2204,10 +2205,10 @@ def case_pdf(work):
         # hyperref's \\pdfstringdef, which writes it, would make them a dash.
         ("and keeps two hyphens in its title as they're printed",
          lambda: ("Pages 10--20", []) in outline(odd) and "Pages 10--20" in odd_text),
-        ("and has a formula in its title as text where Pandoc's plain writer writes it so, "
-         "x\u00b2 + y\u2081, its spaces a word's, a run of them one, and a script it puts in "
-         "parentheses without them, and as its TeX where it can't, a fraction",
-         lambda: ("Power x\u00b2 + y\u2081, \u211d^n, a to b, and \\frac{a}{b}", [])
+        ("and has a formula in its title as text, x\u00b2 + y\u2081, its spaces a word's, a "
+         "run of them one, a script in Unicode's superscripts, \u211d\u207f, and a fraction, "
+         "a/b, and as its TeX where it can't be, a binomial",
+         lambda: ("Power x\u00b2 + y\u2081, \u211d\u207f, a to b, a/b, and \\binom{n}{k}", [])
          in outline(odd)),
         ("a slide in a div is a slide: bookmarked, its title's footnote set",
          lambda: ("Wrapped Slide", []) in outline(more) and "Wrapped Slide5" in more_text

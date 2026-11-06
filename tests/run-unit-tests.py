@@ -3233,44 +3233,51 @@ def check_tagged_copy_fonts():
 def check_bookmark_said():
     """The PDF build's reading of what the filter records of the formulas
     in headings it left as their TeX in the bookmarks (build-pdf.py,
-    bookmark_said): the plain writer's warning of each taken out of what
-    Pandoc said, once for each time it's recorded, with texmath's reason
-    on the lines after it where it gives one, and a formula's second line
-    as Pandoc indents it, another formula's warning and another warning's
-    reason kept, and the run's one note naming them; nothing recorded, or
-    no record, and Pandoc's words are as they were, with no note."""
+    bookmark_said): the plain writer's warning of each formula, or of each
+    part of one, it recorded taken out of what Pandoc said, once for each
+    time it's recorded, with texmath's reason on the lines after it where
+    it gives one, and a formula's second line as Pandoc indents it,
+    another formula's warning and another warning's reason kept, and the
+    run's one note naming the formulas; nothing recorded, or no record,
+    and Pandoc's words are as they were, with no note."""
     build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
     work = tempfile.mkdtemp(prefix="unit-bookmarks-")
     atexit.register(shutil.rmtree, work, True)
     record = os.path.join(work, "record.json")
     with open(record, "w", encoding="utf-8") as fh:
-        json.dump({"bookmark_tex": ["\\frac{a}{b}", "\\frac{a}{b}", "\\foo{x}",
-                                    "\\frac{a}\n{b}"]}, fh)
+        json.dump({"bookmark_tex": ["\\binom{n}{k}", "\\binom{n}{k}", "\\foo{x}",
+                                    "\\binom{a}\n{b}", "\\frac{\\binom{n}{k}}{2}"],
+                   "bookmark_warned": ["\\binom{n}{k}", "\\binom{n}{k}", "\\foo{x}",
+                                       "\\binom{a}\n{b}", "\\binom{n}{k}"]}, fh)
     empty = os.path.join(work, "empty.json")
     with open(empty, "w", encoding="utf-8") as fh:
-        fh.write('{"bookmark_tex":{}}')
+        fh.write('{"bookmark_tex":{},"bookmark_warned":{}}')
     warning = build_pdf.BOOKMARK_WARNING
-    stderr = (warning.format("\\frac{a}{b}")
+    stderr = (warning.format("\\binom{n}{k}")
               + "[WARNING] Could not convert TeX math \\foo{x}, rendering as TeX:\n"
               "  \\foo{x}\n      ^\n  unexpected control sequence \\foo\n"
               "[WARNING] Something else:\n  its reason\n"
-              + warning.format("\\frac{a}{b}")
-              + "[WARNING] Could not convert TeX math \\frac{a}\n  {b}, rendering as TeX\n"
-              + warning.format("\\sqrt{x}") + warning.format("\\frac{a}{b}"))
+              + warning.format("\\binom{n}{k}")
+              + "[WARNING] Could not convert TeX math \\binom{a}\n  {b}, rendering as TeX\n"
+              + warning.format("\\binom{n}{k}")
+              + warning.format("\\sqrt{x}") + warning.format("\\binom{n}{k}"))
     said, note = build_pdf.bookmark_said(stderr, record)
     kept, none = build_pdf.bookmark_said(stderr, empty)
     missing = build_pdf.bookmark_said(stderr, os.path.join(work, "none.json"))
     return [
-        ("the plain writer's warnings of the recorded formulas are taken out, once for each "
-         "time recorded, texmath's reason with one and a formula's second line with another, "
-         "and the run's other words, another warning's reason, another formula's warning, "
-         "and a third of a formula recorded twice kept",
+        ("the plain writer's warnings the filter recorded are taken out, once for each "
+         "time recorded, a part's of a formula among them, texmath's reason with one and a "
+         "formula's second line with another, and the run's other words, another "
+         "warning's reason, another formula's warning, and a fourth of one recorded three "
+         "times kept",
          lambda: said == "[WARNING] Something else:\n  its reason\n"
-         + warning.format("\\sqrt{x}") + warning.format("\\frac{a}{b}")),
-        ("the run says once how many are their TeX in the bookmarks, naming each once",
-         lambda: note == "NOTE: 4 formula(s) in headings are their TeX in the PDF's bookmarks, "
-         "which Pandoc's plain writer can't write as text, as it writes the others: "
-         "\\frac{a}{b}; \\foo{x}; \\frac{a} {b}. The headings set them as formulas."),
+         + warning.format("\\sqrt{x}") + warning.format("\\binom{n}{k}")),
+        ("the run says once how many formulas are their TeX in the bookmarks, naming each "
+         "once, the whole of one whose part was warned of",
+         lambda: note == "NOTE: 5 formula(s) in headings are their TeX in the PDF's "
+         "bookmarks, which couldn't be written as text, as the others are: "
+         "\\binom{n}{k}; \\foo{x}; \\binom{a} {b}; \\frac{\\binom{n}{k}}{2}. The headings "
+         "set them as formulas."),
         ("with none recorded, or no record, Pandoc's words are as they were and there's no "
          "note", lambda: (kept, none) == (stderr, None) and missing == (stderr, None)),
     ]
@@ -3278,15 +3285,16 @@ def check_bookmark_said():
 
 def check_heading_bookmarks():
     """The PDF filter's headings' formulas (pdf-target.lua, bookmarks), in
-    the LaTeX it writes: a formula Pandoc's plain writer writes as text is
-    that text in \\texorpdfstring's second argument, the heading's bookmark,
-    its spaces one, a script in parentheses without them, and the formula
-    set as written; one it can't is left to the writer, its TeX, and
-    recorded (OER_PDF_RECORD), a fraction, a command texmath doesn't know,
-    and a formula over two lines, and the build takes Pandoc's warnings of
-    them out of what it said (bookmark_said); one ending in a comment ends
-    with a line end, so the comment doesn't take its \\) with it, as the
-    writer writes one; and a formula outside a heading is the writer's."""
+    the LaTeX it writes: a formula is its text in \\texorpdfstring's second
+    argument, the heading's bookmark, as math-text.lua writes it, a
+    fraction's and a root's among them, and the formula set as written;
+    one it can't write is left to the writer, its TeX, and recorded
+    (OER_PDF_RECORD), a binomial, a command texmath doesn't know, a
+    formula over two lines, and a fraction of a binomial, with what the
+    plain writer warned of, and the build takes Pandoc's warnings of them
+    out of what it said (bookmark_said); one ending in a comment ends with
+    a line end, so the comment doesn't take its \\) with it, as the writer
+    writes one; and a formula outside a heading is the writer's."""
     if not shutil.which("pandoc"):
         return [("a heading's formula is its text in the bookmark",
                  lambda: print("  skip  no pandoc to run the filter") or True)]
@@ -3305,9 +3313,12 @@ def check_heading_bookmarks():
         header({"t": "Str", "c": "Power"}, {"t": "Space"}, math("x^2 + y_1"),
                {"t": "Space"}, math("\\bar{x}_n"), {"t": "Space"},
                math("a\\text{~~~to~~~}b")),
-        header({"t": "Str", "c": "Fraction"}, {"t": "Space"}, math("\\frac{a}{b}")),
+        header({"t": "Str", "c": "Fraction"}, {"t": "Space"}, math("\\frac{a}{b}"),
+               {"t": "Space"}, math("\\sqrt{x+1}")),
+        header({"t": "Str", "c": "Binomial"}, {"t": "Space"}, math("\\binom{n}{k}")),
         header({"t": "Str", "c": "Unknown"}, {"t": "Space"}, math("\\foo{x}")),
-        header({"t": "Str", "c": "Lines"}, {"t": "Space"}, math(" \\frac{a}\n{b} ")),
+        header({"t": "Str", "c": "Lines"}, {"t": "Space"}, math(" \\binom{a}\n{b} ")),
+        header({"t": "Str", "c": "Nested"}, {"t": "Space"}, math("\\frac{\\binom{n}{k}}{2}")),
         header({"t": "Str", "c": "Remarked"}, {"t": "Space"}, math("y % a remark")),
         header({"t": "Str", "c": "Displayed"}, {"t": "Space"},
                {"t": "Math", "c": [{"t": "DisplayMath"}, "q^2"]}),
@@ -3322,36 +3333,172 @@ def check_heading_bookmarks():
     latex = done.stdout
     try:
         with open(record, encoding="utf-8") as fh:
-            kept = json.load(fh).get("bookmark_tex")
-    except (OSError, ValueError):
-        kept = None
+            recorded = json.load(fh)
+        kept, warned = recorded.get("bookmark_tex"), recorded.get("bookmark_warned")
+    except (OSError, ValueError, AttributeError):
+        kept = warned = None
     said, note = load(os.path.join(ROOT, "bin", "build-pdf.py"),
                       "build_pdf").bookmark_said(done.stderr, record)
     return [
-        ("a formula the plain writer writes as text is its text in the bookmark, set as "
-         "written, its spaces one and a script without parentheses (Pandoc " + version + ")",
+        ("a formula is its text in the bookmark, as math-text.lua writes it, set as "
+         "written, its spaces one and its scripts Unicode's (Pandoc " + version + ")",
          lambda: "\\texorpdfstring{\\(x^2 + y_1\\)}{x² + y₁}" in latex
-         and "\\texorpdfstring{\\(\\bar{x}_n\\)}{x̄\\_n}" in latex
+         and "\\texorpdfstring{\\(\\bar{x}_n\\)}{x̄ₙ}" in latex
          and "\\texorpdfstring{\\(a\\text{~~~to~~~}b\\)}{a to b}" in latex
-         and "{Power x² + y₁ x̄\\_n a to b}" in latex),
+         and "{Power x² + y₁ x̄ₙ a to b}" in latex),
+        ("a fraction and a root, which the plain writer can't write, are their text too",
+         lambda: "\\texorpdfstring{\\(\\frac{a}{b}\\)}{a/b}" in latex
+         and "\\texorpdfstring{\\(\\sqrt{x+1}\\)}{√(x + 1)}" in latex
+         and "{Fraction a/b √(x + 1)}" in latex),
         ("one it can't write is the writer's, its TeX in the bookmark, and recorded, a "
-         "fraction, a command texmath doesn't know, and a formula over two lines",
-         lambda: "\\texorpdfstring{Fraction \\(\\frac{a}{b}\\)}" in latex
+         "binomial, a command texmath doesn't know, a formula over two lines, and a "
+         "fraction of a binomial, with what the plain writer warned of, the binomial alone "
+         "of the last",
+         lambda: "\\texorpdfstring{Binomial \\(\\binom{n}{k}\\)}" in latex
          and "\\texorpdfstring{Unknown \\(\\foo{x}\\)}" in latex
-         and kept == ["\\frac{a}{b}", "\\foo{x}", "\\frac{a}\n{b}"]),
+         and "\\texorpdfstring{Nested \\(\\frac{\\binom{n}{k}}{2}\\)}" in latex
+         and kept == ["\\binom{n}{k}", "\\foo{x}", "\\binom{a}\n{b}",
+                      "\\frac{\\binom{n}{k}}{2}"]
+         and warned == ["\\binom{n}{k}", "\\foo{x}", "\\binom{a}\n{b}", "\\binom{n}{k}"]),
         ("and the build takes Pandoc's warnings of them out of what it said, texmath's "
          "reason with them, and says how many there are",
-         lambda: done.stderr.count("Could not convert TeX math") == 3
+         lambda: done.stderr.count("Could not convert TeX math") == 4
          and "unexpected control sequence" in done.stderr
          and not any(words in said for words in ("Could not convert TeX math",
                                                  "unexpected control sequence", "{b}"))
-         and str(note).startswith("NOTE: 3 formula(s) in headings are their TeX")),
+         and str(note).startswith("NOTE: 4 formula(s) in headings are their TeX")),
         ("one ending in a comment ends with a line end before its \\), as the writer "
          "writes one, and a display formula in a heading, and a formula outside one, are "
          "the writer's",
          lambda: "\\texorpdfstring{\\(y % a remark\n\\)}{y}" in latex
          and "\\[q^2\\]" in latex and "texorpdfstring{\\(q" not in latex
          and "\\(z^2\\)" in latex and "texorpdfstring{\\(z" not in latex),
+    ]
+
+
+def check_math_text():
+    """A formula's text, as math-text.lua writes it for a PDF's bookmark,
+    run with Pandoc's Lua: the plain writer's text, its spaces a word's, a
+    run of them one; a script in Unicode's superscripts and subscripts
+    where each of its characters has one, otherwise with its mark, in
+    parentheses unless it's letters or digits no letter or digit follows,
+    a script within a script in them but for a degree; a fraction a/b, a
+    part in parentheses where it's more than one term, its arguments read
+    past spaces and escaped braces; a root √, ∛, ∜, or its index's
+    superscript before √, its radicand likewise, a bracket after one not
+    its index; a fraction in parentheses where what's beside it would run
+    into it, (1/2)x, a mixed number apart, 2 1/3, and a root a letter
+    follows, (√2)x; a fraction or a root a script follows in parentheses; a
+    limit's name, an accented one too, with its subscript and a space; an
+    arrow over a letter U+20D7, another mark a superscript, and a line
+    over U+0305 on each character; and what it can't write, a binomial, a
+    command texmath doesn't know, a fraction of a binomial, or a fraction
+    short of an argument, nil, with the TeX the plain writer warned of,
+    the binomial alone of the third and none of the fourth."""
+    if not shutil.which("pandoc"):
+        return [("a formula's text is written", lambda: print("  skip  no pandoc to run Lua")
+                 or True)]
+    groups = [
+        ("the plain writer's text, its spaces a word's, a run of them one", {
+            "\\alpha \\leq \\beta": "α ≤ β", "\\hat{p}": "p̂", "a\\text{~~~to~~~}b": "a to b",
+            "x\\quad y": "x y", "\\quad x": "x", "= 1": "= 1", "": ""}),
+        ("a script in Unicode's superscripts and subscripts where each of its characters "
+         "has one", {
+            "x^2 + y_1": "x² + y₁", "\\bar{x}_n": "x̄ₙ", "\\mathbb{R}^n": "ℝⁿ",
+            "x^{n+1}": "xⁿ⁺¹", "n^{th}": "nᵗʰ", "30^\\circ": "30°", "x_{\\text{max}}": "xₘₐₓ"}),
+        ("otherwise with its mark, in parentheses unless it's letters or digits no letter "
+         "or digit follows, and a script within a script in them, but for a degree", {
+            "4^{\\pi}": "4^(π)", "x^{q}": "x^q", "x^{q}y": "x^(q)y",
+            "\\Delta H_f^\\circ": "ΔH_f°", "\\int_C P\\,dx": "∫_(C)P dx",
+            "x^{aq}": "x^aq", "x_{ab}": "x_ab", "x^{2^{3}}": "x^(2³)",
+            "x^{a^{b}}": "x^(aᵇ)", "\\text{Δ}H_{\\text{f}}^{{^\\circ}}": "ΔH_f°"}),
+        ("a fraction a/b, a part in parentheses where it's more than one term, a root one, "
+         "its arguments read past spaces and escaped braces", {
+            "\\frac{a}{b}": "a/b", "\\frac12": "1/2", "\\frac {a} {b}": "a/b",
+            "\\frac{\\{a\\}}{2}": "{a}/2", "\\frac{\\left\\{a\\right.}{2}": "{a/2",
+            "\\dfrac{a+b}{c}": "(a + b)/c",
+            "\\tfrac{a}{b}": "a/b", "\\cfrac{a}{b}": "a/b",
+            "\\frac{\\sqrt{x}-2}{x-4}": "(√x − 2)/(x − 4)",
+            "\\frac{dx}{\\sqrt{1+x^2}}": "dx/√(1 + x²)", "\\frac{1}{\\frac{1}{x}}": "1/(1/x)"}),
+        ("a root √, ∛, or ∜, or its index's superscript before √, its radicand in "
+         "parentheses where it's more than one term, and a bracket after one not its index", {
+            "\\sqrt{x+1}": "√(x + 1)", "\\sqrt[3]{x}": "∛x", "\\sqrt[4]{x}": "∜x",
+            "\\sqrt[n]{a}": "ⁿ√a", "\\sqrt[10]{x}": "¹⁰√x", "\\sqrt[2]{x}": "√x",
+            "\\sqrt [3] {x}": "∛x", "\\sqrt{\\frac{a}{b}}": "√(a/b)",
+            "\\sqrt{x} \\in [0, 1]": "√x ∈ [0, 1]"}),
+        ("a fraction in parentheses where anything but a space, an operator, a relation, "
+         "or what opens or closes the formula or a group is beside it, a limit's space "
+         "beside it one, a mixed number apart from its whole number, and a root a letter, "
+         "a digit, or a parenthesis follows", {
+            "2\\frac{1}{3}": "2 1/3", "\\frac{1}{2}x": "(1/2)x", "a\\frac{b}{c}": "a(b/c)",
+            "\\frac{a}{b}\\frac{c}{d}": "(a/b)(c/d)", "\\frac{1}{2}(x+1)": "(1/2)(x + 1)",
+            "\\int{\\frac{P(x)}{Q(x)}dx}": "∫(P(x)/Q(x))dx", "\\int \\frac{1}{x}\\,dx": "∫1/x dx",
+            "x = \\frac{1}{2}": "x = 1/2", "-\\frac{1}{2}": "−1/2", "\\frac{1}{2}, \\frac{1}{3}": "1/2, 1/3",
+            "\\left(\\frac{1}{x}\\right)": "(1/x)", "\\sqrt{2}x": "(√2)x", "x\\sqrt{2}": "x√2",
+            "\\sqrt{2}\\sqrt{3}": "√2√3"}),
+        ("a fraction or a root a script follows in parentheses, and a fraction in a script "
+         "in the script's", {
+            "\\frac{a}{b}^2": "(a/b)²", "\\sqrt{x}^2": "(√x)²", "\\frac{1}{2}_n": "(1/2)ₙ",
+            "x^{\\frac{1}{n}}": "x^(1/n)", "\\left(1+\\frac{1}{m}\\right)^m": "(1 + 1/m)ᵐ"}),
+        ("a limit's name, an accented one too, with its subscript and a space after it, an "
+         "arrow over a letter U+20D7, another mark a superscript, and a line over U+0305 on "
+         "each character", {
+            "\\underset{x\\rightarrow 4}{\\text{lim}}\\frac{\\sqrt{x}-2}{x-4}":
+                "lim_(x → 4) (√x − 2)/(x − 4)",
+            "\\underset{x\\rightarrow a}{\\text{lím}}f(x) = L": "lím_(x → a) f(x) = L",
+            "\\underset{n}{\\text{max}}": "maxₙ", "\\overset{\\rightarrow}{L}": "L⃗",
+            "\\overset{\\to}{v}": "v⃗", "\\overset{a}{=}": "=ᵃ", "\\overline{AB}": "A̅B̅"}),
+    ]
+    unwritten = {"\\binom{n}{k}": ["\\binom{n}{k}"],
+                 "\\frac{\\binom{n}{k}}{2}": ["\\binom{n}{k}"],
+                 "\\foo{x}": ["\\foo{x}"], "\\frac{a}": []}
+    cases = [tex for _, group in groups for tex in group] + list(unwritten)
+    work = tempfile.mkdtemp(prefix="unit-math-text-")
+    atexit.register(shutil.rmtree, work, True)
+    given, out = os.path.join(work, "cases.json"), os.path.join(work, "texts.json")
+    with open(given, "w", encoding="utf-8") as fh:
+        json.dump(cases, fh)
+    script = os.path.join(work, "texts.lua")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write("local mathtext = dofile(%s)\n" % json.dumps(
+            os.path.join(ROOT, "bin", "math-text.lua"), ensure_ascii=False)
+            + "local fh = io.open(%s)\n" % json.dumps(given, ensure_ascii=False)
+            + "local cases = pandoc.json.decode(fh:read('a'))\nfh:close()\n"
+            "local texts = {}\nfor _, tex in ipairs(cases) do\n"
+            "  local text, warned = mathtext.text(pandoc.Math('InlineMath', tex))\n"
+            "  texts[#texts + 1] = { text = text or false, warned = warned }\nend\n"
+            + "fh = io.open(%s, 'w')\n" % json.dumps(out, ensure_ascii=False)
+            + "fh:write(pandoc.json.encode(texts))\nfh:close()\n")
+    done = subprocess.run(["pandoc", "lua", script], capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    try:
+        with open(out, encoding="utf-8") as fh:
+            texts = json.load(fh)
+    except (OSError, ValueError):
+        texts = []
+    if done.returncode or len(texts) != len(cases):
+        print("  pandoc lua said: " + done.stderr.strip()[-400:])
+    # Each case's text, and what the plain writer warned of: an empty Lua
+    # table is an object in pandoc.json.
+    written = {tex: (text.get("text"), text.get("warned") if isinstance(text.get("warned"), list)
+                     else [])
+               for tex, text in zip(cases, texts)}
+
+    def matches(expected):
+        wrong = [(tex, written.get(tex), want) for tex, want in expected.items()
+                 if written.get(tex) != want]
+        for tex, got, want in wrong:
+            print(f"  {tex!r}: {got!r}, not {want!r}")
+        return not wrong
+    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                             text=True).stdout.split()[1]
+    return [(f"{description} (Pandoc {version})" if n == 0 else description,
+             lambda group=group: matches({tex: (text, []) for tex, text in group.items()}))
+            for n, (description, group) in enumerate(groups)] + [
+        ("what it can't write, a binomial, a command texmath doesn't know, a fraction of a "
+         "binomial, and a fraction short of an argument, is nil, with the TeX the plain "
+         "writer warned of, the binomial alone of the third and none of the fourth",
+         lambda: matches({tex: (False, warned) for tex, warned in unwritten.items()})),
     ]
 
 
@@ -8013,6 +8160,7 @@ GROUPS = [
     ("the PDF build's note of headings' formulas left as TeX in bookmarks", check_bookmark_said),
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
      check_heading_bookmarks),
+    ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

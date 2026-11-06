@@ -1538,39 +1538,42 @@ def latex_said(log_path):
     return said, source
 
 
-# The plain writer's warning of a formula it can't write as text, as the
-# PDF filter's call gives it for a heading's bookmark (pdf-target.lua,
-# bookmarks), which says the formula is rendered as TeX, when the page
-# sets it and only the bookmark has its TeX. Where texmath can't read the
-# TeX, a command it doesn't know, the line ends with a colon, and texmath's
-# reason follows on lines of their own; Pandoc indents each line of a
-# warning after its first two spaces, a formula's own second line among
-# them (showLogMessage, Logging.hs; logOutput, Class/IO.hs; 3.9, 3.12.1,
-# and 3.13).
+# The plain writer's warning of a formula, or of a part of one, it can't
+# write as text, as the PDF filter's calls give it for a heading's
+# bookmark (pdf-target.lua, bookmarks; math-text.lua), which says the
+# formula is rendered as TeX, when the page sets it and only the bookmark
+# has its TeX. Where texmath can't read the TeX, a command it doesn't
+# know, the line ends with a colon, and texmath's reason follows on lines
+# of their own; Pandoc indents each line of a warning after its first two
+# spaces, a formula's own second line among them (showLogMessage,
+# Logging.hs; logOutput, Class/IO.hs; 3.9, 3.12.1, and 3.13).
 BOOKMARK_WARNING = "[WARNING] Could not convert TeX math {}, rendering as TeX\n"
 
 
 def bookmark_said(stderr, record_path, where="the PDF's bookmarks"):
     """(Pandoc's stderr without the plain writer's warnings of the
-    formulas in headings the PDF filter left as their TeX in where, from
+    formulas in headings, or of their parts, the PDF filter warned of
+    (bookmark_warned) and left as their TeX in where (bookmark_tex), from
     its record at record_path (OER_PDF_RECORD), texmath's reason with
     each where it gives one, the run's note of them, or None where there
     are none)."""
     try:
         with open(record_path, encoding="utf-8") as fh:
-            kept = json.load(fh).get("bookmark_tex")
+            record = json.load(fh)
+        kept, warned = record.get("bookmark_tex"), record.get("bookmark_warned")
     except (OSError, ValueError, AttributeError):
-        kept = None
+        kept = warned = None
     kept = [str(tex) for tex in kept] if isinstance(kept, list) else []
-    for tex in kept:
+    warned = [str(tex) for tex in warned] if isinstance(warned, list) else []
+    for tex in warned:
         line = BOOKMARK_WARNING.format(tex)[:-1].replace("\n", "\n  ")
         stderr = re.sub(re.escape(line) + r"(?::\n(?:  .*\n)*|\n)", "", stderr, count=1)
     if not kept:
         return stderr, None
     shown = list(dict.fromkeys(" ".join(tex.split()) for tex in kept))
     return stderr, (f"NOTE: {len(kept)} formula(s) in headings are their TeX in {where}, "
-                    "which Pandoc's plain writer can't write as text, as it writes the "
-                    "others: " + "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
+                    "which couldn't be written as text, as the others are: "
+                    + "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
                     + ". The headings set them as formulas.")
 
 

@@ -3797,16 +3797,17 @@ LACKING_PLEX = ("import importlib.util, sys\n"
 # an accented letter drawn whole and its parts filled with other glyphs
 # (latexbuild.STATIC_FONTS): Acrobat said it couldn't extract such a face,
 # Noto Sans 2.008's, in Introductory Business Statistics 2e's PDF. And a
-# heading with formulas Pandoc's plain writer writes as text, one with a
-# script it puts in parentheses, and one it can't, a fraction, whose
-# bookmark has the first two's text and the third's TeX, the run saying so
-# once for each PDF, for a latex target's LaTeX, and for the LaTeX alone
-# (--latex-only), not with the plain writer's warning (pdf-target.lua,
-# bookmarks).
+# heading with formulas written as text, x² + α, one with a script in
+# Unicode's subscripts, x̄ₙ, and a fraction, a/b, and one that can't be, a
+# binomial, whose bookmark has the first three's text and the fourth's
+# TeX, the run saying so once for each PDF, for a latex target's LaTeX,
+# and for the LaTeX alone (--latex-only), not with the plain writer's
+# warning (pdf-target.lua, bookmarks; math-text.lua).
 MATH_FONT_BOOK = ("# Formulas\n\nA formula, $x^2 + y_1 = z$, and a display:\n\n"
                   "$$\\sum_{i=1}^n a_i = \\frac{1}{2}$$\n\nA script capital, "
                   "$\\mathcal{A} + x$.\n\nAccented letters, ŷ and ī, **and in bold, ŷ**.\n\n"
-                  "## Scripted $x^2 + \\alpha$, $\\bar{x}_n$, and $\\frac{a}{b}$ heading\n\n"
+                  "## Scripted $x^2 + \\alpha$, $\\bar{x}_n$, $\\frac{a}{b}$, and "
+                  "$\\binom{n}{k}$ heading\n\n"
                   "After it.\n")
 MATH_RANGE = "header-includes:\n  - \\setmathfont[range=\\mathcal]{latinmodern-math.otf}\n"
 MATH_FONT_TARGETS = (
@@ -5755,16 +5756,16 @@ def math_font_checks(paths, said):
          and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
                                        "by unicode-math must be an\n")
          and noto("") == ""),
-        ("a heading's formula is its text in the heading's bookmark where Pandoc's plain "
-         "writer writes it as text, x², a script it puts in parentheses without them, and "
-         "its TeX where it can't, a fraction, the run saying so once for each PDF, for the "
-         "latex target, and for --latex-only, not with the plain writer's warning",
+        ("a heading's formula is its text in the heading's bookmark, x², a script in "
+         "Unicode's subscripts, x̄ₙ, and a fraction, a/b, and its TeX where it can't be, a "
+         "binomial, the run saying so once for each PDF, for the latex target, and for "
+         "--latex-only, not with the plain writer's warning",
          lambda: os.path.exists(paths["defaulted"])
-         and "Scripted x\u00b2 + \u03b1, x\u0304_n, and \\frac{a}{b} heading"
+         and "Scripted x\u00b2 + \u03b1, x\u0304\u2099, a/b, and \\binom{n}{k} heading"
          in outline_titles(pypdf.PdfReader(paths["defaulted"]))
          and said.count("NOTE: 1 formula(s) in headings are their TeX in the PDF's bookmarks, "
-                        "which Pandoc's plain writer can't write as text, as it writes the "
-                        "others: \\frac{a}{b}.") == len(paths)
+                        "which couldn't be written as text, as the others are: "
+                        "\\binom{n}{k}.") == len(paths)
          and said.count("NOTE: 1 formula(s) in headings are their TeX in the bookmarks of a "
                         "PDF made from the LaTeX") == 2
          and "Could not convert TeX math" not in said),
@@ -6118,13 +6119,17 @@ end
 def formula_widths(texs, count="formula_width(tex)"):
     """pdf-target.lua's formula_width of each TeX in texs, or another of its
     counts of it (a Lua expression of tex), its Lua run by `pandoc lua`, the
-    filter read up to the filters it returns; [] where that fails."""
-    with open(os.path.join(BIN, "pdf-target.lua"), encoding="utf-8") as fh:
+    filter read up to the filters it returns, its script's file its own,
+    which it finds math-text.lua beside; [] where that fails."""
+    filter_path = os.path.join(BIN, "pdf-target.lua")
+    with open(filter_path, encoding="utf-8") as fh:
         source = fh.read()
     cut = source.rfind("\nreturn {")
     if cut < 0:
         return []
-    script = (source[:cut] + "\nfor _, tex in ipairs({"
+    script = ("PANDOC_SCRIPT_FILE = %s\n" % json.dumps(filter_path, ensure_ascii=False)
+              + source[:cut]
+              + "\nfor _, tex in ipairs({"
               + ", ".join("[==[%s]==]" % tex for tex in texs)
               + "}) do print(" + count + ") end\n")
     with tempfile.TemporaryDirectory() as work:

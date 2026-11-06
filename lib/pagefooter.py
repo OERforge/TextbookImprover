@@ -27,6 +27,11 @@ is left out (_ast):
               again, whoever wrote it, since the target's own setting
               puts it back (figures-and-tables.lua).
 
+Outside an HTML page, a frame (<iframe>) is left out too: Pandoc runs
+in its sandbox (_pandoc), where its HTML reader would otherwise fetch
+the address the frame names, http or data, and put what it got in the
+footer of every page.
+
 A source target's copy, the author's own file, gets none: it writes only
 what a person decided. OpenStax asks that a copy of one of its books say
 "Access for free at openstax.org." on every page, physical or digital,
@@ -92,7 +97,12 @@ def markdown(value, base):
 
 
 def _pandoc(arguments, text):
-    result = subprocess.run(["pandoc"] + arguments, input=text,
+    """Pandoc's output, run in its sandbox, which none of these runs needs
+    to leave: reading the footer's HTML, its HTML reader fetches what a
+    frame (<iframe>) names and puts what it got in the footer, a request
+    a run on someone else's settings mustn't make. Sandboxed, the fetch
+    is refused, and the frame left out."""
+    result = subprocess.run(["pandoc"] + arguments + ["--sandbox"], input=text,
                             capture_output=True, text=True, check=True)
     return result.stdout
 

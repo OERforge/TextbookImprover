@@ -281,7 +281,8 @@ keys:
       back as a source takes out again. Outside an HTML page a picture is its
       alternative text and a link to one of the book's own files its
       words, since a target carries neither file, a heading is a
-      paragraph, and an id is left out; in a PDF and a Word file any link
+      paragraph, and an id is left out, as is a frame (`<iframe>`), which
+      isn't fetched; in a PDF and a Word file any link
       is its words. A deck's PDF, PowerPoint
       file, and reveal.js presentation get none, nor does a LaTeX book's PDF
       from its own build (pdf.from: book), or a source target's copy, the

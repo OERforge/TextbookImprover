@@ -1876,18 +1876,28 @@ def check_page_footer():
     """The footer setting outside an HTML page (lib/pagefooter.py): a Word
     footer's line keeps a no-break space, where its other white space runs
     together, and no part of a table keeps its id, the footer being on
-    every page."""
+    every page; and a frame is left out, not fetched, Pandoc's HTML
+    reader in its sandbox, where outside it what a data: address holds
+    came into the footer as an http one's would."""
+    import base64
     import pagefooter
     base = scratch()
     lines = pagefooter.paragraphs("Shared under CC\\ BY, p.\\ 5.\n\n- One\n- Two", base)
     table = pagefooter.xhtml(
         '<table id="t"><thead id="h"><tr id="hr"><th id="c1">A</th></tr></thead>'
         '<tbody id="b"><tr id="r"><td id="c2">x</td></tr></tbody></table>', base)
+    framed = "Free.\n\n<iframe src=\"data:text/html;base64,%s\"></iframe>" % base64.b64encode(
+        b"<p>Fetched by the reader.</p>").decode("ascii")
+    fetched = [pagefooter.xhtml(framed, base), pagefooter.latex(framed, base),
+               "\n".join(pagefooter.paragraphs(framed, base))]
     return [
         ("a Word footer keeps a no-break space",
          lambda: lines == ["Shared under CC\u00a0BY, p.\u00a05.", "- One\n- Two"]),
         ("no part of a table in the footer keeps its id",
          lambda: "<td>x</td>" in table and " id=" not in table),
+        ("a frame in the footer isn't fetched, but left out",
+         lambda: all("Free." in text and "Fetched" not in text and "iframe" not in text
+                     for text in fetched) or fail(f"got: {fetched}")),
     ]
 
 

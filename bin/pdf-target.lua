@@ -2742,14 +2742,19 @@ end
 -- 3.12.1): the bookmark read "Spaced a\text{~~~to~~~}b heading". A formula
 -- is its text in the bookmark now, as math-text.lua writes it, in Unicode
 -- where it can (x², α ≤ β, p̂, a/b, √x, ℝⁿ): the formula is set in its
--- place as \texorpdfstring{\(...\)}{text}, the text a Str, which stringify
--- takes and the writer escapes, the raw LaTeX around it skipped, so the
--- heading, the contents, and the running head set the formula as before.
--- A formula it can't write, a matrix, is its TeX in the bookmark as
--- before. The filter records it, and what the plain writer warned of,
--- which says it's rendered as TeX when the page sets it (OER_PDF_RECORD);
--- the run says once how many there are (build-pdf.py), in place of those
--- warnings.
+-- place as \protect\texorpdfstring{\(...\)}{text}, the text a Str, which
+-- stringify takes and the writer escapes, the raw LaTeX around it
+-- skipped, so the heading, the contents, and the running head set the
+-- formula as before. A formula it can't write, a matrix, is its TeX in
+-- the bookmark as before, its runs of spaces one. The filter records it,
+-- and what the plain writer warned of, which says it's rendered as TeX
+-- when the page sets it (OER_PDF_RECORD); the run says once how many
+-- there are (build-pdf.py), in place of those warnings. Protected, the
+-- \texorpdfstring is so in the contents' entry too, which LaTeX writes to
+-- the .toc file expanded, and LaTeX's tagging titles the entry's structure
+-- element (TOCI) from it made plain, as it does the heading's: the
+-- \texorpdfstring was its first argument there, the formula, and the title
+-- its TeX, "$x^2$".
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
 local bookmark_tex, bookmark_warned = {}, {}
@@ -2781,11 +2786,11 @@ local function bookmarks(doc)
   doc.blocks = doc.blocks:walk({ Header = function(header)
     local changed = false
     header.content = header.content:walk({ Math = function(math_)
-      local text = math_.mathtype == 'InlineMath' and bookmark_text(math_)
-      if not text then return nil end
+      if math_.mathtype ~= 'InlineMath' then return nil end
+      local text = bookmark_text(math_) or math_.text:gsub('%s+', ' '):match('^ ?(.-) ?$')
       changed = true
-      return { pandoc.RawInline('latex', '\\texorpdfstring{\\(' .. math_comment(math_.text)
-                                  .. '\\)}{'),
+      return { pandoc.RawInline('latex', '\\protect\\texorpdfstring{\\('
+                                  .. math_comment(math_.text) .. '\\)}{'),
                pandoc.Str(text), pandoc.RawInline('latex', '}') }
     end })
     if changed then return header end

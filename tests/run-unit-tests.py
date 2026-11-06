@@ -3287,14 +3287,16 @@ def check_heading_bookmarks():
     """The PDF filter's headings' formulas (pdf-target.lua, bookmarks), in
     the LaTeX it writes: a formula is its text in \\texorpdfstring's second
     argument, the heading's bookmark, as math-text.lua writes it, a
-    fraction's and a root's among them, and the formula set as written;
-    one it can't write is left to the writer, its TeX, and recorded
-    (OER_PDF_RECORD), a binomial, a command texmath doesn't know, a
-    formula over two lines, and a fraction of a binomial, with what the
-    plain writer warned of, and the build takes Pandoc's warnings of them
-    out of what it said (bookmark_said); one ending in a comment ends with
-    a line end, so the comment doesn't take its \\) with it, as the writer
-    writes one; and a formula outside a heading is the writer's."""
+    fraction's and a root's among them, and the formula set as written,
+    the \\texorpdfstring protected, so that it's one in the contents'
+    entry too; one it can't write is its TeX there, its runs of spaces
+    one, and recorded (OER_PDF_RECORD), a binomial, a command texmath
+    doesn't know, a formula over two lines, and a fraction of a binomial,
+    with what the plain writer warned of, and the build takes Pandoc's
+    warnings of them out of what it said (bookmark_said); one ending in a
+    comment ends with a line end, so the comment doesn't take its \\) with
+    it, as the writer writes one; and a display formula, in a heading or
+    not, and a formula outside a heading are the writer's."""
     if not shutil.which("pandoc"):
         return [("a heading's formula is its text in the bookmark",
                  lambda: print("  skip  no pandoc to run the filter") or True)]
@@ -3341,22 +3343,28 @@ def check_heading_bookmarks():
                       "build_pdf").bookmark_said(done.stderr, record)
     return [
         ("a formula is its text in the bookmark, as math-text.lua writes it, set as "
-         "written, its spaces one and its scripts Unicode's (Pandoc " + version + ")",
-         lambda: "\\texorpdfstring{\\(x^2 + y_1\\)}{x² + y₁}" in latex
-         and "\\texorpdfstring{\\(\\bar{x}_n\\)}{x̄ₙ}" in latex
-         and "\\texorpdfstring{\\(a\\text{~~~to~~~}b\\)}{a to b}" in latex
+         "written, its spaces one and its scripts Unicode's, the \\texorpdfstring "
+         "protected (Pandoc " + version + ")",
+         lambda: "\\protect\\texorpdfstring{\\(x^2 + y_1\\)}{x² + y₁}" in latex
+         and "\\protect\\texorpdfstring{\\(\\bar{x}_n\\)}{x̄ₙ}" in latex
+         and "\\protect\\texorpdfstring{\\(a\\text{~~~to~~~}b\\)}{a to b}" in latex
          and "{Power x² + y₁ x̄ₙ a to b}" in latex),
         ("a fraction and a root, which the plain writer can't write, are their text too",
-         lambda: "\\texorpdfstring{\\(\\frac{a}{b}\\)}{a/b}" in latex
-         and "\\texorpdfstring{\\(\\sqrt{x+1}\\)}{√(x + 1)}" in latex
+         lambda: "\\protect\\texorpdfstring{\\(\\frac{a}{b}\\)}{a/b}" in latex
+         and "\\protect\\texorpdfstring{\\(\\sqrt{x+1}\\)}{√(x + 1)}" in latex
          and "{Fraction a/b √(x + 1)}" in latex),
-        ("one it can't write is the writer's, its TeX in the bookmark, and recorded, a "
-         "binomial, a command texmath doesn't know, a formula over two lines, and a "
-         "fraction of a binomial, with what the plain writer warned of, the binomial alone "
-         "of the last",
-         lambda: "\\texorpdfstring{Binomial \\(\\binom{n}{k}\\)}" in latex
-         and "\\texorpdfstring{Unknown \\(\\foo{x}\\)}" in latex
-         and "\\texorpdfstring{Nested \\(\\frac{\\binom{n}{k}}{2}\\)}" in latex
+        ("one it can't write is its TeX in the bookmark, its runs of spaces one, and "
+         "recorded, a binomial, a command texmath doesn't know, a formula over two lines, "
+         "and a fraction of a binomial, with what the plain writer warned of, the binomial "
+         "alone of the last",
+         lambda: "Binomial \\protect\\texorpdfstring{\\(\\binom{n}{k}\\)}"
+         "{\\textbackslash binom\\{n\\}\\{k\\}}" in latex
+         and "Unknown \\protect\\texorpdfstring{\\(\\foo{x}\\)}{\\textbackslash foo\\{x\\}}"
+         in latex
+         and "Lines \\protect\\texorpdfstring{\\( \\binom{a}\n{b} \\)}"
+         "{\\textbackslash binom\\{a\\} \\{b\\}}" in latex
+         and "{Lines \\textbackslash binom\\{a\\} \\{b\\}}" in latex
+         and "Nested \\protect\\texorpdfstring{\\(\\frac{\\binom{n}{k}}{2}\\)}" in latex
          and kept == ["\\binom{n}{k}", "\\foo{x}", "\\binom{a}\n{b}",
                       "\\frac{\\binom{n}{k}}{2}"]
          and warned == ["\\binom{n}{k}", "\\foo{x}", "\\binom{a}\n{b}", "\\binom{n}{k}"]),
@@ -3370,7 +3378,7 @@ def check_heading_bookmarks():
         ("one ending in a comment ends with a line end before its \\), as the writer "
          "writes one, and a display formula in a heading, and a formula outside one, are "
          "the writer's",
-         lambda: "\\texorpdfstring{\\(y % a remark\n\\)}{y}" in latex
+         lambda: "\\protect\\texorpdfstring{\\(y % a remark\n\\)}{y}" in latex
          and "\\[q^2\\]" in latex and "texorpdfstring{\\(q" not in latex
          and "\\(z^2\\)" in latex and "texorpdfstring{\\(z" not in latex),
     ]

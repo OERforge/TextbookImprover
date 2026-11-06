@@ -3444,6 +3444,17 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \text_declare_purify_equivalent:Nn \textgreater { > }
 \text_declare_purify_equivalent:Nn \textasciitilde { \c_tilde_str }
 \text_declare_purify_equivalent:Nn \textbackslash { \c_backslash_str }
+% A caret, which Pandoc's writer writes as \^{}, the circumflex accent on
+% nothing, made plain is a caret too, as hyperref's \pdfstringdef makes it
+% in a bookmark: l3text made it the combining circumflex, U+0302, which
+% joins the character before it, so that a heading's structure title,
+% which LaTeX's tagging makes plain from the bookmark's text, read "x̂q"
+% for "x^q", and its contents entry's too. A circumflex on a letter is the
+% letter and U+0302, as l3text writes one it has no character for: ô is
+% o and U+0302, which reads as ô, where l3text had the one character.
+\cs_new:Npn \__oer_purify_circumflex:n #1
+  { \tl_if_blank:nTF {#1} { \c_circumflex_str } { #1 ^^^^0302 } }
+\text_declare_purify_equivalent:Nn \^ { \__oer_purify_circumflex:n }
 \tl_new:N \l__oer_alt_tl
 \cs_new_protected:Npn \__oer_alt:n #1
   {

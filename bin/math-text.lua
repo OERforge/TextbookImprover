@@ -40,13 +40,11 @@
 -- where each of its characters has one, ℝⁿ, x̄ₙ, xⁿ⁺¹, aᵢ, its spaces
 -- dropped, and otherwise with its caret or underscore, without the
 -- parentheses where it's letters or digits that no letter or digit
--- follows, x^q, with them otherwise, 4^(π), ∫_(C)P dx. A caret is the
--- superscript's mark a script without one keeps: in a heading, LaTeX's
--- tagging titles the heading's structure element from the bookmark's
--- text with \pdf_purify:nN, which takes the writer's \^{} for a combining
--- circumflex (LATEX-NOTES, Links, bookmarks, and text made plain), so
--- that ℝ^n was ℝ̂n there; the superscripts keep the caret out of the
--- commonest.
+-- follows, x^q, with them otherwise, 4^(π), ∫_(C)P dx. In a heading, the
+-- caret reaches the heading's structure title too, which LaTeX's tagging
+-- makes plain from the bookmark's text, and which latexbuild's PDF_MACROS
+-- give a caret, where the tagging made the writer's \^{} a combining
+-- circumflex (LATEX-NOTES, Links, bookmarks, and text made plain).
 --
 -- Copyright 2026 Robert Szarka
 --

@@ -3798,17 +3798,21 @@ LACKING_PLEX = ("import importlib.util, sys\n"
 # (latexbuild.STATIC_FONTS): Acrobat said it couldn't extract such a face,
 # Noto Sans 2.008's, in Introductory Business Statistics 2e's PDF. And a
 # heading with formulas written as text, x² + α, one with a script in
-# Unicode's subscripts, x̄ₙ, and a fraction, a/b, and one that can't be, a
-# binomial, whose bookmark has the first three's text and the fourth's
-# TeX, the run saying so once for each PDF, for a latex target's LaTeX,
-# and for the LaTeX alone (--latex-only), not with the plain writer's
-# warning (pdf-target.lua, bookmarks; math-text.lua).
+# Unicode's subscripts, x̄ₙ, one with a script that has none, 4^(π), and a
+# fraction, a/b, and one that can't be, a binomial, whose bookmark has the
+# first four's text and the fifth's TeX, the run saying so once for each
+# PDF, for a latex target's LaTeX, and for the LaTeX alone (--latex-only),
+# not with the plain writer's warning (pdf-target.lua, bookmarks;
+# math-text.lua); and the heading's structure title and its contents
+# entry's have the bookmark's text too, its caret a caret (MATH_HEADING).
 MATH_FONT_BOOK = ("# Formulas\n\nA formula, $x^2 + y_1 = z$, and a display:\n\n"
                   "$$\\sum_{i=1}^n a_i = \\frac{1}{2}$$\n\nA script capital, "
                   "$\\mathcal{A} + x$.\n\nAccented letters, ŷ and ī, **and in bold, ŷ**.\n\n"
-                  "## Scripted $x^2 + \\alpha$, $\\bar{x}_n$, $\\frac{a}{b}$, and "
+                  "## Scripted $x^2 + \\alpha$, $\\bar{x}_n$, $4^\\pi$, $\\frac{a}{b}$, and "
                   "$\\binom{n}{k}$ heading\n\n"
                   "After it.\n")
+MATH_HEADING = ("Scripted x\u00b2 + \u03b1, x\u0304\u2099, 4^(\u03c0), a/b, and "
+                "\\binom{n}{k} heading")
 MATH_RANGE = "header-includes:\n  - \\setmathfont[range=\\mathcal]{latinmodern-math.otf}\n"
 MATH_FONT_TARGETS = (
     ("missing", "mathfont: NoSuchMath-Regular.otf\n"),
@@ -5708,6 +5712,16 @@ def math_font_checks(paths, said):
     def drawn(path, face):
         return any(face in name for name in fonts(path))
 
+    def heading_titles(path):
+        """The kind and title of each structure element of the heading of
+        formulas, a section's or a contents entry's, in the order of the
+        structure."""
+        if not os.path.exists(path):
+            return []
+        root = pypdf.PdfReader(path).trailer["/Root"]["/StructTreeRoot"]
+        return [(kind(e), str(e.get("/T"))) for e in elements(root)
+                if kind(e) in ("/section", "/TOCI") and "Scripted" in str(e.get("/T"))]
+
     def plex_sizes(path):
         """The sizes the PDF draws IBM Plex Math at, on any page."""
         if not os.path.exists(path):
@@ -5757,18 +5771,26 @@ def math_font_checks(paths, said):
                                        "by unicode-math must be an\n")
          and noto("") == ""),
         ("a heading's formula is its text in the heading's bookmark, x², a script in "
-         "Unicode's subscripts, x̄ₙ, and a fraction, a/b, and its TeX where it can't be, a "
-         "binomial, the run saying so once for each PDF, for the latex target, and for "
-         "--latex-only, not with the plain writer's warning",
+         "Unicode's subscripts, x̄ₙ, one that has none, 4^(π), and a fraction, a/b, and its "
+         "TeX where it can't be, a binomial, the run saying so once for each PDF, for the "
+         "latex target, and for --latex-only, not with the plain writer's warning",
          lambda: os.path.exists(paths["defaulted"])
-         and "Scripted x\u00b2 + \u03b1, x\u0304\u2099, a/b, and \\binom{n}{k} heading"
-         in outline_titles(pypdf.PdfReader(paths["defaulted"]))
+         and MATH_HEADING in outline_titles(pypdf.PdfReader(paths["defaulted"]))
          and said.count("NOTE: 1 formula(s) in headings are their TeX in the PDF's bookmarks, "
                         "which couldn't be written as text, as the others are: "
                         "\\binom{n}{k}.") == len(paths)
          and said.count("NOTE: 1 formula(s) in headings are their TeX in the bookmarks of a "
                         "PDF made from the LaTeX") == 2
          and "Could not convert TeX math" not in said),
+        # LaTeX's tagging titles a heading's structure element, and its
+        # contents entry's, with its text made plain (\pdf_purify:nN), which
+        # made the writer's \^{} a combining circumflex, "4̂(π)", and the
+        # entry's title the formulas' TeX, "$x^2 + \mitalpha $", as written
+        # to the .toc file (latexbuild's PDF_MACROS; pdf-target.lua).
+        ("the heading's structure title and its contents entry's are its bookmark's text, "
+         "a caret a caret",
+         lambda: heading_titles(paths["defaulted"]) == [("/TOCI", MATH_HEADING),
+                                                       ("/section", MATH_HEADING)]),
     ] + static_face_checks(paths.get("static")) + variable_face_checks(paths.get("variable"))
 
 

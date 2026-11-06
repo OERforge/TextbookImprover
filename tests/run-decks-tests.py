@@ -664,7 +664,8 @@ title: Item Code
 # passage in another language, code that shows a frame, a frame option
 # ltx-talk has no key for, beamer's own command in header-includes, and
 # a color named as xcolor's dvipsnames name it. And a formula's term
-# struck out, which the cancel package draws.
+# struck out, which the cancel package draws, and formulas in a slide's
+# title, which its bookmark has as text where it can (deck-pdf.lua).
 ODD = """\
 ---
 title: Odd Cases
@@ -710,6 +711,10 @@ $\\frac{\\cancel{3}x}{\\cancel{3}} = x$ and $\\xcancel{2z}$.
 # Pages 10\\-\\-20
 
 Two hyphens in a title, escaped so as to stay two.
+
+# Power $x^2 + y_1$, $\\mathbb{R}^n$, $a\\text{~~~to~~~}b$, and $\\frac{a}{b}$
+
+Formulas in a title, three Pandoc's plain writer writes as text and one it can't.
 
 [^a]: The first note.
 [^c]: The caption's note.
@@ -2197,6 +2202,11 @@ def case_pdf(work):
         # hyperref's \\pdfstringdef, which writes it, would make them a dash.
         ("and keeps two hyphens in its title as they're printed",
          lambda: ("Pages 10--20", []) in outline(odd) and "Pages 10--20" in odd_text),
+        ("and has a formula in its title as text where Pandoc's plain writer writes it so, "
+         "x\u00b2 + y\u2081, its spaces a word's, a run of them one, and a script it puts in "
+         "parentheses without them, and as its TeX where it can't, a fraction",
+         lambda: ("Power x\u00b2 + y\u2081, \u211d^n, a to b, and \\frac{a}{b}", [])
+         in outline(odd)),
         ("a slide in a div is a slide: bookmarked, its title's footnote set",
          lambda: ("Wrapped Slide", []) in outline(more) and "Wrapped Slide5" in more_text
          and "5The wrapped" in more_text),

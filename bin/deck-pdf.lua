@@ -399,8 +399,27 @@ local function highlighting_macros()
   return pandoc.MetaBlocks({ pandoc.RawBlock('latex', macros) })
 end
 
+-- A formula in a slide's title is text in the slide's bookmark where
+-- Pandoc's plain writer writes it as text, x² + y₁, as pdf-target.lua
+-- gives a heading's bookmark one (bookmarks), a section's here among
+-- them: its spaces a word's, and a script the writer puts in parentheses
+-- for want of a character, ℝ^(n), written ℝ^n. One it can't write, a
+-- fraction's, which it gives as its TeX between dollar signs, is its TeX,
+-- as stringify gives it; the writer's warning of it is among what Pandoc
+-- says, which a deck's build shows only where Pandoc stops
+-- (decks.build_pdf).
+local function math_text(math_)
+  if math_.mathtype ~= 'InlineMath' then return nil end
+  local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math_ }) }), 'plain',
+                            { wrap_text = 'none' }):gsub('%s+$', '')
+  if text == '$' .. math_.text:match('^%s*(.-)%s*$') .. '$' then return nil end
+  return pandoc.Str((text:gsub('\226\128[\128-\138]', ' '):gsub('\194\160', ' ')
+    :gsub('([_^])%((%w+)%)', '%1%2')))
+end
+
 local function heading_text(inlines)
-  local text = pandoc.utils.stringify(inlines:walk({ Note = function() return {} end }))
+  local text = pandoc.utils.stringify(inlines:walk({ Note = function() return {} end,
+                                                     Math = math_text }))
   return (text:gsub('%s+', ' '))
 end
 

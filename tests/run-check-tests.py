@@ -861,6 +861,21 @@ DARK = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dark
 body { background: light-dark(#ffffff, #111111); color: light-dark(#222222, #eeeeee); }
 p.faint { color: light-dark(#222222, #333333); }</style></head>
 <body><main><h1>Dark</h1><p class="faint">Readable in light mode only.</p></main></body></html>"""
+# A formula in the text's colors, whose minus sign axe-core doesn't
+# measure, and text over a picture, whose background it can't tell, in
+# light mode and dark; and a formula with a color of its own.
+FORMULAS = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Formulas</title>
+<style>:root { color-scheme: light dark; }
+body { background: light-dark(#ffffff, #111111); color: light-dark(#222222, #eeeeee); }</style>
+</head><body><main><h1>Formulas</h1>
+<p>A difference, <math><mi>x</mi><mo>−</mo><mn>2</mn></math>, in the text's colors.</p>
+<p style="background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
+FcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==)">Text over a picture.</p>
+</main></body></html>""".replace("AAAAf\nFcSJ", "AAAAfFcSJ")
+COLORED = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Colored</title>
+</head><body><main><h1>Colored</h1>
+<p>A difference in a color of its own,
+<math><mi>x</mi><mo mathcolor="#999999">−</mo><mn>2</mn></math>.</p></main></body></html>"""
 
 
 def presentation(folder, slides=None, start=None, before="", reveal_tail=b"", oer_tail=""):
@@ -929,7 +944,10 @@ def axe_cases(work):
     page's scripts not run, its requests elsewhere refused and its
     stylesheet and font named, its refresh canceled, the machine's files
     not read, a frame of its folder's checked and one from elsewhere
-    named; a page's colors checked again in dark mode; an EPUB's content
+    named; a page's colors checked again in dark mode, what axe-core
+    couldn't decide in light mode not said again; a symbol in a formula
+    in the text's colors left out and counted, one in a color of its own
+    kept; an EPUB's content
     documents, one not well-formed named; TextbookImprover's presentation
     checked slide by slide with its own scripts, a step's picture and a
     slide only its background fails found, and each tampered copy caught;
@@ -989,7 +1007,8 @@ def axe_cases(work):
     # Everything else in one run: the suite's pages, the hostile page, the
     # dark one, an EPUB, and the presentation with its tampered copies.
     for name, markup in (("hostile.html", HOSTILE), ("frame.html", FRAME),
-                         ("dark.html", DARK)):
+                         ("dark.html", DARK), ("formulas.html", FORMULAS),
+                         ("colored.html", COLORED)):
         with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
             fh.write(markup)
     xhtml = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
@@ -1023,7 +1042,8 @@ def axe_cases(work):
                                  before='<script src="../notes.txt"></script>')
     report = os.path.join(work, "axe.csv")
     checked = [os.path.join(work, n) for n in ("good.html", "bad.html", "hostile.html",
-                                               "dark.html")] + list(shows.values())
+                                               "dark.html", "formulas.html", "colored.html")] \
+        + list(shows.values())
     ran = run("--wcag", *checked, "--epub", book, "--report", report)
     rows = [r for r in rows_of(report) if r["Tool"] == "axe"] if os.path.exists(report) else []
     loud_report = os.path.join(work, "axe-verbose.csv")
@@ -1127,6 +1147,25 @@ def axe_cases(work):
          and not [r for r in at("dark.html", "axe:color-contrast")
                   if not r["Detail"].startswith("In dark mode: ")]
          and "axe:color-contrast in dark mode, 1.4.3" in ran),
+        ("a symbol in a formula in the text's colors, whose contrast axe-core doesn't "
+         "measure, left out and counted; text over a picture, which it can't decide, a "
+         "person's to judge",
+         lambda: re.search(r"\d+ symbol\(s\) in formulas on \d+ page\(s\), whose contrast "
+                           r"axe-core doesn't measure since they aren't text, are left out: "
+                           r"each takes the colors of the text around its formula\.", ran)
+         and [r["Detail"][:70] for r in at("formulas.html", "axe-review:color-contrast")] == [
+             "Elements must meet minimum color contrast ratio thresholds (serious), "]
+         and "1 element(s), at p:nth-child(3)" in at(
+             "formulas.html", "axe-review:color-contrast")[0]["Detail"]
+         or fail("got: " + " | ".join(r["Detail"][:150] for r in at(
+             "formulas.html", "axe-review:color-contrast")))),
+        ("and in dark mode, what it couldn't decide in light mode isn't said again",
+         lambda: not [r for r in at("formulas.html", "axe-review:color-contrast")
+                      if r["Detail"].startswith("In dark mode")]),
+        ("a symbol in a formula with a color of its own a person's to judge",
+         lambda: at("colored.html", "axe-review:color-contrast", "1 element(s), at mo")
+         or fail("got: " + " | ".join(r["Detail"][:150] for r in at(
+             "colored.html", "axe-review:color-contrast")))),
         ("an EPUB's content documents checked, as its own entries, and one not well-formed "
          "named", lambda: [r["Kind"] for r in at("EPUB/text/ch01.xhtml", "axe:image-alt")]
          == ["epub"] and "EPUB/text/ch02.xhtml (it isn't well-formed XHTML, which the EPUB's "

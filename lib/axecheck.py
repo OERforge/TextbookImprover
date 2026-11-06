@@ -381,6 +381,7 @@ def report(items, events, stopped, said, job, note=""):
     findings, groups = [], {}
     unchecked, scripted, outside, frames, past = [], [], [], [], []
     slides = presentations = documents = plain = 0
+    symbols, symbol_pages = 0, set()
     for item in items:
         result = results.get(item["id"])
         if result is None:
@@ -407,6 +408,10 @@ def report(items, events, stopped, said, job, note=""):
             frames.append((item, result["frames"]))
         for place in result.get("places") or []:
             where = item["where"] + (place.get("route") or "")
+            left = int((place.get("light") or {}).get("formulas") or 0)
+            if left:
+                symbols += left
+                symbol_pages.add(item["where"])
             for dark, found in ((False, place.get("light")), (True, place.get("dark"))):
                 for kind, prefix in (("violations", "axe"), ("incomplete", "axe-review")):
                     for rule in (found or {}).get(kind, []):
@@ -475,6 +480,10 @@ def report(items, events, stopped, said, job, note=""):
                                for item, n, done in past[:5]]
                               + ([f"{len(past) - 5} more"] if len(past) > 5 else []))
                      + ".")
+    if symbols:
+        lines.append(f"{symbols} symbol(s) in formulas on {len(symbol_pages)} page(s), whose "
+                     "contrast axe-core doesn't measure since they aren't text, are left out: "
+                     "each takes the colors of the text around its formula.")
     lines += rule_lines(groups, meta, job["verbose"])
     return findings, lines
 
@@ -686,8 +695,17 @@ SHADOW_SELECT = "selector => axe.utils.shadowSelect(selector)"
 RUN_PARTIAL = "async ([context, options]) => JSON.stringify(await axe.runPartial(context, options))"
 # finishRun, and the results brought back short: each rule's count, its
 # reasons (messageKey) counted, and its first elements, each's selector,
-# the start of its markup, and axe-core's summary of what failed.
-FINISH = """async ([partials, options, shown]) => {
+# the start of its markup, and axe-core's summary of what failed. Two
+# kinds of element it couldn't decide are left out:
+# - A symbol in a formula whose contrast it doesn't measure, since it
+#   isn't text ("only non-text characters", "too short"), on a page whose
+#   formulas take the colors of the text around them (plain, FORMULAS):
+#   its contrast is that text's. They're counted, distinct (formulas): in
+#   Introductory Business Statistics 2e, 97 percent of the 2,083 elements
+#   it couldn't decide were these.
+# - In dark mode, one it couldn't decide in light mode too, for the same
+#   reason (skip, as a run's undecided gives them).
+FINISH = """async ([partials, options, shown, plain, skip]) => {
   const result = await axe.finishRun(partials.map(p => p === null ? null : JSON.parse(p)),
                                      options);
   const reason = node => {
@@ -697,6 +715,22 @@ FINISH = """async ([partials, options, shown]) => {
     return check ? [keyed ? String(keyed.data.messageKey) : String(check.id),
                     String(check.message || '').slice(0, 200)] : ['', ''];
   };
+  const contrast = id => id === 'color-contrast' || id === 'color-contrast-enhanced';
+  const symbol = node => node.target.length === 1
+    && /^<(mi|mn|mo|ms|mtext)[\\s>]/.test(String(node.html || ''))
+    && ['nonBmp', 'shortTextContent'].includes(reason(node)[0]);
+  const formulas = new Set(), said = new Set(skip || []), undecided = [];
+  const incomplete = result.incomplete.map(rule => Object.assign({}, rule, {
+    nodes: rule.nodes.filter(node => {
+      if (plain && contrast(rule.id) && symbol(node)) {
+        formulas.add(JSON.stringify(node.target));
+        return false;
+      }
+      const key = rule.id + ' ' + JSON.stringify(node.target) + ' ' + reason(node)[0];
+      if (said.has(key)) return false;
+      if (undecided.length < 5000) undecided.push(key);
+      return true;
+    })})).filter(rule => rule.nodes.length > 0);
   const brief = list => list.map(rule => {
     const keys = {};
     for (const node of rule.nodes) {
@@ -710,7 +744,27 @@ FINISH = """async ([partials, options, shown]) => {
               summary: String(node.failureSummary || '').slice(0, 400),
               key: reason(node)[0]}))};
   });
-  return {violations: brief(result.violations), incomplete: brief(result.incomplete)};
+  return {violations: brief(result.violations), incomplete: brief(incomplete),
+          formulas: formulas.size, undecided};
+}"""
+# Whether every formula on the page takes the colors of the text around
+# it: each element of it the color of the formula's parent, with no
+# background of its own and nothing faded. MathML's mathcolor, or a
+# stylesheet's color on a formula, makes it not so.
+FORMULAS = """() => {
+  const clear = color => color === 'transparent' || /^rgba\\(.*,\\s*0\\)$/.test(color);
+  for (const math of document.getElementsByTagName('math')) {
+    const around = math.parentElement;
+    if (!around) continue;
+    const color = getComputedStyle(around).color;
+    for (const element of [math, ...math.getElementsByTagName('*')]) {
+      const style = getComputedStyle(element);
+      if (style.color !== color || !clear(style.backgroundColor) || style.opacity !== '1') {
+        return false;
+      }
+    }
+  }
+  return true;
 }"""
 # Whether a page changes in dark mode: a color-scheme with dark in it, or
 # a stylesheet, or a rule in one, for prefers-color-scheme.
@@ -1042,13 +1096,14 @@ class Checker:
         for archive in self.archives.values():
             archive.close()
 
-    async def finish(self, partials, options, shown):
+    async def finish(self, partials, options, shown, plain=False, skip=()):
         async with self.finishing:
             if self.blank is None:
                 self.blank_context, self.blank = await lockedbrowser.blank_page(self.browser)
                 await self.blank.evaluate(self.axe)
             try:
-                return await self.blank.evaluate(FINISH, [partials, options, shown])
+                return await self.blank.evaluate(
+                    FINISH, [partials, options, shown, bool(plain), list(skip)])
             except BaseException:
                 # Stopped partway (a page past its time), the page may still be
                 # running it: the next run gets a page of its own.
@@ -1136,17 +1191,20 @@ class Checker:
             ready["presentation"] = not problems
         return ready
 
-    async def run(self, page, options, shown, visit, unchecked):
+    async def run(self, page, options, shown, visit, unchecked, skip=()):
         """axe-core's results for a page and its frames, as FINISH brings
-        them back."""
+        them back: what it couldn't decide that skip, an earlier run's
+        undecided, has isn't said again, and this run's undecided is the
+        caller's to take out before the results go anywhere."""
         partials = await self.partials(page.main_frame, CONTEXT, options, visit, unchecked, [0])
-        return await self.finish(partials, options, shown)
+        plain = await page.main_frame.evaluate(FORMULAS)
+        return await self.finish(partials, options, shown, plain, skip)
 
-    async def timed(self, page, options, shown, visit, unchecked, seconds):
+    async def timed(self, page, options, shown, visit, unchecked, seconds, skip=()):
         """run's results, or Slow when axe-core hasn't finished after
         seconds."""
         return await lockedbrowser.within(
-            self.run(page, options, shown, visit, unchecked), seconds,
+            self.run(page, options, shown, visit, unchecked, skip), seconds,
             f"axe-core hadn't finished after {seconds} seconds")
 
     async def partials(self, frame, context, options, visit, unchecked, counted, depth=0):
@@ -1216,12 +1274,14 @@ class Checker:
             shown = LISTED if self.job["verbose"] else SHOWN
             light = await self.timed(page, self.options, shown, visit, unchecked,
                                      self.limits["axe"])
+            undecided = light.pop("undecided", [])
             dark = None
             if self.dark_options and await page.evaluate(DARK):
                 await page.emulate_media(color_scheme="dark")
                 await page.evaluate(SETTLE)
                 dark = await self.timed(page, self.dark_options, shown, visit, [],
-                                        self.limits["axe"])
+                                        self.limits["axe"], undecided)
+                dark.pop("undecided", None)
             return dict(await self.about(page, visit), status="checked", frames=unchecked,
                         places=[{"route": "", "light": light, "dark": dark}])
         finally:
@@ -1271,7 +1331,7 @@ class Checker:
             await page.evaluate("document.fonts.ready.then(() => true)")
             await page.evaluate(self.axe)
             dark = self.dark_options and await page.evaluate(DARK)
-            places, seen, unchecked = [], set(), []
+            places, seen, unchecked, undecided = [], set(), [], []
             total = int(await page.evaluate(SLIDE_COUNT) or 0)
             count = min(total, int(self.limits["slides"]))
             for index in range(count):
@@ -1279,6 +1339,7 @@ class Checker:
                 await page.evaluate(SETTLE)
                 light = await self.timed(page, self.options, LISTED, visit, unchecked,
                                          self.limits["axe"])
+                undecided.append(light.pop("undecided", []))
                 places.append({"route": route, "light": unseen(light, seen), "dark": None})
             if dark:
                 await page.emulate_media(color_scheme="dark")
@@ -1286,7 +1347,8 @@ class Checker:
                     await page.evaluate(STEP, index)
                     await page.evaluate(SETTLE)
                     found = await self.timed(page, self.dark_options, LISTED, visit, [],
-                                             self.limits["axe"])
+                                             self.limits["axe"], undecided[index])
+                    found.pop("undecided", None)
                     place["dark"] = unseen(found, seen, "dark")
             about = await self.about(page, visit)
             about["scripts"] = verdict["own"] > 0 or about["scripts"]
@@ -1330,6 +1392,7 @@ def unseen(result, seen, mode="light"):
             rules.append(dict(rule, nodes=fresh, keys=keys,
                               count=len(fresh) if listed_all else rule.get("count", 0)))
         out[kind] = rules
+    out["formulas"] = result.get("formulas", 0)
     return out
 
 

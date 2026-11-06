@@ -7856,6 +7856,9 @@ def check_presentation_scripts():
          == (4096, 4096)
          and axecheck.slide_viewport({"width": 0.001, "height": 700.0}) == (1001, 4096)
          and axecheck.slide_viewport({"width": float("inf"), "height": 720.0}) == (4096, 749)),
+        ("a slide's results keep the count of formula symbols left out",
+         lambda: axecheck.unseen({"violations": [], "incomplete": [], "formulas": 3},
+                                 set())["formulas"] == 3),
     ]
 
 
@@ -7903,6 +7906,7 @@ def check_axe_report():
                     node(["p > span"], "Fix any of the following:\n  Element has "
                          "insufficient color contrast of 3.1", "<span>")])],
                     "incomplete": []}}]}
+    page["places"][0]["light"]["formulas"] = 5
     deck = {"event": "page", "id": 1, "status": "checked", "past": 3, "places": [
         {"route": "#/one", "light": {"violations": [rule("image-alt", "critical", 1,
                                                          [node(["section > img"])])],
@@ -7998,6 +8002,9 @@ def check_axe_report():
          and any(line.startswith("1 frame(s) weren't checked") for line in lines)
          and "3 slide(s) weren't checked, after the first 500 of a presentation: "
              "slides/deck.html (3 of 5)." in lines
+         and "5 symbol(s) in formulas on 1 page(s), whose contrast axe-core doesn't measure "
+             "since they aren't text, are left out: each takes the colors of the text around "
+             "its formula." in lines
          or fail(" | ".join(lines))),
         ("a line for each rule, its elements over every page, its first, and the "
          "built-in check it overlaps; then how to list them",

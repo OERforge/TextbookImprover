@@ -229,12 +229,27 @@ def check_page_css():
     rules = _re.findall(r"border[-\w]*:[^;]*?light-dark\((#[0-9a-fA-F]{3,6}),\s*"
                         r"(#[0-9a-fA-F]{3,6})\)", screen)
     backgrounds = (("#fdfdfd", "#1a1a1a"), ("#ffffff", "#232629"))
+    quoted = _re.search(r"(?:^|\})\s*figcaption,\s*table caption,\s*blockquote\s*\{\s*"
+                        r"color: (#[0-9a-fA-F]{3,6});\s*color: light-dark\((#[0-9a-fA-F]{3,6}),"
+                        r"\s*(#[0-9a-fA-F]{3,6})\);\s*\}", screen)
+    printed = css.split("@media print")[1] if "@media print" in css else ""
     empty_cell = _re.search(r"thead > tr > td,\s*td\.empty-header\s*\{\s*border-top: 1px solid "
                             r"currentColor;\s*padding: 0\.25em 0\.5em 0\.25em 0\.5em;\s*\}",
                             screen)
     reset = _re.search(r"((?:table\.row-rules[^{,]*,\s*)+table\.row-rules[^{,]*)\{\s*"
                        r"border-top: 0;", screen)
     return [
+        ("a caption and a quotation clear 7:1, WCAG's AAA, in light and dark mode, a page's "
+         "and an EPUB's, where Pandoc's #606060 for a quotation is 6.18:1 on its #fdfdfd",
+         lambda: quoted and quoted.group(1) == quoted.group(2)
+         and all(contrast(expand(quoted.group(2)), light) >= 7
+                 and contrast(expand(quoted.group(3)), dark) >= 7
+                 for light, dark in backgrounds)
+         and 6.1 < contrast("#606060", "#fdfdfd") < 7),
+        ("printed, a quotation is black, as a caption is: Pandoc's print rule for one comes "
+         "before the color it gives one",
+         lambda: _re.search(r"figcaption,\s*table caption,\s*blockquote\s*\{\s*color: black;",
+                            printed)),
         ("an empty header cell made a data cell, a head row's or a row head's marked, has "
          "the line and the room Pandoc's stylesheets give a header cell, and a table of row "
          "rules takes the line away from it as from a header cell",

@@ -1,4 +1,4 @@
-/* Caption contrast -- WCAG 1.4.3 / 1.4.6.
+/* Caption and quotation contrast -- WCAG 1.4.3 / 1.4.6.
    Pandoc's stylesheet sets no color on captions, so they fall back to
    inheritance or the browser default and can land well under 4.5:1.
    #555 on Pandoc's #fdfdfd background measures 7.33:1, which clears AAA
@@ -8,9 +8,15 @@
    Pandoc 3.12's stylesheet follows the reader's dark mode, with a #1a1a1a
    background, where #555 is 2.33:1; #b6b6b6 there is 8.58:1, and 7.50:1
    on the #232629 of an EPUB's dark mode. A browser without light-dark()
-   keeps the first declaration. */
+   keeps the first declaration. A quotation takes the same gray: a page's
+   stylesheet from Pandoc sets one in #606060, 6.18:1 on its #fdfdfd,
+   which passes AA and not AAA (axe-core's color-contrast-enhanced, on 12
+   quotations of Principles of Economics 3e), and its #b6b6b6 in dark
+   mode; an EPUB's sets none, so its quotations, the text's color before,
+   are gray too. */
 figcaption,
-table caption {
+table caption,
+blockquote {
   color: #555;
   color: light-dark(#555, #b6b6b6);
 }
@@ -238,11 +244,14 @@ figcaption {
   margin-top: 0.5em;
 }
 
-/* Pandoc's print block forces the body to black; keep captions in step so
-   they do not print lighter than the surrounding text. */
+/* Pandoc's print block forces the body to black; keep captions and
+   quotations in step so they do not print lighter than the surrounding
+   text. Pandoc's own print rule for a quotation comes before the color it
+   gives one, which takes its place. */
 @media print {
   figcaption,
-  table caption {
+  table caption,
+  blockquote {
     color: black;
   }
 }

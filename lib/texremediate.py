@@ -1302,6 +1302,24 @@ LUATEX85 = ("% Written for LaTeX's tagging, built with LuaLaTeX: pdfTeX's comman
             "% LuaTeX lacks, and \\pdfoutput, which a test for pdfTeX looks for, as the\n"
             "% luatex85 package gives them to LuaTeX. pdfLaTeX builds as before.\n"
             "\\ifdefined\\directlua\\RequirePackage{luatex85}\\fi\n")
+# babel's main language as the book's own build has it, where the copy gives
+# the book its lang: babel takes its main language from \DocumentMetadata's
+# lang where the book names none with main= (read in babel.sty 26.13), so a
+# book in ngerman, the 1996 spelling, given lang=de was set in german,
+# hyphenated by the 1901 rules ("Zucker" unbroken, where the author's build
+# breaks "Zu-cker"), and one in british, in a project in en-US, in american
+# ("or-ga-ni-za-tion" for "or-gan-iz-a-tion"). main= keeps the book's, the
+# PDF's /Lang lang's still (measured on TeX Live 2026, LuaLaTeX); passed
+# before the class, it reaches babel wherever the book loads it, and keeps a
+# language the class's options name. Not where the book names its main
+# language itself, with main= or \babelprovide[main], which babel keeps: a
+# second main= stopped LaTeX ("Bad option 'main=french'").
+BABEL_MAIN = ("%% Written for LaTeX's tagging: babel's main language the book's own,\n"
+              "%% which babel would otherwise take from \\DocumentMetadata's lang.\n"
+              "\\PassOptionsToPackage{main=%s}{babel}\n")
+PROVIDE_MAIN = re.compile(r"\\babelprovide\s*\[[^]]*\bmain\b")
+PASSED_OPTIONS = re.compile(r"\\PassOptionsToPackage\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+CLASS_OPTIONS = re.compile(r"\\documentclass(?:\s|%[^\n]*)*\[([^]]*)\]")
 # A face with a STAT table that isn't a variable font embedded from its own
 # file by LuaLaTeX, not as luaotfload embeds a variable face, which Acrobat
 # said it couldn't extract (latexbuild.STATIC_FONTS): just after
@@ -2376,7 +2394,8 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     """texts: {name: text}, changed in place to build with LaTeX's tagging
     on LuaLaTeX, each change measured on GIAM, where it was needed:
     \\DocumentMetadata before \\documentclass (the standards given, ua-2 by
-    default), the pdftex option and pdfTeX's own settings taken out, a
+    default), babel's main language the book's where it gives the book its
+    lang (BABEL_MAIN), the pdftex option and pdfTeX's own settings taken out, a
     starred theorem the book defines beside its numbered one defined only
     when tagging hasn't (tagging's \\newtheorem defines thm* with thm),
     \\centerline on a line of its own made a centered paragraph,
@@ -2540,6 +2559,7 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     claimed = list(standard) or ["ua-2"]
     claim = claimed[0] if len(claimed) == 1 else "{%s}" % ",".join(claimed)
     after = None                        # where what must follow it goes
+    given = False                       # the book given its lang here
     own = latexsource.code_matches(DOCUMENT_METADATA, text)
     if not own:
         found = latexsource.code_matches(DOCUMENTCLASS, text)
@@ -2555,10 +2575,19 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             text = text[:at] + line + text[at:]
             counts["metadata"] = 1
             after = at + len(line)
+            given = bool(language)
     else:
         text, after, added = _complete_metadata(text, own[0], language, claim)
         if added:
             counts["metadata_added"] = ", ".join(added)
+        given = "lang=%s" % language in added
+    if given and after is not None and "babel" in packages:
+        main = book_babel_main(pieces)
+        if main:
+            text = text[:after] + BABEL_MAIN % main + text[after:]
+            counts["babel_main"] = main
+        elif main is not None:
+            counts["babel_main_unknown"] = language
     if counts.get("luatex85") and after is not None:
         text = text[:after] + LUATEX85 + text[after:]
     if (shimmed or stand_ins) and after is not None:
@@ -2574,6 +2603,26 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
         text = text[:after] + STATIC_FONTS + text[after:]
     texts[master] = text
     return counts
+
+
+def book_babel_main(pieces):
+    """babel's main language as the book's build sets it, by its name
+    (latexsource.babel_main), from the options the preamble's pieces
+    (preamble_packages's) give babel and the master's class's: None where
+    the book names it itself (BABEL_MAIN), "" where it can't be known."""
+    options = []
+    for pattern in (PASSED_OPTIONS, PACKAGE_OPTIONS):
+        for piece in pieces:
+            for m in latexsource.code_matches(pattern, piece):
+                if "babel" in latexsource.package_names(m.group(2)):
+                    options += latexsource.option_list(
+                        latexsource.COMMENT.sub("", m.group(1) or ""))
+    if any(o.partition("=")[0].strip() == "main" for o in options) \
+            or any(latexsource.code_matches(PROVIDE_MAIN, piece) for piece in pieces):
+        return None
+    found = latexsource.code_matches(CLASS_OPTIONS, pieces[0])
+    return latexsource.babel_main(options, latexsource.option_list(
+        latexsource.COMMENT.sub("", found[0].group(1))) if found else [])
 
 
 def _complete_metadata(text, m, language, claim):

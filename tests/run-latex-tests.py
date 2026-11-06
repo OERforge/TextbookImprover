@@ -921,6 +921,160 @@ def case_language(work):
     ]
 
 
+def case_babel_main(work):
+    """A LaTeX book's tagged copy keeps babel's main language the book's, which
+    babel takes from \\DocumentMetadata's lang where the book names none
+    with main=: main= passed before the class, babel's last language, else
+    the class's, so built with LuaLaTeX it's hyphenated as the author's
+    build hyphenates it; none where the book names its main language
+    itself, with main= or \\babelprovide[main], or its own
+    \\DocumentMetadata names the lang, nor once again in a copy made from
+    the copy; the run saying so, and naming a book whose main language its
+    options don't say. And a book whose main= names French is in French."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    import texremediate
+    tagged = "  copy:\n    format: source\n    tagging: \"on\"\n"
+
+    def book_at(name, master, language=None, targets=tagged):
+        path = os.path.join(work, name)
+        os.makedirs(path)
+        with open(os.path.join(path, "book.tex"), "w", encoding="utf-8") as fh:
+            fh.write(master)
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.main\n  title: A Main Language\n"
+                     + (f"  language: {language}\n" if language else ""))
+        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n" + targets)
+        done = convert(path)
+        copy = os.path.join(path, "copy", "book.tex")
+        return (read(path, "copy", "book.tex") if done.returncode == 0
+                and os.path.exists(copy) else ""), done.stdout + done.stderr
+
+    body = "\\begin{document}\nZucker, an organization.\n\\end{document}\n"
+    german, german_said = book_at(
+        "german", "\\documentclass{article}\n\\usepackage[english,ngerman]{babel}\n" + body)
+    british, _ = book_at(
+        "british", "\\documentclass{article}\n\\usepackage[english,british,silent]{babel}\n"
+        + body, language="en-US")
+    french, _ = book_at(
+        "french", "\\documentclass{article}\n\\usepackage[main=french,english]{babel}\n" + body,
+        targets=tagged + "  html:\n    format: html\n")
+    unknown, unknown_said = book_at(
+        "unknown", "\\documentclass[ngerman,latin]{article}\n\\usepackage{babel}\n" + body,
+        language="de")
+    again = ""
+    if german:
+        again, _ = book_at("again", german)
+    passed = "\\PassOptionsToPackage{main=%s}{babel}\n\\documentclass"
+
+    def head(text):
+        return text[:text.find("\\documentclass")] if "\\documentclass" in text else ""
+
+    def tagged_copy(master, language, said=None):
+        """The master as a tagged copy has it; said, given, gets the counts."""
+        texts = {"book.tex": master}
+        counts = texremediate.tag(texts, "book.tex", language, mathml=False)
+        if said is not None:
+            said.update(counts)
+        return texts["book.tex"]
+
+    def left(master, language, unknown=False):
+        """Whether a tagged copy of master passes babel nothing more than the
+        book does, and its run says nothing of babel's main language, or,
+        unknown, that the lang sets it."""
+        said = {}
+        return tagged_copy(master, language, said).count("PassOptionsToPackage") \
+            == master.count("PassOptionsToPackage") \
+            and [key for key in said if key.startswith("babel_main")] \
+            == (["babel_main_unknown"] if unknown else [])
+
+    def built(text, wanted):
+        """The copy built with LuaLaTeX, as a person builds it, with lines
+        that have LaTeX's log name babel's language and hyphenate the words:
+        wanted, babel's main language and the words' hyphens (None for any)."""
+        why = why_no_tex("no lualatex to build the copy", "lualatex")
+        if why:
+            return skip(why)
+        if not text:
+            return False
+        tree = os.path.join(work, "build-" + wanted[0])
+        os.makedirs(tree, exist_ok=True)
+        with open(os.path.join(tree, "book.tex"), "w", encoding="utf-8") as fh:
+            fh.write(text.replace("\\begin{document}\n", "\\begin{document}\n"
+                                  "\\typeout{MAIN=\\languagename}\n"
+                                  "\\showhyphens{Zucker organization}\n"))
+        done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                               "book.tex"], cwd=tree, capture_output=True, text=True,
+                              timeout=300, stdin=subprocess.DEVNULL)
+        log = read(tree, "book.log") if os.path.exists(os.path.join(tree, "book.log")) else ""
+        return done.returncode == 0 and "MAIN=%s\n" % wanted[0] in log \
+            and (wanted[1] is None
+                 or re.search(r"\\TU/\S+ %s\b" % re.escape(wanted[1]), log) is not None)
+
+    page = os.path.join(work, "french", "html", "book.html")
+    return [
+        ("a tagged copy of a book in ngerman, given lang=de, names babel's main language "
+         "the book's: main=ngerman passed before its class, its babel line as written",
+         lambda: "\\DocumentMetadata{lang=de," in german
+         and head(german).endswith("\\PassOptionsToPackage{main=ngerman}{babel}\n")
+         and "\\usepackage[english,ngerman]{babel}\n" in german),
+        ("and the run says so",
+         lambda: "babel given main=ngerman, so its main language is the book's" in german_said),
+        ("built with LuaLaTeX, it's set as the author's build sets it: in ngerman, "
+         "\"Zucker\" hyphenated Zu-cker, where german, by the 1901 rules, leaves it whole",
+         lambda: built(german, ("ngerman", "Zu-cker"))),
+        ("a book in British English, in a project in en-US, keeps british, not an option of "
+         "babel's own after it, and is hyphenated the British way",
+         lambda: head(british).endswith("\\PassOptionsToPackage{main=british}{babel}\n")
+         and built(british, ("british", "Zucker or-gan-iz-a-tion"))),
+        ("a book whose class names its language, a size, a paper, and an AMS class's option "
+         "beside it, gets the class's; one whose language has a modifier, the language; one "
+         "whose own \\DocumentMetadata names no language, main= after it",
+         lambda: passed % "ngerman" in tagged_copy(
+             "\\documentclass[a4paper, % the paper\n  ngerman, 12pt, reqno]{article}\n"
+             "\\usepackage{babel}\n" + body, "de")
+         and passed % "ngerman" in tagged_copy(
+             "\\documentclass{article}\n\\usepackage[english,ngerman.foo]{babel}\n" + body, "de")
+         and "\\DocumentMetadata{pdfversion=2.0, tagging=on, lang=de, pdfstandard=ua-2}\n"
+         + texremediate.STATIC_FONTS + texremediate.BABEL_MAIN % "ngerman"
+         + "\\documentclass" in tagged_copy(
+             "\\DocumentMetadata{pdfversion=2.0}\n\\documentclass{article}\n"
+             "\\usepackage[ngerman]{babel}\n" + body, "de")),
+        ("none where the book names its main language itself, with main=, passed to babel "
+         "too, or \\babelprovide[main], or its own \\DocumentMetadata names the lang",
+         lambda: french and "PassOptionsToPackage" not in french
+         and left("\\PassOptionsToPackage{main=ngerman}{babel}\n\\documentclass{article}\n"
+                  "\\usepackage[english,ngerman]{babel}\n" + body, "de")
+         and left("\\documentclass{article}\n\\usepackage[english]{babel}\n"
+                  "\\babelprovide[import, main]{british}\n" + body, "en-US")
+         and left("\\documentclass{article}\n\\usepackage{babel}\n"
+                  "\\babelprovide[import, main]{british}\n" + body, "en-US")
+         and left("\\DocumentMetadata{lang=de}\n\\documentclass{article}\n"
+                  "\\usepackage[ngerman]{babel}\n" + body, "de")),
+        ("a book whose main= names French is in French, its copy's lang too, and builds; "
+         "and one whose last language has a modifier is in that language, but not one whose "
+         "main= has one, a language babel doesn't load",
+         lambda: latexsource.preamble_language(
+             "\\usepackage[english,spanish.mexico]{babel}") == "es"
+         and latexsource.preamble_language(
+             "\\usepackage[main=ngerman.foo,english]{babel}") == ""
+         and "\\DocumentMetadata{lang=fr," in french and os.path.exists(page)
+         and re.search(r'<html\b[^>]*\slang="fr"', read(work, "french", "html", "book.html"))
+         and built(french, ("french", None))),
+        ("where the class's language can't be told, one the reading doesn't know after it, "
+         "nothing is passed, and the run says the lang sets babel's main language; nor where "
+         "babel's is a macro, which isn't defined before the class",
+         lambda: unknown and "PassOptionsToPackage" not in unknown
+         and "babel's main language left to \\DocumentMetadata's lang=de, which may not be "
+         "the book's" in unknown_said
+         and left("\\documentclass{article}\n\\newcommand\\mainlang{ngerman}\n"
+                  "\\usepackage[english,\\mainlang]{babel}\n" + body, "de", unknown=True)),
+        ("a copy made from the copy has main= once",
+         lambda: again and again.count("\\PassOptionsToPackage{main=ngerman}{babel}") == 1),
+    ]
+
+
 # A book in en-US whose second chapter, \include-d as ch02.tex, is French by
 # languages.csv and defines a macro the fourth uses, and is followed by an
 # English file of sections only, in its chapter; whose third, in a folder,
@@ -1506,8 +1660,11 @@ def case_babel_languages(work):
     # Spanish, which opens with babel's \selectlanguage{english}, the
     # language babel is in already, and holds an English quotation, in
     # another language than the page's. Each project declares American
-    # English, which babel takes its main language from in a tagged copy,
-    # american, where the books' option is english (the fifth review).
+    # English, where the books' option is english: the first's tagged copy
+    # keeps babel's main language english (case_babel_main), and the
+    # second's own \DocumentMetadata names en-US, which babel takes its
+    # main language from, american, as it did in a tagged copy (the fifth
+    # review).
     english_status, english_said = book_at(os.path.join(work, "english"), {
         "book.tex": "\\documentclass{book}\n\\usepackage[english]{babel}\n\\begin{document}\n"
                     "\\include{one}\n\\include{two}\n\\end{document}\n",
@@ -1517,7 +1674,8 @@ def case_babel_languages(work):
     english_master = read(work, "english", "copy", "book.tex") if english_status == 0 else ""
     paged = os.path.join(work, "english-page")
     paged_status, paged_said = book_at(paged, {
-        "book.tex": "\\documentclass{book}\n\\usepackage[english]{babel}\n"
+        "book.tex": "\\DocumentMetadata{lang=en-US}\n\\documentclass{book}\n"
+                    "\\usepackage[english]{babel}\n"
                     "\\begin{document}\n\\include{one}\n\\include{two}\n\\end{document}\n",
         "one.tex": "\\chapter{One}\nIn English.\n",
         "two.tex": "\\selectlanguage{english}\n\\chapter{Dos}\nEn espa\\~nol.\n\n"
@@ -2675,9 +2833,10 @@ def case_source(work):
                                            "keys-older")) == before),
         ("the remediated copy builds with pdfLaTeX, as the author's does", builds),
         ("tagging: \\DocumentMetadata, the book's language, the font setting just after it, "
-         "pdfTeX's option and setting out",
+         "babel's main language the book's, pdfTeX's option and setting out",
          lambda: tagged.startswith("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
                                    + texremediate.STATIC_FONTS
+                                   + texremediate.BABEL_MAIN % "english"
                                    + "\\documentclass[12pt]{article}")
          and "\\pdfcompresslevel" not in tagged),
         ("tagging: the starred theorem defined only when tagging hasn't",
@@ -8227,6 +8386,7 @@ def case_no_contents(work):
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
+         ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

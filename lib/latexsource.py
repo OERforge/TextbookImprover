@@ -98,6 +98,28 @@ BABEL = {"english": "en", "american": "en-US", "USenglish": "en-US",
          "catalan": "ca", "swedish": "sv", "danish": "da",
          "norwegian": "no", "finnish": "fi", "czech": "cs",
          "turkish": "tr"}
+# babel's own options without a value, which aren't languages: babel takes
+# every other such option it's given for one (\DeclareOption*, read in
+# babel.sty 26.13).
+BABEL_OPTIONS = frozenset("""KeepShorthandsActive activeacute activegrave base
+    debug debug-german fleqn leqno nocase noconfigs showlanguages silent
+    strings""".split())
+# A class's options no file of babel's defines, so babel doesn't take them
+# for a language: a size, a paper, the standard classes' layouts, and the
+# AMS classes', KOMA-Script's, and memoir's common ones. babel takes a
+# class's option for one only where a file defines it (babel-<name>.tex or
+# <name>.ldf), which isn't known here.
+CLASS_LAYOUT = re.compile(r"\d+(?:\.\d+)?pt|\w*paper|(?:one|two)(?:side|column)"
+                          r"|(?:no)?titlepage|open(?:any|right|left|bib)|landscape"
+                          r"|portrait|draft|final|leqno|fleqn|reqno|tbtags|centertags"
+                          r"|nomath|noamsfonts|psamsfonts|DIV\d+|BCOR[\d.]*\w*"
+                          r"|(?:head|foot)sepline|abstract(?:on|off)|article"
+                          r"|oldfontcommands|extrafontsizes", re.I)
+# A language's name as babel takes one: its modifiers (spanish.mexico)
+# taken off, which babel keeps apart, where main= keeps them as its value
+# (read in babel.sty 26.13), and no macro, which a line before the class
+# can't expand (\usepackage[english,\mainlang]{babel}).
+LANGUAGE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 RENDERED = "rendered"
 
 
@@ -493,7 +515,11 @@ def book_outline(body):
 
 def preamble_language(preamble):
     """The book's language, as the preamble declares it: \\DocumentMetadata's
-    lang, polyglossia's main language, or babel's main (last) language."""
+    lang, polyglossia's main language, or babel's main language, the one
+    main= names (none where the table doesn't know it, a name with a
+    modifier among them: babel keeps main='s value whole, finds no such
+    language, and sets the last it loaded, as measured with babel 26.13),
+    else the last, its modifiers taken off, as babel takes them off."""
     m = re.search(r"\\DocumentMetadata\s*\{[^}]*?\blang\s*=\s*([A-Za-z-]+)",
                   preamble)
     if m:
@@ -504,10 +530,38 @@ def preamble_language(preamble):
         return BABEL[m.group(1)]
     for m in re.finditer(r"\\usepackage\s*\[([^]]*)\]\s*\{babel\}", preamble):
         options = [o.strip() for o in m.group(1).split(",") if o.strip()]
-        options = [o.split("=")[-1] for o in options]
+        main = [o.partition("=")[2].strip() for o in options
+                if o.partition("=")[0].strip() == "main"]
+        if main:
+            return BABEL.get(main[0], "")
+        options = [o.split("=")[-1].split(".")[0] for o in options]
         known = [o for o in options if o in BABEL]
         if known:
             return BABEL[known[-1]]
+    return ""
+
+
+def babel_main(options, class_options=()):
+    """babel's main language as the book's build sets it, by its name
+    (ngerman), from the options babel is loaded with, in order, and the
+    class's: main='s, else the last language among babel's options (any
+    without a value that isn't babel's own, BABEL_OPTIONS), its modifiers
+    taken off, else the class's last option, where it's a language the
+    table knows (BABEL), options no file of babel's defines aside
+    (CLASS_LAYOUT); "" where it can't be known, a macro's among them
+    (LANGUAGE_NAME)."""
+    for option in options:
+        key, _, value = option.partition("=")
+        if key.strip() == "main":
+            return value.strip()
+    languages = [o for o in options if "=" not in o and o not in BABEL_OPTIONS]
+    if languages:
+        name = languages[-1].split(".")[0]
+        return name if LANGUAGE_NAME.fullmatch(name) else ""
+    for option in reversed(class_options):
+        if "=" in option or CLASS_LAYOUT.fullmatch(option):
+            continue
+        return option if option in BABEL else ""
     return ""
 
 

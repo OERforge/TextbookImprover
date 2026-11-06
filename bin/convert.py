@@ -4013,6 +4013,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   else f"its own \\DocumentMetadata given {counts['tag_metadata_added']}"
                   if counts.get("tag_metadata_added")
                   else "its own \\DocumentMetadata kept")
+               + babel_main_said(counts)
                + f", {counts.get('tag_pdftex_options', 0)} pdftex option(s) and "
                f"{counts.get('tag_pdftex_settings', 0)} pdfTeX setting(s) taken out, "
                + ("luatex85 loaded for LuaLaTeX"
@@ -4251,6 +4252,21 @@ def babel_said(counts):
                f"({babel_listed(untagged)}), each passage marked to be tagged in its language, "
                "which LaTeX does where the copy is built with its tagging (tagging: \"on\")."
                if untagged else ""))
+
+
+def babel_main_said(counts):
+    """The part of a tagged LaTeX copy's message about babel's main
+    language, which babel takes from \\DocumentMetadata's lang where the
+    book names none (texremediate's BABEL_MAIN): kept the book's, or left
+    to the lang where the book's options don't say which it is."""
+    if counts.get("tag_babel_main"):
+        return (f", babel given main={counts['tag_babel_main']}, so its main language "
+                "is the book's, which it takes from \\DocumentMetadata's lang otherwise")
+    if counts.get("tag_babel_main_unknown"):
+        return (", babel's main language left to \\DocumentMetadata's "
+                f"lang={counts['tag_babel_main_unknown']}, which may not be the book's, "
+                "since babel's options and the class's don't name it (main= would)")
+    return ""
 
 
 def babel_said_short(counts):
@@ -4556,6 +4572,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
     warn_own_contents(target.name, [counts], "the copy LaTeX builds")
     warn_page_languages(target.name, counts, "the PDF")
+    if counts.get("tag_babel_main_unknown"):
+        say(f"{target.name}: {babel_main_said(counts)[2:]}.")
     # The book's PDF figures with their fonts embedded, in the copy LaTeX
     # builds, where the output folders aren't.
     embed_figures(target, build, build, (), "the copy LaTeX builds")

@@ -251,7 +251,8 @@ def case_wcag():
     with --wcag never taking the report for current, since what it finds
     turns on a setup the cache can't see, a report made with other
     options not taken for the one asked for, and a page read with
-    another --quick read again."""
+    another --quick read again. A section on axe-core's checks of the page,
+    which say why they didn't run without Playwright."""
     sys.path.insert(0, HERE)
     import fakeverapdf
     import pdfcheck
@@ -320,6 +321,10 @@ def case_wcag():
         ("the report has a section on them, saying they ran and may be wrong",
          lambda: "## book.pdf: veraPDF's WCAG 2.2 checks" in report
          and "experimental and may be wrong" in report),
+        ("and one on axe-core's checks of the page, saying they ran or why not",
+         lambda: "## HTML pages and EPUBs: axe-core's WCAG checks" in report
+         and re.search(r"\n- (axe-core [\d.]+ ran its \d+ rules for WCAG 2\.1 AA on 1 "
+                       r"page\(s\)|axe's WCAG checks not run on the pages)", report)),
         ("a second audit with --wcag doesn't take the report for current, and checks "
          "the PDF again, the page coming from the cache",
          lambda: "is current" not in again.stderr

@@ -671,8 +671,8 @@ WCAG_CAVEAT = "veraPDF's WCAG checks are experimental and may be wrong"
 WCAG_SKIPPED = ("without them veraPDF skips its WCAG checks silently, passing "
                 "their rules unchecked")
 WCAG_DOCS = "docs/installation.md, Optional: veraPDF's WCAG modules"
-WCAG_ALONE = ("--verbose lists veraPDF's WCAG checks one by one, with --wcag; without it, "
-              "it changes nothing.")
+WCAG_ALONE = ("--verbose lists what --wcag finds one by one, veraPDF's failed checks and "
+              "axe-core's elements; without --wcag, it changes nothing.")
 WCAG_VERBOSE = ("Each rule's failed checks are counted, not listed: run again with --verbose "
                 "for each one, with what the PDF has there (a link's address, the line "
                 "repeated characters are on), or check one PDF so with check-output.py "

@@ -12,6 +12,8 @@ tests/fixtures/_dot.png
 !tests/fixtures/mathjax/*.json
 # ... and reveal.js's, which names its version (vendor/reveal.js/README.md).
 !vendor/reveal.js/package.json
+# ... and axe-core's, which names its (vendor/axe-core/README.md).
+!vendor/axe-core/package.json
 *.imscc
 settings.sh
 table-captions.csv

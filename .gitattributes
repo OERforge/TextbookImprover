@@ -6,3 +6,7 @@
 vendor/reveal.js/** -text
 vendor/reveal.js/dist/** -diff
 vendor/reveal.js/README.md text
+# axe-core as published, byte for byte (vendor/axe-core/README.md)
+vendor/axe-core/** -text
+vendor/axe-core/axe.min.js -diff
+vendor/axe-core/README.md text

@@ -3782,8 +3782,8 @@ def case_asciidoc_layout(work):
 def case_quick(work):
     """--quick: the output check without epubcheck, the Nu checker, and
     veraPDF, saying so; --wcag, with --verbose, in a run that made no PDF,
-    saying there was none to check; and --verbose alone saying it changes
-    nothing. The run without --quick has the
+    saying there was none to check, and --quick leaving axe-core out; and
+    --verbose alone saying it changes nothing. The run without --quick has the
     validators hidden (each variable naming a file that isn't there), so
     it asks for them and is told they're missing, without starting Java."""
     os.makedirs(work)
@@ -3807,14 +3807,16 @@ def case_quick(work):
          and "epubcheck, the Nu HTML checker, and veraPDF not run (--quick)." in quick
          and "VNU_JAR" not in quick),
         ("and --wcag, in a run that made no PDF, says there was none to check, after the "
-         "verdict, without passing --wcag on",
-         lambda: "veraPDF's WCAG checks not run: the run made no PDF." in quick
+         "verdict, and --quick leaves axe-core out",
+         lambda: "veraPDF's WCAG checks not run: no PDF to check." in quick
          and quick.index("Output check: 1 page(s)")
-         < quick.index("veraPDF's WCAG checks not run: the run made no PDF.")
-         and "veraPDF's WCAG checks not run (--quick)." not in quick),
+         < quick.index("veraPDF's WCAG checks not run: no PDF to check.")
+         and "veraPDF's WCAG checks not run (--quick)." not in quick
+         and "axe's WCAG checks not run (--quick)." in quick),
         ("and --verbose without --wcag says it changes nothing",
-         lambda: "--verbose lists veraPDF's WCAG checks one by one, with --wcag; without it, "
-                 "it changes nothing." in unasked and "WCAG checks not run" not in unasked),
+         lambda: "--verbose lists what --wcag finds one by one, veraPDF's failed checks and "
+                 "axe-core's elements; without --wcag, it changes nothing." in unasked
+         and "WCAG checks not run" not in unasked),
         ("without it, the run looks for them",
          lambda: "VNU_JAR" in full and "not run (--quick)" not in full),
     ]

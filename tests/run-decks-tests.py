@@ -4863,8 +4863,22 @@ def case_revealjs(work):
         # run-all.sh counts it.
         print(f"  skip  {len(in_browser_checks)} checks of the presentations in a browser, which "
               f"need Python's Playwright and its Chromium, both optional: {browser}")
+        print(f"  skip  --wcag on the presentation the pipeline wrote, which needs them too: "
+              f"{browser}")
         return checks
-    return checks + in_browser_checks
+    # --wcag on what the pipeline wrote: axe-core takes the presentation's
+    # scripts for TextbookImprover's own, so checks it slide by slide.
+    checked = subprocess.run([sys.executable, os.path.join(BIN, "check-output.py"), "--wcag",
+                              path], capture_output=True, text=True, cwd=decks_dir,
+                             stdin=subprocess.DEVNULL)
+    wcag_checks = [
+        ("--wcag checks the presentation the pipeline wrote slide by slide, its scripts "
+         "taken for TextbookImprover's own",
+         lambda: re.search(r"axe-core [\d.]+ ran its \d+ rules for WCAG 2\.1 AA on \d+ "
+                           r"slide\(s\) of 1 presentation\(s\)", checked.stderr)
+         and "didn't check" not in checked.stderr),
+    ]
+    return checks + in_browser_checks + wcag_checks
 
 
 def case_revealjs_settings(work):

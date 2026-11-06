@@ -357,6 +357,11 @@ class Finding:
             meaning = (describe(check), "note",
                        wcag.standard(check.split(":", 1)[1].rsplit("-", 1)[0]),
                        "manual")
+        if meaning is None and check.startswith(("axe:", "axe-review:")):
+            # axe-core's rules (--wcag on pages): a note too, as veraPDF's
+            # are, so what's installed never decides a verdict. Its finding
+            # names the criteria (axecheck.py), which the check doesn't.
+            meaning = (describe(check), "note", "", "manual")
         self.severity = severity or (meaning[1] if meaning else "warning")
         self.standard = standard if standard is not None else (
             meaning[2] if meaning else "")
@@ -381,6 +386,11 @@ def describe(check):
         clause = rule.rsplit("-", 1)[0]
         return (f"veraPDF's WCAG 2.2 rule {rule}, experimental and wrong at times: "
                 f"{wcag.named(clause)}, {wcag.url(clause)}")
+    if check.startswith("axe:"):
+        return f"elements that fail axe-core's rule {check.split(':', 1)[1]}"
+    if check.startswith("axe-review:"):
+        return (f"elements axe-core's rule {check.split(':', 1)[1]} couldn't decide, for a "
+                "person to judge")
     return check
 
 

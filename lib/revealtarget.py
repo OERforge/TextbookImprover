@@ -47,6 +47,8 @@ vendor/reveal.js, or REVEALJS_DIR's):
   (start_settings): a deck's YAML gives the template's settings their
   values as text, so a value with a quote in it would end its string and
   go on as code, and a presentation whose start holds more isn't written;
+  the output check's axe-core holds a presentation to the same rule
+  before it runs its scripts (axecheck.py);
 - oer-reveal.js, after the script that starts reveal.js, takes away the
   presentation's role="application", silences the live region that read
   each slide's text run together, gives a slide's title focus as the

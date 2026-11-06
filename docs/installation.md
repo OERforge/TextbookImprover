@@ -137,7 +137,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | TeX's `latex-tagging-status` package | A LaTeX source's copy made for tagging, whose class and packages are checked against the tagging project's status list ([LaTeX sources](latex.md#the-source-target)); without it, the run says how to install it and checks nothing | `tlmgr install latex-tagging-status`; MiKTeX installs it on demand |
 | reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later | nothing: the repository has a copy, and `REVEALJS_DIR` can name another; see [below](#for-a-revealjs-target-revealjs) |
 | LibreOffice Impress | Optional. Saving a deck in ODP or PowerPoint 97-2003's format (`.odp`, `.ppt`) as PowerPoint, which a slides run reads ([Slides](slides.md#decks-in-other-formats)); without it, the run says how to save one by hand, and the slides suite's case that uses it skips | `sudo apt install libreoffice-impress`, or `LIBREOFFICE` naming it, as a path or a command |
-| Python's Playwright and its Chromium | Optional, and for the test suites only: twelve of the decks suite's checks try a reveal.js presentation in a browser with them, and skip without them | in a virtual environment; see [below](#optional-for-the-suites-playwright-and-its-chromium) |
+| Python's Playwright and its Chromium | Optional. `--wcag` on pages, presentations, and EPUBs, with axe-core, which the repository has ([Checking](checking.md#axe-cores-wcag-checks)), and the suites' checks in a browser; without them, `--wcag` says so and checks the rest, and those checks skip | in a virtual environment; see [below](#optional-playwright-and-its-chromium) |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
 **Pandoc has to come from Pandoc.** `sudo apt install pandoc` on Ubuntu 24.04 gives 3.1.3, which this project refuses to run with: Pandoc 3.6 and older write tables without cell spans, so a table with merged cells loses them silently, and several things the filter relies on arrived later. Install the `.deb` from [Pandoc's releases](https://github.com/jgm/pandoc/releases) instead:
@@ -150,7 +150,7 @@ pandoc --version | head -1
 
 Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs none unless a target converts them, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Each Pandoc is asked for MathML in the form it takes: 3.9 and 3.10 with `--mathml`, and 3.11 and later, which replaced that option with `--math-method` and made MathML the default, with `--math-method=mathml`. The project is developed and tested on 3.12.1 and 3.13. Pandoc 3.9 was checked against its source, and by running every test suite with a stand-in for it over 3.12.1's readers and writers (`tests/pandoc39/`, [Testing](testing.md#running-as-pandoc-39-would)), which takes 3.9's options, writes math as text unless MathML is asked for, as 3.9 does, and gives Lua filters 3.9's functions, but not with 3.9 itself, whose output can differ in ways no test has seen. Some differences are known: 3.9 reads a row of a Word table whose repeat-as-header setting is turned off (`w:tblHeader w:val="0"`) as a header row, which 3.10 fixed; and it drops the language of a block of code whose `<pre>` has an attribute of its own (`<pre id="x"><code class="python">`), so the block isn't highlighted. Versions above 3.9 still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't, and 3.13 writes a list item's later paragraphs in a Word file another way ([Word output](formats.md#word-output)) and reads YAML as YAML 1.2 ([The PDF's page](configuration.md#the-pdfs-page)) — so the same document can produce different reports on different machines. Neither is wrong; the sidecar files absorb the difference.
 
-**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which only the test suites use, and they don't need it ([below](#optional-for-the-suites-playwright-and-its-chromium)).
+**Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which `--wcag` on pages and the suites' checks in a browser use, and nothing needs ([below](#optional-playwright-and-its-chromium)).
 
 ## Optional: the full validators
 
@@ -397,11 +397,11 @@ export REVEALJS_DIR="$HOME/tools/reveal.js-6.0.2"
 
 With `npm`, `npm install reveal.js@6` in a folder of your own does the same, `REVEALJS_DIR` then being that folder's `node_modules/reveal.js`. The run checks that it's reveal.js 6, with the files it copies, and notes a release other than the repository's, since the presentations' script relies on reveal.js's workings, which a release can change; unset, the repository's copy is used again. reveal.js is MIT-licensed, and the font its white theme embeds is under the SIL Open Font License: both licenses go with each copy.
 
-### Optional, for the suites: Playwright and its Chromium
+### Optional: Playwright and its Chromium
 
-Nothing here needs these but twelve of the decks suite's checks. The suite builds presentations and checks what was written; the twelve then open them in a browser, to see what the presentation does there (focus moving to a slide's title, slides fitted, a narrow window's page), through Python's Playwright and the Chromium it installs. Without them, those twelve skip, saying so, and everything else runs. They're worth installing to work on the presentations themselves, and can otherwise be left out: together they take about 570 MB.
+Two things use these: `--wcag`, which checks each page, presentation, and EPUB's content document with axe-core in a browser ([Checking](checking.md#axe-cores-wcag-checks)), and the suites' checks that open a page in a browser, twelve of the decks suite's (focus moving to a slide's title, slides fitted, a narrow window's page) and the check suite's of axe-core. Without them, `--wcag` says so in a line and checks the rest, and those checks skip, saying so. axe-core itself is in the repository (`vendor/axe-core`), so there's nothing more to install for it. Together they take about 570 MB.
 
-Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the suites run with that environment's Python:
+Ubuntu doesn't package Playwright, and Ubuntu 24.04's Python won't take a package from pip ([above](#requirements)), so it goes in a virtual environment that sees Ubuntu's own packages too (`--system-site-packages`), and the tools and the suites run with that environment's Python:
 
 ```bash
 sudo apt install python3-venv
@@ -410,13 +410,22 @@ python3 -m venv --system-site-packages ~/venv
 ~/venv/bin/python -m playwright install --with-deps --only-shell chromium
 ```
 
-`--only-shell` installs only the Chromium that runs without a window, which is all the suites use: about 320 MB, in `~/.cache/ms-playwright`, where Chromium in full would add 600 MB. `--with-deps` installs the libraries and fonts it needs with `apt`, which asks for your password, about 110 MB of them where none is installed yet; Playwright itself is about 130 MB (sizes measured with Playwright 1.56 and its Chromium 141). To check that it starts:
+`--only-shell` installs only the Chromium that runs without a window, which is all `--wcag` and the suites use: about 320 MB, in `~/.cache/ms-playwright`, where Chromium in full would add 600 MB. `--with-deps` installs the libraries and fonts it needs with `apt`, which asks for your password, about 110 MB of them where none is installed yet; Playwright itself is about 130 MB (sizes measured with Playwright 1.56 and its Chromium 141). Then, with the environment active, check the setup:
 
 ```bash
-~/venv/bin/python -c "from playwright.sync_api import sync_playwright as p; s = p().start(); print(s.chromium.launch().version); s.stop()"
+source ~/venv/bin/activate
+python3 $T/bin/check-output.py --wcag
 ```
 
-which prints Chromium's version. Then run the suites with the environment active:
+With nothing to check, that checks a probe page and a probe presentation of axe-core's own, and its line says what it found, and whether Chromium's sandbox was on and the check off the network:
+
+```
+  axe-core 4.14.0 ran its 63 rules for WCAG 2.1 AA on a probe page of its own and a probe presentation, in Playwright 1.63.0's Chromium 153, sandboxed and off the network: it found the probe's problems, the probe's script didn't run, its requests elsewhere were refused, and its refresh canceled, so pages can be checked, and presentations TextbookImprover wrote too.
+```
+
+(veraPDF's lines follow, saying whether its WCAG checks can run, [above](#optional-verapdfs-wcag-modules).) A line after it says why when either wasn't, and the check goes on without it, every page's own scripts still blocked and nothing served but its folder ([Checking](checking.md#axe-cores-wcag-checks)). The sandbox can't start for root, so run the tools as yourself; on Ubuntu 24.04, AppArmor may refuse it to a Chromium no profile of its covers, which [Chromium's notes on it](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) describe, and the same restriction may keep the check from making the namespaces that take it off the network. Neither has been tried on Ubuntu 24.04 itself, nor on WSL: as yourself in a container without AppArmor, both were on.
+
+`convert.py` runs the output check with the Python it's run with, so a run whose `--wcag` should check its pages runs with the environment's Python, active as above or named (`~/venv/bin/python $T/bin/convert.py --wcag`), as do `check-output.py` and `audit.py`. Run the suites with the environment active too:
 
 ```bash
 source ~/venv/bin/activate
@@ -425,7 +434,7 @@ bash tests/run-all.sh
 
 Activating it lasts for that terminal (`deactivate` ends it early). Add `source ~/venv/bin/activate` to `~/.bashrc` to have it in every terminal; the tools run the same in it, since the environment's Python is Ubuntu's, with Playwright added. Playwright supports Ubuntu 22.04 and 24.04 and WSL ([its system requirements](https://playwright.dev/python/docs/intro#system-requirements)); on Ubuntu 22.04, `pip3 install --user playwright` and then `python3 -m playwright install --with-deps --only-shell chromium` work as well, without the environment, as pypdf does there.
 
-When these are missing, the decks suite says what and how to install it, and `run-all.sh` counts what was skipped and lists why at its end: without Playwright, or with a Chromium that doesn't start, the twelve checks in a browser skip, in one line saying how many it stands for.
+When these are missing, the suites say what and how to install them, and `run-all.sh` counts what was skipped and lists why at its end: without Playwright, or with a Chromium that doesn't start, the decks suite's twelve checks in a browser skip, in one line saying how many it stands for, and so do the check suite's of axe-core, the line for `--wcag` saying why it didn't run.
 
 ## Checking the whole setup
 
@@ -435,4 +444,4 @@ From the directory you cloned into:
 bash tests/run-all.sh
 ```
 
-Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set, say, or the twelve checks of the decks suite that open a presentation in a browser, without the optional Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.
+Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set, say, or the checks that open a page in a browser, without the optional Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.

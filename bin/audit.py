@@ -15,11 +15,16 @@ audited and unchanged since (by SHA-256) is not read again unless
 Depends on lib/ and on Pandoc (to read a source), and optionally on
 pypdf (PDFs), epubcheck, the Nu HTML checker, and veraPDF, each found
 the way the output check finds them and reported as absent when they
-are. --wcag checks each PDF against veraPDF's WCAG 2.2 machine profile
-as well, as check-output.py --wcag does: what it finds is a note, never
-an error, one for each rule a PDF fails, and the report says whether the
-checks ran; --verbose makes each failed check a note, with what the PDF
-has there.
+are. --wcag checks against WCAG's machine-testable criteria as well, as
+check-output.py --wcag does: axe-core on the HTML pages and EPUBs, WCAG
+2.1 AA unless --wcag-version and --wcag-level say otherwise, in one
+browser for all of them (with Playwright, optional), and veraPDF's WCAG
+2.2 machine profile on each PDF. What they find is a note, never an
+error, one for each rule a file fails, and the report has a section
+saying whether the checks ran; --verbose makes each element axe-core
+names and each check veraPDF failed a note, with what the file has
+there. Each is checked again on every run with --wcag, since what's
+installed, which the cache can't see, decides what they find.
 
 Copyright 2026 Robert Szarka
 
@@ -44,6 +49,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
+import axecheck  # noqa: E402
 import findings as fl  # noqa: E402
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
@@ -51,6 +57,7 @@ import pptxcheck  # noqa: E402
 import pptxparse  # noqa: E402
 import sourcecheck  # noqa: E402
 import tablecensus  # noqa: E402
+import wcag as wcag_lib  # noqa: E402
 
 VERSION = "0.9"
 KIND_OF = {".docx": "source-docx", ".md": "source-md", ".html": "html",
@@ -83,7 +90,8 @@ def audit_one(path, kind, validators, wcag=False, verbose=False):
     """(findings, sections) for one file. wcag: a PDF is checked against
     veraPDF's WCAG 2.2 machine profile too, its own section saying
     whether the checks ran; verbose: each of its failed checks a finding,
-    and an item in the section, where each rule's are counted in one."""
+    and an item in the section, where each rule's are counted in one. A
+    page's and an EPUB's WCAG checks are audit_pages'."""
     name = os.path.basename(path)
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
@@ -148,6 +156,27 @@ def audit_one(path, kind, validators, wcag=False, verbose=False):
     return [], []
 
 
+def audit_pages(files, validators, verbose, version, level, best_practice):
+    """(findings, sections) of axe-core's rules on the HTML pages and EPUBs
+    among the files, in one worker for all of them, its section saying
+    whether they ran; for --wcag."""
+    pages = [path for path, kind in files if kind == "html"]
+    epubs = [path for path, kind in files if kind == "epub"]
+    if not pages and not epubs:
+        return [], []
+    found, lines = [], [axecheck.NOT_RUN_QUICK]
+    if validators:
+        # Each finding filed under the file audited, an EPUB's under the EPUB.
+        found, lines = axecheck.check(pages, epubs, version=version, level=level,
+                                      best_practice=best_practice, verbose=verbose,
+                                      by_epub=True)
+    for line in lines:
+        print(f"  {line}", file=sys.stderr)
+    return found, [("HTML pages and EPUBs: axe-core's WCAG checks",
+                    [f"  - {fl.md_text(line.strip())}" if line.startswith("  ")
+                     else f"- {fl.md_text(line)}" for line in lines])]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("paths", nargs="+")
@@ -161,14 +190,16 @@ def main():
     parser.add_argument("--quick", action="store_true",
                         help="skip the external validators")
     parser.add_argument("--wcag", action="store_true",
-                        help="check each PDF against veraPDF's WCAG 2.2 machine profile "
-                             "too, with its WCAG modules from VERAPDF_WCAG; experimental, "
-                             "so what it finds is a note, never an error")
+                        help="check against WCAG's machine-testable criteria too: axe-core "
+                             "on the HTML pages and EPUBs, with Playwright, and veraPDF's "
+                             "WCAG 2.2 machine profile on each PDF, with its WCAG modules "
+                             "from VERAPDF_WCAG; what they find is a note, never an error")
+    wcag_lib.add_choices(parser)
     parser.add_argument("--verbose", action="store_true",
-                        help="with --wcag, a note for each of its failed checks, listed in "
-                             "the report too, with what the PDF has there (a link's address, "
-                             "the line repeated characters are on), where each rule's are "
-                             "otherwise counted in one")
+                        help="with --wcag, a note for each element axe-core names and each "
+                             "check veraPDF failed, listed in the report too, with what the "
+                             "file has there (an element's markup, a link's address), where "
+                             "each rule's are otherwise counted in one")
     parser.add_argument("--report-html", action="store_true",
                         help="also write the report as audit.html")
     parser.add_argument("--report-docx", action="store_true",
@@ -192,6 +223,9 @@ def main():
     # read again.
     if args.verbose and not args.wcag:
         print(pdfcheck.WCAG_ALONE, file=sys.stderr)
+    if wcag_lib.choices_given(args) and not args.wcag:
+        print(wcag_lib.CHOICES_ALONE, file=sys.stderr)
+    version, level, best_practice = wcag_lib.chosen(args)
     options = {"quick": bool(args.quick), "wcag": bool(args.wcag)}
     per_file = {"quick": bool(args.quick)}
     # Nothing changed since the last audit: say so and leave the report
@@ -225,6 +259,13 @@ def main():
         sections += extra
         if cache is not None:
             cache.store(item["sha256"], found, per_file)
+    if args.wcag:
+        # After the cache has each file's own findings: axe-core's, like
+        # veraPDF's, turn on what's installed, which it can't see.
+        found, extra = audit_pages(files, not args.quick, args.verbose, version, level,
+                                   best_practice)
+        all_found += found
+        sections += extra
     if cache is not None:
         cache.note_inputs((i["sha256"] for i in inputs), options)
         cache.save()

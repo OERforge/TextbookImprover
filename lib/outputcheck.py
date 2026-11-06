@@ -592,6 +592,15 @@ def check_shared_alt(pages, findings, locate, identity):
                 src, alt, alttext.shared_reason(others))))
 
 
+def page_name(path):
+    """A page as findings name it: by its path below the working
+    directory, so a run with several targets can tell print/tables.html
+    from tables.html, and a page elsewhere by its file name alone."""
+    relative = os.path.relpath(path)
+    return relative.replace(os.sep, "/") if not relative.startswith("..") \
+        else os.path.basename(path)
+
+
 def check_html_files(paths, documents=None):
     """The pages a run wrote, checked as a set so links between them
     count. Names are the file names, so a link to another page is
@@ -602,12 +611,7 @@ def check_html_files(paths, documents=None):
     findings = []
     pages, folders, parts = {}, {}, {}
     for path in paths:
-        # Named by their path below the working directory, so a run with
-        # several targets can tell print/tables.html from tables.html;
-        # a page elsewhere is named by its file name alone.
-        relative = os.path.relpath(path)
-        name = relative.replace(os.sep, "/") if not relative.startswith("..") \
-            else os.path.basename(path)
+        name = page_name(path)
         with open(path, encoding="utf-8", errors="replace") as fh:
             pages[name] = read_html(name, fh.read())
         folders[name] = os.path.dirname(os.path.abspath(path))
@@ -630,6 +634,35 @@ def check_html_files(paths, documents=None):
 
 OPF_NS = "{http://www.idpf.org/2007/opf}"
 DC_NS = "{http://purl.org/dc/elements/1.1/}"
+
+
+def epub_documents(path):
+    """An EPUB's XHTML content documents, as entries of its archive: the
+    manifest's, in the order of its spine, then the rest (the navigation
+    document among them, unless the spine has it). Nothing for an EPUB
+    whose package can't be read, which check_epub reports."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(
+                ".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile")
+            opf_name = rootfile.get("full-path") if rootfile is not None else None
+            if not opf_name or opf_name not in names:
+                return []
+            opf = ET.fromstring(archive.read(opf_name))
+    except (OSError, KeyError, ET.ParseError, zipfile.BadZipFile, ValueError):
+        return []
+    opf_dir = posixpath.dirname(opf_name)
+    manifest = {}
+    for item in opf.iter(OPF_NS + "item"):
+        href = posixpath.normpath(posixpath.join(opf_dir, unquote(item.get("href", ""))))
+        if item.get("media-type") == "application/xhtml+xml" and href in names:
+            manifest[item.get("id")] = href
+    spine = [manifest[ref.get("idref")] for ref in opf.iter(OPF_NS + "itemref")
+             if ref.get("idref") in manifest]
+    rest = [href for href in manifest.values() if href not in spine]
+    return list(dict.fromkeys(spine + rest))
 
 
 def check_epub(path):

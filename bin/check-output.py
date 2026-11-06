@@ -28,19 +28,34 @@ or as commands on the path -- and their findings go into the same
 report with the tool's own message id as the check; --quick skips them,
 and veraPDF, and convert.py --quick passes it on.
 
---wcag runs veraPDF's WCAG 2.2 machine profile on each PDF as well, with
-the WCAG modules its release lacks, from the folder VERAPDF_WCAG names
-(docs/installation.md). The checks are experimental and wrong at times,
-so what they find is a note, never an error, and the summary says so;
-and since veraPDF without the modules passes the profile's own rules
-without checking them, and says nothing of it, a probe of its own in the
-same run says whether they loaded, and the summary warns when they
-didn't. Each rule a PDF fails is one note, with how many of its checks
-failed and on which pages; --verbose makes each failed check a note,
-with what the PDF has there that veraPDF's report doesn't say (a link's
-address, the line repeated characters are on), and lists them in the
-summary. Given nothing to check, --wcag runs the probe alone, which
-checks the setup. convert.py --wcag and --verbose pass them on.
+--wcag checks against WCAG's machine-testable criteria too, and what it
+finds is a note, never an error, which the summary counts apart from the
+verdict:
+
+- each HTML page, presentation, and EPUB's content document, with
+  axe-core's rules for WCAG 2.1 AA, unless --wcag-version and
+  --wcag-level choose another version and level, in Playwright's
+  Chromium, locked down: off the
+  network, sandboxed, nothing served but the folder (or the EPUB), and
+  the page's own scripts blocked, except a presentation's that are
+  TextbookImprover's own (lib/axecheck.py, lib/lockedbrowser.py).
+  --best-practice adds axe-core's best practices. Without Playwright,
+  the summary says so, and the rest runs as before.
+- each PDF, with veraPDF's WCAG 2.2 machine profile, and the WCAG modules
+  its release lacks, from the folder VERAPDF_WCAG names
+  (docs/installation.md). The checks are experimental and wrong at
+  times, and since veraPDF without the modules passes the profile's own
+  rules without checking them, and says nothing of it, a probe of its
+  own in the same run says whether they loaded, and the summary warns
+  when they didn't. Each rule a PDF fails is one note, with how many of
+  its checks failed and on which pages.
+
+--verbose makes each element axe-core names, and each check veraPDF
+failed, a note of its own, with what the page or the PDF has there (an
+element's markup, a link's address, the line repeated characters are
+on), and lists them in the summary. Given nothing to check, --wcag runs
+the probes alone, axe-core's and veraPDF's, which checks the setup.
+convert.py and audit.py pass the flags on.
 
 Copyright 2026 Robert Szarka
 
@@ -65,11 +80,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import axecheck  # noqa: E402
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
 import pptxcheck  # noqa: E402
 import pptxparse  # noqa: E402
 import findings as findings_lib  # noqa: E402
+import wcag  # noqa: E402
 
 
 def main():
@@ -94,15 +111,18 @@ def main():
                         help="skip epubcheck, the Nu checker, and veraPDF "
                              "even if installed")
     parser.add_argument("--wcag", action="store_true",
-                        help="run veraPDF's WCAG 2.2 machine profile on each PDF too, with "
-                             "its WCAG modules from VERAPDF_WCAG; experimental, so what it "
-                             "finds is a note, never an error; with nothing else to check, "
-                             "check the setup")
+                        help="check against WCAG's machine-testable criteria too: axe-core "
+                             "on each page, presentation, and EPUB's content document, in "
+                             "Playwright's Chromium, locked down, and veraPDF's WCAG 2.2 "
+                             "machine profile on each PDF, with its WCAG modules from "
+                             "VERAPDF_WCAG; what they find is a note, never an error; with "
+                             "nothing else to check, check the setup")
+    wcag.add_choices(parser)
     parser.add_argument("--verbose", action="store_true",
-                        help="with --wcag, a note for each failed check of veraPDF's WCAG "
-                             "profile, listed in the summary too, with what the PDF has "
-                             "there (a link's address, the line repeated characters are "
-                             "on), where each rule's are otherwise counted in one")
+                        help="with --wcag, a note for each element axe-core names and each "
+                             "check veraPDF failed, listed in the summary too, with what the "
+                             "page or the PDF has there (an element's markup, a link's "
+                             "address), where each rule's are otherwise counted in one")
     args = parser.parse_args()
 
     pages = list(args.pages)
@@ -148,25 +168,40 @@ def main():
             notes.append("veraPDF not found (set VERAPDF, or put verapdf on "
                          "the path); skipped.")
         pdf_findings += found
-    # veraPDF's WCAG 2.2 checks, when asked for: information, never a
-    # verdict, so they're counted and summarized apart from the rest.
+    # The WCAG checks, when asked for: information, never a verdict, so
+    # they're counted and summarized apart from the rest, axe-core's on the
+    # pages, then veraPDF's on the PDFs, in the verdict's order.
     wcag_findings, wcag_lines = [], []
     if args.verbose and not args.wcag:
         notes.append(pdfcheck.WCAG_ALONE)
+    if wcag.choices_given(args) and not args.wcag:
+        notes.append(wcag.CHOICES_ALONE)
     if args.wcag:
+        version, level, best_practice = wcag.chosen(args)
+        named = bool(args.pages or args.pages_file or args.epub or args.pdf or args.pptx)
+        # With nothing named to check, each checks the setup alone; with
+        # none of its kind among what's named, it says so, even with
+        # --quick, since without it the check wouldn't run either.
+        if not (pages or epubs) and named:
+            wcag_lines.append(axecheck.NOT_RUN_NO_PAGE)
+        elif args.quick:
+            wcag_lines.append(axecheck.NOT_RUN_QUICK)
+        else:
+            wcag_findings, wcag_lines = axecheck.check(
+                pages, epubs, version=version, level=level, best_practice=best_practice,
+                verbose=args.verbose)
         command = None if args.quick else outputcheck.find_validator("verapdf")
-        if args.quick:
+        if not pdfs and named:
+            wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")
+        elif args.quick:
             wcag_lines.append("veraPDF's WCAG checks not run (--quick).")
         elif not command:
             wcag_lines.append("veraPDF's WCAG checks not run: veraPDF not found (set "
                               "VERAPDF, or put verapdf on the path).")
-        elif not pdfs and (args.pages or args.pages_file or args.epub or args.pdf
-                           or args.pptx):
-            wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")
         else:
-            # With nothing named to check, the setup alone.
-            wcag_findings, wcag_lines = pdfcheck.run_verapdf_wcag(command, pdfs,
-                                                                  verbose=args.verbose)
+            found, lines = pdfcheck.run_verapdf_wcag(command, pdfs, verbose=args.verbose)
+            wcag_findings += found
+            wcag_lines += lines
     # A PowerPoint file's, as a PowerPoint deck's are found.
     pptxs = [p for p in args.pptx if os.path.exists(p)]
     pptx_findings = []

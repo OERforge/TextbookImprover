@@ -454,6 +454,7 @@ def main():
              or fail("got: " + " | ".join(notes))),
         ]
         cases += wcag_cases(work)
+        cases += axe_cases(work)
         for label, predicate in cases:
             try:
                 ok = predicate()
@@ -784,6 +785,503 @@ def wcag_cases(work):
     else:
         print("  skip  veraPDF's WCAG modules not installed (VERAPDF_WCAG)")
     return cases
+
+
+def browser_problem():
+    """Why a page can't be checked in a browser here, or None: Python's
+    Playwright tries it, in the Chromium Playwright installs."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "Playwright isn't installed (docs/installation.md says how to install both)"
+    try:
+        with sync_playwright() as play:
+            play.chromium.launch().close()
+    except Exception as exc:
+        lines = str(exc).strip().splitlines()
+        return (f"Playwright's Chromium doesn't start ({lines[0][:200] if lines else exc}); "
+                "`python3 -m playwright install --with-deps --only-shell chromium` installs "
+                "it (see docs/installation.md)")
+    return None
+
+
+# A page that tries everything a page shouldn't get to do when it's
+# checked: its scripts, inline, in a handler, and in a frame's srcdoc,
+# each of which would add a picture without alt text, named pwned, if it
+# ran; a refresh elsewhere; a stylesheet, a font, and a picture from
+# elsewhere; a file of the machine's, in a picture and a frame; a frame of
+# its own folder's, with a picture without alt text, and one from
+# elsewhere; and a WebSocket.
+PWNED = "document.body.insertAdjacentHTML('beforeend', '<img src=\"pwned-{}.png\">');"
+HOSTILE = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>A hostile page</title>
+<meta http-equiv="refresh" content="0; url=https://refresh.example.com/">
+<link rel="stylesheet" href="https://example.com/remote.css">
+<style>@font-face {{ font-family: Far; src: url("https://fonts.example.org/far.woff2"); }}
+p {{ font-family: Far, serif; }}</style>
+</head><body onload="{PWNED.format('onload').replace('"', '&quot;')}">
+<main><h1>A hostile page</h1>
+<p><img src="https://tracker.example.com/pixel.gif" alt=""></p>
+<p><img src="file:///etc/hostname" alt="A file of the machine's"></p>
+<iframe src="file:///etc/passwd" title="A file of the machine's"></iframe>
+<iframe src="frame.html" title="A frame of the folder's"></iframe>
+<iframe src="https://www.youtube.com/embed/abc" title="A frame from elsewhere"></iframe>
+<iframe srcdoc="<p>srcdoc</p><script>parent.{PWNED.format('srcdoc').replace('"', '&quot;')}</script>" title="srcdoc"></iframe>
+<script src="https://cdn.example.com/lib.js"></script>
+<script>{PWNED.format('inline')} new WebSocket('wss://ws.example.com/');</script>
+</main></body></html>"""
+FRAME = """<!DOCTYPE html><html lang="en"><head><title>A frame</title></head>
+<body><main><p>A frame of the folder's.</p><img src="in-frame.png"></main></body></html>"""
+# A page whose text is fine in light mode and too faint in dark.
+DARK = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dark</title>
+<style>:root { color-scheme: light dark; }
+body { background: light-dark(#ffffff, #111111); color: light-dark(#222222, #eeeeee); }
+p.faint { color: light-dark(#222222, #333333); }</style></head>
+<body><main><h1>Dark</h1><p class="faint">Readable in light mode only.</p></main></body></html>"""
+
+
+def presentation(folder, slides=None, start=None, before="", reveal_tail=b"", oer_tail=""):
+    """A presentation as revealtarget writes one, in folder, from the
+    probe's own files: TextbookImprover's scripts, and slides, the second
+    with a picture without alt text, one in a step, and one whose
+    background only reveal.js paints. start, before, reveal_tail, and
+    oer_tail change it: the start of reveal.js, markup before the
+    scripts, and what's added to reveal.js and to oer-reveal.js."""
+    import axecheck
+    files = axecheck.probe_presentation_files()
+    page = files.pop("probe-presentation.html").decode("utf-8")
+    page = page.replace(
+        '<section id="two" class="slide level2"><h2>Two</h2><p><img src="nameless.png">'
+        "</p></section>", slides or (
+            '<section id="two" class="slide level2"><h2>Two</h2><p><img src="nameless.png">'
+            '</p></section><section id="steps" class="slide level2"><h2>Steps</h2>'
+            '<p>First.</p><p class="fragment"><img src="step.png"></p></section>'
+            '<section id="gray" class="slide level2" data-background-color="#777777">'
+            '<h2>Gray</h2><p style="font-size: 16px">Small text on gray, which reveal.js '
+            "paints, and makes white: 4.48 to 1.</p></section>"))
+    if start:
+        page = re.sub(r"Reveal\.initialize\(\{.*?\}\);", lambda m: start, page, count=1,
+                      flags=re.S)
+    if before:
+        page = page.replace('<script src="reveal.js/dist/reveal.js">',
+                            before + '<script src="reveal.js/dist/reveal.js">', 1)
+    if oer_tail:
+        page = page.replace("</script>\n</body>", oer_tail + "\n</script>\n</body>")
+    files["reveal.js/dist/reveal.js"] += reveal_tail
+    files["deck.html"] = page.encode("utf-8")
+    files["step.png"] = files["nameless.png"]
+    for name, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(folder, name)), exist_ok=True)
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(data)
+    return os.path.join(folder, "deck.html")
+
+
+def epub(path, documents):
+    """An EPUB of the given content documents, {name: XHTML}."""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
+        archive.writestr("META-INF/container.xml", (
+            '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:'
+            'opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/p.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>'))
+        items = "".join(f'<item id="d{n}" href="{name}" media-type="application/xhtml+xml"/>'
+                        for n, name in enumerate(documents))
+        refs = "".join(f'<itemref idref="d{n}"/>' for n in range(len(documents)))
+        archive.writestr("EPUB/p.opf", (
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            f"<manifest>{items}</manifest><spine>{refs}</spine></package>"))
+        for name, text in documents.items():
+            archive.writestr("EPUB/" + name, text)
+    return path
+
+
+def axe_cases(work):
+    """--wcag on pages: axe-core's rules in Playwright's Chromium, locked
+    down. Without Playwright, and with a Chromium that doesn't start, a
+    line says so and the other findings are what they'd be without
+    --wcag; --quick, and nothing but a PDF, leave axe-core out, saying so.
+    With them: the probes as the setup; the built-in checks and axe-core's
+    rules that overlap them agreeing on the suite's pages; a hostile
+    page's scripts not run, its requests elsewhere refused and its
+    stylesheet and font named, its refresh canceled, the machine's files
+    not read, a frame of its folder's checked and one from elsewhere
+    named; a page's colors checked again in dark mode; an EPUB's content
+    documents, one not well-formed named; TextbookImprover's presentation
+    checked slide by slide with its own scripts, a step's picture and a
+    slide only its background fails found, and each tampered copy caught;
+    each element a note with --verbose; a page past its time, and a
+    worker past its, named; a presentation whose slides are too large for
+    a window checked in a smaller one, and slides past the most counted;
+    off the network wherever a process can leave it; another axe-core
+    noted; the policy service
+    refusing what it lacks; in the suite's own process, the route taking
+    a WebSocket and canceling a navigation that scripts make; and a
+    worker whose run is killed partway ending too."""
+    import axecheck
+    tool = os.path.join(ROOT, "bin", "check-output.py")
+    pages = [os.path.join(work, name) for name in ("good.html", "other.html", "bad.html")]
+
+    def run(*flags, **env):
+        environ = dict(os.environ, **env)
+        environ.pop("VERAPDF", None)
+        return subprocess.run([sys.executable, tool, *flags], capture_output=True, text=True,
+                              env=environ, cwd=work, stdin=subprocess.DEVNULL).stderr
+
+    def rows_of(path):
+        with open(path, newline="", encoding="utf-8-sig") as fh:
+            return list(csv.DictReader(fh))
+    # Playwright hidden by a package of the same name that can't be imported.
+    hidden = os.path.join(work, "hidden")
+    os.makedirs(os.path.join(hidden, "playwright"))
+    with open(os.path.join(hidden, "playwright", "__init__.py"), "w") as fh:
+        fh.write('raise ImportError("hidden by the check suite")\n')
+    plain_report = os.path.join(work, "plain.csv")
+    hidden_report = os.path.join(work, "hidden.csv")
+    run(*pages, "--quick", "--report", plain_report)
+    without = run("--wcag", *pages, "--quick", "--report", hidden_report,
+                  PYTHONPATH=hidden)
+    unhidden = run("--wcag", *pages, PYTHONPATH=hidden)
+    quick = run("--wcag", "--quick", *pages)
+    no_page = run("--wcag", "--pdf", os.path.join(work, "no-such.pdf"))
+    cases = [
+        ("--quick leaves axe-core out, saying so",
+         lambda: "  " + axecheck.NOT_RUN_QUICK in quick or fail("got: " + quick)),
+        ("and nothing named but a PDF, or one that isn't there, does too",
+         lambda: "  " + axecheck.NOT_RUN_NO_PAGE in no_page or fail("got: " + no_page)),
+        ("without Playwright, a line says so, and the findings are those without --wcag",
+         lambda: "axe's WCAG checks not run on the pages: Playwright isn't installed "
+                 "(docs/installation.md, Optional: Playwright and its Chromium)." in unhidden
+         and rows_of(plain_report) == rows_of(hidden_report) or fail("got: " + unhidden)),
+    ]
+    problem = browser_problem()
+    if problem:
+        print(f"  skip  {problem}: axe-core's checks in a browser aren't tried")
+        return cases
+    # Chromium that doesn't start: a folder of browsers with none in it.
+    empty = os.path.join(work, "no-browsers")
+    os.makedirs(empty)
+    absent = run("--wcag", pages[0], PLAYWRIGHT_BROWSERS_PATH=empty)
+    setup = run("--wcag")
+    # Everything else in one run: the suite's pages, the hostile page, the
+    # dark one, an EPUB, and the presentation with its tampered copies.
+    for name, markup in (("hostile.html", HOSTILE), ("frame.html", FRAME),
+                         ("dark.html", DARK)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(markup)
+    xhtml = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+             'lang="en" xml:lang="en"><head><title>{0}</title></head><body><main><h1>{0}</h1>'
+             '{1}</main></body></html>')
+    book = epub(os.path.join(work, "axe.epub"), {
+        "text/ch01.xhtml": xhtml.format("One", '<p><img src="one.png"/></p>'),
+        "text/ch02.xhtml": xhtml.format("Two", "<p>Unclosed").replace("</main>", "", 1)})
+    decks = os.path.join(work, "decks")
+    shows = {"ours": presentation(os.path.join(decks, "ours"))}
+    shows["inline"] = presentation(os.path.join(decks, "inline"),
+                                   before=f"<script>{PWNED.format('extra')}</script>")
+    shows["handler"] = presentation(
+        os.path.join(decks, "handler"),
+        before=f'<img src="missing.png" alt="" onerror="{PWNED.format("handler")}">'.replace(
+            "'<img", "&apos;<img").replace(".png\">');", '.png&quot;>&apos;);'))
+    shows["setting"] = presentation(
+        os.path.join(decks, "setting"),
+        start="Reveal.initialize({hash: (function () { " + PWNED.format("setting")
+              + " return true; })(), plugins: [RevealNotes, RevealSearch, RevealZoom]});")
+    shows["revealjs"] = presentation(os.path.join(decks, "revealjs"),
+                                     reveal_tail=b"\n;" + PWNED.format("revealjs").encode())
+    shows["oer"] = presentation(os.path.join(decks, "oer"), oer_tail=PWNED.format("oer"))
+    with open(os.path.join(decks, "file.js"), "w") as fh:
+        fh.write(PWNED.format("file"))
+    shows["file"] = presentation(os.path.join(decks, "file"),
+                                 before='<script src="../file.js"></script>')
+    with open(os.path.join(decks, "notes.txt"), "w") as fh:
+        fh.write(PWNED.format("text"))
+    shows["text"] = presentation(os.path.join(decks, "text"),
+                                 before='<script src="../notes.txt"></script>')
+    report = os.path.join(work, "axe.csv")
+    checked = [os.path.join(work, n) for n in ("good.html", "bad.html", "hostile.html",
+                                               "dark.html")] + list(shows.values())
+    ran = run("--wcag", *checked, "--epub", book, "--report", report)
+    rows = [r for r in rows_of(report) if r["Tool"] == "axe"] if os.path.exists(report) else []
+    loud_report = os.path.join(work, "axe-verbose.csv")
+    other_axe = os.path.join(work, "other-axe")
+    os.makedirs(other_axe)
+    with open(os.path.join(axecheck.VENDORED, "axe.min.js"), "rb") as fh:
+        data = fh.read().replace(b"axe v4.14.0", b"axe v4.13.9", 1)
+    with open(os.path.join(other_axe, "axe.min.js"), "wb") as fh:
+        fh.write(data)
+    loud = run("--wcag", "--verbose", pages[2], "--report", loud_report, AXE_CORE_DIR=other_axe)
+    loud_rows = [r for r in rows_of(loud_report) if r["Tool"] == "axe"]
+    past = axecheck.check([os.path.join(work, "good.html")], limits={"axe": 0.001})[1]
+    stopped = axecheck.check([os.path.join(work, "good.html")], timeout=0.5)[1]
+    service = axecheck.check([os.path.join(work, "good.html")], policy="service")[1]
+    # Slides its settings make 100,000 pixels square, a window Chromium
+    # stalled or crashed opening, checked in a smaller one, in the time a
+    # stall would run past; and a presentation's slides past the most.
+    start = re.search(r"Reveal\.initialize\(\{.*?\}\);", axecheck.probe_presentation_files()[
+        "probe-presentation.html"].decode("utf-8"), re.S).group(0)
+    giant = presentation(os.path.join(decks, "giant"), start=start.replace(
+        "width: 1280,", "width: 100000,").replace("height: 720,", "height: 100000,"))
+    huge = axecheck.check([giant], timeout=150)[1]
+    few = axecheck.check([shows["ours"]], limits={"slides": 2})[1]
+    # Whether a process of its own can leave the network here, as the
+    # worker should.
+    can_leave = subprocess.run(
+        [sys.executable, "-c", "import lockedbrowser as l; print(repr(l.leave_network()))"],
+        capture_output=True, text=True,
+        env=dict(os.environ, PYTHONPATH=os.path.join(ROOT, "lib"))).stdout.strip() == "''"
+    lockdown = route_cases(work)
+    orphans = orphan_cases(presentation(os.path.join(decks, "long"), slides="".join(
+        f'<section id="s{n}" class="slide level2"><h2>Slide {n}</h2><p>Text {n}.</p>'
+        "</section>" for n in range(300))))
+
+    def at(where, check, text=None):
+        return [r for r in rows if r["Where"].replace(os.sep, "/").endswith(where)
+                and r["Check"] == check and (text is None or text in r["Detail"])]
+    overlaps = {"image-without-alt": "axe:image-alt", "no-lang": "axe:html-has-lang",
+                "no-title": "axe:document-title"}
+    built_in = [r for r in rows_of(report)] if os.path.exists(report) else []
+    cases += [
+        ("a Chromium that doesn't start: a line saying why, and how to install it",
+         lambda: "axe's WCAG checks not run on the pages: Playwright's Chromium doesn't start ("
+                 in absent and "playwright install --with-deps --only-shell chromium" in absent
+         or fail("got: " + absent)),
+        ("with nothing to check, the probes alone: a page, and a presentation of "
+         "TextbookImprover's",
+         lambda: re.search(r"axe-core 4\.14\.0 ran its 63 rules for WCAG 2\.1 AA on a probe "
+                           r"page of its own and a probe presentation, in Playwright [\d.]+'s "
+                           r"Chromium \d+, (not )?sandboxed and (off|on) the network: it found "
+                           r"the probe's problems", setup) or fail("got: " + setup)),
+        ("the sandbox and the network as they are, and a line for each that isn't",
+         lambda: (re.search(r"axe-core 4\.14\.0 ran [^\n]*, sandboxed and", ran)
+                  or "Chromium's sandbox wasn't on (" in ran)
+         and (re.search(r"axe-core 4\.14\.0 ran [^\n]* off the network", ran)
+              or "The check wasn't off the network (" in ran) or fail("got: " + ran)),
+        ("off the network wherever a process of its own can leave it, as one can here",
+         lambda: not can_leave
+         or re.search(r"axe-core 4\.14\.0 ran [^\n]* off the network", ran)
+         or fail("got: " + ran)),
+        ("axe-core's rules a built-in check overlaps agree with it on the suite's pages",
+         lambda: all(bool([r for r in built_in if r["Check"] == mine
+                           and r["Where"].endswith(page)])
+                     == bool(at(page, theirs)) for mine, theirs in overlaps.items()
+                     for page in ("good.html", "bad.html"))
+         and at("bad.html", "axe:image-alt") and at("bad.html", "axe:html-has-lang")
+         and not at("good.html", "axe:image-alt") or fail("got: " + " | ".join(
+             r["Where"] + " " + r["Check"] for r in built_in))),
+        ("each a note, by axe, its criterion the standard and the built-in check's fix",
+         lambda: {(r["Severity"], r["Tool"]) for r in rows} == {("note", "axe")}
+         and at("bad.html", "axe:image-alt")[0]["Standard"] == "WCAG 2.0 SC 1.1.1 (A)"
+         and at("bad.html", "axe:image-alt")[0]["Fix"] == "sidecar"),
+        ("the verdict doesn't count them, and their lines come after it",
+         lambda: ran.index("Output check:") < ran.index("axe-core 4.14.0 ran its 63 rules")
+         and "axe:" not in ran.split("Output check:")[1].split("axe-core 4.14.0 ran")[0]),
+        ("a hostile page's scripts don't run: inline, in a handler, or in a frame's srcdoc",
+         lambda: not [r for r in rows if "pwned-onload" in r["Detail"]
+                      or "pwned-inline" in r["Detail"] or "pwned-srcdoc" in r["Detail"]]
+         and "have scripts of their own, which didn't run, so what they'd show isn't "
+             "checked: hostile.html" in ran or fail("got: " + ran)),
+        ("its refresh elsewhere canceled, so axe-core checks it, not Chromium's error page",
+         lambda: at("hostile.html", "axe:image-alt")
+         and not at("hostile.html", "axe:document-title")
+         and not at("hostile.html", "axe:html-has-lang")),
+        ("its stylesheet and font from elsewhere named, as what may change its look",
+         lambda: re.search(r"What \d+ page\(s\) load from elsewhere wasn't loaded, so their "
+                           r"colors and sizes may differ from what a reader sees: hostile\.html "
+                           r"\(the stylesheet https://example\.com/remote\.css, the font "
+                           r"https://fonts\.example\.org/far\.woff2\)", ran)
+         or fail("got: " + ran)),
+        ("a frame of its folder's checked, and one from elsewhere and the machine's file named "
+         "as not checked", lambda: at("hostile.html", "axe:image-alt", "in the frame at")
+         and re.search(r"\d frame\(s\) weren't checked, which aren't served from the folder, "
+                       r"weren't loaded, or are past the most a page's check takes \(50, five "
+                       r"deep\): hostile\.html \(file:///etc/passwd, "
+                       r"https://www\.youtube\.com/embed/abc", ran) or fail("got: " + ran)),
+        ("nothing of the machine's files read",
+         lambda: "root:" not in ran and not [r for r in rows if "root:" in r["Detail"]]),
+        ("a page's colors checked again in dark mode, its text there too faint",
+         lambda: at("dark.html", "axe:color-contrast", "In dark mode: ")
+         and not [r for r in at("dark.html", "axe:color-contrast")
+                  if not r["Detail"].startswith("In dark mode: ")]
+         and "axe:color-contrast in dark mode, 1.4.3" in ran),
+        ("an EPUB's content documents checked, as its own entries, and one not well-formed "
+         "named", lambda: [r["Kind"] for r in at("EPUB/text/ch01.xhtml", "axe:image-alt")]
+         == ["epub"] and "EPUB/text/ch02.xhtml (it isn't well-formed XHTML, which the EPUB's "
+                         "checks report)" in ran or fail("got: " + ran)),
+        ("TextbookImprover's presentation checked slide by slide: a picture on its slide, "
+         "one in a step, and small text only the slide's background fails, its large title, "
+         "which passes once the background has faded in, not",
+         lambda: at("ours/deck.html#/two", "axe:image-alt")
+         and at("ours/deck.html#/steps", "axe:image-alt")
+         and at("ours/deck.html#/gray", "axe:color-contrast")
+         and not at("ours/deck.html#/gray", "axe:color-contrast", "h2")
+         and not at("ours/deck.html#/one", "axe:image-alt")
+         and "20 slide(s) of 5 presentation(s)" in ran or fail("got: " + " | ".join(
+             r["Where"] + " " + r["Check"] for r in rows))),
+        ("a presentation's script of its own, inline, a handler, a file, or a text file, "
+         "doesn't run, and the rest is checked",
+         lambda: not [r for r in rows if "pwned" in r["Detail"]]
+         and all(at(f"{name}/deck.html#/two", "axe:image-alt")
+                 for name in ("inline", "handler", "file", "text"))),
+        ("one whose start of reveal.js holds code, or whose reveal.js or oer-reveal.js "
+         "isn't the repository's, isn't checked, and says why",
+         lambda: "decks/setting/deck.html (its start of reveal.js holds more than settings: "
+                 "the setting hash holds (function () {" in ran
+         and "decks/revealjs/deck.html (it doesn't load the repository's copy of reveal.js)"
+             in ran
+         and "decks/oer/deck.html (its oer-reveal.js isn't this version of "
+             "TextbookImprover's)" in ran
+         and not at("setting/deck.html#/two", "axe:image-alt") or fail("got: " + ran)),
+        ("with --verbose, each element a note with its markup, listed under its rule",
+         lambda: len([r for r in loud_rows if r["Check"] == "axe:image-alt"]) == 1
+         and "its markup, <img src=\"p.png\">" in [r for r in loud_rows
+                                                   if r["Check"] == "axe:image-alt"][0]["Detail"]
+         and re.search(r"\n    bad\.html at img\[src=\"p\.png\"\]: Fix any of the "
+                       r"following: Element does not have an alt attribute", loud)
+         or fail("got: " + loud)),
+        ("another axe-core, from AXE_CORE_DIR, named in a note",
+         lambda: "axe-core 4.13.9, from AXE_CORE_DIR, where the repository's is 4.14.0" in loud),
+        ("a page past its time named, and the rest go on",
+         lambda: any("good.html (axe-core hadn't finished after 0.001 seconds)" in line
+                     for line in past) or fail(" | ".join(past))),
+        ("a presentation whose settings make its slides 100,000 pixels square checked in a "
+         "smaller window, in its time",
+         lambda: re.search(r"axe-core 4\.14\.0 ran [^\n]* on 4 slide\(s\) of 1 "
+                           r"presentation\(s\)", huge[0])
+         and not any("didn't check" in line or "stopped" in line for line in huge)
+         or fail(" | ".join(huge))),
+        ("a presentation's slides past the most checked, counted",
+         lambda: re.search(r"axe-core 4\.14\.0 ran [^\n]* on 2 slide\(s\) of 1 "
+                           r"presentation\(s\)", few[0])
+         and any(re.fullmatch(r"2 slide\(s\) weren't checked, after the first 2 of a "
+                              r"presentation: \S*deck\.html \(2 of 4\)\.", line)
+                 for line in few) or fail(" | ".join(few))),
+        ("and a worker past its, stopped, with a warning",
+         lambda: stopped == ["WARNING: axe's WCAG checks not run on the pages: the worker that "
+                             "runs them failed: it ran past the time it was given, and was "
+                             "stopped."] or fail(" | ".join(stopped))),
+        ("the policy service refuses to go on without Chromium's sandbox or the network's "
+         "namespace, which root can't have",
+         lambda: (any("the worker that runs them failed: Chromium's sandbox didn't start: it "
+                      "can't start for root" in line for line in service)
+                  if os.geteuid() == 0 else
+                  service[0].startswith("axe-core 4.14.0 ran") or "failed: " in service[0])
+         or fail(" | ".join(service))),
+    ] + lockdown + orphans
+    return cases
+
+
+def orphan_cases(deck):
+    """The worker ends once the run that started it is gone: a run of a
+    presentation of many slides, killed partway, leaves no worker behind
+    (axecheck.watch_parent), where without it the worker went on to the
+    end. Read from /proc, so Linux's alone."""
+    import signal
+    import time
+    if not os.path.isdir("/proc/self"):
+        print("  skip  no /proc: whether the worker outlives its run isn't tried")
+        return []
+    run = subprocess.Popen([sys.executable, "-c", "import sys, axecheck; "
+                            "axecheck.check(sys.argv[1:])", deck],
+                           env=dict(os.environ, PYTHONPATH=os.path.join(ROOT, "lib")),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def workers():
+        """{pid: its parent's} for each worker running, a zombie aside."""
+        found = {}
+        for name in os.listdir("/proc"):
+            try:
+                with open(f"/proc/{name}/cmdline", "rb") as fh:
+                    command = fh.read().split(b"\0")
+                with open(f"/proc/{name}/stat") as fh:
+                    state, parent = fh.read().rsplit(")", 1)[1].split()[:2]
+            except (OSError, ValueError):
+                continue
+            if state != "Z" and b"--worker" in command \
+                    and any(part.endswith(b"axecheck.py") for part in command):
+                found[int(name)] = int(parent)
+        return found
+    worker, deadline = None, time.monotonic() + 60
+    while worker is None and time.monotonic() < deadline and run.poll() is None:
+        worker = next((pid for pid, parent in workers().items() if parent == run.pid), None)
+        time.sleep(0.2)
+    time.sleep(3)                       # into the slides
+    run.kill()
+    run.wait()
+    gone, deadline = False, time.monotonic() + 15
+    while worker and not gone and time.monotonic() < deadline:
+        gone = worker not in workers()
+        time.sleep(0.25)
+    if worker and not gone:
+        os.killpg(worker, signal.SIGKILL)
+    return [
+        ("a worker whose run is killed partway ends too",
+         lambda: worker is not None and gone or fail(f"worker {worker}, gone: {gone}")),
+    ]
+
+
+def route_cases(work):
+    """The route itself, in this process, with the page's scripts allowed,
+    which no check allows: what they try is still kept in, and a link in
+    the folder to a file outside it isn't followed. And the worker's way
+    off the network, in a process of its own: a loopback and nothing
+    else, or the reason it couldn't."""
+    import asyncio
+    import lockedbrowser
+    from playwright.async_api import async_playwright
+    served = os.path.join(work, "served")
+    os.makedirs(served)
+    with open(os.path.join(served, "scripted-out.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>Out</title></head><body>'
+                 '<p id="said">waiting</p><img src="linked-out.png" alt="A link out">'
+                 '<script>new WebSocket("wss://ws.example.com/");'
+                 'fetch("https://example.com/").catch(() => {});'
+                 'const img = document.createElement("img"); img.src = "../../../etc/hostname";'
+                 'document.body.append(img); setTimeout(() => location.href = '
+                 '"https://elsewhere.example.com/", 50);</script></body></html>')
+    outside = os.path.join(work, "outside.png")
+    with open(outside, "wb") as fh:
+        fh.write(b"outside the folder")
+    os.symlink(outside, os.path.join(served, "linked-out.png"))
+    left = subprocess.run([sys.executable, "-c", "import lockedbrowser as l; "
+                           "print(repr(l.leave_network())); print(l.interfaces())"],
+                          capture_output=True, text=True, env=dict(
+                              os.environ, PYTHONPATH=os.path.join(ROOT, "lib")))
+    seen = {}
+
+    async def go():
+        async with async_playwright() as play:
+            browser = await play.chromium.launch(args=lockedbrowser.ARGUMENTS)
+            context, page, visit = await lockedbrowser.open_page(
+                browser, lockedbrowser.Folder(served), "scripted-out.html",
+                scripts="'unsafe-inline'")
+            await page.wait_for_timeout(600)
+            seen.update(url=page.url, refused=list(visit.refused), served=dict(visit.served),
+                        canceled=list(visit.canceled),
+                        blocked=await lockedbrowser.blocked(page.main_frame))
+            await context.close()
+            await browser.close()
+    asyncio.run(go())
+    return [
+        ("with the page's scripts allowed, a WebSocket is taken and never connected",
+         lambda: ("websocket", "wss://ws.example.com/", "elsewhere") in seen["refused"]
+         or fail(f"got: {seen}")),
+        ("a fetch elsewhere blocked, and a file outside the folder refused",
+         lambda: any(directive == "connect-src" for directive, _ in seen["blocked"])
+         and any(why == "not there" for _, _, why in seen["refused"])),
+        ("a link in the folder to a file outside it isn't followed",
+         lambda: "linked-out.png" not in seen["served"]
+         and any(url.endswith("/linked-out.png") and why == "not there"
+                 for _, url, why in seen["refused"]) or fail(f"got: {seen}")),
+        ("the worker's way off the network leaves a loopback and nothing else, or says why "
+         "it couldn't",
+         lambda: left.stdout.splitlines() == ["''", "['lo']"]
+         or (left.stdout.splitlines()[:1] != ["''"] and left.returncode == 0)
+         or fail("got: " + left.stdout + left.stderr)),
+        ("and a navigation a script makes canceled, the page where it was",
+         lambda: seen["canceled"] == ["https://elsewhere.example.com/"]
+         and seen["url"].endswith("/scripted-out.html") or fail(f"got: {seen}")),
+    ]
 
 
 if __name__ == "__main__":

@@ -173,3 +173,69 @@ def url(number):
     number it doesn't have."""
     found = criterion(number)
     return found[3] if found else RECOMMENDATION
+
+
+# What --wcag checks against: a version of WCAG and a level, each version
+# holding its own criteria and those of the versions before it, and each
+# level those below it. WCAG 2.1 AA is what the U.S. Department of
+# Justice's rule for state and local governments names, and so the
+# default.
+VERSIONS = ("2.0", "2.1", "2.2")
+LEVELS = ("A", "AA", "AAA")
+DEFAULT_VERSION, DEFAULT_LEVEL = "2.1", "AA"
+
+
+def within(number, version=DEFAULT_VERSION, level=DEFAULT_LEVEL):
+    """Whether a criterion is one of WCAG <version>'s at <level> or below:
+    1.4.10 Reflow (AA, WCAG 2.1) is within 2.1 AA and 2.2 AAA, not within
+    2.0 AA or 2.1 A. A number WCAG 2.2 doesn't have isn't, nor is 4.1.1,
+    obsolete and removed, which no checker here tests."""
+    entry = CRITERIA.get(str(number))
+    if entry is None or not entry[1]:
+        return False
+    return (VERSIONS.index(entry[2]) <= VERSIONS.index(version)
+            and LEVELS.index(entry[1]) <= LEVELS.index(level))
+
+
+def conformance(version=DEFAULT_VERSION, level=DEFAULT_LEVEL):
+    """A version and level as a reader meets them, "WCAG 2.1 AA"."""
+    return f"WCAG {version} {level}"
+
+
+CHOICES_ALONE = ("--wcag-version, --wcag-level, and --best-practice choose what --wcag "
+                 "checks; without it, they change nothing.")
+
+
+def add_choices(parser):
+    """--wcag-version, --wcag-level, and --best-practice, as each tool that
+    takes --wcag takes them; None, None, and False when not given."""
+    parser.add_argument("--wcag-version", choices=VERSIONS,
+                        help="with --wcag, the version of WCAG checked against, the "
+                             "criteria of the versions before it among its own (default "
+                             f"{DEFAULT_VERSION})")
+    parser.add_argument("--wcag-level", choices=("AA", "AAA"), type=str.upper,
+                        help="with --wcag, the level checked to, the levels below it among "
+                             f"it (default {DEFAULT_LEVEL})")
+    parser.add_argument("--best-practice", action="store_true",
+                        help="with --wcag, axe-core's best practices on pages too "
+                             "(landmarks, heading order), beyond WCAG's criteria")
+
+
+def chosen(args):
+    """(version, level, best_practice) the arguments choose, the defaults
+    for those not given."""
+    return (args.wcag_version or DEFAULT_VERSION, args.wcag_level or DEFAULT_LEVEL,
+            bool(args.best_practice))
+
+
+def choices_given(args):
+    """Whether any of --wcag-version, --wcag-level, and --best-practice
+    was given."""
+    return bool(args.wcag_version or args.wcag_level or args.best_practice)
+
+
+def choice_flags(args):
+    """The arguments again, for a tool to pass on: those given, in order."""
+    return ((["--wcag-version", args.wcag_version] if args.wcag_version else [])
+            + (["--wcag-level", args.wcag_level] if args.wcag_level else [])
+            + (["--best-practice"] if args.best_practice else []))

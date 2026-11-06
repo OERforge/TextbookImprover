@@ -40,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import atexit
+import hashlib
 import importlib.util
 import subprocess
 import os
@@ -50,6 +51,7 @@ import shutil
 import struct
 import tempfile
 import sys
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -6736,23 +6738,30 @@ def check_wcag_context():
 
 def check_output_check_flags():
     """What convert.py gives the output check: --quick when asked, and
-    --wcag and --verbose only when the run made a PDF, --verbose only with
-    --wcag."""
+    --wcag, the version, level, and best practices it checks, and
+    --verbose only when the run made a page, an EPUB, or a PDF, --verbose
+    only with --wcag."""
     import argparse
     convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_flags")
 
-    def flags(pdfs, **given):
-        args = argparse.Namespace(**dict({"quick": False, "wcag": False, "verbose": False},
-                                         **given))
-        return convert.output_check_flags(args, pdfs)
+    def flags(checkable, **given):
+        args = argparse.Namespace(**dict({"quick": False, "wcag": False, "verbose": False,
+                                          "wcag_version": None, "wcag_level": None,
+                                          "best_practice": False}, **given))
+        return convert.output_check_flags(args, checkable)
     return [
-        ("--wcag and --verbose passed on with a PDF to check",
-         lambda: flags(["b.pdf"], wcag=True, verbose=True) == ["--wcag", "--verbose"]
-         and flags(["b.pdf"], quick=True, wcag=True) == ["--quick", "--wcag"]),
-        ("and neither without one, nor --verbose without --wcag",
-         lambda: flags([], wcag=True, verbose=True) == []
-         and flags(["b.pdf"], verbose=True) == []
-         and flags([], quick=True) == ["--quick"]),
+        ("--wcag and --verbose passed on with something to check",
+         lambda: flags(True, wcag=True, verbose=True) == ["--wcag", "--verbose"]
+         and flags(True, quick=True, wcag=True) == ["--quick", "--wcag"]),
+        ("with the version, level, and best practices it was given, and only those",
+         lambda: flags(True, wcag=True, wcag_version="2.2", wcag_level="AAA",
+                       best_practice=True) == ["--wcag", "--wcag-version", "2.2",
+                                               "--wcag-level", "AAA", "--best-practice"]
+         and flags(True, wcag=True, wcag_level="AAA") == ["--wcag", "--wcag-level", "AAA"]),
+        ("and none of them with nothing to check, nor --verbose without --wcag",
+         lambda: flags(False, wcag=True, verbose=True, wcag_level="AAA") == []
+         and flags(True, verbose=True) == []
+         and flags(False, quick=True) == ["--quick"]),
     ]
 
 
@@ -7265,6 +7274,116 @@ def check_copy_languages():
     ]
 
 
+def check_wcag_choices():
+    """What --wcag checks against: a version of WCAG with the versions
+    before it, and a level with the levels below it (lib/wcag.py), WCAG
+    2.1 AA unless the flags every tool takes say otherwise, which a tool
+    passes on as given."""
+    import argparse
+    import wcag
+    parser = argparse.ArgumentParser()
+    wcag.add_choices(parser)
+    given = parser.parse_args(["--wcag-version", "2.2", "--wcag-level", "aaa",
+                               "--best-practice"])
+    plain = parser.parse_args([])
+    return [
+        ("a criterion within a version and level, and not one beyond either",
+         lambda: wcag.within("1.4.10", "2.1", "AA") and wcag.within("1.4.10", "2.2", "AAA")
+         and not wcag.within("1.4.10", "2.0", "AA") and not wcag.within("1.4.10", "2.1", "A")
+         and wcag.within("1.1.1") and not wcag.within("2.4.9")
+         and wcag.within("2.4.9", "2.0", "AAA")),
+        ("4.1.1, obsolete and removed, and a number WCAG 2.2 doesn't have, within none",
+         lambda: not wcag.within("4.1.1", "2.2", "AAA")
+         and not wcag.within("9.9.9", "2.2", "AAA")),
+        ("WCAG 2.1 AA by default, a level read in either case, and the flags passed on "
+         "as given",
+         lambda: wcag.chosen(plain) == ("2.1", "AA", False) and not wcag.choices_given(plain)
+         and wcag.chosen(given) == ("2.2", "AAA", True) and wcag.choices_given(given)
+         and wcag.choice_flags(given) == ["--wcag-version", "2.2", "--wcag-level", "AAA",
+                                          "--best-practice"]
+         and wcag.choice_flags(plain) == [] and wcag.conformance("2.0", "AAA") == "WCAG 2.0 AAA"),
+    ]
+
+
+# A rule in axe.min.js: its id, then its tags, before the next rule's id.
+AXE_RULE = re.compile(r'\{id:"([a-z0-9-]+)",(?:(?!\{id:")[^\n])*?tags:\[([^\]]*)\]')
+
+
+def axe_rules():
+    """axe-core's rules, {id, tags}, as the repository's axe.min.js holds
+    them, read without a browser."""
+    with open(os.path.join(ROOT, "vendor", "axe-core", "axe.min.js"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index("rules:[{id:")
+    end = text.index("checks:[{id:", start)
+    return [{"id": found.group(1), "tags": re.findall(r'"([^"]*)"', found.group(2))}
+            for found in AXE_RULE.finditer(text[start:end])]
+
+
+def check_axe_rules():
+    """The rules --wcag runs on pages: those whose WCAG criteria, from
+    their tags, are within the version and level, and axe-core's best
+    practices when asked for, never an experimental or a deprecated rule;
+    chosen so, they're the rules axe-core's own level tags choose, which
+    a release that retags a rule would make otherwise. And the vendored
+    axe-core is the file and the release its README names."""
+    import axecheck
+    import wcag
+    rules = axe_rules()
+    ids = [rule["id"] for rule in rules]
+
+    def by_tags(version, level):
+        names = set()
+        for v in wcag.VERSIONS[:wcag.VERSIONS.index(version) + 1]:
+            for depth in range(wcag.LEVELS.index(level) + 1):
+                names.add(("wcag2" if v == "2.0" else "wcag2" + v[-1]) + "a" * (depth + 1))
+        return sorted(rule["id"] for rule in rules
+                      if names & set(rule["tags"])
+                      and not {"experimental", "deprecated"} & set(rule["tags"]))
+
+    def chosen(version, level, best_practice=False):
+        return sorted(rule["id"] for rule in axecheck.select(rules, version, level,
+                                                             best_practice))
+    counts = {(v, l): len(chosen(v, l)) for v in wcag.VERSIONS for l in ("AA", "AAA")}
+    practices = set(chosen("2.1", "AA", True)) - set(chosen("2.1", "AA"))
+    with open(os.path.join(ROOT, "vendor", "axe-core", "axe.min.js"), "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    with open(os.path.join(ROOT, "vendor", "axe-core", "README.md"), encoding="utf-8") as fh:
+        readme = fh.read()
+    with open(os.path.join(ROOT, "vendor", "axe-core", "package.json"), encoding="utf-8") as fh:
+        package = json.load(fh)
+    return [
+        ("axe-core 4.14.0's 105 rules, each once, read from its file",
+         lambda: len(ids) == len(set(ids)) == 105),
+        ("a rule's criteria from its tags, 1.4.10 among them, and its level tags none",
+         lambda: axecheck.criteria(["cat.color", "wcag2aa", "wcag111", "wcag1410", "ACT"])
+         == ["1.1.1", "1.4.10"]),
+        ("chosen by their criteria, the rules are those axe-core's own level tags choose, "
+         "at each version and level",
+         lambda: all(chosen(v, l) == by_tags(v, l) for v in wcag.VERSIONS
+                     for l in ("AA", "AAA")) or fail(str({
+                         (v, l): sorted(set(chosen(v, l)) ^ set(by_tags(v, l)))
+                         for v in wcag.VERSIONS for l in ("AA", "AAA")}))),
+        ("60, 63, and 64 rules for WCAG 2.0, 2.1, and 2.2 at AA, and three more at AAA, "
+         "as the docs say",
+         lambda: [counts[(v, "AA")] for v in wcag.VERSIONS] == [60, 63, 64]
+         and [counts[(v, "AAA")] for v in wcag.VERSIONS] == [63, 66, 67] or fail(str(counts))),
+        ("27 best practices when asked for, and an experimental or deprecated rule never",
+         lambda: len(practices) == 27 and "heading-order" in practices
+         and not {"td-has-header", "p-as-heading", "duplicate-id", "css-orientation-lock"}
+         & set(chosen("2.2", "AAA", True))),
+        ("the rules overlapping a check of the output check's own are axe-core's, and the "
+         "rules run again in dark mode",
+         lambda: set(axecheck.OVERLAPS) <= set(ids) and set(axecheck.DARK_RULES) <= set(ids)),
+        ("the vendored axe.min.js is the file the README and AXE_SHA256 name, the release "
+         "AXE_VERSION names",
+         lambda: digest == axecheck.AXE_SHA256 and digest in readme
+         and package["version"] == axecheck.AXE_VERSION
+         and axecheck.axe_version(os.path.join(axecheck.VENDORED, "axe.min.js"))
+         == axecheck.AXE_VERSION and f"# axe-core {axecheck.AXE_VERSION}" in readme),
+    ]
+
+
 # The template's start of reveal.js as revealtarget writes it, shortened.
 REVEAL_START = """
       // Full list of configuration options available at:
@@ -7340,6 +7459,454 @@ def check_reveal_start():
     ]
 
 
+def check_presentation_scripts():
+    """A presentation's scripts, as the check holds them to
+    TextbookImprover's before it runs them (axecheck.judge_scripts):
+    reveal.js and its plugins byte for byte the repository's,
+    oer-reveal.js the repository's once its indent is set aside, as
+    Pandoc's template indents it, and a start of reveal.js that's settings
+    alone; and the window its slides are checked in."""
+    import axecheck
+    import lockedbrowser
+    import revealtarget
+    shipped = axecheck.shipped_scripts()
+    with open(revealtarget.SCRIPT, encoding="utf-8") as fh:
+        oer = fh.read()
+    lines = axecheck.script_lines(oer)
+    files = {}
+    for name in ("dist/reveal.js", "dist/plugin/notes.js", "dist/plugin/zoom.js"):
+        with open(os.path.join(revealtarget.VENDORED, name), "rb") as fh:
+            files["deck/reveal.js/" + name] = fh.read()
+    files["deck/mine.js"] = b"window.pwned = 1;"
+    source = lockedbrowser.Memory(files)
+    indented = "\n" + "\n".join("      " + line for line in oer.splitlines()) + "\n    "
+
+    def judged(*scripts, changed=None):
+        given = lockedbrowser.Memory(dict(files, **(changed or {})))
+        return axecheck.judge_scripts([list(s) for s in scripts], given, shipped, lines)
+    loads = [(lockedbrowser.url_of("deck/reveal.js/" + name), "")
+             for name in ("dist/reveal.js", "dist/plugin/notes.js")]
+    start, own = (None, REVEAL_START), (None, "window.pwned = 1;")
+    ours = judged(*loads, start, (None, indented))
+    extra = judged(*loads, start, (None, indented), own,
+                   (lockedbrowser.url_of("deck/mine.js"), ""))
+    other_oer = judged(*loads, start, (None, indented.replace("role", "rule", 1)))
+    return [
+        ("TextbookImprover's are: the start's and oer-reveal.js's hashes for the policy, and "
+         "the start's settings",
+         lambda: ours["problem"] == "" and ours["own"] == 0
+         and ours["hashes"] == [axecheck.policy_hash(REVEAL_START),
+                                axecheck.policy_hash(indented)]
+         and ours["settings"]["width"] == 1280.0),
+        ("a script of its own, inline or a file, counted, and the rest still run",
+         lambda: extra["problem"] == "" and extra["own"] == 2),
+        ("reveal.js changed by a byte isn't the repository's",
+         lambda: judged(*loads, start, (None, indented), changed={
+             "deck/reveal.js/dist/reveal.js": files["deck/reveal.js/dist/reveal.js"] + b" "})
+         ["problem"] == "it doesn't load the repository's copy of reveal.js"),
+        ("an oer-reveal.js of another version, or none, named",
+         lambda: other_oer["problem"] == "its oer-reveal.js isn't this version of "
+                                         "TextbookImprover's"
+         and judged(*loads, start)["problem"] == "it has no oer-reveal.js"),
+        ("a start holding code, or two starts, named",
+         lambda: judged(*loads, (None, REVEAL_START.replace("true,", "alert(1),")),
+                        (None, indented))["problem"].startswith(
+             "its start of reveal.js holds more than settings: the setting controls holds")
+         and judged(*loads, start, start, (None, indented))["problem"].startswith(
+             "it has 2 starts of reveal.js")),
+        ("a slide checked at its own size, reveal.js's margin around it, in a window wider "
+         "than oer-reveal.js's page view",
+         lambda: axecheck.slide_viewport({"width": 1280.0, "height": 720.0}) == (1332, 749)
+         and axecheck.slide_viewport({"width": 960.0, "height": 720.0}) == (1001, 751)
+         and axecheck.slide_viewport({"width": 1280.0, "height": 720.0, "margin": 0.1})
+         == (1408, 792) and axecheck.slide_viewport({}) == (1001, 730)),
+        ("but in a window no larger than MOST_PIXELS across or down, whatever size its "
+         "settings give the slides, a slide narrow but tall, or one too large for a number",
+         lambda: axecheck.slide_viewport({"width": 100000.0, "height": 100000.0})
+         == (4096, 4096)
+         and axecheck.slide_viewport({"width": 0.001, "height": 700.0}) == (1001, 4096)
+         and axecheck.slide_viewport({"width": float("inf"), "height": 720.0}) == (4096, 749)),
+    ]
+
+
+def check_axe_report():
+    """axe-core's results, as the worker gives them, made findings and
+    the summary's lines (axecheck.report): a note for each rule a page
+    failed, and for each it couldn't decide, naming the criteria, the
+    elements, and axe-core's page on the rule; a slide by its route; a
+    content document an EPUB's; the fix a built-in check's where one
+    overlaps; with verbose, an element a note; and what wasn't checked,
+    and why, said."""
+    import axecheck
+    url = "https://dequeuniversity.com/rules/axe/4.14/{}?application=axeAPI"
+    rules = [{"id": "image-alt", "tags": ["wcag2a", "wcag111"],
+              "help": "Images must have alternative text", "url": url.format("image-alt")},
+             {"id": "color-contrast", "tags": ["wcag2aa", "wcag143"],
+              "help": "Elements must meet minimum color contrast ratio thresholds",
+              "url": url.format("color-contrast")},
+             {"id": "link-name", "tags": ["wcag2a", "wcag244", "wcag412"],
+              "help": "Links must have discernible text", "url": url.format("link-name")},
+             {"id": "region", "tags": ["best-practice"],
+              "help": "All page content should be contained by landmarks",
+              "url": url.format("region")}]
+
+    def node(target, summary="Fix any of the following:\n  Element does not have an alt "
+                             "attribute", html='<img src="a.png">', key=""):
+        return {"target": target, "html": html, "summary": summary, "key": key}
+
+    def rule(name, impact, count, nodes, keys=None):
+        return {"id": name, "impact": impact, "count": count, "nodes": nodes,
+                "keys": keys or {}}
+    page = {"event": "page", "id": 0, "status": "checked", "scripts": True,
+            "outside": ["the stylesheet https://fonts.example.org/a.css"],
+            "frames": ["https://www.youtube.com/embed/x"],
+            "places": [{"route": "", "light": {
+                "violations": [rule("image-alt", "critical", 4, [
+                    node(["p > img"]), node(["figure > img"]),
+                    node(["iframe#inner", "img"])])],
+                "incomplete": [rule("color-contrast", "serious", 375, [
+                    node(["mo"], "", "<mo>−</mo>", "nonBmp")],
+                    {"nonBmp": [370, "Element content contains only non-text characters."],
+                     "bgImage": [5, "Element's background color could not be determined "
+                                    "due to a background image"]})]},
+                "dark": {"violations": [rule("color-contrast", "serious", 2, [
+                    node(["p > span"], "Fix any of the following:\n  Element has "
+                         "insufficient color contrast of 3.1", "<span>")])],
+                    "incomplete": []}}]}
+    deck = {"event": "page", "id": 1, "status": "checked", "past": 3, "places": [
+        {"route": "#/one", "light": {"violations": [rule("image-alt", "critical", 1,
+                                                         [node(["section > img"])])],
+                                     "incomplete": []}, "dark": None},
+        {"route": "#/two", "light": {"violations": [rule("link-name", "serious", 1,
+                                                         [node(["a"], "", "<a href=x>")])],
+                                     "incomplete": []}, "dark": None}]}
+    late = {"event": "page", "id": 2, "status": "not checked",
+            "why": "it hadn't loaded after 30 seconds"}
+    old = {"event": "page", "id": 3, "status": "not checked",
+           "why": "its oer-reveal.js isn't this version of TextbookImprover's"}
+    chapter = {"event": "page", "id": 4, "status": "checked", "places": [
+        {"route": "", "light": {"violations": [rule("region", "moderate", 1,
+                                                    [node(["p"], "", "<p>")])],
+                                "incomplete": []}, "dark": None}]}
+    items = [{"id": 0, "where": "html/a.html", "file": "a.html", "kind": "html",
+              "presentation": False},
+             {"id": 1, "where": "slides/deck.html", "file": "deck.html", "kind": "html",
+              "presentation": True},
+             {"id": 2, "where": "html/b.html", "file": "b.html", "kind": "html",
+              "presentation": False},
+             {"id": 3, "where": "slides/old.html", "file": "old.html", "kind": "html",
+              "presentation": True},
+             {"id": 4, "where": "EPUB/text/ch001.xhtml", "file": "ch001.xhtml", "kind": "epub",
+              "presentation": False, "epub": "book.epub"}]
+    ready = {"event": "ready", "axe": "4.14.0", "playwright": "1.63.0", "chromium": "153.0.1",
+             "sandbox": [True, ""], "network": "", "problems": [], "presentation": True,
+             "rules": rules}
+    job = {"version": "2.1", "level": "AA", "best_practice": True, "verbose": False}
+    events = [ready, page, deck, late, old, chapter, {"event": "done"}]
+    found, lines = axecheck.report(items, events, False, "", job)
+    loud, loud_lines = axecheck.report(items, events, False, "", dict(job, verbose=True))
+    by = {}
+    for f in found:
+        by.setdefault((f.where, f.check, f.detail.startswith("In dark mode")), f)
+    image = by[("html/a.html", "axe:image-alt", False)]
+    review = by[("html/a.html", "axe-review:color-contrast", False)]
+    open_sandbox = dict(ready, sandbox=[False, "it can't start for root, and the run is root's"],
+                        network="unshare: Operation not permitted")
+    unsafe = axecheck.report(items[:1], [open_sandbox, page], False, "", job)[1]
+    probe = axecheck.report(items, [dict(ready, problems=["the probe page's script ran"])],
+                            False, "", job)
+    return [
+        ("a note for each rule a page failed, and each it couldn't decide, by axe-core",
+         lambda: sorted((f.where, f.check) for f in found) == [
+             ("EPUB/text/ch001.xhtml", "axe:region"), ("html/a.html", "axe-review:color-contrast"),
+             ("html/a.html", "axe:color-contrast"), ("html/a.html", "axe:image-alt"),
+             ("slides/deck.html#/one", "axe:image-alt"), ("slides/deck.html#/two", "axe:link-name")]
+         and {(f.severity, f.tool) for f in found} == {("note", "axe")}),
+        ("the elements counted, the first three named, the criterion, and axe-core's page "
+         "without its query",
+         lambda: image.detail == (
+             "Images must have alternative text (critical): 4 element(s), at p > img, "
+             "figure > img, img, in the frame at iframe#inner, and 1 more; --verbose lists "
+             "each, with its markup. 1.1.1 Non-text Content (A): https://www.w3.org/WAI/"
+             "WCAG22/Understanding/non-text-content.html. axe-core's rule: "
+             "https://dequeuniversity.com/rules/axe/4.14/image-alt.") or fail(image.detail)),
+        ("what it couldn't decide, by its reasons, most first",
+         lambda: "which axe-core couldn't decide, for a person to judge: 375 element(s), at "
+                 "mo and 374 more; 370 because Element content contains only non-text "
+                 "characters, 5 because Element's background color could not be determined "
+                 "due to a background image; " in review.detail or fail(review.detail)),
+        ("the standard each criterion's, the fix the built-in check's where one overlaps, "
+         "and a best practice named as one",
+         lambda: image.standard == "WCAG 2.0 SC 1.1.1 (A)" and image.fix == "sidecar"
+         and by[("slides/deck.html#/two", "axe:link-name", False)].standard
+         == "WCAG 2.0 SC 2.4.4 (A); WCAG 2.0 SC 4.1.2 (A)"
+         and by[("slides/deck.html#/two", "axe:link-name", False)].fix == "manual"
+         and by[("EPUB/text/ch001.xhtml", "axe:region", False)].standard
+         == "axe-core best practice"),
+        ("dark mode's its own note; a content document's an EPUB's, by its own name",
+         lambda: by[("html/a.html", "axe:color-contrast", True)].detail.startswith(
+             "In dark mode: Elements must meet")
+         and by[("EPUB/text/ch001.xhtml", "axe:region", False)].kind == "epub"
+         and by[("EPUB/text/ch001.xhtml", "axe:region", False)].file == "ch001.xhtml"),
+        ("the head line: the rules, what they ran on, the browser, and how it was locked down",
+         lambda: lines[0] == (
+             "axe-core 4.14.0 ran its 4 rules for WCAG 2.1 AA and its best practices on 1 "
+             "page(s), 2 slide(s) of 1 presentation(s), and 1 content document(s) of 1 "
+             "EPUB(s), in Playwright 1.63.0's Chromium 153, sandboxed and off the network, "
+             "with each page's own scripts blocked, but in a presentation TextbookImprover's "
+             "own: what it finds is a note, never a failure.") or fail(lines[0])),
+        ("what wasn't checked, and why; what was refused; scripts and frames that didn't run",
+         lambda: "axe-core didn't check 1 page(s): html/b.html (it hadn't loaded after 30 "
+                 "seconds)." in lines
+         and "axe-core didn't check 1 presentation(s), whose scripts it runs only when "
+             "they're TextbookImprover's own: slides/old.html (its oer-reveal.js isn't this "
+             "version of TextbookImprover's)." in lines
+         and any(line.startswith("What 1 page(s) load from elsewhere") and
+                 "https://fonts.example.org/a.css" in line for line in lines)
+         and "1 page(s) have scripts of their own, which didn't run, so what they'd show "
+             "isn't checked: html/a.html." in lines
+         and any(line.startswith("1 frame(s) weren't checked") for line in lines)
+         and "3 slide(s) weren't checked, after the first 500 of a presentation: "
+             "slides/deck.html (3 of 5)." in lines
+         or fail(" | ".join(lines))),
+        ("a line for each rule, its elements over every page, its first, and the "
+         "built-in check it overlaps; then how to list them",
+         lambda: "axe:image-alt, 1.1.1 Non-text Content (A), as image-without-alt checks "
+                 "too: 5 element(s) on 2 page(s), the first in html/a.html at p > img: Images "
+                 "must have alternative text. https://www.w3.org/WAI/WCAG22/Understanding/"
+                 "non-text-content.html" in lines
+         and any(line.startswith("axe:color-contrast in dark mode, 1.4.3") for line in lines)
+         and lines[-1] == axecheck.VERBOSE or fail(" | ".join(lines))),
+        ("with verbose, each element its own note, with its markup, and those not listed one",
+         lambda: [f.detail for f in loud if f.check == "axe:image-alt"
+                  and f.where == "html/a.html"][0] == (
+             "Images must have alternative text (critical), at p > img: Fix any of the "
+             "following: Element does not have an alt attribute; its markup, <img "
+             'src="a.png">. 1.1.1 Non-text Content (A): https://www.w3.org/WAI/WCAG22/'
+             "Understanding/non-text-content.html. axe-core's rule: "
+             "https://dequeuniversity.com/rules/axe/4.14/image-alt.")
+         and len([f for f in loud if f.check == "axe:image-alt" and f.where == "html/a.html"])
+         == 4 and "  html/a.html at p > img: Fix any of the following: Element does not have "
+                  "an alt attribute" in loud_lines and axecheck.VERBOSE not in loud_lines),
+        ("Chromium's sandbox off, and the network there, each a line saying why",
+         lambda: "not sandboxed and on the network" in unsafe[0]
+         and any(line.startswith("Chromium's sandbox wasn't on (it can't start for root")
+                 for line in unsafe)
+         and any(line.startswith("The check wasn't off the network (unshare: Operation not "
+                                 "permitted)") for line in unsafe)),
+        ("a probe that failed: a warning, and nothing reported",
+         lambda: probe[0] == [] and probe[1] == [
+             "WARNING: axe's WCAG checks not run on the pages: the probe page's script ran, so "
+             "nothing axe-core found is reported."]),
+        ("no Playwright, no Chromium, a worker that failed, and one stopped, each a line",
+         lambda: axecheck.report(items, [{"event": "failed", "kind": "playwright"}], False,
+                                 "", job)[1][0].endswith("Playwright isn't installed "
+                                                         "(docs/installation.md, Optional: "
+                                                         "Playwright and its Chromium).")
+         and "Playwright's Chromium doesn't start (Executable doesn't exist)" in axecheck.report(
+             items, [{"event": "failed", "kind": "chromium",
+                      "why": "Executable doesn't exist"}], False, "", job)[1][0]
+         and axecheck.report(items, [{"event": "failed", "why": "no policy x"}], False, "",
+                             job)[1][0].endswith("the worker that runs them failed: no "
+                                                 "policy x.")
+         and "it ran past the time it was given, and was stopped" in axecheck.report(
+             items, [], True, "", job)[1][0]),
+    ]
+
+
+def check_page_limits():
+    """What keeps one page from holding the check up, without a browser:
+    each step of opening a page has its time (lockedbrowser.open_page
+    and blank_page), past which it's Slow, saying so, and the context is
+    closed; closing has its own, past which the context is left; and a
+    page's budget, which the worker's time is made of, is twice its
+    load's and axe-core's, a presentation's ten axe-core's, past which a
+    page is named as not checked, whatever step its check is in."""
+    import asyncio
+    import time
+    import axecheck
+    import lockedbrowser
+
+    class Context:
+        def __init__(self, page_stuck=False, close_stuck=False):
+            self.page_stuck, self.close_stuck, self.closed = page_stuck, close_stuck, False
+
+        async def add_init_script(self, script):
+            pass
+
+        async def route(self, pattern, handler):
+            pass
+
+        async def route_web_socket(self, pattern, handler):
+            pass
+
+        async def new_page(self):
+            await asyncio.sleep(20 if self.page_stuck else 0)
+
+        async def close(self):
+            await asyncio.sleep(20 if self.close_stuck else 0)
+            self.closed = True
+
+    class Browser:
+        """A browser whose new context comes only after 20 seconds, or is
+        context."""
+        def __init__(self, context=None):
+            self.context = context
+
+        async def new_context(self, **settings):
+            if self.context is None:
+                await asyncio.sleep(20)
+            return self.context
+
+    def timed(coroutine):
+        """(what came of it, the seconds it took)."""
+        async def run():
+            start = time.monotonic()
+            try:
+                await coroutine
+                outcome = "finished"
+            except lockedbrowser.Slow as exc:
+                outcome = str(exc)
+            except Exception as exc:    # a stand-in used past a step that wasn't timed
+                outcome = f"{type(exc).__name__}: {exc}"
+            return outcome, time.monotonic() - start
+        return asyncio.run(run())
+    source = lockedbrowser.Memory({"p.html": b"<p>A page.</p>"})
+    no_context = timed(lockedbrowser.open_page(Browser(), source, "p.html", load=0.2))
+    stuck = Context(page_stuck=True)
+    no_page = timed(lockedbrowser.open_page(Browser(stuck), source, "p.html", load=0.2))
+    blank_stuck = Context(page_stuck=True)
+    no_blank = timed(lockedbrowser.blank_page(Browser(blank_stuck), load=0.2))
+    unclosed = Context(close_stuck=True)
+    closing = timed(lockedbrowser.close_quietly(unclosed, 0.2))
+    opening = "Chromium hadn't opened a page for it after 0.2 seconds"
+
+    async def over_budget():
+        """A page whose check never ends, in a worker whose limits make its
+        budget 0.4 seconds: (what check_item says of it, the seconds it took)."""
+        checker = axecheck.Checker(None, "", {}, [], {"load": 0.1, "axe": 0.1, "slides": 500},
+                                   {"verbose": False})
+
+        async def stalls(source, path):
+            await asyncio.sleep(20)
+        checker.check_page = stalls
+        checker.source = lambda item: None
+        start = time.monotonic()
+        result = await checker.check_item({"id": 0, "presentation": False, "path": "p.html"})
+        return result, time.monotonic() - start
+    over, took = asyncio.run(over_budget())
+    return [
+        ("a context Chromium doesn't make in time: Slow, at the load's limit",
+         lambda: no_context[0] == opening and no_context[1] < 2 or fail(str(no_context))),
+        ("a page it doesn't open in time: Slow, and the context closed",
+         lambda: no_page[0] == opening and no_page[1] < 2 and stuck.closed
+         or fail(str(no_page))),
+        ("the blank page that finishes axe-core's runs, the same",
+         lambda: no_blank[0] == "Chromium hadn't opened a blank page after 0.2 seconds"
+         and blank_stuck.closed or fail(str(no_blank))),
+        ("a context that doesn't close in its time is left",
+         lambda: closing[0] == "finished" and closing[1] < 2 and not unclosed.closed
+         or fail(str(closing))),
+        ("a page's budget twice its load's and axe-core's, a presentation's ten "
+         "axe-core's, which the worker's time is made of",
+         lambda: axecheck.budget(axecheck.LIMITS, False) == 180
+         and axecheck.budget(axecheck.LIMITS, True) == 660),
+        ("a page whose check runs past its budget, whatever step it's in, not checked, "
+         "saying so",
+         lambda: over == {"status": "not checked",
+                          "why": "it wasn't checked in the 0.4 seconds it was given"}
+         and took < 2 or fail(f"got: {over} in {took:.1f} s")),
+    ]
+
+
+def check_axe_setup():
+    """What check() finds before the worker runs: AXE_CORE_DIR's copy, a
+    4.x release named in a note and another refused, the repository's own
+    held to its hash; a page's text with no control character in it once
+    the worker says it; a presentation told from a page; and an EPUB's
+    content documents in its spine's order."""
+    import axecheck
+    import outputcheck
+    work = scratch("axe-setup-")
+    saved = os.environ.get(axecheck.AXE_VARIABLE)
+
+    def copy(folder, version, tamper=False):
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(axecheck.VENDORED, "axe.min.js"), "rb") as fh:
+            data = fh.read()
+        data = data.replace(b"axe v4.14.0", f"axe v{version}".encode(), 1)
+        with open(os.path.join(folder, "axe.min.js"), "wb") as fh:
+            fh.write(data + (b" " if tamper else b""))
+        return folder
+
+    def located(given=None, policy="local", vendored=None):
+        if given is None:
+            os.environ.pop(axecheck.AXE_VARIABLE, None)
+        else:
+            os.environ[axecheck.AXE_VARIABLE] = given
+        kept = axecheck.VENDORED
+        axecheck.VENDORED = vendored or kept
+        try:
+            return axecheck.locate_axe(policy)
+        finally:
+            axecheck.VENDORED = kept
+            if saved is None:
+                os.environ.pop(axecheck.AXE_VARIABLE, None)
+            else:
+                os.environ[axecheck.AXE_VARIABLE] = saved
+    other = copy(os.path.join(work, "other"), "4.13.0")
+    five = copy(os.path.join(work, "five"), "5.0.0")
+    tampered = copy(os.path.join(work, "tampered"), "4.14.0", tamper=True)
+    with open(os.path.join(work, "deck.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html><body><div class="reveal"><div class="slides"></div></div>'
+                 "<script>Reveal.initialize({});</script></body></html>")
+    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write("<html><body><p>Reveal.initialize is a function.</p></body></html>")
+    epub = os.path.join(work, "book.epub")
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr("META-INF/container.xml", '<container xmlns="urn:oasis:names:tc:'
+                         'opendocument:xmlns:container"><rootfiles><rootfile full-path='
+                         '"OEBPS/p.opf"/></rootfiles></container>')
+        archive.writestr("OEBPS/p.opf", '<package xmlns="http://www.idpf.org/2007/opf"><manifest>'
+                         '<item id="n" href="nav.xhtml" media-type="application/xhtml+xml" '
+                         'properties="nav"/><item id="b" href="t/b.xhtml" media-type='
+                         '"application/xhtml+xml"/><item id="a" href="t/a.xhtml" media-type='
+                         '"application/xhtml+xml"/><item id="c" href="s.css" media-type='
+                         '"text/css"/></manifest><spine><itemref idref="a"/><itemref idref="b"/>'
+                         "</spine></package>")
+        for name in ("OEBPS/nav.xhtml", "OEBPS/t/a.xhtml", "OEBPS/t/b.xhtml", "OEBPS/s.css"):
+            archive.writestr(name, "<html/>")
+    return [
+        ("the repository's axe-core by default, and AXE_CORE_DIR's another 4.x, noted",
+         lambda: located()[0] == os.path.join(axecheck.VENDORED, "axe.min.js")
+         and located()[1:] == ("", "")
+         and located(other) == (os.path.join(other, "axe.min.js"), "",
+                                "axe-core 4.13.0, from AXE_CORE_DIR, where the repository's "
+                                "is 4.14.0, which the suites test.")),
+        ("another major release, or a folder without the file, refused, naming the variable",
+         lambda: "is axe-core 5.0.0, where --wcag is written for axe-core 4" in located(five)[1]
+         and "which has no axe.min.js" in located(work)[1]),
+        ("the repository's copy changed by a byte is refused, naming its hash",
+         lambda: located(vendored=tampered)[0] is None
+         and "isn't the file the repository has" in located(vendored=tampered)[1]),
+        ("a service never takes AXE_CORE_DIR's",
+         lambda: located(other, policy="service")[0]
+         == os.path.join(axecheck.VENDORED, "axe.min.js")),
+        ("control characters and those that reorder text taken out of what the worker says, "
+         "a line's end kept",
+         lambda: axecheck.scrubbed({"a\x1b": ["x\x1b]0;t\x07y", "a\nb", "\u202eabc"]})
+         == {"a ": ["x ]0;t y", "a\nb", " abc"]}),
+        ("a presentation told from a page that only names reveal.js",
+         lambda: axecheck.is_presentation(os.path.join(work, "deck.html"))
+         and not axecheck.is_presentation(os.path.join(work, "page.html"))),
+        ("an EPUB's content documents, its spine's first, then the navigation document",
+         lambda: outputcheck.epub_documents(epub) == ["OEBPS/t/a.xhtml", "OEBPS/t/b.xhtml",
+                                                      "OEBPS/nav.xhtml"]
+         and outputcheck.epub_documents(os.path.join(work, "page.html")) == []),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("alt text's rules, and their findings", check_alt_text_rules),
@@ -7349,7 +7916,13 @@ GROUPS = [
     ("veraPDF's WCAG profile's report, read as findings", check_wcag_report),
     ("what a PDF has where its WCAG checks failed, for --verbose", check_wcag_context),
     ("the output check's flags from convert.py", check_output_check_flags),
+    ("WCAG's versions and levels, as --wcag chooses them", check_wcag_choices),
+    ("axe-core's rules, chosen by their criteria", check_axe_rules),
     ("a presentation's start of reveal.js, settings and nothing else", check_reveal_start),
+    ("a presentation's scripts, held to TextbookImprover's", check_presentation_scripts),
+    ("axe-core's results, as findings and the summary's lines", check_axe_report),
+    ("axe-core's setup, and what's read before the browser", check_axe_setup),
+    ("a page that holds the check up, given up on", check_page_limits),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),

@@ -102,6 +102,7 @@ try:
     from names import safe_path, safe_stem, is_safe, output_path
     import sidecars
     from sidecars import math_keep_rows
+    import wcag
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
@@ -184,12 +185,15 @@ def say(text):
     print(text, file=sys.stderr)
 
 
-def output_check_flags(args, pdfs):
-    """The flags the run gives the output check: --quick, and --wcag and
-    --verbose only when it made a PDF for them to check."""
+def output_check_flags(args, checkable):
+    """The flags the run gives the output check: --quick, and --wcag, with
+    the version, level, and best practices it checks and --verbose, only
+    when the run made a page, an EPUB, or a PDF for them to check
+    (checkable): given nothing, the check would check its setup."""
+    asked = bool(args.wcag and checkable)
     return ((["--quick"] if args.quick else [])
-            + (["--wcag"] if args.wcag and pdfs else [])
-            + (["--verbose"] if args.wcag and args.verbose and pdfs else []))
+            + (["--wcag"] + wcag.choice_flags(args) if asked else [])
+            + (["--verbose"] if asked and args.verbose else []))
 
 
 def archive_entry(name):
@@ -6284,19 +6288,23 @@ def main():
                              "checker, and veraPDF, even where they're "
                              "installed (check-output.py --quick)")
     parser.add_argument("--wcag", action="store_true",
-                        help="check each PDF against veraPDF's WCAG 2.2 machine "
-                             "profile too, with its WCAG modules from VERAPDF_WCAG; "
-                             "experimental, so what it finds is a note, never an "
-                             "error (check-output.py --wcag)")
+                        help="check the output against WCAG's machine-testable criteria "
+                             "too: axe-core on its pages, presentations, and EPUBs, with "
+                             "Playwright, and veraPDF's WCAG 2.2 machine profile on its "
+                             "PDFs, with its WCAG modules from VERAPDF_WCAG; what they find "
+                             "is a note, never an error (check-output.py --wcag)")
+    wcag.add_choices(parser)
     parser.add_argument("--verbose", action="store_true",
-                        help="with --wcag, a note for each of its failed checks, with what "
-                             "the PDF has there, where each rule's are otherwise counted "
+                        help="with --wcag, a note for each element axe-core names and each "
+                             "check veraPDF failed, where each rule's are otherwise counted "
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
     if args.verbose and not args.wcag:
         import pdfcheck
         say(pdfcheck.WCAG_ALONE)
+    if wcag.choices_given(args) and not args.wcag:
+        say(wcag.CHOICES_ALONE)
     base = os.getcwd()
 
     for required in (FIGURE_FILTER, MATH_FILTER, MEDIA_FILTER, HEADER_FILTER,
@@ -6905,8 +6913,12 @@ def main():
         # ---- 5.7 check, per target -------------------------------------------
         # Findings go to one report beside the others and never stop the
         # run: the output exists, and the list is what to work through.
-        command = ["python3", CHECK_TOOL, "--report", reports["output_check"]] \
-            + output_check_flags(args, pdfs)
+        # With the interpreter running this, where an optional package such
+        # as Playwright, for --wcag on pages, may be installed.
+        checked = [p for pages in written.values() for p in pages if p.endswith(".html")] \
+            + list(presentations)
+        command = [sys.executable, CHECK_TOOL, "--report", reports["output_check"]] \
+            + output_check_flags(args, bool(checked or epubs or pdfs))
         # A PowerPoint deck's copies were checked before it was converted,
         # into the same report, which keeps their findings.
         copies_found = []
@@ -6914,9 +6926,7 @@ def main():
                 and os.path.exists(reports["output_check"]):
             import findings
             copies_found = findings.read_csv(reports["output_check"])
-        for pages in written.values():
-            command += [p for p in pages if p.endswith(".html")]
-        command += presentations
+        command += checked
         if DECK_RUN:
             # Each deck a document of its own, its pages its pieces.
             command += ["--documents", deck_documents(
@@ -6929,9 +6939,9 @@ def main():
             command += ["--pptx", pptx]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
-        if args.wcag and not pdfs:
-            # After the check's verdict, where veraPDF's WCAG lines go.
-            say("  veraPDF's WCAG checks not run: the run made no PDF.")
+        if args.wcag and not (checked or epubs or pdfs):
+            # After the check's verdict, where the WCAG checks' lines go.
+            say("  The WCAG checks not run: the run made no page, EPUB, or PDF.")
         if copies_found:
             import findings
             findings.write_csv(reports["output_check"], copies_found + (

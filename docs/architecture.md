@@ -64,7 +64,9 @@ on another `bin/` script.
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
 | `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed, and veraPDF's WCAG 2.2 checks when asked for (`--wcag`), with the probe that says whether its WCAG modules loaded. |
-| `lib/wcag.py` | WCAG 2.2's success criteria, from W3C's source: each one's name, level, the version it came in, and its Understanding document, which a finding from veraPDF's WCAG profile names. |
+| `lib/wcag.py` | WCAG 2.2's success criteria, from W3C's source: each one's name, level, the version it came in, and its Understanding document, which a finding from veraPDF's WCAG profile or axe-core names; and what `--wcag-version` and `--wcag-level` choose, a criterion within them or not. |
+| `lib/axecheck.py` | `--wcag` on HTML pages, presentations, and an EPUB's content documents: axe-core's rules chosen by their criteria, run by a worker of its own (`--worker`), its results made findings and the summary's lines. A presentation TextbookImprover wrote is checked slide by slide with its own scripts, held to the repository's first. |
+| `lib/lockedbrowser.py` | Pages opened in Playwright's Chromium with nothing reachable but what they're served from: the worker off the network, Chromium sandboxed, every request answered from a folder, an EPUB, or memory, or refused, and the page's own scripts blocked by a Content Security Policy; and each step of opening a page, and closing it, within its time. Nothing in it is axe-core's. |
 | `lib/pptxparse.py` | What a PowerPoint deck holds, read from its XML: slides in order, each slide's shapes in the tree's order (its reading order and its stacking order alike) and where each sits, titles, pictures keyed by their image's SHA-256, tables, charts and embedded objects, links, notes, sections, languages. Changes nothing. |
 | `lib/pptxcheck.py` | What's wrong with a deck: what PowerPoint's Accessibility Checker reports, and more. |
 | `lib/pptxremediate.py` | A `source` target on a deck: the sidecars' decisions written into a copy, edited as text, the rest byte for byte. |
@@ -86,7 +88,7 @@ on another `bin/` script.
 | `page.css` | The rules every page carries beyond Pandoc's own stylesheet: caption contrast, highlighted code's colors in dark mode, real table display, the scroll wrapper. |
 | `highlighting.theme` | The colors every writer highlights code in: Pandoc's pygments style, each of its colors under 4.5:1 darkened. |
 | `read-conversion-config.py` | Resolves `conversion.yaml` into settings `convert.py` reads. |
-| `check-output.py` | Checks the pages, EPUBs, PDFs, and PowerPoint files a run wrote (`--epub`, `--pdf`, `--pptx`) for dead links, missing alt text, skipped headings, and the like; the command line over `lib/outputcheck.py`. |
+| `check-output.py` | Checks the pages, EPUBs, PDFs, and PowerPoint files a run wrote (`--epub`, `--pdf`, `--pptx`) for dead links, missing alt text, skipped headings, and the like, and with `--wcag` against WCAG's criteria too (axe-core, veraPDF); the command line over `lib/outputcheck.py`, `lib/axecheck.py`, and `lib/pdfcheck.py`. |
 | `build-epub.py` | Assembles the filtered intermediates into one EPUB3, ordered by `project.contents`, with accessibility claims computed from the build. |
 | `build-pdf.py` | Assembles the same way into one tagged PDF through Pandoc's LaTeX writer and LuaLaTeX: roles as division commands, the default page and the metadata file's YAML for the writer, and the macros `pdf-target.lua` uses. |
 | `pdf-layout.yaml` | The PDF target's default page, Pandoc's LaTeX variables and `ragged-right`, which a book's `pdf.metadata` file changes a field at a time and `unpack-cnx.py` copies into an OpenStax book's folder. |
@@ -117,6 +119,11 @@ and redistributed under their own terms. See the README there.
 of reveal.js 6.0.2, unmodified and redistributed under its MIT license and
 its theme's font's SIL Open Font License. See the README there, which
 says how it's updated.
+
+**`vendor/axe-core/`** holds axe-core 4.14.0's `axe.min.js`, which `--wcag`
+runs on pages, unmodified and redistributed under the Mozilla Public
+License 2.0. See the README there, which says where its source is and
+how it's updated.
 
 **`lib/` — shared**
 

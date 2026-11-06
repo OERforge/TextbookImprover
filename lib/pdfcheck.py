@@ -753,7 +753,8 @@ def wcag_modules(folder):
     return found
 
 
-def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
+def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
+                     wcag_version=None, wcag_level=None):
     """veraPDF's WCAG 2.2 machine checks on the PDFs, as (findings,
     lines): a note for each of the profile's own rules a PDF failed,
     counting its failed checks, and the lines for the run's summary or a
@@ -765,7 +766,10 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
     veraPDF's report doesn't say (a link's address, the line repeated
     characters are on), and a line for each after its rule's. With no
     PDFs, the probe alone, which checks the setup. folder: where the
-    modules and the profiles are, VERAPDF_WCAG's when not given."""
+    modules and the profiles are, VERAPDF_WCAG's when not given.
+    wcag_version and wcag_level: only the rules for criteria within them
+    are reported (wcag.within), and a line counts the others; without
+    them, every rule the profile has."""
     if folder is None:
         folder = os.environ.get(WCAG_VARIABLE, "").strip()
     if not folder:
@@ -831,7 +835,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
         [os.path.join(os.path.abspath(folder), "*")]
         + ([environment["CLASSPATH_PREFIX"]] if environment.get("CLASSPATH_PREFIX")
            else []))
-    findings, rules, ran = [], [], []
+    findings, rules, ran, left_out = [], [], [], []
     with tempfile.TemporaryDirectory() as work:
         probe = os.path.join(work, "wcag-probe.pdf")
         with open(probe, "wb") as fh:
@@ -843,7 +847,8 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
                 continue
             report, stderr = result
             try:
-                read = wcag_report(report, probe, folder, modules, group, verbose)
+                read = wcag_report(report, probe, folder, modules, group, verbose,
+                                   wcag_version, wcag_level)
             except Exception as exc:        # a report no veraPDF writes
                 warnings.append(f"WARNING: --wcag: veraPDF's report on "
                                 f"{WCAG_PROFILES[major]} couldn't be read: {exc}")
@@ -853,6 +858,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
                 break                       # nor will they with the other profile
             findings += read["findings"]
             rules += read["rules"]
+            left_out += read["left_out"]
             ran.append(read)
             said = _java_error(stderr)
             if said:
@@ -862,10 +868,12 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
     if ran:
         version = ran[0]["version"]
         if paths:
+            within = (f" for {wcag.conformance(wcag_version, wcag_level)}"
+                      if wcag_version and wcag_level else "")
             head = [f"veraPDF {version}'s WCAG 2.2 machine checks ran on "
-                    f"{sum(read['checked'] for read in ran)} PDF(s), with its WCAG modules "
-                    f"from {folder}: {WCAG_CAVEAT}, so what they find is a note, never a "
-                    "failure."]
+                    f"{sum(read['checked'] for read in ran)} PDF(s){within}, with its WCAG "
+                    f"modules from {folder}: {WCAG_CAVEAT}, so what they find is a note, "
+                    "never a failure."]
         else:
             files = ("PDF 2.0 and PDF 1.x files alike" if len(fit) == 2 else
                      f"a {WCAG_FILES[fit[0]]} file, as a PDF/UA-{fit[0]} build is, but not "
@@ -877,6 +885,21 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False):
     listed = [line for _, lines in sorted(rules) for line in lines]
     if rules and not verbose:
         listed.append(WCAG_VERBOSE)
+    if left_out:
+        # Counted, by rule, over the PDFs: what --wcag-level AAA, say, would
+        # report.
+        counts = {}
+        for name, rule, clause, total in left_out:
+            counts.setdefault((rule, clause), []).append((name, total))
+        listed.append(
+            f"Left out at {wcag.conformance(wcag_version, wcag_level)}, which --wcag-version "
+            "and --wcag-level choose: " + "; ".join(
+                f"verapdf-wcag:{rule}, {wcag.named(clause)}, "
+                f"{sum(total for _, total in each)} failed check(s) in "
+                f"{_listed([name for name, _ in each])}"
+                for (rule, clause), each in sorted(counts.items(), key=lambda item: _rule_key(
+                    "", {"clause": item[0][1], "testNumber": item[0][0].rsplit("-", 1)[1]}))
+            ) + ".")
     return findings, head + warnings + unfitting + listed
 
 
@@ -958,7 +981,8 @@ def _probe_tells(profile):
     return False
 
 
-def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=False):
+def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=False,
+                wcag_version=None, wcag_level=None):
     """What veraPDF's JSON report of a run of a WCAG profile, the probe
     among its files, says: {"loaded": whether the probe failed one of
     the profile's own rules, so the modules loaded, "version": veraPDF's,
@@ -968,7 +992,9 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
     nothing else is read, since then no WCAG rule was checked. expected:
     the PDFs given, each of which veraPDF should have reported on.
     verbose: a finding, and a line, for each failed check, with what the
-    PDF it names (veraPDF's own name for it) has there."""
+    PDF it names (veraPDF's own name for it) has there. wcag_version and
+    wcag_level: a rule for a criterion beyond them is no finding, and is
+    in "left_out" instead, (PDF, rule, clause, failed checks)."""
     modules = modules or {}
     body = _dict(_dict(report).get("report"))
     details = {}
@@ -976,7 +1002,7 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
         details[_dict(item).get("id")] = _dict(item).get("version")
     version = str(details.get("apps") or details.get("validation-model") or "?")
     read = {"loaded": False, "version": version, "checked": 0, "findings": [],
-            "rules": [], "warnings": []}
+            "rules": [], "warnings": [], "left_out": []}
     jobs = [job for job in _list(body.get("jobs")) if isinstance(job, dict)]
     probed = next((job for job in jobs if _same_file(
         _dict(job.get("itemDetails")).get("name"), probe)), None)
@@ -1018,6 +1044,13 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
                 for rule in _list(_dict(profile.get("details")).get("ruleSummaries")):
                     if not isinstance(rule, dict) or not str(
                             rule.get("specification", "")).startswith("WCAG"):
+                        continue
+                    clause = str(rule.get("clause", ""))
+                    if wcag_version and wcag_level and not wcag.within(
+                            clause, wcag_version, wcag_level):
+                        read["left_out"].append((
+                            name, f"{clause}-{rule.get('testNumber', '')}", clause,
+                            max(_count(rule.get("failedChecks")), len(_failed_checks(rule)))))
                         continue
                     found, pages, lines = wcag_rule_findings(name, rule, context)
                     read["findings"] += found

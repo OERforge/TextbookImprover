@@ -28,14 +28,13 @@ or as commands on the path -- and their findings go into the same
 report with the tool's own message id as the check; --quick skips them,
 and veraPDF, and convert.py --quick passes it on.
 
---wcag checks against WCAG's machine-testable criteria too, and what it
-finds is a note, never an error, which the summary counts apart from the
-verdict:
+--wcag checks against WCAG's machine-testable criteria too, WCAG 2.1 AA
+unless --wcag-version and --wcag-level choose another version and level,
+and what it finds is a note, never an error, which the summary counts
+apart from the verdict:
 
 - each HTML page, presentation, and EPUB's content document, with
-  axe-core's rules for WCAG 2.1 AA, unless --wcag-version and
-  --wcag-level choose another version and level, in Playwright's
-  Chromium, locked down: off the
+  axe-core's rules, in Playwright's Chromium, locked down: off the
   network, sandboxed, nothing served but the folder (or the EPUB), and
   the page's own scripts blocked, except a presentation's that are
   TextbookImprover's own (lib/axecheck.py, lib/lockedbrowser.py).
@@ -48,7 +47,8 @@ verdict:
   rules without checking them, and says nothing of it, a probe of its
   own in the same run says whether they loaded, and the summary warns
   when they didn't. Each rule a PDF fails is one note, with how many of
-  its checks failed and on which pages.
+  its checks failed and on which pages; a rule for a criterion beyond
+  the version and level is left out, and counted.
 
 --verbose makes each element axe-core names, and each check veraPDF
 failed, a note of its own, with what the page or the PDF has there (an
@@ -199,7 +199,8 @@ def main():
             wcag_lines.append("veraPDF's WCAG checks not run: veraPDF not found (set "
                               "VERAPDF, or put verapdf on the path).")
         else:
-            found, lines = pdfcheck.run_verapdf_wcag(command, pdfs, verbose=args.verbose)
+            found, lines = pdfcheck.run_verapdf_wcag(
+                command, pdfs, verbose=args.verbose, wcag_version=version, wcag_level=level)
             wcag_findings += found
             wcag_lines += lines
     # A PowerPoint file's, as a PowerPoint deck's are found.

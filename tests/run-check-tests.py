@@ -475,7 +475,8 @@ def wcag_cases(work):
     suite runs; and with veraPDF itself where it's installed, which,
     with jars that hold no modules, passes the profile's rule unchecked,
     as the probe shows, and with the modules VERAPDF_WCAG names, loads
-    them."""
+    them. Each run is at AAA, which reports the stand-in's rule for 2.4.9,
+    but those that say what WCAG 2.1 AA, the default, leaves out."""
     tool = os.path.join(ROOT, "bin", "check-output.py")
     fake = fakeverapdf.install(os.path.join(work, "fake"))
     loads = fakeverapdf.modules(os.path.join(work, "loads"))
@@ -485,11 +486,12 @@ def wcag_cases(work):
     with open(pdf, "wb") as fh:
         fh.write(pdfcheck.wcag_probe().replace(b"%PDF-1.7", b"%PDF-2.0", 1))
 
-    def run(*flags, folder=None, verapdf=fake, **more):
+    def run(*flags, folder=None, verapdf=fake, level="AAA", **more):
         env = dict(os.environ, VERAPDF=verapdf, FAKE_VERAPDF_LOG=log, **more)
         env.pop("VERAPDF_WCAG", None)
         if folder:
             env["VERAPDF_WCAG"] = folder
+        flags = list(flags) + (["--wcag-level", level] if level and "--wcag" in flags else [])
         return subprocess.run([sys.executable, tool, *flags], capture_output=True, text=True,
                               env=env, cwd=work, stdin=subprocess.DEVNULL).stderr
 
@@ -515,6 +517,14 @@ def wcag_cases(work):
     missed = run("--wcag", "--pdf", pdf, folder=unloaded)
     absent = run("--wcag", "--pdf", pdf)
     quick = run("--wcag", "--quick", "--pdf", pdf, folder=loads)
+    # At WCAG 2.1 AA, the default, and at 2.0: the rule for 2.4.9 (AAA), and
+    # for 1.4.10 (AA, WCAG 2.1), left out and counted.
+    default_report = os.path.join(work, "wcag-default.csv")
+    default = run("--wcag", "--pdf", pdf, "--report", default_report, folder=loads, level=None)
+    with open(default_report, newline="", encoding="utf-8-sig") as fh:
+        default_rows = list(csv.DictReader(fh))
+    older_aa = run("--wcag", "--wcag-version", "2.0", "--pdf", pdf, folder=loads, level=None,
+                   FAKE_VERAPDF_REFLOW="1")
     # A PDF 1.x beside a PDF 2.0, each against its own profile, a
     # CLASSPATH_PREFIX already set kept after the modules', and a folder
     # without the 1.x profile.
@@ -727,6 +737,19 @@ def wcag_cases(work):
          or fail("got: " + absent)),
         ("--quick leaves the profile out, saying so",
          lambda: "veraPDF's WCAG checks not run (--quick)." in quick),
+        ("at WCAG 2.1 AA, the default, a rule for a criterion beyond it is no finding, and a "
+         "line counts what it found",
+         lambda: [r["Check"] for r in default_rows if r["Check"].startswith("verapdf-wcag")]
+         == ["verapdf-wcag:1.3.1-1"]
+         and "WCAG 2.2 machine checks ran on 1 PDF(s) for WCAG 2.1 AA, with its WCAG" in default
+         and "  Left out at WCAG 2.1 AA, which --wcag-version and --wcag-level choose: "
+             "verapdf-wcag:2.4.9-1, 2.4.9 Link Purpose (Link Only) (AAA), 1 failed check(s) "
+             "in book.pdf.\n" in default or fail("got: " + default)),
+        ("and at 2.0 AA, a rule for one 2.1 brought, left out with it",
+         lambda: "Left out at WCAG 2.0 AA, which --wcag-version and --wcag-level choose: "
+                 "verapdf-wcag:1.4.10-1, 1.4.10 Reflow (AA, WCAG 2.1), 1 failed check(s) in "
+                 "book.pdf; verapdf-wcag:2.4.9-1" in older_aa
+         and "book.pdf: verapdf-wcag:1.3.1-1" in older_aa or fail("got: " + older_aa)),
     ]
     # A PDF the output check finds nothing in of its own: the probe with a
     # title it displays, XMP metadata, and a bookmark.

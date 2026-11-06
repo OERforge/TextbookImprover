@@ -251,8 +251,9 @@ def case_wcag():
     with --wcag never taking the report for current, since what it finds
     turns on a setup the cache can't see, a report made with other
     options not taken for the one asked for, and a page read with
-    another --quick read again. A section on axe-core's checks of the page,
-    which say why they didn't run without Playwright."""
+    another --quick read again. At AAA, whose rule for 2.4.9 the stand-in
+    fails; a section on axe-core's checks of the page, which say why they
+    didn't run without Playwright."""
     sys.path.insert(0, HERE)
     import fakeverapdf
     import pdfcheck
@@ -290,8 +291,8 @@ def case_wcag():
         with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
             return result, found, fh.read()
     plain, plain_found, _ = audit()
-    ran, found, report = audit("--wcag")
-    loud, loud_found, loud_report = audit("--wcag", "--verbose")
+    ran, found, report = audit("--wcag", "--wcag-level", "AAA")
+    loud, loud_found, loud_report = audit("--wcag", "--verbose", "--wcag-level", "AAA")
     alone, _, _ = audit("--verbose")
     again, _, _ = audit("--wcag")
     without, without_found, without_report = audit()
@@ -323,7 +324,7 @@ def case_wcag():
          and "experimental and may be wrong" in report),
         ("and one on axe-core's checks of the page, saying they ran or why not",
          lambda: "## HTML pages and EPUBs: axe-core's WCAG checks" in report
-         and re.search(r"\n- (axe-core [\d.]+ ran its \d+ rules for WCAG 2\.1 AA on 1 "
+         and re.search(r"\n- (axe-core [\d.]+ ran its \d+ rules for WCAG 2\.1 AAA on 1 "
                        r"page\(s\)|axe's WCAG checks not run on the pages)", report)),
         ("a second audit with --wcag doesn't take the report for current, and checks "
          "the PDF again, the page coming from the cache",

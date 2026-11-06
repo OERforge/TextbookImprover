@@ -6387,6 +6387,13 @@ def check_wcag_report():
     listed = [line for _, group in sorted(read["rules"]) for line in group]
     counted = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
         job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules)
+    # At WCAG 2.1 AA, 2.4.9's rule is beyond it; at 2.0 A, all but 4.1.2's.
+    within = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules,
+        wcag_version="2.1", wcag_level="AA")
+    narrow = pdfcheck.wcag_report({"report": {"buildInformation": build, "jobs": [
+        job(probe, [repeated]), job(book, rules)]}}, probe, "/tools/verapdf-wcag", modules,
+        wcag_version="2.0", wcag_level="A")
     thirty = rule("WCAG2.2", "2.4.9", 1, "Links",
                   [check("a message", f"root/doc[0]/pages[{n}]/annots[0]") for n in range(30)])
     many, many_pages, _ = pdfcheck.wcag_rule_findings("book.pdf", thirty)
@@ -6521,6 +6528,14 @@ def check_wcag_report():
                                      "Couldn't parse stream")
          and told["warnings"][2].startswith("WARNING: --wcag: veraPDF didn't check "
                                             "skipped.pdf, and said nothing of it")),
+        ("at a version and level, a rule for a criterion beyond it is no finding, and is "
+         "kept with its count, the probe still read",
+         lambda: within["loaded"] and [f.check for f in within["findings"]] == [
+             "verapdf-wcag:4.1.2-17", "verapdf-wcag:1.4.4-1", "verapdf-wcag:1.4.3-1"]
+         and within["left_out"] == [("book.pdf", "2.4.9-1", "2.4.9", 1)]
+         and [f.check for f in narrow["findings"]] == ["verapdf-wcag:4.1.2-17"]
+         and [entry[1] for entry in narrow["left_out"]] == ["2.4.9-1", "1.4.4-1", "1.4.3-1"]
+         and narrow["left_out"][2][3] == 150 and counted["left_out"] == []),
         ("a report no veraPDF writes is read as far as it goes, never stopping the run",
          lambda: not [s for s in survived if isinstance(s, Exception)]),
         ("a test number that isn't a number, a count that isn't one, and a check that's "

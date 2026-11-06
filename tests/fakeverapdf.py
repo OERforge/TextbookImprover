@@ -21,8 +21,10 @@ FAKE_VERAPDF_GARBLED, set, has a run with a profile print what isn't
 JSON, and a stack trace, as veraPDF does when it can't load one;
 FAKE_VERAPDF_STDERR is written to its stderr, as bytes, beside its
 report; FAKE_VERAPDF_KILLED, set, has a run with a profile end there,
-killed, as the kernel kills a JVM short of memory; and
-FAKE_VERAPDF_SLEEP is how many seconds it waits first.
+killed, as the kernel kills a JVM short of memory; FAKE_VERAPDF_REFLOW,
+set, fails any other PDF on 1.4.10-1 too, a figure with no bounding
+box, for a criterion WCAG 2.1 brought; and FAKE_VERAPDF_SLEEP is how
+many seconds it waits first.
 
 Copyright 2026 Robert Szarka
 
@@ -108,7 +110,11 @@ for name in files:
                           [{"status": "failed", "context": "root/doc[0]",
                             "errorMessage": "Text contains 10 repeated non space characters"}])]
     else:
-        rules = [ua, repeated, link]
+        rules = [ua, repeated, link] + ([rule(
+            "WCAG2.2", "1.4.10", 1, "SAFigure", "Figure shall have a bounding box", [
+                {"status": "failed", "context": "root/doc[0]/figures[0]",
+                 "errorMessage": "A figure has no bounding box"}])]
+            if os.environ.get("FAKE_VERAPDF_REFLOW") else [])
     jobs.append({"itemDetails": {"name": name, "size": 1}, "validationResult": [{
         "jobEndStatus": "normal",
         "profileName": "WCAG 2.2 machine validation profile" if profile else "PDF/UA-2",

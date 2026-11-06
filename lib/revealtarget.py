@@ -91,6 +91,7 @@ import shutil
 import subprocess
 import tempfile
 
+import headercells
 import highlighting
 import pandocversion
 
@@ -275,13 +276,15 @@ def flatten(html):
 
 def finish(html):
     """The writer's page put right: the viewport, each address src and
-    loaded with the page, reveal.js's own scroll view off, and each
-    heading at its level."""
+    loaded with the page, reveal.js's own scroll view off, each heading
+    at its level, and each empty header cell a data cell
+    (lib/headercells.py)."""
     html = VIEWPORT.sub(r"\1width=device-width, initial-scale=1.0\2", html, count=1)
     html = html.replace(INITIALIZE, INITIALIZE + NO_SCROLL_VIEW, 1)
     html = LEVELED.sub(lambda m: f"<h{m[3]}{m[2]}{m[4]}>{m[5]}</h{m[3]}>", html)
     html = LEVEL_ATTRIBUTE.sub("", html)
     html = DEFERRED.sub(r"\1", html)
+    html = headercells.empty_as_data(html)[0]
     return flatten(LAZY.sub(r"\1 src=", html))
 
 

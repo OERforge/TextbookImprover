@@ -323,6 +323,12 @@ def case_markdown(work):
     section = read(work, "html", "long-run--economies-of-scale.html") \
         if exists(work, "html", "long-run--economies-of-scale.html") else ""
     validated = epubcheck(os.path.join(work, "epub", "org.example.fixtures.epub"))
+    chapters = ""
+    if exists(work, "epub", "org.example.fixtures.epub"):
+        with zipfile.ZipFile(os.path.join(work, "epub", "org.example.fixtures.epub")) as z:
+            chapters = "".join(z.read(n).decode("utf-8") for n in z.namelist()
+                               if n.endswith(".xhtml") and n != "EPUB/nav.xhtml")
+    empty_header = re.compile(r"<th\b[^>]*>\s*</th>")
     return [
         ("a stem with a space gives ids without one, and epubcheck agrees",
          lambda: validated == [] if validated is not None else True),
@@ -334,6 +340,14 @@ def case_markdown(work):
         ("a ::: matrix table gets row headers, a plain one does not",
          lambda: page.count('<th scope="row">') == 2
          and '<th scope="col">Plain</th>' in page),
+        ("its empty corner is a data cell, on the page and in the EPUB, as W3C's tables "
+         "tutorial codes one, where Pandoc writes a header that heads nothing, and it's "
+         "marked for page.css to draw as one",
+         lambda: re.search(r'<thead>\s*<tr\b[^>]*>\s*<td class="empty-header"></td>\s*'
+                           r'<th scope="col">Left</th>', page)
+         and re.search(r'<thead>\s*<tr\b[^>]*>\s*<td class="empty-header"></td>\s*'
+                       r'<th scope="col">Left</th>', chapters)
+         and not empty_header.search(page) and not empty_header.search(chapters)),
         ("a link's aria-label survives",
          lambda: 'aria-label="DOI for Seidel 2014"' in page),
         ("an image named by path is copied beside the page under a safe "
@@ -4696,7 +4710,11 @@ def case_head_only_tables(work):
         return sum(m.group(0).count("<tr") for m in re.finditer(
             r"<%s\b.*?</%s>" % (part, part), table, re.S))
     tables = re.findall(r"<table\b.*?</table>", page, re.S)
-    shape = [(rows(t, "thead"), rows(t, "tbody"), t.count("<td")) for t in tables]
+    # Its data cells: an empty header cell is written as a <td> too, marked
+    # (lib/headercells.py).
+    corner = '<td class="empty-header"></td>'
+    shape = [(rows(t, "thead"), rows(t, "tbody"), t.count("<td") - t.count(corner))
+             for t in tables]
     words = glob.glob(os.path.join(work, "word", "*.docx"))
     repeated = []
     if words:
@@ -4715,12 +4733,12 @@ def case_head_only_tables(work):
         ("two header rows stay its head, and so does a header row with an empty <td> in "
          "its corner, its body's rows headed by a <th> each",
          lambda: len(shape) == 5 and shape[1] == (2, 2, 8) and shape[3] == (1, 2, 4)
-         and tables[3].count('<th scope="row">') == 2),
+         and tables[3].count('<th scope="row">') == 2 and tables[3].count(corner) == 1),
         ("a head whose first row is data is all body, which the header guess reads",
          lambda: len(shape) == 5 and shape[4][1] >= 2 and shape[4][2] >= 4),
         ("a head with a body after it is as its author divided it, a row of <td> in it a "
          "header still",
-         lambda: len(shape) == 5 and shape[2] == (2, 2, 10)),
+         lambda: len(shape) == 5 and shape[2] == (2, 2, 10) and tables[2].count(corner) == 1),
         ("and a Word file repeats only the header rows",
          lambda: repeated[:4] == [1, 2, 2, 1] and len(repeated) == 5 and repeated[4] <= 1),
         ("the output check finds no table without a data cell",

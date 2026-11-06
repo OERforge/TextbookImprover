@@ -61,6 +61,7 @@ on another `bin/` script.
 | `lib/mathjax.py` | Formulas a saved page holds only as MathJax drew them, made math again. |
 | `lib/cartridgesource.py` | A Common Cartridge read as a book's source: its outline, its pages, and the files they use. |
 | `lib/notes.py` | Footnote numbering and placement across pages, after rendering, for HTML and EPUB alike. |
+| `lib/headercells.py` | An empty header cell, which Pandoc's HTML writer makes a `<th>` whatever it holds, written as a `<td>` on a page, in an EPUB's chapters, and in a presentation, marked on a page and in an EPUB for `page.css` to draw as a header cell, and in an HTML source's copy where a declared header row or column holds one. |
 | `lib/pagefooter.py` | The `footer` setting for every format but an HTML page: an EPUB's documents, a PDF's page style, a Word file's footer, and the end of a Markdown or AsciiDoc file. |
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
@@ -173,6 +174,14 @@ Beyond the Word-to-HTML translation, each page gets:
   a focusable scroll wrapper. Pandoc's own stylesheet sets `display: block`
   on tables, which strips the table role from the accessibility tree; the
   wrapper restores it.
+- **An empty header cell becomes a data cell.** Pandoc's HTML writer makes
+  every cell of a head row a `<th>`, and every cell of a header column, so
+  a table whose rows are labeled down its first column has an empty `<th>`
+  at its top left, a header that heads nothing (axe-core's
+  empty-table-header). A page, an EPUB's chapters, and a presentation have
+  it written as a `<td>`, as W3C's tables tutorial codes an empty corner
+  (`lib/headercells.py`), and `page.css` draws it as Pandoc's stylesheets
+  draw a header cell.
 - **A merged title row becomes the caption.** Word has no caption feature
   for tables, so authors put the title in a merged first row, and Pandoc
   makes it a header cell spanning the table. The run recognizes the shape,

@@ -85,6 +85,15 @@ table {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+/* An empty header cell, which the run writes as a data cell and marks
+   (lib/headercells.py), a head row's or a row head's: the line Pandoc's
+   stylesheets, a page's and an EPUB's, draw over each header cell runs
+   over it, with a header cell's room, as it did when it was one. */
+thead > tr > td,
+td.empty-header {
+  border-top: 1px solid currentColor;
+  padding: 0.25em 0.5em 0.25em 0.5em;
+}
 /* A layout table (role="presentation"), which only lines things up, has
    no scroll region: on a narrow screen its cells stack instead, each
    row's one under another, in the order they're read. WCAG 1.4.10
@@ -159,7 +168,9 @@ table.steps[role="presentation"] > tbody {
 table.row-rules > thead,
 table.row-rules > tbody,
 table.row-rules > tfoot,
-table.row-rules > * > tr > th {
+table.row-rules > * > tr > th,
+table.row-rules > thead > tr > td,
+table.row-rules > * > tr > td.empty-header {
   border-top: 0;
   border-bottom: 0;
 }

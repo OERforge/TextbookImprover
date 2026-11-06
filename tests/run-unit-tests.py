@@ -229,7 +229,19 @@ def check_page_css():
     rules = _re.findall(r"border[-\w]*:[^;]*?light-dark\((#[0-9a-fA-F]{3,6}),\s*"
                         r"(#[0-9a-fA-F]{3,6})\)", screen)
     backgrounds = (("#fdfdfd", "#1a1a1a"), ("#ffffff", "#232629"))
+    empty_cell = _re.search(r"thead > tr > td,\s*td\.empty-header\s*\{\s*border-top: 1px solid "
+                            r"currentColor;\s*padding: 0\.25em 0\.5em 0\.25em 0\.5em;\s*\}",
+                            screen)
+    reset = _re.search(r"((?:table\.row-rules[^{,]*,\s*)+table\.row-rules[^{,]*)\{\s*"
+                       r"border-top: 0;", screen)
     return [
+        ("an empty header cell made a data cell, a head row's or a row head's marked, has "
+         "the line and the room Pandoc's stylesheets give a header cell, and a table of row "
+         "rules takes the line away from it as from a header cell",
+         lambda: empty_cell and reset
+         and "table.row-rules > * > tr > td.empty-header" in reset.group(1)
+         and "table.row-rules > thead > tr > td" in reset.group(1)
+         and "table.row-rules > * > tr > th" in reset.group(1)),
         ("each light-dark() color text is given clears 4.5:1 in light and dark mode, a "
          "page's and an EPUB's",
          lambda: pairs and all(contrast(expand(l), light) >= 4.5
@@ -246,6 +258,56 @@ def check_page_css():
          lambda: all(any(expand(c) == expand(l) for l, _ in pairs) for c in fixed)),
         ("no outline is a fixed color that dark mode's background matches",
          lambda: not outlines),
+    ]
+
+
+def check_header_cells():
+    """An empty header cell written as a data cell (lib/headercells.py),
+    as the pages, the EPUB's chapters, the presentations, and the copy of
+    an HTML source have it."""
+    import headercells
+    import htmlremediate
+    import revealtarget
+    each = lambda html, **kw: headercells.empty_as_data(html, **kw)
+    page = ("<table>\n<tr><td></td><td>Left</td></tr>\n<tr><td>Up</td><td>1</td></tr>\n"
+            "<tr><td></td><td>2</td></tr>\n</table>")
+    copied, counts = htmlremediate.remediate_tables(
+        page, [{"supplier": "sidecar", "headers": "both", "index": 0, "rows": 3, "first": ""}])
+    deck = revealtarget.finish("<html><head></head><body><table><thead><tr><th></th>"
+                               "<th>A</th></tr></thead></table></body></html>")
+    return [
+        ("an empty one is a td, its attributes kept but scope and abbr, which a data cell "
+         "doesn't take, whatever their quotes",
+         lambda: each("<th></th>") == ("<td></td>", 1)
+         and each('<th scope="col" style="text-align: center;"></th>')
+         == ('<td style="text-align: center;"></td>', 1)
+         and each("<th abbr=\"x\" scope='row' title=\"a>b\"></th>")
+         == ('<td title="a>b"></td>', 1)
+         and each("<TH SCOPE=col></TH>") == ("<td></td>", 1)),
+        ("white space and a no-break space are empty, as a character or a reference, and "
+         "kept",
+         lambda: each("<th>&nbsp;</th><th>&#160;</th><th>&#xA0;</th><th>\u00a0 \n</th>")
+         == ("<td>&nbsp;</td><td>&#160;</td><td>&#xA0;</td><td>\u00a0 \n</td>", 4)),
+        ("a cell with text or any element isn't, nor a thead",
+         lambda: each('<thead><tr><th>Name</th><th><img alt="" src="a.png"></th>'
+                      "<th><span></span></th></tr></thead>")[1] == 0),
+        ("marked, it's of class empty-header, beside the classes it has, however quoted, "
+         "and once",
+         lambda: each("<th></th>", marked=True)[0] == '<td class="empty-header"></td>'
+         and each("<th class='a b'></th><th class=c></th><th class=\"empty-header\"></th>",
+                  marked=True)[0]
+         == '<td class="a b empty-header"></td><td class="c empty-header"></td>'
+            '<td class="empty-header"></td>'
+         and each('<th data-class="x"></th>', marked=True)[0]
+         == '<td class="empty-header" data-class="x"></td>'),
+        ("the copy of an HTML source has a head row's empty cell a td, and a header column's, "
+         "unmarked, the author's stylesheet its own, the others header cells",
+         lambda: copied == "<table>\n<tr><td></td><th scope=\"col\">Left</th></tr>\n"
+                           "<tr><th scope=\"row\">Up</th><td>1</td></tr>\n"
+                           "<tr><td></td><td>2</td></tr>\n</table>"
+         and counts["header_rows"] == counts["header_columns"] == 1),
+        ("a presentation's is a td, unmarked, its theme drawing a th as it draws a td",
+         lambda: "<thead><tr><td></td><th>A</th></tr></thead>" in deck),
     ]
 
 
@@ -8324,6 +8386,7 @@ GROUPS = [
     ("the content prefix", check_content_prefix),
     ("the wrapper module's name", check_wrapper_title),
     ("the page stylesheet's contrast, light and dark", check_page_css),
+    ("an empty header cell a data cell", check_header_cells),
     ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
     ("a page's notes group", check_notes_groups),

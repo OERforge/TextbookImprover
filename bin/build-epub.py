@@ -64,6 +64,7 @@ except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
 from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
+import headercells  # noqa: E402
 import highlighting  # noqa: E402
 import languages  # noqa: E402
 import pagefooter  # noqa: E402
@@ -255,8 +256,9 @@ def number_notes(text):
 
 
 def retitle_chapters(path, texts=None):
-    """Give each chapter file a <title> that is its heading's text, and
-    its footnotes their numbers.
+    """Give each chapter file a <title> that is its heading's text, its
+    footnotes their numbers, and each empty header cell of its tables a
+    data cell's element (lib/headercells.py).
 
     Pandoc titles every chapter file by its file name ("ch002.xhtml"), a
     WCAG 2.4.2 failure on every page and what Ace reports first. The
@@ -307,6 +309,7 @@ def retitle_chapters(path, texts=None):
                                          text, count=1)
                         retitled += 1
                 text, _ = number_notes(text)
+                text, _ = headercells.empty_as_data(text, marked=True)
                 data = text.encode("utf-8")
             zout.writestr(info, data)
     os.replace(tmp, path)

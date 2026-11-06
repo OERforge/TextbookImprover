@@ -37,6 +37,7 @@ import shutil
 import tempfile
 from urllib.parse import unquote
 
+import headercells
 import sidecars
 from names import case_match
 
@@ -83,8 +84,12 @@ def _text(fragment):
 
 
 def _header_cell(match, scope):
+    """The cell as a header cell of the scope, or, holding nothing but
+    white space, as a data cell, as the pages write one
+    (lib/headercells.py)."""
     attrs = re.sub(r'\sscope\s*=\s*("[^"]*"|\'[^\']*\'|\S+)', "", match.group(2))
-    return '<th%s scope="%s">%s</th>' % (attrs, scope, match.group(3))
+    header = '<th%s scope="%s">%s</th>' % (attrs, scope, match.group(3))
+    return headercells.empty_as_data(header)[0]
 
 
 def _row_cells(row, scope, first_only):

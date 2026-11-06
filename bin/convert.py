@@ -87,6 +87,7 @@ try:
     import texremediate
     import docxtarget
     import downsample
+    import headercells
     import highlighting
     import htmlrepair
     import languages
@@ -5493,10 +5494,12 @@ def render_html(target, pages, base, fragments, language, env):
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
         run(command, env=env, cwd=base)
-        # The notes' heading, which Pandoc's writer doesn't write.
+        # The notes' heading, which Pandoc's writer doesn't write, and
+        # each empty header cell a data cell (lib/headercells.py).
         with open(out, encoding="utf-8") as fh:
             text = fh.read()
         headed = notes_lib.titled(text, " ".join(str(target["notes.title"] or "").split()))
+        headed = headercells.empty_as_data(headed, marked=True)[0]
         if headed != text:
             with open(out, "w", encoding="utf-8") as fh:
                 fh.write(headed)

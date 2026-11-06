@@ -4502,6 +4502,20 @@ def overfull_warning(found, where="PDF"):
             + ".")
 
 
+# The pages of the PDF a run of LaTeX wrote, as LuaTeX's last lines say:
+# "Output written on input.pdf (7 pages, 12345 bytes).", which PDF_MACROS
+# leaves in place (it reports after the last page, not from LuaTeX's
+# stop_run callback).
+PAGES_WRITTEN = re.compile(r"Output written on .*?\((\d+) pages?")
+
+
+def pages_written(output):
+    """The pages of the PDF LaTeX wrote, as its output says, or None where
+    it doesn't say."""
+    found = PAGES_WRITTEN.search(output or "")
+    return int(found.group(1)) if found else None
+
+
 # What PDF_MACROS says it kept of the fill-in blanks it draws as lines,
 # at the end of a run: how many, in a face whose underscore it couldn't
 # measure, named on the line after (its PostScript name, which fits a

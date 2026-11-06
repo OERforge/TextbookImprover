@@ -1043,8 +1043,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         result["block_headings"] = UNTAGGED_BLOCKS not in result["log"]
         os.makedirs(os.path.dirname(os.path.abspath(out_pdf)), exist_ok=True)
         shutil.copyfile(os.path.join(work, "deck.pdf"), out_pdf)
-        found = re.search(r"Output written on .*?\((\d+) pages?", result["log"])
-        result["pages"] = int(found.group(1)) if found else 0
+        result["pages"] = latexbuild.pages_written(result["log"]) or 0
         result["ok"] = True
     finally:
         shutil.rmtree(work, ignore_errors=True)

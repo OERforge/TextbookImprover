@@ -5471,6 +5471,11 @@ def sized_checks(sized_path, sized_said):
         ("a page number of four digits fits its line of the contents",
          lambda: re.search(r"Its section\W*100\d", contents)
          and "in the contents" not in sized_said),
+        ("the build's last line counts the PDF's pages, and the book's that hold its "
+         "images, apart",
+         lambda: reader is not None and len(reader.pages) > 2
+         and f"org.example.sized.pdf: {len(reader.pages)} page(s); the book's 2 page(s) "
+             "hold 1 image(s), 0 without alternative text." in sized_said),
         ("a box that opens with a heading takes the rule above it to the next page with it",
          lambda: rule_over(r"Thebox.slegend") is not None and rule_over(r"Thebox.slegend") < 60),
         # A figure alone begins no paragraph, which had left the heading

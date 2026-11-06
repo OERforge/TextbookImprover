@@ -3019,6 +3019,24 @@ def check_tlmgr_command():
     ]
 
 
+def check_pages_written():
+    """The pages of the PDF LaTeX wrote, as its last lines say, which a
+    book's build counts in its last line beside the book's pages, and a
+    deck's and a LaTeX book's own build in theirs."""
+    import latexbuild
+    said = ("TextbookImprover blanks kept: 2, in the face\nLatinModern-Regular\n"
+            "Output written on input.pdf (948 pages, 12345678 bytes).\n"
+            "Transcript written on input.log.\n")
+    return [
+        ("the PDF's pages, a page of one, and none where LaTeX doesn't say, or there's "
+         "nothing it said",
+         lambda: latexbuild.pages_written(said) == 948
+         and latexbuild.pages_written("Output written on deck.pdf (1 page, 2048 bytes).") == 1
+         and latexbuild.pages_written("No pages of output.\n") is None
+         and latexbuild.pages_written(None) is None),
+    ]
+
+
 def check_fitted_blanks():
     """The build's count of lines too wide for their text, read from what
     LaTeX said: a line whose fill-in blank PDF_MACROS drew shorter to fit,
@@ -8239,6 +8257,7 @@ GROUPS = [
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
+    ("the pages of the PDF LaTeX wrote, as it says", check_pages_written),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),
     ("a CFF charstring's end, as the font setting reads it", check_charstring_end),
     ("a LaTeX book's tagged copy, the font setting before its class", check_tagged_copy_fonts),

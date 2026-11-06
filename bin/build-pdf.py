@@ -1732,6 +1732,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         result = subprocess.run(command, cwd=base, capture_output=True,
                                 text=True, env=environment)
         said, source = latex_said(log_path)
+        # The PDF's own pages, which the last line counts beside the book's.
+        printed = latexbuild.pages_written(said)
         # The default's faces given way to Latin Modern (default_faces),
         # whether LaTeX went on to finish or not.
         lacking = list(dict.fromkeys(FACE_MISSING.findall(said)))
@@ -1793,7 +1795,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
 
     print(os.path.abspath(out_path))          # for whatever runs next
     found = assembly.found
-    print(f"Wrote {out_path}: {len(assembly.pages)} page(s), "
+    # The PDF's pages, where LaTeX said how many, and the book's, which
+    # hold the images: the book's alone had been "page(s)", a PDF's 7 pages
+    # said as the book's 2.
+    print(f"Wrote {out_path}: " + (f"{printed} page(s); " if printed else "")
+          + f"the book's {len(assembly.pages)} page(s) hold "
           f"{found['images']} image(s), {found['without_alt']} without "
           "alternative text.", file=sys.stderr)
     return 0

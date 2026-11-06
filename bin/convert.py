@@ -4557,8 +4557,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         out_path = os.path.join(target.output_dir, name)
         shutil.copyfile(pdf, out_path)
         written.append(out_path)
-        found = re.search(r"Output written on .*?\((\d+) pages?", log)
-        pages += int(found.group(1)) if found else 0
+        pages += latexbuild.pages_written(log) or 0
         unnamed += log.count("Alternative text for graphic is missing")
         for character, n in latexbuild.missing_characters(log.splitlines())[0].items():
             missing[character] = missing.get(character, 0) + n

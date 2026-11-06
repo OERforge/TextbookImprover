@@ -4451,9 +4451,10 @@ def case_formula_titles(work):
     a PDF's bookmark has them, a/b, ℝⁿ, √x, where Pandoc's writers gave the
     formula's TeX, and the EPUB its MathML's letters run together: a page's
     <title>, a piece's the split cut, an EPUB chapter's, a Word file's, and
-    a Markdown copy's front matter, its heading keeping the formula. A
-    piece's and a chapter's are of the formula as math-repair.lua repaired
-    it (title-formulas.lua, after it). A formula that can't be text, a
+    a Markdown copy's front matter, its heading keeping the formula. Each
+    is of the formula as math-repair.lua repaired it (title-formulas.lua,
+    after it), a page's own title too, and a cartridge's name for the page
+    with it. A formula that can't be text, a
     binomial, is its TeX between dollar signs, said once, without Pandoc's
     warning of it; the texts the filters note reach no output; and the
     Markdown copy, read again, has its heading for its title heading, its
@@ -4485,26 +4486,35 @@ def case_formula_titles(work):
                 if name.startswith("EPUB/text/ch"):
                     found = re.search(rb"<title>(.*?)</title>", data, re.S)
                     chapters[name] = html_lib.unescape(found.group(1).decode("utf-8"))
-    word_title = None
-    if exists(work, "word", "01-limits.docx"):
-        with zipfile.ZipFile(os.path.join(work, "word", "01-limits.docx")) as z:
-            word_title = html_lib.unescape(re.search(
-                r"<dc:title>(.*?)</dc:title>", z.read("docProps/core.xml").decode("utf-8")).group(1))
-            leaked += ["word/" + n for n in z.namelist() if b"formula-texts" in z.read(n)]
+    word_titles = {}
+    for name in ("01-limits", "02-choose"):
+        if exists(work, "word", name + ".docx"):
+            with zipfile.ZipFile(os.path.join(work, "word", name + ".docx")) as z:
+                word_titles[name] = html_lib.unescape(re.search(
+                    r"<dc:title>(.*?)</dc:title>",
+                    z.read("docProps/core.xml").decode("utf-8")).group(1))
+                leaked += ["word/" + n for n in z.namelist() if b"formula-texts" in z.read(n)]
+    word_title = word_titles.get("01-limits")
+    manifest = read(work, "imsmanifest.xml") if exists(work, "imsmanifest.xml") else ""
+    named = [html_lib.unescape(n) for n in re.findall(r"<title>(.*?)</title>", manifest)]
     for folder in ("html", "src"):
         for path in glob.glob(os.path.join(work, folder, "*")):
             if os.path.isfile(path) and "formula-texts" in read(path):
                 leaked.append(path)
     copy = read(work, "src", "01-limits.md") if exists(work, "src", "01-limits.md") else ""
+    chosen = read(work, "src", "02-choose.md") if exists(work, "src", "02-choose.md") else ""
     # The Markdown copy read again as a source, its title the heading's text.
     again = work + "-again"
     os.makedirs(again)
-    if copy:
-        with open(os.path.join(again, "01-limits.md"), "w", encoding="utf-8") as fh:
-            fh.write(copy)
+    for name, text in (("01-limits", copy), ("02-choose", chosen)):
+        if text:
+            with open(os.path.join(again, name + ".md"), "w", encoding="utf-8") as fh:
+                fh.write(text)
     convert(again, "targets:\n  html:\n    format: html\n", fixtures=())
     read_again = read(again, "html", "01-limits.html") if exists(again, "html", "01-limits.html") \
         else ""
+    chosen_again = read(again, "html", "02-choose.html") \
+        if exists(again, "html", "02-choose.html") else ""
     return [
         ("a page's title has its heading's formulas as text, and a piece's the split cut, a "
          "repaired formula's as repaired",
@@ -4520,9 +4530,17 @@ def case_formula_titles(work):
          lambda: word_title == "Limits a/b and ℝⁿ"
          and "title: Limits a/b and ℝⁿ\n" in copy
          and "# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$" in copy),
+        ("a page's own title has a repaired formula as repaired, as its heading has it, in "
+         "its <title>, a cartridge's name for it, a Word file's title, and a Markdown copy's "
+         "front matter",
+         lambda: page_title("02-choose.html") == "Choosing $\\binom{n}{k}$ and X̄"
+         and "Choosing $\\binom{n}{k}$ and X̄" in named
+         and word_titles.get("02-choose") == "Choosing $\\binom{n}{k}$ and X̄"
+         and "title: Choosing \\$\\\\binom{n}{k}\\$ and X̄\n" in chosen
+         and "# Choosing $\\binom{n}{k}$ and $\\bar{X}$" in chosen),
         ("the binomial, which can't be text, is its TeX in its page's title, said once, "
          "without Pandoc's warning",
-         lambda: (page_title("02-choose.html") or "").startswith("Choosing $\\binom{n}{k}$ and ")
+         lambda: page_title("02-choose.html") == "Choosing $\\binom{n}{k}$ and X̄"
          and said.count("formula(s) in headings couldn't be written as text") == 1
          and "NOTE: 1 formula(s) in headings couldn't be written as text, as the others are, "
              "and are their TeX in a title made from their heading" in said
@@ -4534,6 +4552,10 @@ def case_formula_titles(work):
          lambda: read_again and len(re.findall(r"<h1\b", read_again)) == 1
          and html_lib.unescape(re.search(r"<title>(.*?)</title>", read_again).group(1))
          == "Limits a/b and \u211d\u207f"),
+        ("and so does the copy of a page whose heading's formula was repaired",
+         lambda: chosen_again and len(re.findall(r"<h1\b", chosen_again)) == 1
+         and html_lib.unescape(re.search(r"<title>(.*?)</title>", chosen_again).group(1))
+         == "Choosing $\\binom{n}{k}$ and X̄"),
     ]
 
 

@@ -2866,7 +2866,9 @@ end
 -- formula. The texts of the titles made from a heading outside the
 -- filters, a piece's and an EPUB chapter's, are noted after math-repair.lua
 -- (title-formulas.lua), which can change a formula's TeX; this one is made
--- here, from the formula as the source wrote it.
+-- here, from the formula as the source wrote it, for the filters before
+-- then, and made again there from the formula as repaired, which the
+-- heading shows (title-is-heading marks it).
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
 
@@ -2951,6 +2953,7 @@ function Pandoc(doc)
           and declared:find(h1, 1, true) ~= nil)
     if h1_wins then
       doc.meta.title = pandoc.MetaInlines(plain_formulas(heading.content))
+      doc.meta['title-is-heading'] = pandoc.MetaBool(true)
     elseif (folded(h1):match('^[%d%.]+%s(.*)$') or ''):find(folded(declared), 1, true) then
       -- The title stands without the number its heading puts before it:
       -- it's found in what follows the number, so a title that is the

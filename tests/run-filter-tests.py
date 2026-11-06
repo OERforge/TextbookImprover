@@ -1196,6 +1196,52 @@ def case_declared_formula_title(work):
     ]
 
 
+def case_title_after_repairs(work):
+    """A page's own title made from its heading is made again after
+    math-repair.lua, of the heading as repaired, as title-formulas.lua runs
+    last, where figures-and-tables.lua made it of the formula as the source
+    wrote it, and the mark that says so goes with it; a declared title is
+    left as it is."""
+    os.makedirs(work, exist_ok=True)
+    heading = "# Choosing $\\overset{\u2013}{X}$ and $\\frac{a}{b}$\n\nText.\n"
+    with open(os.path.join(work, "own.md"), "w", encoding="utf-8") as fh:
+        fh.write(heading)
+    with open(os.path.join(work, "declared.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Declared\n---\n\n" + heading)
+    with open(os.path.join(work, "words.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Words alone\n\nText $x$.\n")
+
+    def filtered(name, *filters):
+        result = subprocess.run(
+            ["pandoc", "-f", "markdown", "-t", "json", name + ".md"]
+            + [part for f in filters for part in ("--lua-filter", os.path.join(BIN, f))],
+            capture_output=True, text=True, cwd=work)
+        return json.loads(result.stdout)["meta"]
+
+    def text(value):
+        return "".join(i["c"] if i["t"] == "Str" else " " for i in value["c"])
+    chain = ("figures-and-tables.lua", "math-repair.lua", "title-formulas.lua")
+    first = filtered("own", "figures-and-tables.lua")
+    own = filtered("own", *chain)
+    declared = filtered("declared", *chain)
+    words = filtered("words", *chain)
+    return [
+        ("figures-and-tables.lua makes the title of the formula as written, and marks it",
+         lambda: text(first["title"]) == "Choosing X^(\u2013) and a/b"
+         and "title-is-heading" in first),
+        ("title-formulas.lua makes it again of the heading as math-repair.lua leaves it, "
+         "the mark gone",
+         lambda: text(own["title"]) == "Choosing X\u0304 and a/b"
+         and "title-is-heading" not in own
+         and [i["c"][1] for i in own["title-heading"]["c"] if i["t"] == "Math"]
+         == ["\\bar{X}", "\\frac{a}{b}"]),
+        ("a declared title is left as it is",
+         lambda: text(declared["title"]) == "Declared" and "title-is-heading" not in declared),
+        ("a heading with no formula is its title, and its mark goes too",
+         lambda: text(words["title"]) == "Words alone" and "title-is-heading" not in words),
+    ]
+
+
 # Each line one paragraph, its first word its name: OpenStax's en dashes
 # written for minus signs, and the ranges beside them.
 MINUS_TEXT = """\
@@ -1513,6 +1559,7 @@ CASES = [
     ("an en dash in text made a minus sign", case_minus_in_text),
     ("a title's formulas as text, after the repairs", case_title_formulas),
     ("a declared title that is its heading's, its formulas as text", case_declared_formula_title),
+    ("a title made from its heading, after the repairs", case_title_after_repairs),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),
     ("sidecars Excel saved, with files appended", case_sidecar_marks),

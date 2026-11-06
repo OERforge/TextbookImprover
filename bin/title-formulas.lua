@@ -16,6 +16,13 @@
 -- as in its body). target-blocks.lua takes the texts out of a page before
 -- a writer sees it.
 --
+-- A page's own title made from its heading (figures-and-tables.lua marks
+-- it title-is-heading) is made again here, of the heading as
+-- math-repair.lua leaves it, so that it says what the heading says, where
+-- it had been of the formula as the source wrote it: a heading's
+-- \overset{–}{X} was X̄ on the page and X^(–) in the page's <title>, the
+-- contents, and a cartridge's name for it. The mark goes with it.
+--
 -- A formula math-text.lua can't write, a matrix, is its TeX between
 -- dollar signs in those titles too, and each is recorded for the run to
 -- say once which formulas are (TITLE_FORMULAS: one formula of a page's a
@@ -41,13 +48,14 @@ local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_F
                                            'math-text.lua' }))
 
 local function note(doc)
-  local texts, any, kept = {}, false, {}
+  local texts, any, kept, plain = {}, false, {}, {}
   local function each(inlines)
     pandoc.Inlines(inlines):walk({
       Math = function(math_)
         if texts[math_.text] == nil then
           local text, tex = mathtext.title_text(math_)
           texts[math_.text] = pandoc.MetaString(text)
+          plain[math_.text] = text
           any = true
           if tex then kept[#kept + 1] = math_.text end
         end
@@ -56,7 +64,14 @@ local function note(doc)
   end
   if doc.meta['title-heading'] ~= nil then each(doc.meta['title-heading']) end
   doc.blocks:walk({ Header = function(heading) each(heading.content) end })
-  if not any then return nil end
+  local remade = doc.meta['title-is-heading'] ~= nil
+  doc.meta['title-is-heading'] = nil
+  if remade and doc.meta['title-heading'] ~= nil then
+    doc.meta.title = pandoc.MetaInlines(pandoc.Inlines(doc.meta['title-heading']):walk({
+      Math = function(math_) return pandoc.Str(plain[math_.text]) end,
+    }))
+  end
+  if not any then return remade and doc or nil end
   doc.meta['formula-texts'] = pandoc.MetaMap(texts)
   local found = os.getenv('TITLE_FORMULAS')
   if #kept > 0 and found and found ~= '' then

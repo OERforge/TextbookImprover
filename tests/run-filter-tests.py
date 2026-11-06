@@ -1101,6 +1101,64 @@ def case_math_repair(work):
     ]
 
 
+def case_title_formulas(work):
+    """title-formulas.lua, last at the filter stage, as convert.py runs it:
+    each formula of a page's headings as text, by its TeX as math-repair.lua
+    leaves it, for the titles made outside the filters (a piece's, an EPUB
+    chapter's); a formula that can't be text recorded for the run to say,
+    and no warning of it; and the page's own title, which
+    figures-and-tables.lua makes, its formulas as text too."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\n"
+                 "## The $\\sqrt{x}$ part\n\nText.\n\n"
+                 "## The $\\begin{pmatrix}a & b\\end{pmatrix}$ row\n\nMore.\n\n"
+                 "## The $\\begin{pmatrix}a & b\\end{pmatrix}$ row again\n\nAgain.\n\n"
+                 "## The mean $\\overset{\u2013}{X} \u2013 \u00b5$\n\nLast $\\sqrt{y}$.\n")
+    with open(os.path.join(work, "plain.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Plain\n\n## Words alone\n\nText $\\frac{c}{d}$.\n")
+    found = os.path.join(work, "title-formulas.txt")
+    environment = dict(os.environ, PROMOTE_H1_TO_TITLE="always", TITLE_FORMULAS=found)
+
+    def filtered(name):
+        result = subprocess.run(
+            ["pandoc", "-f", "markdown", "-t", "json", name + ".md",
+             "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+             "--lua-filter", os.path.join(BIN, "math-repair.lua"),
+             "--lua-filter", os.path.join(BIN, "title-formulas.lua")],
+            capture_output=True, text=True, env=environment, cwd=work)
+        return json.loads(result.stdout), result.stderr
+    page, said = filtered("page")
+    plain, plain_said = filtered("plain")
+    meta = page["meta"]
+    texts = {tex: entry["c"] for tex, entry in meta.get("formula-texts", {}).get("c", {}).items()}
+    with open(found, encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh]
+    title = "".join(i["c"] if i["t"] == "Str" else " " for i in meta["title"]["c"])
+    return [
+        ("each formula of the headings is its text, by its TeX, a fraction's, a script's, "
+         "and a root's, a formula outside a heading not among them",
+         lambda: texts.get("\\frac{a}{b}") == "a/b" and texts.get("\\mathbb{R}^n") == "\u211d\u207f"
+         and texts.get("\\sqrt{x}") == "\u221ax" and "\\sqrt{y}" not in texts),
+        ("by its TeX as math-repair.lua leaves it, which the writers are given, a repaired "
+         "one's repaired",
+         lambda: texts.get("\\bar{X} - \u03bc") == "X\u0304 \u2212 \u03bc"
+         and "\\overset{\u2013}{X} \u2013 \u00b5" not in texts and len(texts) == 5),
+        ("a formula that can't be text is its TeX between dollar signs, recorded once by "
+         "its page for the run to say, and no warning of it",
+         lambda: texts.get("\\begin{pmatrix}a & b\\end{pmatrix}") == "$\\begin{pmatrix}a & b\\end{pmatrix}$"
+         and rows == [{"page": "page.md", "tex": "\\begin{pmatrix}a & b\\end{pmatrix}"}]
+         and "Could not convert" not in said),
+        ("the page's own title has its heading's formulas as text, and its title heading "
+         "the formulas",
+         lambda: title == "Limits a/b and \u211d\u207f"
+         and [i["t"] for i in meta["title-heading"]["c"]].count("Math") == 2),
+        ("a page whose headings have no formula is given no texts, and nothing recorded",
+         lambda: "formula-texts" not in plain["meta"] and len(rows) == 1
+         and "Could not convert" not in plain_said),
+    ]
+
+
 def case_media(work):
     """Word's content types, alt text, and keys that must stay distinct."""
     out = Converted(work, ["media-a", "media-b"])
@@ -1240,6 +1298,7 @@ CASES = [
     ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
     ("math repaired, and math typed as text", case_math_repair),
+    ("a title's formulas as text, after the repairs", case_title_formulas),
     ("media naming, alt text, and keys", case_media),
     ("media keys when converting in one pass", case_media_keys_single_pass),
     ("sidecars Excel saved, with files appended", case_sidecar_marks),

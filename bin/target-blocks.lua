@@ -370,6 +370,9 @@ local function title_heading(doc)
   -- A deck's slide level, which decks.py recorded when the deck was read,
   -- and the PDF's writer is given as an option.
   meta['deck-slide-level'] = nil
+  -- The headings' formulas as text, which the split and the EPUB's titles
+  -- read (title-formulas.lua).
+  meta['formula-texts'] = nil
   -- The page's language, which convert.py decided once for every target
   -- (lib/languages.py): the page's lang, in place of the book's that -M
   -- gave, for every writer but Markdown's and AsciiDoc's, whose lang is

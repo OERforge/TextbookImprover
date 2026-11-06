@@ -2857,13 +2857,23 @@ end
 -- A title's formulas as text: a page's <title>, its entry in the contents,
 -- and a cartridge's name for it hold no MathML, and Pandoc's writers give a
 -- formula there as its TeX ("\pmb{t}-Probability Table", OpenIntro
--- Statistics's t-table). Pandoc's plain writer sets one in Unicode where it
--- can (t, x²); the heading on the page keeps its formula.
+-- Statistics's t-table). math-text.lua writes one as a PDF's bookmark has
+-- it, x² + y₁, a/b, √x, ℝⁿ, through Pandoc's plain writer, in Unicode
+-- where texmath can (t, x²); a formula it can't write, a matrix, is its
+-- TeX between dollar signs, as the plain writer gives it, and as it gave
+-- a fraction before ($\frac{a}{b}$ was a page's title), the writer's
+-- warning silenced (title_text). The heading on the page keeps its
+-- formula. The texts of the titles made from a heading outside the
+-- filters, a piece's and an EPUB chapter's, are noted after math-repair.lua
+-- (title-formulas.lua), which can change a formula's TeX; this one is made
+-- here, from the formula as the source wrote it.
+local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                           'math-text.lua' }))
+
 local function plain_formulas(inlines)
   return inlines:walk({
     Math = function(math)
-      local text = pandoc.write(pandoc.Pandoc({ pandoc.Plain({ math }) }), 'plain')
-      return pandoc.Str((text:gsub('%s+$', '')))
+      return pandoc.Str((mathtext.title_text(math)))
     end,
   })
 end

@@ -85,7 +85,7 @@ end
 
 local PIPELINE_META = { 'source-page', 'source-title', 'page-part',
                         'page-position', 'page-parents', 'page-role', 'page-type',
-                        'header-includes', 'page-language' }
+                        'header-includes', 'page-language', 'formula-texts' }
 
 local BOOKKEEPING = { 'data-th-index', 'data-cc-ordinal', 'data-th-marker' }
 

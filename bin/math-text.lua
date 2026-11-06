@@ -1,6 +1,8 @@
--- math-text.lua -- a formula as text, for a PDF's bookmark: loaded by
--- pdf-target.lua, for a heading's, and deck-pdf.lua, for a slide's, with
--- dofile, so that both write the same text.
+-- math-text.lua -- a formula as text, for a PDF's bookmark and a title:
+-- loaded by pdf-target.lua, for a heading's bookmark, deck-pdf.lua, for a
+-- slide's, figures-and-tables.lua, for a page's <title>, and
+-- title-formulas.lua, for the titles made outside the filters, with
+-- dofile, so that all of them write the same text.
 --
 -- The text is Pandoc's plain writer's, in Unicode where texmath can: x²,
 -- α ≤ β, p̂. Where it can't write a formula, it gives the formula's TeX
@@ -338,6 +340,21 @@ function M.text(math_)
   local warned = {}
   local text = convert(math_.text:match('^%s*(.-)%s*$'), warned)
   return text or nil, warned
+end
+
+-- A formula's text in a title, a page's <title>, a piece's, an EPUB
+-- chapter's, its entry in the contents, and a cartridge's name for it,
+-- which hold no MathML, and where Pandoc's writers give a formula as its
+-- TeX: (text, false), or, for one text() can't write, a matrix, (its TeX
+-- between dollar signs, true), as the plain writer gives it. The plain
+-- writer's warning that such a formula is rendered as TeX is silenced
+-- (pandoc.log.silence, Pandoc 3.2 on), since on the page it isn't: the run
+-- says once which formulas are their TeX in titles (title-formulas.lua).
+function M.title_text(math_)
+  local _, text = pandoc.log.silence(M.text, math_)
+  if text then return text, false end
+  local fence = math_.mathtype == 'DisplayMath' and '$$' or '$'
+  return fence .. math_.text .. fence, true
 end
 
 return M

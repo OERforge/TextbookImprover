@@ -40,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import csv
 import importlib.util
 import json
 import os
@@ -308,6 +309,48 @@ def case_heading_as_written(work):
          " without a group still",
          lambda: out.stems == ["book--one", "book--stressed-and-x-2", "book--under-two"]
          and "Note" in kinds("book--one") and '"part."' in out.text("book--one")),
+    ]
+
+
+def case_formula_titles(work):
+    """A piece's title, for its <title> and its entry in the contents, is
+    its heading's words with each formula as its text, as
+    title-formulas.lua noted it, last at the filter stage: √x, X̄ − μ as
+    math-repair.lua left the formula, and a matrix its TeX between dollar
+    signs; its name and the page-names sidecar's heading are its words
+    with the formula's TeX, as they were."""
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Limits $\\frac{a}{b}$\n\nIntro.\n\n## The $\\sqrt{x}$ part\n\nText.\n\n"
+                 "## The $\\begin{pmatrix}a & b\\end{pmatrix}$ row\n\nMore.\n\n"
+                 "## The mean $\\overset{–}{X} – µ$\n\nLast.\n")
+    run(["pandoc", "book.md", "-t", "json", "-o", "book.json"], work)
+    run(["pandoc", "-f", "json", "-t", "json", "book.json", "-o", "book.filtered.json",
+         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+         "--lua-filter", os.path.join(BIN, "math-repair.lua"),
+         "--lua-filter", os.path.join(BIN, "title-formulas.lua")], work,
+        dict(os.environ, PROMOTE_H1_TO_TITLE="always",
+             IMAGE_ALT_MISSING=os.path.join(work, "alt.csv"),
+             TABLE_CAPTIONS_MISSING=os.path.join(work, "caps.csv")))
+    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
+    with open(os.path.join(work, "page-names-new.csv"), encoding="utf-8-sig", newline="") as fh:
+        headings = {row["name"]: row["heading"] for row in csv.DictReader(fh)}
+    return [
+        ("a piece's title has its heading's formulas as text, a repaired one's as repaired, "
+         "and one that can't be text its TeX between dollar signs",
+         lambda: out.title("book--the-sqrt-x-part") == "The √x part"
+         and out.title("book--the-mean-bar-x") == "The mean X̄ − μ"
+         and out.title("book--the-begin-pmatrix-a-b-end-pmatrix-row")
+         == "The $\\begin{pmatrix}a & b\\end{pmatrix}$ row"),
+        ("its name and the sidecar's heading are its words with the formula's TeX, as "
+         "they were",
+         lambda: out.stems == ["book", "book--the-sqrt-x-part",
+                               "book--the-begin-pmatrix-a-b-end-pmatrix-row",
+                               "book--the-mean-bar-x"]
+         and headings.get("book--the-sqrt-x-part") == "The \\sqrt{x} part"
+         and headings.get("book--the-mean-bar-x") == "The mean \\bar{X} - μ"),
+        ("the source's own page keeps its title, its formula's text",
+         lambda: out.title("book") == "Limits a/b"),
     ]
 
 
@@ -709,6 +752,7 @@ CASES = [
     ("restyling a Title-styled source", case_restyle),
     ("what a piece is", case_pieces),
     ("a cut heading as it was written", case_heading_as_written),
+    ("a piece's title, its formulas as text", case_formula_titles),
     ("document metadata stays on the document", case_document_meta),
     ("the page-names sidecar", case_names),
     ("levels and refusals", case_levels),

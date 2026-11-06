@@ -3384,6 +3384,83 @@ def check_heading_bookmarks():
     ]
 
 
+def check_formula_titles():
+    """A title's formulas as text where the title is made outside the
+    filters, from what title-formulas.lua noted of the page's headings (a
+    formula's TeX to its text): an EPUB chapter's <title> (build-epub.py's
+    retitle_chapters), whose heading has the formula as MathML with its
+    TeX as an annotation; a piece's title (split-pages.py's heading_text),
+    whose name and sidecar keys keep the TeX; and the run's note of those
+    kept as TeX (convert.py's say_title_formulas)."""
+    import contextlib
+    import io
+    import bookassembly
+    build_epub = load(os.path.join(ROOT, "bin", "build-epub.py"), "build_epub_titles")
+    split = load(os.path.join(ROOT, "bin", "split-pages.py"), "split_titles")
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_titles")
+    work = scratch("formula-titles-")
+    meta = {"formula-texts": {"t": "MetaMap", "c": {
+        "\\frac{a}{b}": {"t": "MetaString", "c": "a/b"},
+        "x < y": {"t": "MetaString", "c": "x < y"},
+        "\\sqrt{x}": {"t": "MetaString", "c": "√x"}}}}
+    texts = bookassembly.formula_texts(meta)
+    epub = os.path.join(work, "titles.epub")
+
+    def formula(mathml, tex):
+        return ('<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML">'
+                "<semantics>" + mathml + '<annotation encoding="application/x-tex">' + tex
+                + "</annotation></semantics></math>")
+    with zipfile.ZipFile(epub, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("EPUB/text/ch001.xhtml", "<html><head><title>ch001</title></head><body>"
+                   '<h1 id="page-limits">Limits ' + formula("<mfrac><mi>a</mi><mi>b</mi></mfrac>",
+                                                       "\\frac{a}{b}")
+                   + " and " + formula("<mi>t</mi>", "\\pmb{t}") + "</h1></body></html>")
+        z.writestr("EPUB/text/ch002.xhtml", "<html><head><title>ch002</title></head><body>"
+                   '<h1>Less ' + formula("<mi>x</mi><mo>&lt;</mo><mi>y</mi>", "x &lt; y")
+                   + "</h1></body></html>")
+    build_epub.retitle_chapters(epub, texts)
+    with zipfile.ZipFile(epub) as z:
+        titles = [re.search(r"<title>(.*?)</title>", z.read(f"EPUB/text/ch00{n}.xhtml")
+                            .decode("utf-8")).group(1) for n in (1, 2)]
+    heading = [{"t": "Str", "c": "The"}, {"t": "Space"},
+               {"t": "Math", "c": [{"t": "InlineMath"}, "\\sqrt{x}"]}, {"t": "Space"},
+               {"t": "Str", "c": "part"}]
+    found = os.path.join(work, "title-formulas.txt")
+    with open(found, "w", encoding="utf-8") as fh:
+        for page, tex in (("a.json", "\\binom{n}{k}"), ("a.json", "\\binom{n}{k}"),
+                          ("b.json", "\\binom{n}{k}"), ("b.json", "\\begin{pmatrix}a\\end{pmatrix}")):
+            fh.write(json.dumps({"page": page, "tex": tex}) + "\n")
+        fh.write("not JSON\n")
+    said = io.StringIO()
+    with contextlib.redirect_stderr(said):
+        convert.say_title_formulas(found)
+        convert.say_title_formulas(os.path.join(work, "none.txt"))
+    return [
+        ("the pages' headings' formulas are read by their TeX, and a page without them "
+         "has none, nor one whose metadata has another value by that name",
+         lambda: texts == {"\\frac{a}{b}": "a/b", "x < y": "x < y", "\\sqrt{x}": "√x"}
+         and bookassembly.formula_texts({}) == {}
+         and bookassembly.formula_texts({"formula-texts": {"t": "MetaInlines", "c": []}}) == {}),
+        ("an EPUB chapter's title has a formula the pages noted as its text, one they "
+         "didn't as its MathML's text, as before",
+         lambda: titles[0] == "Limits a/b and t"),
+        ("the TeX is found in the annotation, its entities read, and the text written "
+         "escaped",
+         lambda: titles[1] == "Less x &lt; y"),
+        ("a piece's title has a formula's text, and the words its name and sidecar keys "
+         "are made from, the TeX, as before",
+         lambda: split.heading_text(heading, texts) == "The √x part"
+         and split.heading_text(heading) == "The \\sqrt{x} part"),
+        ("the run says once which formulas are their TeX in titles, each page's counted "
+         "once, a line it can't read passed over",
+         lambda: said.getvalue().count("NOTE:") == 1
+         and "NOTE: 3 formula(s) in headings couldn't be written as text, as the others "
+             "are, and are their TeX in a title made from their heading" in said.getvalue()
+         and "\\binom{n}{k}; \\begin{pmatrix}a\\end{pmatrix}." in said.getvalue()),
+    ]
+
+
 def check_math_text():
     """A formula's text, as math-text.lua writes it for a PDF's bookmark,
     run with Pandoc's Lua: the plain writer's text, its spaces a word's, a
@@ -8169,6 +8246,8 @@ GROUPS = [
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
      check_heading_bookmarks),
     ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),
+    ("a title's formulas as text in an EPUB chapter's title, a piece's, and the run's note",
+     check_formula_titles),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

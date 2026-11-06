@@ -88,6 +88,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 from bookcontents import slugify, stem_title, PIECE_SEPARATOR  # noqa: E402
+from bookassembly import formula_texts  # noqa: E402
 import sidecars  # noqa: E402
 
 INTERMEDIATE = ".filtered.json"
@@ -103,25 +104,29 @@ SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # inlines and metadata
 # --------------------------------------------------------------------------
 
-def stringify(node):
+def stringify(node, texts=None):
+    """The text of inlines: a formula's TeX, or, given texts (formula_texts),
+    its text where they have it."""
     if isinstance(node, dict):
         kind = node.get("t")
         if kind == "Str":
             return node["c"]
         if kind in ("Space", "SoftBreak", "LineBreak"):
             return " "
-        if kind in ("Code", "Math"):
+        if kind == "Math":
+            return (texts or {}).get(node["c"][1], node["c"][1])
+        if kind == "Code":
             return node["c"][1]
         if kind in ("RawInline", "Note"):
             return ""
-        return stringify(node.get("c", []))
+        return stringify(node.get("c", []), texts)
     if isinstance(node, list):
-        return "".join(stringify(child) for child in node)
+        return "".join(stringify(child, texts) for child in node)
     return ""
 
 
-def heading_text(inlines):
-    return " ".join(stringify(inlines).split())
+def heading_text(inlines, texts=None):
+    return " ".join(stringify(inlines, texts).split())
 
 
 def holds_note(node):
@@ -435,6 +440,7 @@ def split_document(doc, stem, level, names, taken, problems):
         return []                       # nothing at that level to cut at
     source_title = meta_text(doc.get("meta", {}), "title") \
         or stem_title(stem)
+    texts = formula_texts(doc.get("meta", {}))
     out = []
     paths = {}                      # default name -> parents it was given
     pending = []                    # ids of group headings, for the next page
@@ -522,11 +528,16 @@ def split_document(doc, stem, level, names, taken, problems):
             # section's: each piece has a heading of its own.
             meta.pop("title-id", None)
             meta.pop("page-type", None)
+        # Its title, for its <title> and its entry in the contents, is
+        # its heading's words with each formula as its text, where its name
+        # and its sidecars' keys are the words with the formula's TeX, as
+        # they were before the formulas had a text.
+        shown = heading_text(head["c"][2], texts) if head is not None else title
         meta["title"] = {"t": "MetaInlines", "c": [{"t": "Str", "c": w}
                                                     if i % 2 == 0 else
                                                     {"t": "Space"}
                                                     for i, w in enumerate(
-                                                        interleave(title))]}
+                                                        interleave(shown))]}
         # The piece's heading is its title heading: the HTML shows it as the
         # piece's own H1 (target-blocks.lua), as a whole page's, as it was
         # written, its footnote, its emphasis, and its formula with it,

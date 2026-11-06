@@ -103,6 +103,17 @@ def meta_text(meta, key):
     return " ".join(stringify(value.get("c", [])).split())
 
 
+def formula_texts(meta):
+    """Each formula of a page's headings as text, by its TeX, as
+    title-formulas.lua noted them: x² + y₁, a/b, √x, as a PDF's bookmark
+    has them. Empty where the page's headings have no formula, or the
+    filter didn't run."""
+    value = meta.get("formula-texts")
+    if not value or value.get("t") != "MetaMap":
+        return {}
+    return {tex: meta_text({"text": entry}, "text") for tex, entry in value["c"].items()}
+
+
 def page_title(doc, stem):
     """The page's title from its metadata, falling back to the filename.
 

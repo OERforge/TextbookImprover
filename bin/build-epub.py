@@ -70,7 +70,7 @@ import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
-    load_documents, targets_of, plan_book, wants_title_page,
+    load_documents, targets_of, plan_book, wants_title_page, formula_texts,
     # not used here, but the EPUB tests reach them through this module
     count_images, page_title, prefix_ids, shift_headers,  # noqa: F401
 )
@@ -254,17 +254,32 @@ def number_notes(text):
     return NOTE.sub(fix, text), count
 
 
-def retitle_chapters(path):
+def retitle_chapters(path, texts=None):
     """Give each chapter file a <title> that is its heading's text, and
     its footnotes their numbers.
 
     Pandoc titles every chapter file by its file name ("ch002.xhtml"), a
     WCAG 2.4.2 failure on every page and what Ace reports first. The
     archive is rewritten in place, mimetype first and stored as the
-    container rules require.
+    container rules require. texts: a heading formula's TeX to its text,
+    from the pages (title-formulas.lua).
     """
     heading = re.compile(r"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", re.S)
     title = re.compile(r"<title>.*?</title>", re.S)
+    tex = re.compile(r'<annotation encoding="application/x-tex">(.*?)</annotation>', re.S)
+    texts = texts or {}
+
+    def formula(match):
+        # A formula as its text, a/b, which the pages noted by the TeX its
+        # MathML keeps as an annotation, as it was written, its spaces and
+        # all, escaped; where its MathML's text alone was the formula's
+        # letters run together ("ab"). A formula they didn't note is its
+        # MathML still, made plain below.
+        found = tex.search(match.group(0))
+        key = html_unescape(found.group(1)) if found else None
+        if key in texts:
+            return html_escape(texts[key], quote=False)
+        return match.group(0)
     tmp = path + ".tmp"
     retitled = 0
     with zipfile.ZipFile(path) as zin, \
@@ -282,8 +297,10 @@ def retitle_chapters(path):
                     # is no part of the title's text; and the title is put in
                     # as it is, not as a pattern's template, where a
                     # backslash in it (\pmb) was an escape.
+                    words = re.sub(r"<math\b.*?</math>", formula, found.group(1),
+                                   flags=re.S)
                     words = re.sub(r"<annotation\b.*?</annotation>", "",
-                                   found.group(1), flags=re.S)
+                                   words, flags=re.S)
                     plain = " ".join(re.sub(r"<[^>]+>", "", words).split())
                     if plain:
                         text = title.sub(lambda m: "<title>" + plain + "</title>",
@@ -480,6 +497,7 @@ class EpubAssembly(Assembly):
         self.page_types = {}      # a page's heading id -> the epub:type its heading gave
         self.page_ids = set()     # every page's heading id
         self.contents_id = None   # the generated contents page's heading id
+        self.formula_texts = {}   # a heading formula's TeX -> its text, every page's
 
     def before_entry(self, entry, depth):
         kind = "contents" if is_generated(entry) else entry[0]
@@ -501,6 +519,7 @@ class EpubAssembly(Assembly):
         super().add_page(stem, title_override, depth, heading=heading, number=number)
         self.page_ids.add(page_id(stem))
         doc = load_page(self.base, stem)
+        self.formula_texts.update(formula_texts(doc.get("meta", {})))
         kind = section_type(meta_text(doc.get("meta", {}), "page-type"))
         first = self.blocks[start] if len(self.blocks) > start else None
         if not kind and heading and first and first.get("t") == "Header":
@@ -1007,7 +1026,7 @@ def build(base, name, resolved, keep, intermediates=None):
             print(result.stderr.rstrip(), file=sys.stderr)
         if result.returncode != 0:
             sys.exit(f"pandoc failed building {out_path}.")
-        retitle_chapters(out_path)
+        retitle_chapters(out_path, assembly.formula_texts)
         if numbering != "page" or placement != "page":
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)

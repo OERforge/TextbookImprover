@@ -594,6 +594,7 @@ EMU_PER_POINT = 12700
 # or reads itself, and Pandoc's options given in a YAML block.
 NOT_PROPERTIES = frozenset("""
     deck-slide-level title-heading title-index title-id title-from title-meta page-type
+    formula-texts
     page-role page-position page-part page-parents source-page source-title heading-offset
     has-frontmatter language pagetitle title-prefix linkcolordark header-includes
     include-before include-after css toc toc-depth toc-title numbersections

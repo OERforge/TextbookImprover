@@ -4432,6 +4432,81 @@ def case_title_id(work):
     ]
 
 
+def case_formula_titles(work):
+    """A title made from a heading has the heading's formulas as text, as
+    a PDF's bookmark has them, a/b, ℝⁿ, √x, where Pandoc's writers gave the
+    formula's TeX, and the EPUB its MathML's letters run together: a page's
+    <title>, a piece's the split cut, an EPUB chapter's, a Word file's, and
+    a Markdown copy's front matter, its heading keeping the formula. A
+    piece's and a chapter's are of the formula as math-repair.lua repaired
+    it (title-formulas.lua, after it). A formula that can't be text, a
+    binomial, is its TeX between dollar signs, said once, without Pandoc's
+    warning of it; and the texts the filters note reach no output."""
+    os.makedirs(work)
+    with open(os.path.join(work, "01-limits.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\nText.\n\n"
+                 "## The $\\sqrt{x}$ section\n\nMore.\n\n"
+                 "## The mean $\\overset{–}{X} – µ$\n\nLast.\n")
+    with open(os.path.join(work, "02-choose.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Choosing $\\binom{n}{k}$ and $\\overset{–}{X}$\n\nText.\n")
+    result = convert(work, "targets:\n  html:\n    format: html\n    pages:\n      split_level: 2\n"
+                     "  epub:\n    format: epub3\n  word:\n    format: docx\n"
+                     "  src:\n    format: markdown\n", fixtures=())
+    said = result.stdout + result.stderr
+
+    def page_title(name):
+        found = re.search(r"<title>(.*?)</title>", read(work, "html", name), re.S) \
+            if exists(work, "html", name) else None
+        return html_lib.unescape(found.group(1)) if found else None
+    chapters, leaked = {}, []
+    epub = os.path.join(work, "epub", "org.example.fixtures.epub")
+    if os.path.exists(epub):
+        with zipfile.ZipFile(epub) as z:
+            for name in z.namelist():
+                data = z.read(name)
+                if b"formula-texts" in data:
+                    leaked.append(name)
+                if name.startswith("EPUB/text/ch"):
+                    found = re.search(rb"<title>(.*?)</title>", data, re.S)
+                    chapters[name] = html_lib.unescape(found.group(1).decode("utf-8"))
+    word_title = None
+    if exists(work, "word", "01-limits.docx"):
+        with zipfile.ZipFile(os.path.join(work, "word", "01-limits.docx")) as z:
+            word_title = html_lib.unescape(re.search(
+                r"<dc:title>(.*?)</dc:title>", z.read("docProps/core.xml").decode("utf-8")).group(1))
+            leaked += ["word/" + n for n in z.namelist() if b"formula-texts" in z.read(n)]
+    for folder in ("html", "src"):
+        for path in glob.glob(os.path.join(work, folder, "*")):
+            if os.path.isfile(path) and "formula-texts" in read(path):
+                leaked.append(path)
+    copy = read(work, "src", "01-limits.md") if exists(work, "src", "01-limits.md") else ""
+    return [
+        ("a page's title has its heading's formulas as text, and a piece's the split cut, a "
+         "repaired formula's as repaired",
+         lambda: page_title("01-limits.html") == "Limits a/b and ℝⁿ"
+         and page_title("01-limits--the-sqrt-x-section.html") == "The √x section"
+         and page_title("01-limits--the-mean-bar-x.html") == "The mean X̄ − μ"),
+        ("an EPUB chapter's title has them as text, a repaired formula's as repaired, and a "
+         "binomial's its TeX between dollar signs",
+         lambda: sorted(chapters.values()) == ["Choosing $\\binom{n}{k}$ and X̄",
+                                               "Limits a/b and ℝⁿ"]),
+        ("so does a Word file's title, and a Markdown copy's front matter, its heading "
+         "keeping the formulas",
+         lambda: word_title == "Limits a/b and ℝⁿ"
+         and "title: Limits a/b and ℝⁿ\n" in copy
+         and "# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$" in copy),
+        ("the binomial, which can't be text, is its TeX in its page's title, said once, "
+         "without Pandoc's warning",
+         lambda: (page_title("02-choose.html") or "").startswith("Choosing $\\binom{n}{k}$ and ")
+         and said.count("formula(s) in headings couldn't be written as text") == 1
+         and "NOTE: 1 formula(s) in headings couldn't be written as text, as the others are, "
+             "and are their TeX in a title made from their heading" in said
+         and "an EPUB chapter's: \\binom{n}{k}." in said and "Could not convert" not in said),
+        ("the texts the filters note reach no output",
+         lambda: chapters and word_title and copy and not leaked),
+    ]
+
+
 def case_link_titles(work):
     """A link's title survives from every source through every target:
     Markdown and AsciiDoc titles, HTML's title attribute, and Word's
@@ -8926,6 +9001,7 @@ CASES = [
     ("AsciiDoc to Markdown and back", case_asciidoc_markdown),
     ("an AsciiDoc target", case_asciidoc_target),
     ("a page title that is also a heading", case_title_id),
+    ("a title's formulas as text, in every title made from a heading", case_formula_titles),
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("a table whose <thead> holds every row", case_head_only_tables),

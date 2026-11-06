@@ -109,6 +109,9 @@ except ImportError:
 
 FIGURE_FILTER = os.path.join(HERE, "figures-and-tables.lua")
 MATH_FILTER = os.path.join(HERE, "math-repair.lua")
+# Last at the filter stage, after math-repair.lua: the headings' formulas
+# as text, for the titles made outside the filters.
+TITLE_FILTER = os.path.join(HERE, "title-formulas.lua")
 MEDIA_FILTER = os.path.join(HERE, "media-extensions.lua")
 HEADER_FILTER = os.path.join(HERE, "header-includes.lua")
 SAFE_MEDIA_FILTER = os.path.join(HERE, "safe-media.lua")
@@ -3198,7 +3201,8 @@ def filter_pages(base, stems, target, env, raw=None):
         source = (raw or {}).get(stem) or os.path.join(base, stem + ".json")
         run(["pandoc", "-f", "json", "-t", "json", source, "-o", out,
              "--lua-filter=" + FIGURE_FILTER,
-             "--lua-filter=" + MATH_FILTER], env=env, cwd=base)
+             "--lua-filter=" + MATH_FILTER,
+             "--lua-filter=" + TITLE_FILTER], env=env, cwd=base)
         written.append(out)
     return written
 
@@ -3639,6 +3643,36 @@ def warn_title_numbers(found):
             f"heading puts before it (\"{heading}\" is titled \"{title}\"), in <title> "
             "and in the names a cartridge gives its pages; promote_h1_to_title: always "
             "titles them with the number.")
+
+
+def say_title_formulas(found):
+    """The formulas in headings the filters couldn't write as text, said
+    once (title-formulas.lua, TITLE_FORMULAS, one formula of a page's a
+    line, as JSON): each is its TeX between dollar signs in a title made
+    from its heading, a page's <title>, its entry in the contents, and a
+    cartridge's name for it, a piece's, or an EPUB chapter's, as a PDF's
+    bookmarks have it, where the others are their text, x² + y₁, a/b, √x;
+    a formula in a heading no title is made from, one below the split's
+    level, is in none. Counted once a page, which is filtered once for
+    each target whose filter settings differ."""
+    if not os.path.exists(found):
+        return
+    kept = {}
+    with open(found, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                row = json.loads(line)
+                kept[(str(row["page"]), str(row["tex"]))] = None
+            except (ValueError, KeyError, TypeError):
+                continue
+    if not kept:
+        return
+    shown = list(dict.fromkeys(" ".join(tex.split()) for _, tex in kept))
+    say(f"NOTE: {len(kept)} formula(s) in headings couldn't be written as text, as the "
+        "others are, and are their TeX in a title made from their heading, a page's, a "
+        "piece's, or an EPUB chapter's: "
+        + "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
+        + ". The headings set them as formulas.")
 
 
 def say_headings_moved(found):
@@ -6313,8 +6347,8 @@ def main():
         say(wcag.CHOICES_ALONE)
     base = os.getcwd()
 
-    for required in (FIGURE_FILTER, MATH_FILTER, MEDIA_FILTER, HEADER_FILTER,
-                     PAGE_CSS):
+    for required in (FIGURE_FILTER, MATH_FILTER, TITLE_FILTER, MEDIA_FILTER,
+                     HEADER_FILTER, PAGE_CSS):
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
 
@@ -6472,7 +6506,7 @@ def main():
                      ("captions_missing", "alt_missing", "alt_seen", "spacers",
                       "media_unresolved", "bare_links", "captions_applied",
                       "math", "math_places", "math_kept", "title_numbers",
-                      "ids_renamed", "headings_moved")}
+                      "ids_renamed", "headings_moved", "title_formulas")}
         env = dict(os.environ)
         env.update({
             # For html-source.lua: a page's <title> that repeats the
@@ -6489,6 +6523,7 @@ def main():
             "MATH_PLACES": collected["math_places"],
             "MATH_KEPT": collected["math_kept"],
             "TITLE_NUMBERS": collected["title_numbers"],
+            "TITLE_FORMULAS": collected["title_formulas"],
             "HEADINGS_MOVED": collected["headings_moved"],
             "MEDIA_UNRESOLVED": collected["media_unresolved"],
             "MEDIA_STRICT": "1" if first["media.strict"] else "",
@@ -6787,6 +6822,7 @@ def main():
                             if not any(t[key] for t in targets)])
             warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
+        say_title_formulas(collected["title_formulas"])
         say_headings_moved(collected["headings_moved"])
         if PPTX_RUN:
             deck_math_report(collected, reports, paths, targets, work)

@@ -4567,7 +4567,10 @@ def case_declared_formula_titles(work):
     chapter's, where they had its TeX, and a Word file's title had lost it;
     it keeps the formula where it's shown, the title block and a Markdown
     copy's front matter. A formula that can't be text, a matrix, is its TeX
-    between dollar signs there, and the run says so once, of titles."""
+    between dollar signs there, and the run says so once, of titles. A
+    book's heading for the page keeps the formula, an EPUB's numbered one
+    too, its number before it, and the LaTeX's, where they had been the
+    title's text."""
     os.makedirs(work)
     pages = {"01-declared": "---\ntitle: The $x^2$ law\n---\n\nText with no heading.\n",
              "02-headed": "---\ntitle: The $x^2$ law again\n---\n\n"
@@ -4583,7 +4586,8 @@ def case_declared_formula_titles(work):
                  "    - title: Part One\n      items: [01-declared, 02-headed, 03-matrix]\n")
     result = convert(work, "targets:\n  html:\n    format: html\n    menu: \"on\"\n"
                      "  epub:\n    format: epub3\n  word:\n    format: docx\n"
-                     "  src:\n    format: markdown\n", project=False, fixtures=())
+                     "  src:\n    format: markdown\n  tex:\n    format: latex\n",
+                     project=False, fixtures=())
     said = result.stdout + result.stderr
 
     def page(name):
@@ -4605,7 +4609,7 @@ def case_declared_formula_titles(work):
                 core = z.read("docProps/core.xml").decode("utf-8")
                 words[name] = [html_lib.unescape(x) for x in
                                re.findall(r"<dc:title>(.*?)</dc:title>", core)]
-    chapters = []
+    chapters, headings = [], []
     for epub in glob.glob(os.path.join(work, "epub", "*.epub")):
         with zipfile.ZipFile(epub) as z:
             for name in sorted(z.namelist()):
@@ -4615,6 +4619,13 @@ def case_declared_formula_titles(work):
                 if name.startswith("EPUB/text/ch"):
                     found = re.search(rb"<title>(.*?)</title>", data, re.S)
                     chapters.append(html_lib.unescape(found.group(1).decode("utf-8")))
+                    found = re.search(rb"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", data, re.S)
+                    if found:
+                        headings.append(found.group(1).decode("utf-8"))
+    # The LaTeX's file for the chapter, Part One, which holds its pages.
+    chapter = read(work, "tex", "01-declared.tex") if exists(work, "tex", "01-declared.tex") \
+        else ""
+    sections = re.findall(r"\\section\{(.*?)\}\\label", chapter, re.S)
     for folder in ("html", "src"):
         for path in glob.glob(os.path.join(work, folder, "*")):
             if os.path.isfile(path) and "formula-texts" in read(path):
@@ -4655,6 +4666,11 @@ def case_declared_formula_titles(work):
          and "1.1 The x² law" in chapters and "1.2 The x² law again" in chapters),
         ("a Markdown copy's front matter keeps the formula",
          lambda: "title: The $x^2$ law\n" in copy),
+        ("an EPUB's heading for the page keeps the formula, its number before it",
+         lambda: any(re.match(r"1\.1 The\s*<math\b", h) for h in headings)
+         and any(re.match(r"1\.2 The\s*<math\b", h) for h in headings)),
+        ("and so does the LaTeX's",
+         lambda: len(sections) == 3 and all("\\(x^2\\)" in s for s in sections[:2])),
         ("a book of one page, which nothing else names, is named by its title's text",
          lambda: lone_title == "The x² law"
          and 'is titled "The x² law", as its one page says' in lone_said),

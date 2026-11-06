@@ -149,6 +149,29 @@ def title_heading_inlines(doc):
     return None
 
 
+def declared_title_inlines(doc):
+    """The title the page declares, as it wrote it, its formulas and all,
+    for a page with no title heading, or None."""
+    value = (doc.get("meta") or {}).get("title")
+    if isinstance(value, dict) and value.get("t") == "MetaInlines" and value.get("c"):
+        return copy.deepcopy(value["c"])
+    return None
+
+
+def heading_inlines(own, title, renamed, number):
+    """A page's heading in the book: its own words (own), as the page says
+    its title, a formula and a note among them, with the page's number
+    before them in a numbered book, where a numbered heading had been the
+    title's text, and a formula in it its text or its TeX; the title, as
+    text, where the contents renames the page or the page has no words of
+    its own for it."""
+    if renamed or own is None:
+        return inlines(title)
+    if number:
+        return inlines(number) + [{"t": "Space"}] + own
+    return own
+
+
 def header(level, content, identifier):
     return {"t": "Header", "c": [level, [identifier, [], []], content]}
 
@@ -420,15 +443,18 @@ class Assembly:
             # LaTeX chapter's \label, say) is sent to the page by finish().
             self.alias("", blocks[0]["c"][1][0], stem)
             blocks[0]["c"][1][0] = page_id(stem)
-            blocks[0]["c"][2] = inlines(title) if (title_override or number) \
-                else blocks[0]["c"][2]
+            blocks[0]["c"][2] = heading_inlines(blocks[0]["c"][2], title,
+                                                title_override, number)
         else:
             # The page's own title heading, as it said itself ("1.1 ..."),
-            # unless the contents renames or numbers it.
+            # or the title it declares, as it wrote it, a formula and all,
+            # where it had been the title's text, unless the contents
+            # renames it; its number before it.
             own = title_heading_inlines(doc)
+            if own is None:
+                own = declared_title_inlines(doc)
             self.alias(prefix, meta_text(doc.get("meta", {}), "title-id"), stem)
-            blocks.insert(0, header(depth, own if own is not None and not
-                                    (title_override or number) else inlines(title),
+            blocks.insert(0, header(depth, heading_inlines(own, title, title_override, number),
                                     page_id(stem)))
         count_images(blocks, self.found)
         self.depth = max(self.depth, depth)

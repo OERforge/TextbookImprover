@@ -1007,8 +1007,11 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
     the sidecar says has no headers not counted against it, nor a slide
     put in the order the sidecar gives. copies: (target, deck, the copy,
     its original's table_decisions()). Returns the number of copies that
-    couldn't be read back."""
-    found, unreadable = [], 0
+    couldn't be read back. A table decided to have its headers in its
+    first column, which the copy marks so (First Column), isn't counted
+    either, and the run says once that PowerPoint's checker asks for a
+    header row all the same."""
+    found, unreadable, columns = [], 0, 0
     for target, name, destination, by_shape in copies:
         def decided(slide, shape, by_shape=by_shape):
             value = by_shape.get((slide.slide_id, shape.id))
@@ -1026,6 +1029,9 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
                                      orders or {}, pptxremediate.deck_name(name)),
                                  links=pptxremediate.decided_links(links or {}),
                                  restricted=restricted)
+        columns += sum(1 for slide in deck.slides for shape in slide.all_shapes()
+                       if shape.table is not None and not shape.table.first_row
+                       and shape.table.first_col and decided(slide, shape) == "first-column")
     if found:
         fl.write_csv(path, found)
     elif os.path.exists(path):
@@ -1033,4 +1039,9 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
     summarize("Output check: %d deck(s), " % len(copies), found, say)
     if found:
         say("Written to %s." % path)
+    if columns:
+        say("NOTE: %d table(s) in the copies have their headers in their first column, as "
+            "decided (First Column), and aren't counted as missing a header. PowerPoint's "
+            "own checker asks for a header row (\"Tables specify column header "
+            "information\"), so it may list them as Missing Table Header." % columns)
     return unreadable

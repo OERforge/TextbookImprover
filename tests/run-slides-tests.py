@@ -5572,6 +5572,55 @@ def case_blank_rows(work):
         == [[(0, 2)], [(1, 2)], [(1, 1)]], read
 
 
+def case_first_column(work):
+    """A deck's table decided to have its headers in its first column,
+    which its copy marks so (First Column), isn't counted against the copy
+    as missing a header row, the run saying once that PowerPoint's checker
+    asks for one; one undecided still is, and so is one decided so without
+    First Column checked."""
+    box = (457200, 1600200, 6000000, 1112520)
+
+    def at(shapes, slide_title):
+        return {"shapes": [title(2, slide_title, box=TITLE_BOX)] + shapes, "images": {}}
+    path = deck(os.path.join(work, "column.pptx"), [
+        at([table(4, [["Apples", "Red fruit"], ["Lemons", "Yellow fruit"]], box)], "Decided"),
+        at([table(4, [["Pears", "Green fruit"], ["Plums", "Purple fruit"]], box)], "Undecided"),
+        at([table(4, [["Year", "Sales"], ["2025", "12"]], box)], "First Row")])
+    d = pptxparse.read(path)
+    keys = [[s.table.key() for s in slide.all_shapes() if s.table is not None][0]
+            for slide in d.slides]
+    paths = {"table_headers": os.path.join(work, "table-headers.csv"),
+             "image_alt": os.path.join(work, "image-alt.csv"),
+             "slide_titles": os.path.join(work, "slide-titles.csv")}
+    reports = {k: os.path.join(work, v) for k, v in (
+        ("image_alt_missing", "image-alt-missing.csv"), ("table_headers_new", "t.csv"),
+        ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
+        ("output_check", "output-check.csv"))}
+    with open(paths["table_headers"], "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerows([deckrun.TABLE_COLUMNS, [keys[0], "first-column"],
+                                  [keys[2], "first-row"]])
+    said = []
+    deckrun.run(work, ["column.pptx"], [CopyTarget(work)], paths, reports, say=said.append)
+    copy = pptxparse.read(os.path.join(work, "copies", "column.pptx"))
+    marked = [(t.first_row, t.first_col) for t in
+              (s.table for slide in copy.slides for s in slide.all_shapes() if s.table)]
+    left = [r[0].split(",")[0] for r in rows_of(reports["output_check"])
+            if r[1] == "pptx-table-no-header"]
+    yield "a table decided first-column, First Column checked in its copy, isn't counted as " \
+        "missing a header row, nor one decided first-row; one undecided is", \
+        marked == [(False, True), (False, False), (True, False)] and left == ["slide 2"], \
+        (marked, left)
+    noted = [line for line in said if line.startswith("NOTE: 1 table(s) in the copies have "
+                                                      "their headers in their first column")]
+    yield "and the run says once that PowerPoint's checker asks for a header row", \
+        len(noted) == 1 and "may list them as Missing Table Header" in noted[0], said[-6:]
+    found = pptxcheck.check(d, "column.pptx", kind="pptx",
+                            tables=lambda _slide, _shape: "first-column")
+    left = [f.where.split(",")[0] for f in found if f.check == "pptx-table-no-header"]
+    yield "a table decided first-column without First Column checked is still counted", \
+        left == ["slide 1", "slide 2", "slide 3"], left
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -5604,7 +5653,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the title slide as LibreOffice saves one", case_saved_title),
          ("decks in other formats", case_other_formats),
          ("a deck in ODP, saved by LibreOffice", case_other_formats_libreoffice),
-         ("a table's blank rows at the top", case_blank_rows)]
+         ("a table's blank rows at the top", case_blank_rows),
+         ("a table decided to have its headers in its first column", case_first_column)]
 
 
 def main():

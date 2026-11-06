@@ -329,7 +329,8 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
     """Findings for a parsed deck. tables: a table-headers sidecar's
     decisions by key (pptxremediate.header_rows()), or a function of a
     slide and a table's shape giving its decision, for a copy they were
-    written into: one decided to have no headers isn't missing them.
+    written into: one decided to have no headers isn't missing them, nor
+    one decided to have them in its first column, First Column checked.
     orders: the reading-order sidecar's orders for this deck's slides, by
     the slide's id: a slide whose shapes are in its order was decided, in
     whatever order a person put them. links: the addresses the bare-links
@@ -370,7 +371,14 @@ def check(deck, name=None, kind="source-pptx", alt_max_chars=ALT_MAX_CHARS,
             if shape.table is not None:
                 size = "%d by %d table" % (len(shape.table.rows),
                                            max((len(r) for r in shape.table.rows), default=0))
-                if not shape.table.first_row and table_decision(slide, shape) != "none":
+                decision = table_decision(slide, shape)
+                # Not one decided to have no headers, nor one decided to have
+                # them in its first column that has First Column checked:
+                # row headers are its structure (WCAG's 1.3.1), though
+                # PowerPoint's checker asks for a header row, as the run
+                # says once (deckrun.check_copies).
+                if not shape.table.first_row and decision != "none" \
+                        and not (decision == "first-column" and shape.table.first_col):
                     add(where(slide, shape), "pptx-table-no-header", size)
                 elif shape.table.first_row and shape.table.blank_rows:
                     # PowerPoint's checker counts the Header Row, which

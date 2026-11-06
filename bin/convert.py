@@ -5164,6 +5164,15 @@ def deck_presentations(target, stems, base, language):
     for (stem, _intermediate, _level, shape, why), result in results:
         if not result["ok"]:
             failed.append(stem)
+            if result.get("refused"):
+                # A setting from the deck's YAML that ends its string in the
+                # template's start of reveal.js, and goes on as code.
+                say(f"{stem}'s presentation wasn't written: in the script that starts "
+                    f"reveal.js, {result['refused']}, which isn't a setting alone and could "
+                    "run as code. A setting the deck's YAML gives reveal.js takes a word, a "
+                    "number, true, or false, with no quotes in it (docs/slides.md, The "
+                    "reveal.js presentation).")
+                continue
             say(f"Pandoc couldn't write {stem}'s presentation:")
             for line in result["log"].strip().splitlines()[-5:]:
                 say(line)

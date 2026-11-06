@@ -64,6 +64,11 @@ except ImportError:
 import oerconfig                                     # noqa: E402
 
 
+def fail(message):
+    """A failed check that says what it got."""
+    raise AssertionError(message)
+
+
 def scratch(prefix="unit-tests-"):
     """A temporary folder, removed when the suite ends, since some checks
     read it when they're run, after their case has returned."""
@@ -7260,6 +7265,81 @@ def check_copy_languages():
     ]
 
 
+# The template's start of reveal.js as revealtarget writes it, shortened.
+REVEAL_START = """
+      // Full list of configuration options available at:
+      // https://revealjs.com/config/
+      Reveal.initialize({
+        scrollActivationWidth: null,
+        // Display controls in the bottom right corner
+        controls: true,
+        controlsLayout: 'bottom-right',
+        transition: 'slide',
+        margin: 0.1,
+        parallaxBackgroundImage: 'https://example.org/p.jpg', // e.g. "'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg'"
+        width: 1280,
+
+        height: 720,
+
+        // reveal.js plugins
+        plugins: [
+          RevealNotes,
+          RevealSearch,
+          RevealZoom
+        ]
+      });
+    """
+
+
+def check_reveal_start():
+    """A presentation's start of reveal.js held to settings and nothing
+    else (revealtarget.start_settings): the template's is, and a value
+    from a deck's YAML that ends its string and goes on as code isn't,
+    named by its setting; nor are the other ways code could get in."""
+    import revealtarget
+    good, problem = revealtarget.start_settings(REVEAL_START)
+
+    def why(old, new):
+        return revealtarget.start_settings(REVEAL_START.replace(old, new, 1))[1]
+    injected = why("'slide'", "'<p>none', controls: (window.pwned = 1), x: '</p>'")
+    harmless = revealtarget.start_settings(
+        REVEAL_START.replace("'slide'", "'none', controls: true, x: ''", 1))
+    html = f"<html><body><script src='reveal.js/dist/reveal.js'></script><script>{REVEAL_START}</script></body></html>"
+    return [
+        ("the template's start is settings: each value read, the plugins a list",
+         lambda: problem is None and good["controls"] is True
+         and good["scrollActivationWidth"] is None and good["controlsLayout"] == "bottom-right"
+         and good["margin"] == 0.1 and good["width"] == 1280.0
+         and good["plugins"] == ["RevealNotes", "RevealSearch", "RevealZoom"]),
+        ("a value that ends its string and goes on as code is refused, by its setting",
+         lambda: injected == "the setting transition holds '<p>none', controls: "
+                             "(window.pwned = 1), x: '</p>'" or fail(str(injected))),
+        ("one that ends its string and goes on as settings is settings",
+         lambda: harmless[1] is None and harmless[0]["x"] == ""),
+        ("a call, an expression, a nested object, a backslash, and a plugin the template "
+         "doesn't load, each refused by its setting",
+         lambda: why("true,", "(function () { return true; })(),").startswith(
+             "the setting controls holds (function")
+         and why("0.1,", "0.1 + 1,").startswith("the setting margin holds 0.1 + 1")
+         and why("width: 1280,", "math: {mathjax: 'x'},").startswith("the setting math holds {")
+         and why("'bottom-right'", "'it\\'s'").startswith("the setting controlsLayout holds")
+         and why("RevealZoom", "RevealHighlight").startswith("the setting plugins holds [")),
+        ("a setting without its comma, which would end it in a comment, refused",
+         lambda: why("'slide',", "'slide' // ',").startswith("the setting transition holds")),
+        ("code before the start, or after it, refused",
+         lambda: why("Reveal.initialize", "alert(1); Reveal.initialize").startswith(
+             "it holds alert(1); Reveal.initialize")
+         and why("});", "}); alert(1)") == "after its settings, it holds alert(1)"),
+        ("a presentation with one start, settings alone, passes; with none or two, not",
+         lambda: revealtarget.start_problem(html) is None
+         and revealtarget.start_problem(html.replace(REVEAL_START, "")) .startswith(
+             "it has no scripts starting reveal.js")
+         and revealtarget.start_problem(html.replace("</body>", f"<script>{REVEAL_START}"
+                                                                "</script></body>"))
+         .startswith("it has 2 scripts starting reveal.js")),
+    ]
+
+
 GROUPS = [
     ("a report's rows", check_report_rows),
     ("alt text's rules, and their findings", check_alt_text_rules),
@@ -7269,6 +7349,7 @@ GROUPS = [
     ("veraPDF's WCAG profile's report, read as findings", check_wcag_report),
     ("what a PDF has where its WCAG checks failed, for --verbose", check_wcag_context),
     ("the output check's flags from convert.py", check_output_check_flags),
+    ("a presentation's start of reveal.js, settings and nothing else", check_reveal_start),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),

@@ -43,6 +43,10 @@ vendor/reveal.js, or REVEALJS_DIR's):
 - reveal.js's own scroll view, which a window 435 pixels wide or less
   turns on, is off: it scales each slide to the window's width, so its
   text shrinks with the window;
+- the script that starts reveal.js holds settings and nothing else
+  (start_settings): a deck's YAML gives the template's settings their
+  values as text, so a value with a quote in it would end its string and
+  go on as code, and a presentation whose start holds more isn't written;
 - oer-reveal.js, after the script that starts reveal.js, takes away the
   presentation's role="application", silences the live region that read
   each slide's text run together, gives a slide's title focus as the
@@ -122,6 +126,36 @@ INITIALIZE = "Reveal.initialize({"
 # smaller as the window narrows: off, for oer-reveal.js's page view. The
 # template sets it only with the scroll view asked for.
 NO_SCROLL_VIEW = "\n        scrollActivationWidth: null,"
+
+# The template's start of reveal.js, read as settings and nothing else:
+# Reveal.initialize({...}); and comments, each setting a name and a value,
+# true, false, null, a number, or a string with nothing in it that could
+# end it or the script (a quote, a backslash, a line's end, < or >, a
+# backtick, a control character), and the plugins a list of the ones the
+# template loads. A deck's YAML gives the template's settings their values
+# as text, so a value with a quote in it ends its string and goes on as
+# code (a transition of none\', controls: (window.pwned = 1), x: \'); what
+# isn't a setting is refused (start_settings).
+START_TOKEN = re.compile(r"""
+    (?P<space>[ \t\r\n]+)
+  | (?P<comment>//[^\r\n<>  ]*)
+  | (?P<open>Reveal\.initialize\(\{)
+  | (?P<close>\}\);)
+  | (?P<key>[A-Za-z][A-Za-z0-9]*)[ \t]*:
+  | (?P<value>true|false|null
+      | -?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?
+      | '[^'\\\r\n<>`\x00-\x1f\x7f  ]*'
+      | "[^"\\\r\n<>`\x00-\x1f\x7f  ]*")
+  | (?P<plugin>RevealNotes|RevealSearch|RevealZoom)
+  | (?P<comma>,)
+  | (?P<lbracket>\[)
+  | (?P<rbracket>\])
+""", re.X)
+# A script element, its attributes and its text, as the HTML parser ends
+# one: at the first </script. (A text with < in it isn't settings, so
+# the parser's other ways of ending one don't arise.)
+SCRIPT_ELEMENT = re.compile(r"<script(\s[^>]*)?>(.*?)</script[\s/>]", re.S | re.I)
+SCRIPT_SOURCE = re.compile(r"\ssrc\s*=", re.I)
 
 # An address the writer gives reveal.js to load when the slide is near.
 LAZY = re.compile(r"(<(?:img|video|audio|source|iframe)\b[^>]*?)\sdata-src=")
@@ -249,17 +283,110 @@ def finish(html):
     return flatten(LAZY.sub(r"\1 src=", html))
 
 
+def start_settings(text):
+    """(settings, problem) for the text of the script that starts
+    reveal.js: {name: value} and None when it's settings and nothing else
+    (START_TOKEN), the plugins a list of their names; else None and what
+    isn't a setting, named by the setting it follows, "the setting
+    transition holds '<p>none', controls: (window.pwned = 1), x: …"."""
+    tokens, at = [], 0
+    while at < len(text):
+        found = START_TOKEN.match(text, at)
+        if not found:
+            tokens.append(("bad", "", at, at))
+            break
+        if found.lastgroup not in ("space", "comment"):
+            tokens.append((found.lastgroup, found.group(found.lastgroup), found.start(),
+                           found.end()))
+        at = found.end()
+    tokens.append(("end", "", len(text), len(text)))
+
+    def held(start):
+        # To the end of its line, as the template writes a setting a line.
+        line = text[start:].lstrip().split("\n", 1)[0]
+        words = " ".join(line.split()).rstrip(",")
+        return words[:100] + ("…" if len(words) > 100 else "") if words else "nothing"
+
+    settings, place, name, start = {}, 0, None, 0
+
+    def kind():
+        return tokens[place][0]
+
+    def wrong(lead=None):
+        if lead:
+            return None, f"{lead} it holds {held(tokens[place][2])}"
+        if name is None:
+            return None, (f"it holds {held(tokens[place][2])} where Pandoc's template "
+                          "calls Reveal.initialize with its settings")
+        return None, f"the setting {name} holds {held(start)}"
+
+    if kind() != "open":
+        return wrong()
+    place += 1
+    while kind() != "close":
+        if kind() != "key":
+            return wrong()
+        name, start = tokens[place][1], tokens[place][3]
+        place += 1
+        if name == "plugins" and kind() == "lbracket":
+            place += 1
+            plugins = []
+            while kind() == "plugin":
+                plugins.append(tokens[place][1])
+                place += 1
+                if kind() != "comma":
+                    break
+                place += 1
+            if kind() != "rbracket":
+                return wrong()
+            settings[name] = plugins
+        elif kind() == "value":
+            literal = tokens[place][1]
+            settings[name] = (True if literal == "true" else False if literal == "false"
+                              else None if literal == "null" else literal[1:-1]
+                              if literal[0] in "'\"" else float(literal))
+        else:
+            return wrong()
+        place += 1
+        if kind() == "comma":
+            place += 1
+        elif kind() != "close":
+            return wrong()
+    place += 1
+    if kind() != "end":
+        return wrong("after its settings,")
+    return settings, None
+
+
+def start_problem(html):
+    """Why a presentation's start of reveal.js isn't settings and nothing
+    else (start_settings), or None: what the setting holds, or that the
+    presentation has no start, or two."""
+    starts = [match.group(2) for match in SCRIPT_ELEMENT.finditer(html)
+              if not SCRIPT_SOURCE.search(match.group(1) or "")
+              and "Reveal.initialize" in match.group(2)]
+    if len(starts) != 1:
+        return (f"it has {'no' if not starts else len(starts)} script"
+                f"{'' if len(starts) == 1 else 's'} starting reveal.js, where Pandoc's "
+                "template writes one")
+    return start_settings(starts[0])[1]
+
+
 def build(intermediate, base, out, *, filters, level, language, shape, notes="collapsed",
           env=None):
     """One deck's presentation, out, from its filtered intermediate: Pandoc's
     reveal.js writer with filters, at the deck's slide level, its slides
     shape, then finish(). notes is slides.notes. Returns a dict: ok; log,
-    Pandoc's errors; warnings, its others; slides, how many. filters
+    Pandoc's errors; refused, why a presentation Pandoc wrote was refused
+    and removed, its start of reveal.js holding more than settings
+    (start_problem), which would run as code; warnings, Pandoc's others;
+    slides, how many. filters
     ends with header-includes.lua, which adds the stylesheet to the
     deck's header-includes and the script after its include-after, where
     Pandoc's --include-in-header and --include-after-body would take
     their place."""
-    result = {"ok": False, "log": "", "warnings": [], "slides": 0, "html": out}
+    result = {"ok": False, "log": "", "refused": "", "warnings": [], "slides": 0,
+              "html": out}
     work = tempfile.mkdtemp(prefix="deck-reveal-")
     try:
         style, script = os.path.join(work, "style.html"), os.path.join(work, "script.html")
@@ -295,6 +422,11 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
                                      for line in done.stderr.splitlines() if line.strip()})
         with open(out, encoding="utf-8") as fh:
             html = finish(fh.read())
+        refused = start_problem(html)
+        if refused:
+            os.remove(out)
+            result["refused"] = refused
+            return result
         with open(out, "w", encoding="utf-8") as fh:
             fh.write(html)
         result["slides"] = len(re.findall(r'<section\b[^>]*\bclass="[^"]*\bslide\b', html)) \

@@ -4871,8 +4871,10 @@ def case_revealjs_settings(work):
     """slides.notes visible and omitted, slides.aspect_ratio, slides.size and
     slides.reference_doc said unread, a book's revealjs target, the
     repository's copy of reveal.js and REVEALJS_DIR's in its place, a
-    later release, reveal.js 5, and an empty folder, a Pandoc too old, and
-    highlighted code."""
+    later release, reveal.js 5, and an empty folder, a Pandoc too old,
+    highlighted code, and a setting in a deck's YAML that would put code
+    into the start of reveal.js stopping the run, one that's a value
+    alone written."""
     unready = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
     problem = revealjs_ready()
     if problem:
@@ -4895,6 +4897,15 @@ def case_revealjs_settings(work):
     omitted = convert(omitted_dir, "--quick")
     left = read(os.path.join(omitted_dir, "present", "presented.html")) \
         if omitted.returncode == 0 else ""
+    # A transition whose escaped quotes end the template's string and go on
+    # as code, and one that's a word.
+    injected_dir = folder(os.path.join(work, "injected"), REVEALJS, decks_given={
+        "one.md": "---\ntitle: Injected\ntransition: |\n  none\\', controls: "
+                  "(window.pwned = 1), x: \\'\n---\n\n" + UNTITLED})
+    injected = convert(injected_dir, "--quick")
+    faded_dir = folder(os.path.join(work, "faded"), REVEALJS, decks_given={
+        "one.md": "---\ntitle: Faded\ntransition: fade\n---\n\n" + UNTITLED})
+    faded = convert(faded_dir, "--quick")
     coded_dir = folder(os.path.join(work, "coded"), REVEALJS, decks_given={"code.md": SECTIONED})
     coded = convert(coded_dir, "--quick")
     code_page = read(os.path.join(coded_dir, "present", "code.html")) \
@@ -4977,6 +4988,16 @@ def case_revealjs_settings(work):
          and "unset, the repository's own copy of reveal.js 6.0.2 is used" in older.stderr),
         ("a slide's highlighted code is in the theme's colors (lib/highlighting.py)",
          lambda: "code span.dv { color: %s; }" % highlight_color("DecVal") in code_page),
+        ("a setting in a deck's YAML that ends its string and goes on as code stops the run, "
+         "naming it, and its presentation isn't left written",
+         lambda: injected.returncode != 0
+         and "one's presentation wasn't written: in the script that starts reveal.js, the "
+             "setting transition holds '<p>none', controls: (window.pwned = 1), x: '</p>', "
+             "which isn't a setting alone and could run as code." in injected.stderr
+         and not os.path.exists(os.path.join(injected_dir, "present", "one.html"))),
+        ("one that's a value alone is written",
+         lambda: faded.returncode == 0
+         and "transition: 'fade'," in read(os.path.join(faded_dir, "present", "one.html"))),
     ]
     # Said before a deck's presentation is built, whatever the Pandoc, or
     # of the repository's copy of reveal.js itself.

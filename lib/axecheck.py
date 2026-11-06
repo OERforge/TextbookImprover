@@ -782,10 +782,11 @@ DARK = """() => {
 # with Chromium's account of the error, which isn't the page.
 UNPARSED = """() => document.getElementsByTagName('parsererror').length > 0
     || document.documentElement.localName !== 'html'"""
-# What's moving brought to its end, then two frames drawn: reveal.js fades
-# a slide's background in over 0.8 seconds, which oer-reveal.css's
-# reduced motion doesn't stop, and caught partway, a gray slide's
-# background is all but white, its white text unreadable on it.
+# What's moving brought to its end, then two frames drawn, so a color isn't
+# measured partway through a change: reveal.js faded a slide's background
+# in over 0.8 seconds until oer-reveal.css's reduced motion stopped that
+# too, and caught partway, a gray slide's background was all but white,
+# its white text unreadable on it. A page's own transitions still run.
 SETTLE = """() => {
   for (const motion of document.getAnimations()) {
     try { motion.finish(); } catch (e) { /* one that never ends */ }

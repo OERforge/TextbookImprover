@@ -4579,8 +4579,9 @@ def presentation_steps(page):
     found["outline"] = page.evaluate(OUTLINE)
     found["link"] = page.evaluate(LINK)
     page.emulate_media(reduced_motion="reduce")
-    found["motion"] = page.evaluate("() => getComputedStyle(Reveal.getCurrentSlide())"
-                                    ".transitionDuration")
+    found["motion"] = page.evaluate("() => [Reveal.getCurrentSlide(), Reveal.getSlideBackground("
+                                    "Reveal.getCurrentSlide())].map(e => getComputedStyle(e)"
+                                    ".transitionDuration)")
     page.emulate_media(reduced_motion="no-preference")
     page.evaluate("() => Reveal.slide(Reveal.getSlides().findIndex("
                   "s => s.id === 'steps'))")
@@ -4802,10 +4803,10 @@ def case_revealjs(work):
          and linked.get("back") == ["A", "fnref1", False, "solid", "opening"]
          and linked.get("slide") == ["H3", "Steps", True, "none", "steps"]),
         ("links in #0066CC, underlined, the arrow back as plain as the arrow on, and no slide "
-         "moving with reduced motion asked for",
+         "moving with reduced motion asked for, nor its background fading in",
          lambda: browsed.get("link") == ["rgb(0, 102, 204)", "underline"]
          and len(set(browsed.get("arrows", []))) == 1 and browsed["arrows"][0] != "0.3"
-         and browsed.get("motion") == "0s"),
+         and browsed.get("motion") == ["0s", "0s"]),
         ("a slide too tall is set closer and smaller to fit, as PowerPoint shrinks text, once "
          "its pictures are in, its title as it was, and one too tall at a quarter of its size "
          "scrolls",

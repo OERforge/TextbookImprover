@@ -134,7 +134,8 @@ html.oer-page-view .reveal .progress {
   .reveal .slides,
   .reveal .slides section,
   .reveal .slides .fragment,
-  .reveal .backgrounds {
+  .reveal .backgrounds,
+  .reveal .backgrounds .slide-background {
     transition: none !important;
   }
 }

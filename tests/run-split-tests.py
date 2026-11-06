@@ -318,21 +318,32 @@ def case_formula_titles(work):
     title-formulas.lua noted it, last at the filter stage: √x, X̄ − μ as
     math-repair.lua left the formula, and a matrix its TeX between dollar
     signs; its name and the page-names sidecar's heading are its words
-    with the formula's TeX, as they were."""
+    with the formula's TeX, as they were. A source's declared title with a
+    formula in it, its own page's title and its pieces' source-title, has
+    the formula's text too."""
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "book.md"), "w", encoding="utf-8") as fh:
         fh.write("# Limits $\\frac{a}{b}$\n\nIntro.\n\n## The $\\sqrt{x}$ part\n\nText.\n\n"
                  "## The $\\begin{pmatrix}a & b\\end{pmatrix}$ row\n\nMore.\n\n"
                  "## The mean $\\overset{–}{X} – µ$\n\nLast.\n")
-    run(["pandoc", "book.md", "-t", "json", "-o", "book.json"], work)
-    run(["pandoc", "-f", "json", "-t", "json", "book.json", "-o", "book.filtered.json",
-         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
-         "--lua-filter", os.path.join(BIN, "math-repair.lua"),
-         "--lua-filter", os.path.join(BIN, "title-formulas.lua")], work,
-        dict(os.environ, PROMOTE_H1_TO_TITLE="always",
-             IMAGE_ALT_MISSING=os.path.join(work, "alt.csv"),
-             TABLE_CAPTIONS_MISSING=os.path.join(work, "caps.csv")))
-    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json")]))
+    with open(os.path.join(work, "declared.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: Declared $\\sqrt{y}$ book\n---\n\nIntro.\n\n"
+                 "## First part\n\nText.\n\n## Second part\n\nMore.\n")
+    for name, promote in (("book", "always"), ("declared", "if-absent")):
+        run(["pandoc", name + ".md", "-t", "json", "-o", name + ".json"], work)
+        run(["pandoc", "-f", "json", "-t", "json", name + ".json", "-o", name + ".filtered.json",
+             "--lua-filter", os.path.join(BIN, "figures-and-tables.lua"),
+             "--lua-filter", os.path.join(BIN, "math-repair.lua"),
+             "--lua-filter", os.path.join(BIN, "title-formulas.lua")], work,
+            dict(os.environ, PROMOTE_H1_TO_TITLE=promote,
+                 IMAGE_ALT_MISSING=os.path.join(work, "alt.csv"),
+                 TABLE_CAPTIONS_MISSING=os.path.join(work, "caps.csv")))
+    out = Pieces(work, split(work, [os.path.join(work, "book.filtered.json"),
+                                    os.path.join(work, "declared.filtered.json")]))
+
+    def source_title(stem):
+        value = out.docs[stem]["meta"].get("source-title", {})
+        return value.get("c") if value.get("t") == "MetaString" else None
     with open(os.path.join(work, "page-names-new.csv"), encoding="utf-8-sig", newline="") as fh:
         headings = {row["name"]: row["heading"] for row in csv.DictReader(fh)}
     return [
@@ -344,13 +355,18 @@ def case_formula_titles(work):
          == "The $\\begin{pmatrix}a & b\\end{pmatrix}$ row"),
         ("its name and the sidecar's heading are its words with the formula's TeX, as "
          "they were",
-         lambda: out.stems == ["book", "book--the-sqrt-x-part",
-                               "book--the-begin-pmatrix-a-b-end-pmatrix-row",
-                               "book--the-mean-bar-x"]
+         lambda: out.stems[:4] == ["book", "book--the-sqrt-x-part",
+                                   "book--the-begin-pmatrix-a-b-end-pmatrix-row",
+                                   "book--the-mean-bar-x"]
          and headings.get("book--the-sqrt-x-part") == "The \\sqrt{x} part"
          and headings.get("book--the-mean-bar-x") == "The mean \\bar{X} - μ"),
         ("the source's own page keeps its title, its formula's text",
          lambda: out.title("book") == "Limits a/b"),
+        ("a declared title's formula is its text in the source's own page's title and its "
+         "pieces' source title",
+         lambda: out.title("declared") == "Declared √y book"
+         and source_title("declared") == "Declared √y book"
+         and source_title("declared--first-part") == "Declared √y book"),
     ]
 
 

@@ -3496,10 +3496,16 @@ def check_formula_titles():
     retitle_chapters), whose heading has the formula as MathML with its
     TeX as an annotation; a piece's title (split-pages.py's heading_text),
     whose name and sidecar keys keep the TeX; and the run's note of those
-    kept as TeX (convert.py's say_title_formulas)."""
+    kept as TeX (convert.py's say_title_formulas), of headings, of titles a
+    source declared, or of both. A page's title as text, a declared one's
+    formula as its text where the page noted it, and its TeX where it
+    didn't: the contents' (convert.py's title_text), a book's
+    (bookassembly's page_title), and a Word file's (docxtarget's
+    page_title_text), which had left it out."""
     import contextlib
     import io
     import bookassembly
+    import docxtarget
     build_epub = load(os.path.join(ROOT, "bin", "build-epub.py"), "build_epub_titles")
     split = load(os.path.join(ROOT, "bin", "split-pages.py"), "split_titles")
     convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_titles")
@@ -3541,6 +3547,25 @@ def check_formula_titles():
     with contextlib.redirect_stderr(said):
         convert.say_title_formulas(found)
         convert.say_title_formulas(os.path.join(work, "none.txt"))
+    declared = {}
+    for name, rows in (("both", [("a.json", "\\binom{n}{k}", False),
+                                 ("b.json", "\\binom{n}{k}", True)]),
+                       ("titles", [("b.json", "\\binom{n}{k}", True)])):
+        path = os.path.join(work, name + ".txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            for page, tex, title in rows:
+                fh.write(json.dumps(dict({"page": page, "tex": tex},
+                                         **({"title": True} if title else {}))) + "\n")
+        heard = io.StringIO()
+        with contextlib.redirect_stderr(heard):
+            convert.say_title_formulas(path)
+        declared[name] = heard.getvalue()
+    titled = {"title": {"t": "MetaInlines", "c": [
+        {"t": "Str", "c": "The"}, {"t": "Space"},
+        {"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]}, {"t": "Space"},
+        {"t": "Str", "c": "law"}]}}
+    noted = dict(titled, **{"formula-texts": {"t": "MetaMap", "c": {
+        "x^2": {"t": "MetaString", "c": "x²"}}}})
     return [
         ("the pages' headings' formulas are read by their TeX, and a page without them "
          "has none, nor one whose metadata has another value by that name",
@@ -3563,6 +3588,21 @@ def check_formula_titles():
          and "NOTE: 3 formula(s) in headings couldn't be written as text, as the others "
              "are, and are their TeX in a title made from their heading" in said.getvalue()
          and "\\binom{n}{k}; \\begin{pmatrix}a\\end{pmatrix}." in said.getvalue()),
+        ("a formula of a declared title is said to be in titles, beside the headings' or alone",
+         lambda: "NOTE: 2 formula(s) in headings and titles couldn't be written as text, as "
+                 "the others are, and are their TeX where a title is text, a page's <title> "
+                 "and its entry in the contents among them: \\binom{n}{k}. The pages set "
+                 "them as formulas." in declared["both"]
+         and "NOTE: 1 formula(s) in titles couldn't" in declared["titles"]),
+        ("a page's title as text has a declared title's formula as its text where the page "
+         "noted it, for the contents, a book, and a Word file",
+         lambda: convert.title_text(noted) == "The x² law"
+         and bookassembly.page_title({"meta": noted}, "stem") == "The x² law"
+         and docxtarget.page_title_text({"meta": noted}) == "The x² law"),
+        ("and its TeX where it didn't, which a Word file's title had left out",
+         lambda: convert.title_text(titled) == "The x^2 law"
+         and bookassembly.page_title({"meta": titled}, "stem") == "The x^2 law"
+         and docxtarget.page_title_text({"meta": titled}) == "The x^2 law"),
     ]
 
 
@@ -8368,8 +8408,8 @@ GROUPS = [
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
      check_heading_bookmarks),
     ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),
-    ("a title's formulas as text in an EPUB chapter's title, a piece's, and the run's note",
-     check_formula_titles),
+    ("a title's formulas as text in an EPUB chapter's title, a piece's, a declared title's, "
+     "and the run's note", check_formula_titles),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

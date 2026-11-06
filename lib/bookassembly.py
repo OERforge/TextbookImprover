@@ -76,31 +76,35 @@ def load_page(base, stem):
         return json.load(fh)
 
 
-def stringify(node):
-    """The text of an inline tree, as Pandoc's stringify would give it."""
+def stringify(node, texts=None):
+    """The text of an inline tree, as Pandoc's stringify would give it: a
+    formula's TeX, or, given texts (formula_texts), its text where they
+    have it."""
     if isinstance(node, dict):
         kind = node.get("t")
         if kind == "Str":
             return node["c"]
         if kind in ("Space", "SoftBreak", "LineBreak"):
             return " "
+        if kind == "Math" and texts and node["c"][1] in texts:
+            return texts[node["c"][1]]
         if kind in ("Code", "Math"):
             return node["c"][1]
         if kind in ("RawInline", "Note"):
             return ""
-        return stringify(node.get("c", []))
+        return stringify(node.get("c", []), texts)
     if isinstance(node, list):
-        return "".join(stringify(child) for child in node)
+        return "".join(stringify(child, texts) for child in node)
     return ""
 
 
-def meta_text(meta, key):
+def meta_text(meta, key, texts=None):
     value = meta.get(key)
     if not value:
         return ""
     if value.get("t") == "MetaString":
         return value["c"]
-    return " ".join(stringify(value.get("c", [])).split())
+    return " ".join(stringify(value.get("c", []), texts).split())
 
 
 def formula_texts(meta):
@@ -115,12 +119,15 @@ def formula_texts(meta):
 
 
 def page_title(doc, stem):
-    """The page's title from its metadata, falling back to the filename.
+    """The page's title from its metadata, falling back to the filename,
+    its formulas as their text (formula_texts), where a title the source
+    declared with one had its TeX ("The x^2 law").
 
     With promote_h1_to_title in effect the filter has moved the page's
     heading here, which is why the intermediate usually opens without one.
     """
-    return meta_text(doc.get("meta", {}), "title") or stem_title(stem)
+    meta = doc.get("meta", {})
+    return meta_text(meta, "title", formula_texts(meta)) or stem_title(stem)
 
 
 def inlines(text):

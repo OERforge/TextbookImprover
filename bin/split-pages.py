@@ -142,13 +142,13 @@ def meta_string(text):
     return {"t": "MetaString", "c": str(text)}
 
 
-def meta_text(meta, key):
+def meta_text(meta, key, texts=None):
     value = meta.get(key)
     if not value:
         return ""
     if value.get("t") == "MetaString":
         return value["c"]
-    return heading_text(value.get("c", []))
+    return heading_text(value.get("c", []), texts)
 
 
 def html_escape(text):
@@ -438,9 +438,10 @@ def split_document(doc, stem, level, names, taken, problems):
     parts = cut(blocks, level, meta_text(doc.get("meta", {}), "page-role") or None)
     if len(parts) <= 1 and (not parts or parts[0][0] is None):
         return []                       # nothing at that level to cut at
-    source_title = meta_text(doc.get("meta", {}), "title") \
-        or stem_title(stem)
     texts = formula_texts(doc.get("meta", {}))
+    # The source's title as text, its formulas as theirs, as a piece's is.
+    source_title = meta_text(doc.get("meta", {}), "title", texts) \
+        or stem_title(stem)
     out = []
     paths = {}                      # default name -> parents it was given
     pending = []                    # ids of group headings, for the next page

@@ -23,6 +23,13 @@
 -- \overset{–}{X} was X̄ on the page and X^(–) in the page's <title>, the
 -- contents, and a cartridge's name for it. The mark goes with it.
 --
+-- A title the source declares with a formula in it, Markdown's title:
+-- The $x^2$ law, has its formulas noted too, for where a title is text: a
+-- page's <title> (target-blocks.lua), its entry in the contents and the
+-- menu (convert.py), a cartridge's name for it, a Word file's title, and
+-- an EPUB's contents page (lib/bookassembly.py), where they had been its
+-- TeX ("The x^2 law"). The title keeps its formulas where it's shown.
+--
 -- A formula math-text.lua can't write, a matrix, is its TeX between
 -- dollar signs in those titles too, and each is recorded for the run to
 -- say once which formulas are (TITLE_FORMULAS: one formula of a page's a
@@ -49,7 +56,7 @@ local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_F
 
 local function note(doc)
   local texts, any, kept, plain = {}, false, {}, {}
-  local function each(inlines)
+  local function each(inlines, declared)
     pandoc.Inlines(inlines):walk({
       Math = function(math_)
         if texts[math_.text] == nil then
@@ -57,7 +64,7 @@ local function note(doc)
           texts[math_.text] = pandoc.MetaString(text)
           plain[math_.text] = text
           any = true
-          if tex then kept[#kept + 1] = math_.text end
+          if tex then kept[#kept + 1] = { tex = math_.text, title = declared } end
         end
       end,
     })
@@ -70,6 +77,8 @@ local function note(doc)
     doc.meta.title = pandoc.MetaInlines(pandoc.Inlines(doc.meta['title-heading']):walk({
       Math = function(math_) return pandoc.Str(plain[math_.text]) end,
     }))
+  elseif pandoc.utils.type(doc.meta.title) == 'Inlines' then
+    each(doc.meta.title, true)
   end
   if not any then return remade and doc or nil end
   doc.meta['formula-texts'] = pandoc.MetaMap(texts)
@@ -78,8 +87,10 @@ local function note(doc)
     local handle = io.open(found, 'a')
     if handle then
       local page = (PANDOC_STATE.input_files[1] or ''):match('([^/\\]+)$') or ''
-      for _, tex in ipairs(kept) do
-        handle:write(pandoc.json.encode({ page = page, tex = tex }) .. '\n')
+      for _, row in ipairs(kept) do
+        local record = { page = page, tex = row.tex }
+        if row.title then record.title = true end
+        handle:write(pandoc.json.encode(record) .. '\n')
       end
       handle:close()
     end

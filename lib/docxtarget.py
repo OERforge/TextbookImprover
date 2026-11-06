@@ -1729,8 +1729,32 @@ def prune_bookmarks(xml, keep):
     return xml, len(drop)
 
 
+def formula_texts(meta):
+    """{TeX: text}: the formulas of a page's headings and title as text, as
+    title-formulas.lua noted them (formula-texts)."""
+    value = (meta or {}).get("formula-texts")
+    if not isinstance(value, dict) or value.get("t") != "MetaMap":
+        return {}
+    return {tex: entry.get("c", "") for tex, entry in value["c"].items()
+            if isinstance(entry, dict) and entry.get("t") == "MetaString"}
+
+
+def holds_formula(node):
+    """Whether a metadata value holds a formula."""
+    if isinstance(node, list):
+        return any(holds_formula(n) for n in node)
+    if isinstance(node, dict):
+        return node.get("t") == "Math" or holds_formula(node.get("c"))
+    return False
+
+
 def page_title_text(doc):
-    """The page's title as plain text, from its metadata."""
+    """The page's title as plain text, from its metadata, a formula as the
+    text title-formulas.lua noted for it, x² + y₁, a/b, else its TeX, where
+    a formula had been left out ("The  law")."""
+    meta = doc.get("meta") or {}
+    texts = formula_texts(meta)
+
     def text(node):
         if isinstance(node, list):
             return "".join(text(n) for n in node)
@@ -1742,9 +1766,11 @@ def page_title_text(doc):
                 return " "
             if kind == "MetaString":
                 return node["c"]
+            if kind == "Math":
+                return texts.get(node["c"][1], node["c"][1])
             return text(node.get("c"))
         return ""
-    return text((doc.get("meta") or {}).get("title")).strip()
+    return " ".join(text(meta.get("title")).split())
 
 
 def finish(path, doc, keep=None, footer=()):
@@ -1833,12 +1859,15 @@ def finish(path, doc, keep=None, footer=()):
     # The page's title is its Heading 1, not a Title paragraph
     # (target-blocks.lua), so Pandoc wrote no title into the file's
     # properties; it goes there, where Word and a screen reader find it.
+    # Where Pandoc wrote a declared title there itself, it gave a formula in
+    # it as its TeX ("The x^2 law"), and the title goes in its place.
     title = page_title_text(doc)
     if title and "docProps/core.xml" in parts:
         core = parts["docProps/core.xml"].decode("utf-8")
-        if not re.search(r"<dc:title>[^<]", core):
+        if not re.search(r"<dc:title>[^<]", core) \
+                or holds_formula((doc.get("meta") or {}).get("title")):
             entry = "<dc:title>%s</dc:title>" % html.escape(title, quote=False)
-            core = re.sub(r"<dc:title\s*/>|<dc:title>\s*</dc:title>", "", core)
+            core = re.sub(r"<dc:title\s*/>|<dc:title>.*?</dc:title>", "", core, flags=re.S)
             core = core.replace("</cp:coreProperties>", entry + "</cp:coreProperties>")
             parts["docProps/core.xml"] = core.encode("utf-8")
     if counts["code_lines"] and "word/styles.xml" in parts \

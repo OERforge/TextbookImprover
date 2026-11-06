@@ -346,6 +346,29 @@ local function own_name()
   return (name:gsub('%.json$', ''):gsub('%.filtered$', ''))
 end
 
+-- A title's words with each formula as its text, as title-formulas.lua
+-- noted it (texts, from formula-texts), for a page's <title>, where
+-- Pandoc's writer gives a formula's TeX ("The x^2 law"); a formula it
+-- didn't note is its TeX still.
+local function title_text(title, texts)
+  if pandoc.utils.type(title) ~= 'Inlines' then return pandoc.utils.stringify(title) end
+  return pandoc.utils.stringify(title:walk({
+    Math = function(math_)
+      local text = texts and texts[math_.text]
+      if text ~= nil then return pandoc.Str(pandoc.utils.stringify(text)) end
+    end,
+  }))
+end
+
+-- Whether a title holds a formula.
+local function holds_formula(title)
+  local found = false
+  if pandoc.utils.type(title) == 'Inlines' then
+    title:walk({ Math = function() found = true end })
+  end
+  return found
+end
+
 -- A page whose title is its own H1 (the filter marked it title-heading,
 -- having taken the heading out of the body so the split, the contents,
 -- and the numbering find the title in one place) gets the heading back as
@@ -370,8 +393,9 @@ local function title_heading(doc)
   -- A deck's slide level, which decks.py recorded when the deck was read,
   -- and the PDF's writer is given as an option.
   meta['deck-slide-level'] = nil
-  -- The headings' formulas as text, which the split and the EPUB's titles
-  -- read (title-formulas.lua).
+  -- The formulas of the headings and the title as text, which the split
+  -- and the EPUB's titles read (title-formulas.lua), and <title> below.
+  local texts = meta['formula-texts']
   meta['formula-texts'] = nil
   -- The page's language, which convert.py decided once for every target
   -- (lib/languages.py): the page's lang, in place of the book's that -M
@@ -381,6 +405,12 @@ local function title_heading(doc)
   meta[LANGUAGE_KEY] = nil
   if language ~= '' and not SOURCE_WRITERS[FORMAT] then
     meta.lang = pandoc.MetaString(language)
+  end
+  -- A declared title with a formula, which the HTML writer shows in the
+  -- title block: its formulas as text in <title>, which Pandoc gives the
+  -- title's TeX.
+  if TITLE_WRITER == 'html' and meta.pagetitle == nil and holds_formula(meta.title) then
+    meta.pagetitle = pandoc.MetaString(title_text(meta.title, texts))
   end
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK
@@ -397,7 +427,7 @@ local function title_heading(doc)
   end
   doc.blocks:insert(1, pandoc.Header(1, content, pandoc.Attr(id, {}, attributes)))
   if TITLE_WRITER == 'html' then
-    meta.pagetitle = pandoc.MetaString(pandoc.utils.stringify(meta.title))
+    meta.pagetitle = pandoc.MetaString(title_text(meta.title, texts))
     meta.title = nil
   elseif TITLE_WRITER == 'docx' then
     meta.title = nil

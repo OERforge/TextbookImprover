@@ -3656,26 +3656,36 @@ def say_title_formulas(found):
     cartridge's name for it, a piece's, or an EPUB chapter's, as a PDF's
     bookmarks have it, where the others are their text, x² + y₁, a/b, √x;
     a formula in a heading no title is made from, one below the split's
-    level, is in none. Counted once a page, which is filtered once for
-    each target whose filter settings differ."""
+    level, is in none. A title the source declares with such a formula in
+    it (its row's title true) is its TeX where a title is text too, and
+    the note says so. Counted once a page, which is filtered once for each
+    target whose filter settings differ."""
     if not os.path.exists(found):
         return
-    kept = {}
+    kept, titled = {}, set()
     with open(found, encoding="utf-8") as fh:
         for line in fh:
             try:
                 row = json.loads(line)
-                kept[(str(row["page"]), str(row["tex"]))] = None
+                key = (str(row["page"]), str(row["tex"]))
+                kept[key] = None
+                if row.get("title") is True:
+                    titled.add(key)
             except (ValueError, KeyError, TypeError):
                 continue
     if not kept:
         return
     shown = list(dict.fromkeys(" ".join(tex.split()) for _, tex in kept))
-    say(f"NOTE: {len(kept)} formula(s) in headings couldn't be written as text, as the "
-        "others are, and are their TeX in a title made from their heading, a page's, a "
-        "piece's, or an EPUB chapter's: "
-        + "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
-        + ". The headings set them as formulas.")
+    listed = "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
+    if not titled:
+        say(f"NOTE: {len(kept)} formula(s) in headings couldn't be written as text, as the "
+            "others are, and are their TeX in a title made from their heading, a page's, a "
+            f"piece's, or an EPUB chapter's: {listed}. The headings set them as formulas.")
+        return
+    where = "titles" if len(titled) == len(kept) else "headings and titles"
+    say(f"NOTE: {len(kept)} formula(s) in {where} couldn't be written as text, as the "
+        "others are, and are their TeX where a title is text, a page's <title> and its "
+        f"entry in the contents among them: {listed}. The pages set them as formulas.")
 
 
 def say_headings_moved(found):
@@ -5448,11 +5458,9 @@ def page_formula_texts(pages):
     found = {}
     for intermediate in pages:
         with open(intermediate, encoding="utf-8") as fh:
-            meta = json.load(fh).get("meta", {})
-        texts = meta.get("formula-texts")
-        if texts and texts.get("t") == "MetaMap":
-            found[os.path.basename(intermediate)[:-len(INTERMEDIATE)]] = {
-                tex: meta_text({"text": entry}, "text") for tex, entry in texts["c"].items()}
+            texts = formula_texts(json.load(fh).get("meta", {}))
+        if texts:
+            found[os.path.basename(intermediate)[:-len(INTERMEDIATE)]] = texts
     return found
 
 
@@ -5682,32 +5690,52 @@ def html_escape(text):
             .replace(">", "&gt;"))
 
 
-def inlines_text(node):
+def inlines_text(node, texts=None):
     """The text of an inline tree, as Pandoc's stringify gives it: what's
-    inside a Span or an Emph too (a title set in \\textrm, FINC 308's)."""
+    inside a Span or an Emph too (a title set in \\textrm, FINC 308's). A
+    formula is its TeX, or the text texts gives it ({TeX: text},
+    formula_texts)."""
     if isinstance(node, dict):
         kind = node.get("t")
         if kind == "Str":
             return node["c"]
         if kind in ("Space", "SoftBreak", "LineBreak"):
             return " "
+        if kind == "Math" and texts and node["c"][1] in texts:
+            return texts[node["c"][1]]
         if kind in ("Code", "Math"):
             return node["c"][1]
         if kind in ("RawInline", "Note"):
             return ""
-        return inlines_text(node.get("c", []))
+        return inlines_text(node.get("c", []), texts)
     if isinstance(node, list):
-        return "".join(inlines_text(child) for child in node)
+        return "".join(inlines_text(child, texts) for child in node)
     return ""
 
 
-def meta_text(meta, key):
+def meta_text(meta, key, texts=None):
     value = meta.get(key)
     if not value:
         return ""
     if value.get("t") == "MetaString":
         return value["c"]
-    return " ".join(inlines_text(value.get("c", [])).split())
+    return " ".join(inlines_text(value.get("c", []), texts).split())
+
+
+def formula_texts(meta):
+    """{TeX: text}: the formulas of a page's headings and title as text, as
+    title-formulas.lua noted them (formula-texts), for a title that is text:
+    x² + y₁, a/b, √x, as a PDF's bookmark has them."""
+    value = meta.get("formula-texts")
+    if not value or value.get("t") != "MetaMap":
+        return {}
+    return {tex: meta_text({"text": entry}, "text") for tex, entry in value["c"].items()}
+
+
+def title_text(meta):
+    """A page's title as text, its formulas as their text (formula_texts),
+    for the contents, the menu, the pager, and the numbering."""
+    return meta_text(meta, "title", formula_texts(meta))
 
 
 def numbering_for(target, project):
@@ -5734,7 +5762,7 @@ def book_tree(project, pages, numbered=None):
             doc = json.load(fh)
         api = api or doc.get("pandoc-api-version")
         meta = doc.get("meta", {})
-        titles[stem] = meta_text(meta, "title") or stem
+        titles[stem] = title_text(meta) or stem
         if meta_text(meta, "page-role"):
             roles[stem] = meta_text(meta, "page-role")
         source = meta_text(meta, "source-page")
@@ -5831,7 +5859,7 @@ def one_page_title(pages):
         return ""
     try:
         with open(pages[0], encoding="utf-8") as fh:
-            return meta_text(json.load(fh).get("meta", {}), "title")
+            return title_text(json.load(fh).get("meta", {}))
     except (OSError, ValueError):
         return ""
 

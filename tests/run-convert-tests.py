@@ -4559,6 +4559,117 @@ def case_formula_titles(work):
     ]
 
 
+def case_declared_formula_titles(work):
+    """A title the source declares with a formula in it, Markdown's title:
+    The $x^2$ law, has the formula's text where a title is text, as a title
+    made from a heading has: a page's <title>, the contents page, the menu,
+    the pager, a cartridge's names, a Word file's title, and an EPUB
+    chapter's, where they had its TeX, and a Word file's title had lost it;
+    it keeps the formula where it's shown, the title block and a Markdown
+    copy's front matter. A formula that can't be text, a matrix, is its TeX
+    between dollar signs there, and the run says so once, of titles."""
+    os.makedirs(work)
+    pages = {"01-declared": "---\ntitle: The $x^2$ law\n---\n\nText with no heading.\n",
+             "02-headed": "---\ntitle: The $x^2$ law again\n---\n\n"
+                          "# The $x^2$ law again\n\nText.\n",
+             "03-matrix": "---\ntitle: The $\\begin{pmatrix}a & b\\end{pmatrix}$ row\n---\n\n"
+                          "Text.\n"}
+    for name, text in pages.items():
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.declared\n  title: Declared\n"
+                 "  numbering: true\n  contents:\n    - generate: toc\n"
+                 "    - title: Part One\n      items: [01-declared, 02-headed, 03-matrix]\n")
+    result = convert(work, "targets:\n  html:\n    format: html\n    menu: \"on\"\n"
+                     "  epub:\n    format: epub3\n  word:\n    format: docx\n"
+                     "  src:\n    format: markdown\n", project=False, fixtures=())
+    said = result.stdout + result.stderr
+
+    def page(name):
+        return read(work, "html", name + ".html") if exists(work, "html", name + ".html") else ""
+
+    def title(name):
+        found = re.search(r"<title>(.*?)</title>", page(name), re.S)
+        return html_lib.unescape(found.group(1)) if found else None
+
+    def links(name):
+        return [" ".join(html_lib.unescape(re.sub(r"<[^>]+>", "", x)).split())
+                for x in re.findall(r"<a\b[^>]*>(.*?)</a>", page(name), re.S)]
+    manifest = read(work, "imsmanifest.xml") if exists(work, "imsmanifest.xml") else ""
+    named = [html_lib.unescape(n) for n in re.findall(r"<title>(.*?)</title>", manifest)]
+    words, leaked = {}, []
+    for name in pages:
+        if exists(work, "word", name + ".docx"):
+            with zipfile.ZipFile(os.path.join(work, "word", name + ".docx")) as z:
+                core = z.read("docProps/core.xml").decode("utf-8")
+                words[name] = [html_lib.unescape(x) for x in
+                               re.findall(r"<dc:title>(.*?)</dc:title>", core)]
+    chapters = []
+    for epub in glob.glob(os.path.join(work, "epub", "*.epub")):
+        with zipfile.ZipFile(epub) as z:
+            for name in sorted(z.namelist()):
+                data = z.read(name)
+                if b"formula-texts" in data:
+                    leaked.append(name)
+                if name.startswith("EPUB/text/ch"):
+                    found = re.search(rb"<title>(.*?)</title>", data, re.S)
+                    chapters.append(html_lib.unescape(found.group(1).decode("utf-8")))
+    for folder in ("html", "src"):
+        for path in glob.glob(os.path.join(work, folder, "*")):
+            if os.path.isfile(path) and "formula-texts" in read(path):
+                leaked.append(path)
+    copy = read(work, "src", "01-declared.md") if exists(work, "src", "01-declared.md") else ""
+    matrix = "The $\\begin{pmatrix}a & b\\end{pmatrix}$ row"
+    # A book of one page, which nothing else names, is named by its title.
+    lone = work + "-one"
+    os.makedirs(lone)
+    with open(os.path.join(lone, "only.md"), "w", encoding="utf-8") as fh:
+        fh.write(pages["01-declared"])
+    lone_said = convert(lone, "targets:\n  epub:\n    format: epub3\n", project=False,
+                        fixtures=())
+    lone_said = lone_said.stdout + lone_said.stderr
+    lone_title = ""
+    for epub in glob.glob(os.path.join(lone, "epub", "*.epub")):
+        with zipfile.ZipFile(epub) as z:
+            opf = [n for n in z.namelist() if n.endswith(".opf")]
+            found = re.search(r"<dc:title[^>]*>(.*?)</dc:title>",
+                              z.read(opf[0]).decode("utf-8")) if opf else None
+            lone_title = html_lib.unescape(found.group(1)) if found else ""
+    return [
+        ("a page's <title> has a declared title's formula as text, with its number",
+         lambda: title("01-declared") == "1.1 The x² law"
+         and title("02-headed") == "1.2 The x² law again"
+         and title("03-matrix") == "1.3 " + matrix),
+        ("the title block, and the heading, keep the formula, the number before it",
+         lambda: re.search(r'<h1 class="title">1\.1 The\s*<math\b', page("01-declared"))
+         and re.search(r"<h1\b[^>]*>1\.2 The\s*<math\b", page("02-headed"))),
+        ("so do the contents page, the menu, and the pager",
+         lambda: "1.1 The x² law" in links("toc") and "1.2 The x² law again" in links("toc")
+         and "1.1 The x² law" in links("02-headed")
+         and "Previous: The x² law" in links("02-headed")),
+        ("and a cartridge's names, a Word file's title, one for each, and an EPUB chapter's",
+         lambda: "1.1 The x² law" in named and "1.2 The x² law again" in named
+         and words.get("01-declared") == ["The x² law"]
+         and words.get("02-headed") == ["The x² law again"]
+         and "1.1 The x² law" in chapters and "1.2 The x² law again" in chapters),
+        ("a Markdown copy's front matter keeps the formula",
+         lambda: "title: The $x^2$ law\n" in copy),
+        ("a book of one page, which nothing else names, is named by its title's text",
+         lambda: lone_title == "The x² law"
+         and 'is titled "The x² law", as its one page says' in lone_said),
+        ("a matrix, which can't be text, is its TeX, said once, of titles, without Pandoc's "
+         "warning",
+         lambda: said.count("formula(s) in titles couldn't be written as text") == 1
+         and "NOTE: 1 formula(s) in titles couldn't be written as text, as the others are, "
+             "and are their TeX where a title is text, a page's <title> and its entry in the "
+             "contents among them: \\begin{pmatrix}a & b\\end{pmatrix}." in said
+         and "Could not convert" not in said),
+        ("the texts reach no output",
+         lambda: chapters and words and copy and not leaked),
+    ]
+
+
 def case_numbered_titles(work):
     """A numbered book's page has its number in its <title> and its own
     heading, whatever its title holds: a character outside ASCII, which the
@@ -9230,6 +9341,7 @@ CASES = [
     ("a page title that is also a heading", case_title_id),
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
+    ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("a table whose <thead> holds every row", case_head_only_tables),

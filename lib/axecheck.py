@@ -364,6 +364,11 @@ def report(items, events, stopped, said, job, note=""):
     if ready is None:
         if failed and failed.get("kind") == "playwright":
             return [], [f"{NOT_RUN} on the pages: Playwright isn't installed ({INSTALL})."]
+        if failed and failed.get("kind") == "old":
+            which = f"Playwright {failed['why']}" if failed.get("why") else "This Playwright"
+            return [], [f"{NOT_RUN} on the pages: {which} is older than 1.48, the first "
+                        "that lets the check take a page's WebSockets; update it, and its "
+                        f"Chromium ({INSTALL})."]
         if failed and failed.get("kind") == "chromium":
             return [], [f"{NOT_RUN} on the pages: Playwright's Chromium doesn't start "
                         f"({failed.get('why')}); `{INSTALL_CHROMIUM}` installs it ({INSTALL})."]
@@ -1022,10 +1027,19 @@ def first_line(exc):
 
 async def work(job, network, emit):
     try:
-        from playwright.async_api import async_playwright
+        from playwright.async_api import BrowserContext, async_playwright
         from importlib import metadata
     except ImportError:
         emit({"event": "failed", "kind": "playwright", "why": "Playwright isn't installed"})
+        return
+    # The lockdown takes a page's WebSockets with route_web_socket, which
+    # came with Playwright 1.48.
+    if not hasattr(BrowserContext, "route_web_socket"):
+        try:
+            version = metadata.version("playwright")
+        except Exception:
+            version = ""
+        emit({"event": "failed", "kind": "old", "why": version})
         return
     if job["policy"] not in lockedbrowser.POLICIES:
         emit({"event": "failed", "why": f"no policy {job['policy']}"})

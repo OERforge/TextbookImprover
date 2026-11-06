@@ -8048,6 +8048,15 @@ def check_axe_report():
                                                  "policy x.")
          and "it ran past the time it was given, and was stopped" in axecheck.report(
              items, [], True, "", job)[1][0]),
+        ("a Playwright older than 1.48 named, and how to update it",
+         lambda: axecheck.report(items, [{"event": "failed", "kind": "old", "why": "1.47.0"}],
+                                 False, "", job)[1] == [
+             "axe's WCAG checks not run on the pages: Playwright 1.47.0 is older than 1.48, the "
+             "first that lets the check take a page's WebSockets; update it, and its Chromium "
+             "(docs/installation.md, Optional: Playwright and its Chromium)."]
+         and axecheck.report(items, [{"event": "failed", "kind": "old", "why": ""}], False, "",
+                             job)[1][0].startswith(
+             "axe's WCAG checks not run on the pages: This Playwright is older than 1.48")),
     ]
 
 

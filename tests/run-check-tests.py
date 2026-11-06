@@ -938,7 +938,8 @@ def axe_cases(work):
     """--wcag on pages: axe-core's rules in Playwright's Chromium, locked
     down. Without Playwright, and with a Chromium that doesn't start, a
     line says so and the other findings are what they'd be without
-    --wcag; --quick, and nothing but a PDF, leave axe-core out, saying so.
+    --wcag, and with a Playwright older than 1.48 a line naming it; --quick,
+    and nothing but a PDF, leave axe-core out, saying so.
     With them: the probes as the setup; the built-in checks and axe-core's
     rules that overlap them agreeing on the suite's pages; a hostile
     page's scripts not run, its requests elsewhere refused and its
@@ -983,6 +984,16 @@ def axe_cases(work):
     without = run("--wcag", *pages, "--quick", "--report", hidden_report,
                   PYTHONPATH=hidden)
     unhidden = run("--wcag", *pages, PYTHONPATH=hidden)
+    # A Playwright older than 1.48: one whose BrowserContext has no
+    # route_web_socket, by a package of the same name.
+    old = os.path.join(work, "old")
+    os.makedirs(os.path.join(old, "playwright"))
+    with open(os.path.join(old, "playwright", "__init__.py"), "w") as fh:
+        fh.write("")
+    with open(os.path.join(old, "playwright", "async_api.py"), "w") as fh:
+        fh.write("class BrowserContext:\n    pass\n\n\n"
+                 "def async_playwright():\n    raise RuntimeError('never reached')\n")
+    aged = run("--wcag", pages[0], PYTHONPATH=old)
     quick = run("--wcag", "--quick", *pages)
     no_page = run("--wcag", "--pdf", os.path.join(work, "no-such.pdf"))
     cases = [
@@ -994,6 +1005,10 @@ def axe_cases(work):
          lambda: "axe's WCAG checks not run on the pages: Playwright isn't installed "
                  "(docs/installation.md, Optional: Playwright and its Chromium)." in unhidden
          and rows_of(plain_report) == rows_of(hidden_report) or fail("got: " + unhidden)),
+        ("one older than 1.48, without route_web_socket, named, and how to update it",
+         lambda: "is older than 1.48, the first that lets the check take a page's "
+                 "WebSockets; update it, and its Chromium (docs/installation.md, Optional: "
+                 "Playwright and its Chromium)." in aged or fail("got: " + aged)),
     ]
     problem = browser_problem()
     if problem:

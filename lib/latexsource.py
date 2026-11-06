@@ -178,10 +178,10 @@ def code_matches(pattern, text, spans=None):
     return [m for m in pattern.finditer(text) if not in_spans(m.start(), spans)]
 
 
-def math_spans(text, spans=None):
-    """The (start, end) of each formula in text's code, as MATH_SPANS finds
-    them once comments and verbatim text are blanked, so a $ in a comment
-    pairs with nothing."""
+def math_spans(text, spans=None, pattern=None):
+    """The (start, end) of each formula in text's code, as MATH_SPANS (or
+    pattern) finds them once comments and verbatim text are blanked, so a
+    $ in a comment pairs with nothing."""
     spans = skip_spans(text) if spans is None else spans
     pieces, last = [], 0
     for start, end in spans:
@@ -189,7 +189,8 @@ def math_spans(text, spans=None):
         pieces.append(" " * (end - start))
         last = end
     pieces.append(text[last:])
-    return [(m.start(), m.end()) for m in MATH_SPANS.finditer("".join(pieces))]
+    pattern = MATH_SPANS if pattern is None else pattern
+    return [(m.start(), m.end()) for m in pattern.finditer("".join(pieces))]
 
 
 def escaped(text, pos):
@@ -2105,6 +2106,313 @@ def language_marks(text, counter):
     return substitute(LANGUAGE_PASSAGE_END, text, lambda m: "", counter, "language_passages_end")
 
 
+# babel's commands for a passage in another language that Pandoc's reader
+# can't read (3.12.1, PANDOC-NOTES): \foreignlanguage with babel's options
+# (\foreignlanguage[date]{ngerman}{...}), or with words that hold a
+# paragraph break or an environment other than a formula's, stopped it
+# ("Nothing was converted"), and babeltags' \textfr{...} was dropped, its
+# words with it.
+FOREIGN_LANGUAGE = re.compile(r"\\foreignlanguage(?![A-Za-z@])(\*?)\s*(\[[^][{}]*\])?\s*\{")
+BABEL_TAGS = re.compile(r"\\babeltags\s*\{([^{}]*)\}")
+# A paragraph break in a passage's words: a blank line, or \par. (A blank
+# line alone is PARAGRAPH_BREAK, captionof_floats'.)
+PASSAGE_BREAK = re.compile(r"\n[ \t]*\n\s*|\\par(?![A-Za-z@])\s*")
+BEGIN_ENVIRONMENT = re.compile(r"\\begin\s*\{([^{}]*)\}")
+# The environments the reader takes inside a paragraph, a formula's
+# (Readers/LaTeX/Math.hs's inlineEnvironments): any other stops it there,
+# but one inside a formula, which texmath reads, and one the book defines
+# as text, which the reader expands.
+INLINE_ENVIRONMENTS = frozenset("""displaymath math equation equation* gather gather*
+    multline multline* eqnarray eqnarray* align align* alignat alignat* flalign flalign*
+    dmath dmath* dgroup dgroup* darray darray* subequations""".split())
+# Each of them whole, as a formula: breqn's aren't among MATH_SPANS'.
+INLINE_SPANS = re.compile(r"\\begin\s*\{(%s)\}.*?\\end\s*\{\1\}" % "|".join(
+    re.escape(e) for e in sorted(INLINE_ENVIRONMENTS, key=len, reverse=True)), re.S)
+# A definition of a command, in each form the reader reads one
+# (Readers/LaTeX/Macro.hs), the command's name its first, second, or third
+# group: \NewCommandCopy's and its kin's only where the command copied
+# isn't braced, since the reader reads no other (commandCopy, its
+# anyControlSeq) and drops the copy's command with its words (3.12.1,
+# measured), so a tag copied so is still read as \foreignlanguage, which
+# keeps them. And of an environment, its name the group, and a copy of
+# one, the copy's name and its source's.
+COMMAND_DEFINITION = re.compile(
+    r"\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand"
+    r"|(?:New|Renew|Provide|Declare)(?:Expandable)?DocumentCommand)\s*\*?\s*\{?\s*"
+    r"\\([A-Za-z@]+)|\\(?:[gex]?def|let)\s*\\([A-Za-z@]+)"
+    r"|\\(?:New|Renew|Declare)CommandCopy\s*\{?\s*\\([A-Za-z@]+)\s*\}?\s*\\[A-Za-z@]")
+BOOK_ENVIRONMENT = re.compile(
+    r"\\(?:(?:re)?newenvironment|(?:New|Renew|Provide|Declare)DocumentEnvironment)"
+    r"\s*\*?\s*\{\s*([^{}]*?)\s*\}")
+ENVIRONMENT_COPY = re.compile(
+    r"\\(?:New|Renew|Declare)EnvironmentCopy\s*\{\s*([^{}]*?)\s*\}\s*\{\s*([^{}]*?)\s*\}")
+# What may open a formula in an environment's code: a $, \(, \[, or an
+# environment's beginning, its name the group.
+FORMULA_OPENING = re.compile(r"\$|\\\(|\\\[|\\begin\s*\{([^{}]*)\}")
+
+
+def babel_tags(texts):
+    """{tag: language}, the tags the book's \\babeltags declares
+    (\\babeltags{fr = french}), each of which babel makes a command
+    (\\textfr{...}), a declaration (\\fr), and an environment; not one
+    whose command the book defines again itself, in any form the reader
+    reads (COMMAND_DEFINITION: \\renewcommand{\\textfr}, \\def\\textfr,
+    \\RenewDocumentCommand), which the reader reads as the book defines
+    it."""
+    tags = {}
+    for text in texts:
+        for m in code_matches(BABEL_TAGS, text):
+            for item in option_list(COMMENT.sub("", m.group(1))):
+                tag, eq, language = (part.strip() for part in item.partition("="))
+                if eq and re.fullmatch(r"[A-Za-z]+", tag) and language:
+                    tags[tag] = language
+    defined = {m.group(1) or m.group(2) or m.group(3) for text in texts
+               for m in code_matches(COMMAND_DEFINITION, text)} if tags else set()
+    return {tag: language for tag, language in tags.items() if "text" + tag not in defined}
+
+
+def environment_code(text, m):
+    """What a BOOK_ENVIRONMENT match defines its environment with: the
+    text of each braced argument after the name, \\newenvironment's
+    [n][default] passed over."""
+    pos, count = m.end(), 3 if "Document" in m.group(0) else 2
+    for _ in range(2 if count == 2 else 0):
+        at = argument_space(text, pos)
+        if not text.startswith("[", at):
+            break
+        close = closing_bracket(text, at)
+        if close < 0:
+            break
+        pos = close + 1
+    parts = []
+    for _ in range(count):
+        at = argument_space(text, pos)
+        if not text.startswith("{", at):
+            break
+        close = matching_brace(text, at)
+        if close < 0:
+            break
+        parts.append(text[at + 1:close - 1])
+        pos = close
+    return parts
+
+
+def book_environments(texts):
+    """{name: kind} for the environments the book defines (BOOK_ENVIRONMENT)
+    or copies (ENVIRONMENT_COPY), in code, that the reader takes inside a
+    paragraph, as it expands them: "formula" for a copy of a formula's
+    environment (INLINE_ENVIRONMENTS), which it expands to the formula;
+    "text" for the rest, but not one whose code holds a paragraph break or
+    an environment the reader doesn't take there, a list's or another of
+    the book's that does, nor a copy of one the book doesn't define, such
+    as itemize. Definitions and copies are read in order, each replacing
+    what came before it."""
+    codes, formulas = {}, set()
+    for text in texts:
+        found = sorted(code_matches(BOOK_ENVIRONMENT, text)
+                       + code_matches(ENVIRONMENT_COPY, text), key=lambda m: m.start())
+        for m in found:
+            name = m.group(1)
+            if m.re is BOOK_ENVIRONMENT:
+                codes[name] = environment_code(text, m)
+                formulas.discard(name)
+                continue
+            codes.pop(name, None)
+            formulas.discard(name)
+            source = m.group(2)
+            if source in codes:
+                codes[name] = codes[source]
+            elif source in INLINE_ENVIRONMENTS or source in formulas:
+                formulas.add(name)
+    blocks = set()
+
+    def block(part):
+        """Whether code holds what the reader doesn't take in a paragraph."""
+        spans = skip_spans(part)
+        inner = [b.group(1).strip() for b in code_matches(BEGIN_ENVIRONMENT, part, spans)]
+        return any(passage_break(part, b, spans)
+                   for b in code_matches(PASSAGE_BREAK, part, spans)) or any(
+            name not in INLINE_ENVIRONMENTS and name not in formulas
+            and (name not in codes or name in blocks) for name in inner)
+
+    # Until no more are found, since one of the book's may hold another.
+    while True:
+        found = {name for name, parts in codes.items()
+                 if name not in blocks and any(block(part) for part in parts)}
+        if not found:
+            break
+        blocks |= found
+    kinds = {name: "text" for name in codes if name not in blocks}
+    kinds.update((name, "formula") for name in formulas)
+    # One whose opening code leaves a formula open holds a formula, as one
+    # of the book's may open another's.
+    while True:
+        opened = {name for name, kind in kinds.items() if kind == "text"
+                  and len(codes[name]) >= 2 and opens_formula(
+                      codes[name][-2], {n for n, k in kinds.items() if k == "formula"})}
+        if not opened:
+            return kinds
+        kinds.update((name, "formula") for name in opened)
+
+
+def opens_formula(code, formulas):
+    """Whether code, an environment's opening code, leaves a formula open:
+    a $, \\(, or \\[, or a formula's environment begun (INLINE_ENVIRONMENTS,
+    or the book's, formulas), that code doesn't close itself."""
+    spans = skip_spans(code)
+    closed = sorted(math_spans(code, spans) + math_spans(code, spans, INLINE_SPANS))
+    for m in code_matches(FORMULA_OPENING, code, spans):
+        if escaped(code, m.start()) or in_spans(m.start(), closed):
+            continue
+        name = (m.group(1) or "").strip()
+        if not m.group(0).startswith("\\begin") or name in INLINE_ENVIRONMENTS \
+                or name in formulas:
+            return True
+    return False
+
+
+def after_line_break(text, pos, spans):
+    """Whether pos, in text's code, follows \\\\ (and its [...]) with
+    nothing between but spaces, line ends, and comments, which Pandoc's
+    reader takes with it (Readers/LaTeX/Inline.hs, its spaces), a blank
+    line among them: there a blank line is no paragraph break to it.
+    spans: skip_spans(text)."""
+    while True:
+        end = len(text[:pos].rstrip(" \t\n"))
+        comment = next((start for start, stop in spans
+                        if start < end <= stop and text.startswith("%", start)), None)
+        if comment is None:
+            break
+        pos = comment
+    before = text[:end]
+    if before.endswith("]") and "[" in before:
+        before = before[:before.rfind("[")].rstrip(" \t\n")
+    run = len(before) - len(before.rstrip("\\"))
+    return run >= 2 and run % 2 == 0
+
+
+def passage_break(text, b, spans):
+    """Whether b, a PASSAGE_BREAK match in text's code, is a paragraph
+    break to the reader: \\par, but not one that follows a backslash of its
+    own, \\\\par being a line break and a word (escaped), and a blank line,
+    but not one after a line break (after_line_break). spans:
+    skip_spans(text)."""
+    if b.group(0).startswith("\\"):
+        return not escaped(text, b.start())
+    return not after_line_break(text, b.start(), spans)
+
+
+def formula_spans(text, names=()):
+    """The (start, end) of each formula in text's code (math_spans), and of
+    each environment the reader reads as one (INLINE_SPANS), or the book
+    makes one, by names (book_environments' formulas), in order."""
+    spans = skip_spans(text)
+    found = math_spans(text, spans) + math_spans(text, spans, INLINE_SPANS)
+    if names:
+        book = re.compile(r"\\begin\s*\{(%s)\}.*?\\end\s*\{\1\}" % "|".join(
+            re.escape(n) for n in sorted(names, key=len, reverse=True)), re.S)
+        found += math_spans(text, spans, book)
+    return sorted(found)
+
+
+def top_level(pattern, text):
+    """pattern's matches in text's code outside every group text holds."""
+    spans = skip_spans(text)
+    groups, depth, opened, i = [], 0, 0, 0
+    while i < len(text):
+        if in_spans(i, spans):
+            i = next(end for start, end in spans if start <= i < end)
+            continue
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+            if depth == 1:
+                opened = i
+        elif c == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                groups.append((opened, i + 1))
+        i += 1
+    return [m for m in pattern.finditer(text)
+            if not in_spans(m.start(), spans) and not in_spans(m.start(), groups)]
+
+
+def babel_passages(text, counter, tags=None, environments=()):
+    """babel's commands for a passage in another language, in code, as the
+    reader can read them (FOREIGN_LANGUAGE): babeltags' \\textfr{X} as
+    \\foreignlanguage{french}{X}, by tags (babel_tags); \\foreignlanguage
+    without its options; and its words, where they hold a paragraph
+    break, a \\foreignlanguage of each paragraph, so the paragraph keeps
+    the words before and after them, as LaTeX sets it, a comment that ends
+    a paragraph after the paragraph's brace, but for a blank line after
+    \\\\, which the reader reads as a line break, and \\\\par, a line break
+    and a word (passage_break), or where they hold an environment the
+    reader doesn't take inside a paragraph, not a formula's or in one
+    (formula_spans, a copy of one among them) and not one of environments,
+    the book's own it takes ({name: kind}, book_environments), in
+    otherlanguage, which holds paragraphs, lists, and the rest."""
+    if tags:
+        command = re.compile(r"\\text(%s)(?![A-Za-z@])(?=\s*\{)" % "|".join(
+            re.escape(t) for t in sorted(tags, key=len, reverse=True)))
+        text = substitute(command, text, lambda m: "\\foreignlanguage{%s}" % tags[m.group(1)],
+                          counter, "babel_tags")
+    spans = skip_spans(text)
+    found = [m for m in FOREIGN_LANGUAGE.finditer(text) if not in_spans(m.start(), spans)]
+    # From the last, so one inside another's words is read first and the
+    # places before it stay where they are.
+    for m in reversed(found):
+        named = matching_brace(text, m.end() - 1)
+        opening = re.compile(r"\s*\{").match(text, named) if named >= 0 else None
+        close = matching_brace(text, opening.end() - 1) if opening else -1
+        if close < 0:
+            continue
+        language, words = text[m.end():named - 1], text[opening.end():close - 1]
+        formulas = formula_spans(words, [name for name, kind in dict(environments).items()
+                                         if kind == "formula"])
+        blocks = [b for b in top_level(BEGIN_ENVIRONMENT, words)
+                  if b.group(1).strip() not in environments
+                  and not in_spans(b.start(), formulas)]
+        skipped = skip_spans(words)
+        breaks = [b for b in top_level(PASSAGE_BREAK, words)
+                  if passage_break(words, b, skipped)]
+        if blocks:
+            new = "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, words)
+            key = "babel_blocks"
+        elif breaks:
+            pieces, last = [], 0
+            for b in breaks + [None]:
+                stop = b.start() if b else len(words)
+                # A comment on the piece's last line goes after its brace,
+                # which it would take.
+                line = max(last, words.rfind("\n", last, stop) + 1)
+                cut = next((start for start, _ in skipped
+                            if line <= start < stop and words.startswith("%", start)), stop)
+                piece, tail = words[last:cut], words[cut:stop]
+                # A piece ending in a backslash of its own, a control
+                # space with the line's end, keeps its line end, or the
+                # backslash would take the brace.
+                if (len(piece) - len(piece.rstrip("\\"))) % 2:
+                    piece += "\n"
+                pieces.append(("\\foreignlanguage%s{%s}{%s}" % (m.group(1), language, piece)
+                               if piece.strip() else piece) + tail)
+                if b:
+                    pieces.append(b.group(0))
+                    last = b.end()
+            new = "".join(pieces)
+            key = "babel_paragraphs"
+        elif m.group(2):
+            new = "\\foreignlanguage%s{%s}{%s}" % (m.group(1), language, words)
+            key = "babel_options"
+        else:
+            continue
+        text = text[:m.start()] + new + text[close:]
+        counter[key] = counter.get(key, 0) + 1
+    return text
+
+
 # The PDF target's group around a table or a formula for latexbuild's
 # FIT_MACROS to fit (pdf-target.lua), as the target writes it: its number,
 # its kind, and a table's columns and whether they wrap, or for a worked
@@ -2352,11 +2660,12 @@ def highlighted_code(text, counter):
     return HIGHLIGHTED_INLINE.sub(inline, text)
 
 
-def repair_text(text, counter, math_macros=(), counters=()):
+def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
-    counters' names (book_counters)."""
+    counters' names (book_counters); tags, its babeltags (babel_tags);
+    environments, the ones it defines (book_environments)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -2383,6 +2692,7 @@ def repair_text(text, counter, math_macros=(), counters=()):
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
+    text = babel_passages(text, counter, tags, environments)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -6760,8 +7070,11 @@ def prepare(base, work, master, say, macros=""):
     originals = [(name, read_text(os.path.join(base, name))) for name in files]
     in_math = math_macros([t for _, t in originals])
     counting = book_counters(originals, originals[0][1] if originals else "")
+    tags = babel_tags([t for _, t in originals])
+    environments = book_environments([t for _, t in originals])
     for name, text in originals:
-        texts[name] = repair_text(text, counts, in_math, counting["counters"])
+        texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
+                                  environments)
     # A chapter \include-d by the book's own macro, written out, so the
     # pages are cut where it begins; the book's environments as the
     # commands LaTeX makes of them, which Pandoc's reader can balance; its

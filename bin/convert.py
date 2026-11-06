@@ -1359,6 +1359,14 @@ LATEX_READ_CHANGES = (
      "babel's command inside it read"),
     ("language_passages", "passage's language tag for the PDF (oerlanguage) left out, "
      "babel's environment around it read"),
+    ("babel_tags", "babeltags' command(s) (\\textfr) read as \\foreignlanguage, which the "
+     "reader dropped with its words"),
+    ("babel_options", "\\foreignlanguage's option(s) ([date]) left out, which stopped the "
+     "reader"),
+    ("babel_paragraphs", "\\foreignlanguage's words holding a paragraph break read as a "
+     "\\foreignlanguage in each paragraph, which stopped the reader"),
+    ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read as "
+     "otherlanguage, which stopped the reader"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),

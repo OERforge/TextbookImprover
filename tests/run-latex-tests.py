@@ -1075,6 +1075,235 @@ def case_babel_main(work):
     ]
 
 
+def case_babel_reading(work):
+    """A LaTeX book's passages in another language by babel's commands the
+    reader stopped on, or dropped, read into its pages in their language:
+    \\foreignlanguage with babel's option, \\foreignlanguage whose words
+    hold a paragraph break, a blank line or \\par, the paragraphs as LaTeX
+    sets them, the words before and after in them, or a list, as a
+    division, the book's own list environment too; a note's paragraph
+    break, a blank line after \\\\, a formula, breqn's among them, an
+    environment in a formula, and environments the book defines as text,
+    each way it defines them, in them, as the reader read them; a
+    paragraph that ends in a comment; and babeltags' \\textfr, which the
+    master's preamble declares, but not a tag whose command the book
+    defines again, each way the reader reads; the run saying what it read
+    so, the author's files as they were, and a \\captionof's paragraph
+    found as before."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    os.makedirs(work)
+    files = {
+        "book.tex": "\\documentclass{book}\n\\usepackage[ngerman,french,english]{babel}\n"
+                    "\\usepackage{amsmath}\n\\usepackage{breqn}\n"
+                    "\\babeltags{fr = french, de = ngerman, en = english, fra = french, "
+                    "deu = ngerman, allem = ngerman, franc = french}\n"
+                    "\\renewcommand{\\textde}[1]{\\emph{\\foreignlanguage{ngerman}{#1}}}\n"
+                    "\\def\\texten#1{\\emph{\\foreignlanguage{english}{#1}}}\n"
+                    "\\RenewDocumentCommand{\\textfra}{m}{\\emph{\\foreignlanguage{french}{#1}}}\n"
+                    "\\DeclareRobustCommand{\\textdeu}[1]{\\emph{\\foreignlanguage{ngerman}{#1}}}\n"
+                    "\\newcommand{\\myallem}[1]{\\emph{\\foreignlanguage{ngerman}{#1}}}\n"
+                    "\\RenewCommandCopy\\textallem\\myallem\n"
+                    "\\RenewCommandCopy{\\textfranc}{\\myallem}\n"
+                    "\\newenvironment{rouge}{}{}\n\\NewEnvironmentCopy{rose}{rouge}\n"
+                    "\\NewEnvironmentCopy{myeq}{equation}\n"
+                    "\\newenvironment{eqn}{\\begin{equation}}{\\end{equation}}\n"
+                    "\\newenvironment{eqnn}{\\begin{eqn}}{\\end{eqn}}\n"
+                    "\\newenvironment{enmath}{$}{$}\n\\newenvironment{etoile}{$\\star$ }{}\n"
+                    "\\newenvironment{prix}{\\$ }{}\n"
+                    "\\newenvironment{gris}{}{}\n\\RenewEnvironmentCopy{gris}{itemize}\n"
+                    "\\NewEnvironmentCopy{beige}{itemize}\n\\renewenvironment{beige}{}{}\n"
+                    "\\newenvironment{ensuite}{\\\\par la suite, }{}\n"
+                    "\\newenvironment*{verte}{}{}\n"
+                    "\\NewDocumentEnvironment{bleue}{}{}{}\n\\newenvironment{step2}{}{}\n"
+                    "\\newenvironment{points}{\\begin{itemize}}{\\end{itemize}}\n"
+                    "\\newenvironment{morepoints}{\\begin{points}}{\\end{points}}\n"
+                    "\\newenvironment{remarque}[1][Note]{\\par\\textbf{#1} }{\\par}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\nA date: \\foreignlanguage[date]{ngerman}{das Wort} here.\n\n"
+                   "Words before \\foreignlanguage{french}{la fin du paragraphe.\n\n"
+                   "Le d\\'ebut du suivant} and words after.\n\n"
+                   "Again \\foreignlanguage{french}{un.\\par Deux} after.\n\n"
+                   "A list \\foreignlanguage{french}{pour commencer\n"
+                   "\\begin{itemize}\n\\item un point\n\\end{itemize}\npour finir} last.\n\n"
+                   "A tag: \\textfr{court} and \\textfr{bref}.\n\n"
+                   "A note: \\foreignlanguage{french}{un mot\\footnote{Une note.\n\n"
+                   "Son second paragraphe.}} after.\n\n"
+                   "A formula: \\foreignlanguage{french}{la formule \\begin{dmath*}x = "
+                   "\\begin{cases}0\\\\1\\end{cases}\\end{dmath*} suit} here.\n\n"
+                   "A copied formula: \\foreignlanguage{french}{la formule \\begin{myeq}y = "
+                   "\\begin{cases}1\\\\2\\end{cases}\\end{myeq} suit} here.\n\n"
+                   "A wrapped formula: \\foreignlanguage{french}{la formule \\begin{eqn}z = "
+                   "\\begin{cases}3\\\\4\\end{cases}\\end{eqn} suit} here.\n\n"
+                   "Wrapped twice: \\foreignlanguage{french}{la formule \\begin{eqnn}w = "
+                   "\\begin{cases}5\\\\6\\end{cases}\\end{eqnn} suit} here.\n\n"
+                   "A priced list \\foreignlanguage{french}{pour \\begin{prix}\n"
+                   "\\begin{itemize}\n\\item cher\n\\end{itemize}\n\\end{prix}\nfin} last.\n\n"
+                   "A wrapped matrix: \\foreignlanguage{french}{la matrice \\begin{enmath}"
+                   "\\begin{pmatrix} 2 & 0 \\end{pmatrix}\\end{enmath} suit} here.\n\n"
+                   "A starred list \\foreignlanguage{french}{pour \\begin{etoile}\n"
+                   "\\begin{itemize}\n\\item une\n\\end{itemize}\n\\end{etoile}\nfin} last.\n\n"
+                   "A grey list \\foreignlanguage{french}{pour \\begin{gris}\n\\item gris\n"
+                   "\\end{gris}\nfin} last.\n\n"
+                   "Copied tags: \\textallem{ein Wort} and \\textfranc{un mot}.\n\n"
+                   "A matrix: \\foreignlanguage{french}{la matrice $\\begin{pmatrix} 1 & 0 "
+                   "\\end{pmatrix}$ suit} here.\n\n"
+                   "Its own: \\foreignlanguage{french}{un \\begin{rouge}mot\\end{rouge}, rouge} "
+                   "here.\n\n"
+                   "Others of its own: \\foreignlanguage{french}{un \\begin{verte}vert"
+                   "\\end{verte} \\begin{bleue}bleu\\end{bleue} \\begin{step2}deux"
+                   "\\end{step2} \\begin{rose}rose\\end{rose} \\begin{beige}beige"
+                   "\\end{beige}} here.\n\n"
+                   "A list of its own \\foreignlanguage{french}{pour ouvrir\n"
+                   "\\begin{points}\n\\item un autre point\n\\end{points}\npour fermer} last.\n\n"
+                   "Its list in its own \\foreignlanguage{french}{pour lancer\n"
+                   "\\begin{morepoints}\n\\item un dernier point\n\\end{morepoints}\npour clore} "
+                   "last.\n\n"
+                   "A remark \\foreignlanguage{french}{avant \\begin{remarque}une remarque"
+                   "\\end{remarque} puis} last.\n\n"
+                   "A tag of its own: \\textde{das Wort}.\n\n"
+                   "Tags of their own: \\texten{a word}, \\textfra{un mot}, and "
+                   "\\textdeu{ein Wort}.\n\n"
+                   "A poem: \\foreignlanguage{french}{vers un\\\\\n\nvers deux\\\\[1ex]\n\n"
+                   "vers trois} after.\n\n"
+                   "A space: \\foreignlanguage{french}{vers un\\\\\\\n\nvers deux} after.\n\n"
+                   "A turn: \\foreignlanguage{french}{vers un\\\\par la suite} after.\n\n"
+                   "Then: \\foreignlanguage{french}{vers un\\begin{ensuite}ici\\end{ensuite}} "
+                   "after.\n\n"
+                   "A line's note: \\foreignlanguage{french}{vers un\\\\% une note\n\n"
+                   "vers deux} after.\n\n"
+                   "A comment: \\foreignlanguage{french}{avant.% une note\n\n"
+                   "Apr\\`es} after.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.read\n  title: Read in Languages\n"
+                 "  language: en\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    page = read(work, "html", "one.html") if os.path.exists(
+        os.path.join(work, "html", "one.html")) else ""
+    text = re.sub(r"\s+", " ", page)
+
+    def paragraph(*parts):
+        """Whether the page has a paragraph of parts (patterns), in order,
+        nothing else."""
+        return re.search(r"<p>\s*" + r"\s*".join(parts) + r"\s*</p>", text) is not None
+
+    return [
+        ("a LaTeX book is read whose \\foreignlanguage has babel's option, or words that "
+         "hold a paragraph break or a list, which stopped the reader",
+         lambda: result.returncode == 0 and bool(page)),
+        ("\\foreignlanguage[date]'s words are in its language, in their paragraph",
+         lambda: paragraph("A date:", '<span lang="de-DE">das Wort</span>', "here.")),
+        ("words holding a blank line are a passage in each paragraph LaTeX sets, the words "
+         "before and after in them",
+         lambda: paragraph("Words before", '<span lang="fr">la fin du paragraphe.</span>')
+         and paragraph('<span lang="fr">Le d(?:\u00e9|&#xE9;)but du suivant</span>',
+                       "and words after.")),
+        ("and so are words holding \\par",
+         lambda: paragraph("Again", '<span lang="fr">un.</span>')
+         and paragraph('<span lang="fr">Deux</span>', "after.")),
+        ("words holding a list are a division in their language, the list in it, and so "
+         "are words holding a list environment the book defines, one defined with it, one "
+         "whose code ends a paragraph, one copied from itemize over the book's own, or one "
+         "whose code holds a formula it closes, or a dollar sign",
+         lambda: re.search(r'<div lang="fr">\s*<p>pour commencer</p>\s*<ul>\s*<li>\s*'
+                           r'(?:<p>)?un point(?:</p>)?\s*</li>\s*</ul>\s*<p>pour finir</p>\s*'
+                           r'</div>', text) is not None
+         and re.search(r'<p>A list of its own</p>\s*<div lang="fr">\s*<p>pour ouvrir</p>\s*'
+                       r'<ul>\s*<li>\s*(?:<p>)?un autre point(?:</p>)?\s*</li>\s*</ul>\s*'
+                       r'<p>pour fermer</p>\s*</div>', text) is not None
+         and re.search(r'<p>Its list in its own</p>\s*<div lang="fr">\s*<p>pour lancer</p>\s*'
+                       r'<ul>\s*<li>\s*(?:<p>)?un dernier point(?:</p>)?\s*</li>\s*</ul>\s*'
+                       r'<p>pour clore</p>\s*</div>', text) is not None
+         and re.search(r'<p>A remark</p>\s*<div lang="fr">\s*<p>avant</p>\s*<p><strong>Note'
+                       r'</strong> une remarque</p>\s*<p>puis</p>\s*</div>', text) is not None
+         and re.search(r'<p>A grey list</p>\s*<div lang="fr">\s*<p>pour</p>\s*<ul>\s*<li>\s*'
+                       r'(?:<p>)?gris(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*</div>', text)
+         is not None
+         and re.search(r'<p>A starred list</p>\s*<div lang="fr">\s*<p>pour <math .*?</math></p>'
+                       r'\s*<ul>\s*<li>\s*(?:<p>)?une(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*'
+                       r'</div>', text) is not None
+         and re.search(r'<p>A priced list</p>\s*<div lang="fr">\s*<p>pour \$</p>\s*<ul>\s*<li>'
+                       r'\s*(?:<p>)?cher(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*</div>', text)
+         is not None),
+        ("babeltags' \\textfr, declared in the master, is a passage in French, where the "
+         "reader dropped it with its words",
+         lambda: paragraph("A tag:", '<span lang="fr">court</span>', "and",
+                           '<span lang="fr">bref</span>.')),
+        ("a paragraph break in a note in the words is the note's, and a formula in them, "
+         "breqn's, the book's copy of equation, or one the book's own environment opens, "
+         "with an environment in it, is in their passage, as the reader read them",
+         lambda: re.search(r'<p>\s*A note: <span lang="fr">un mot<a [^>]*>.*?</a></span> '
+                           r'after\.</p>', text) is not None
+         and re.search(r"<p>Son second paragraphe\.", text) is not None
+         and re.search(r'<p>\s*A formula: <span lang="fr">la formule <math .*?<mtable>.*? '
+                       r'suit</span> here\.</p>', text) is not None
+         and re.search(r'<p>\s*A copied formula: <span lang="fr">la formule .*?<mtable>.*? '
+                       r'suit</span> here\.</p>', text) is not None
+         and re.search(r'<p>\s*A wrapped formula: <span lang="fr">la formule .*?<mtable>.*? '
+                       r'suit</span> here\.</p>', text) is not None
+         and re.search(r'<p>\s*A wrapped matrix: <span lang="fr">la matrice <math .*?<mtable>.*? '
+                       r'suit</span> here\.</p>', text) is not None
+         and re.search(r'<p>\s*Wrapped twice: <span lang="fr">la formule .*?<mtable>.*? '
+                       r'suit</span> here\.</p>', text) is not None),
+        ("a blank line after \\\\, which the reader reads as a line break, is left to it, "
+         "with an option or a comment between too, and so is \\\\par, a line break and a "
+         "word; after a control space, a blank line is a paragraph break, the backslash kept "
+         "from the brace",
+         lambda: paragraph("A poem:", '<span lang="fr">vers un<br />', "vers deux<br />",
+                           "vers trois</span>", "after.")
+         and paragraph("A line(?:\u2019|&#x2019;)s note:", '<span lang="fr">vers un<br />',
+                       "vers deux</span>", "after.")
+         and paragraph("A space:", '<span lang="fr">vers un<br />', "(?:\u00a0|&#xA0;)</span>")
+         and paragraph('<span lang="fr">vers deux</span>', "after.")
+         and paragraph("A turn:", '<span lang="fr">vers un<br />', "par la suite</span>",
+                       "after.")
+         and paragraph("Then:", '<span lang="fr">vers un<br />', "par la suite, ici</span>",
+                       "after.")),
+        ("a formula's environment in the words, and those the book defines as text, each "
+         "way it defines them, a copy of one, and one defined as text after it was copied "
+         "from a list's, are read in the paragraph, as the reader read them",
+         lambda: re.search(r'<p>\s*A matrix: <span lang="fr">la matrice .*? suit</span> '
+                           r'here\.</p>', text) is not None
+         and paragraph("Its own:", '<span lang="fr">un mot, rouge</span>', "here.")
+         and paragraph("Others of its own:", '<span lang="fr">un <span>vert</span>',
+                       "<span>bleu</span>", "<span>deux</span>", "(?:<span>)?rose(?:</span>)?",
+                       "(?:<span>)?beige(?:</span>)?</span>",
+                       "here.")),
+        ("and a tag whose command the book defines again, each way the reader reads, as "
+         "it defines it, one copied from a command written in braces, which the reader drops, "
+         "read as \\foreignlanguage",
+         lambda: paragraph("A tag of its own:", '<em><span lang="de-DE">das Wort</span></em>.')
+         and paragraph("Tags of their own:", '<em><span lang="en">a word</span></em>,',
+                       '<em><span lang="fr">un mot</span></em>,', "and",
+                       '<em><span lang="de-DE">ein Wort</span></em>.')
+         and paragraph("Copied tags:", '<em><span lang="de-DE">ein Wort</span></em>', "and",
+                       '<span lang="fr">un mot</span>.')),
+        ("a paragraph that ends in a comment, the break after it, is a passage of its own",
+         lambda: paragraph("A comment:", '<span lang="fr">avant.</span>')
+         and paragraph('<span lang="fr">Apr(?:\u00e8|&#xE8;)s</span>', "after.")),
+        ("the run says what it read so",
+         lambda: "3 babeltags' command(s) (\\textfr) read as \\foreignlanguage" in said
+         and "1 \\foreignlanguage's option(s) ([date]) left out" in said
+         and "4 \\foreignlanguage's words holding a paragraph break read" in said
+         and "7 \\foreignlanguage's words holding a list or another environment read as "
+             "otherlanguage" in said),
+        ("and the author's files are as they were",
+         lambda: all(read(work, name) == text for name, text in files.items())),
+        ("and a \\captionof's paragraph is found as before, its blank line its start",
+         lambda: latexsource.captionof_floats(
+             "Before.\n\n\n  A picture \\includegraphics{x}\\captionof{figure}{Cap}\n\nAfter.\n",
+             {}) == "Before.\n\n\\begin{figure}\n  A picture \\includegraphics{x}"
+                   "\\caption{Cap}\\end{figure}\n\nAfter.\n"),
+    ]
+
+
 # A book in en-US whose second chapter, \include-d as ch02.tex, is French by
 # languages.csv and defines a macro the fourth uses, and is followed by an
 # English file of sections only, in its chapter; whose third, in a folder,
@@ -8387,6 +8616,7 @@ def case_no_contents(work):
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
+         ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

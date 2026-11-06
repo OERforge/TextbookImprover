@@ -65,7 +65,7 @@ move them if you would rather keep them with their chapters.
 | `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
 | `--toc PDF-OR-EPUB` | — | Order from a PDF's bookmark outline or an EPUB's table of contents |
-| `--includeallhtml` | off | Place pages the config doesn't list |
+| `--include-all-html` | off | Place pages the config doesn't list |
 | `--zip` | off | Also build the `.imscc` |
 | `--check` | off | Validate; write nothing |
 | `--init` | off | Write `packaging-sample.yaml`, and `project-sample.yaml` when nothing names the book and no run has written one, and stop |
@@ -87,8 +87,9 @@ error that writes nothing. Links to other pages in the cartridge are
 skipped — each page is already its own resource.
 
 Pages in the directory that `contents` doesn't list are reported and left
-out. `--includeallhtml` adds them, placing each one as precisely as the
-filename allows:
+out. `--include-all-html` adds them (`--includeallhtml`, its old name,
+still works, with a warning, and goes after 1.0), placing each one as
+precisely as the filename allows:
 
 - A page whose chapter already has a group in `contents` joins that group,
   in back-matter order. This is what makes re-running after converting a

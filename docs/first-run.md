@@ -7,7 +7,7 @@ From a directory of Word files to a cartridge, in the order the steps have to ha
 A cartridge needs the pages in the book's order, grouped into modules. Three sources, in order of how much you should trust them:
 
 1. **The book's PDF or EPUB**, with `--toc book.pdf` or `--toc book.epub`: the PDF's bookmark outline or the EPUB's navigation document is the table of contents in the order the book uses, with its real chapter titles. The PDF needs `pypdf`; the EPUB needs nothing. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config doesn't.
-2. **The filenames**, with `--includeallhtml`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
+2. **The filenames**, with `--include-all-html`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
 3. **A guess**, which is what a bare first run does and says so in the sample.
 
 Whichever you use, the result goes to `project-sample.yaml` for review (to `packaging-sample.yaml` for a book named in `packaging.yaml`'s own `project:` block), and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
@@ -109,7 +109,7 @@ survive a commit made through GitHub's web interface, so the explicit form
 is what this document uses throughout.
 
 `convert.py` passes any arguments straight through to `build-cartridge.py`,
-so `--zip`, `--check`, `--toc` and `--includeallhtml` all work on the front
+so `--zip`, `--check`, `--toc` and `--include-all-html` all work on the front
 script.
 
 Work on the Linux filesystem, not under `/mnt/c` or `/mnt/h`. See
@@ -157,7 +157,7 @@ python3 $T/bin/convert.py --zip
 
 Steps 4 and 5 are the loop you will spend the most time in. Everything else
 is done once per book. A page left out of `contents` later on is placed
-in the chapter its name gives with `--includeallhtml`.
+in the chapter its name gives with `--include-all-html`.
 
 The sample written in step 2 is complete: every project setting appears at
 its current value with a comment explaining it, so renaming it over your

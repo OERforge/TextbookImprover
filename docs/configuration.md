@@ -310,7 +310,7 @@ A page cut by `pages.split_level` is listed by its piece name,
 
 Omit `contents` and the order is guessed from the filenames — natural sort,
 so chapter 10 doesn't land between chapters 1 and 2, plus chapter grouping
-when the filenames encode it. `--includeallhtml` groups the pages it
+when the filenames encode it. `--include-all-html` groups the pages it
 appends the same way.
 
 Chapters are detected by shape, not vocabulary: a numeric prefix

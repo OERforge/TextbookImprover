@@ -9049,10 +9049,58 @@ def case_book_name(work):
          and read(bare, "conversion.yaml").endswith("footer: Our footer.\n")),
     ]
 
+
+def case_include_all_html(work):
+    """A page contents doesn't list, left out, and appended by
+    --include-all-html, the option's name, and by --includeallhtml, its old
+    name, which works, with a warning, until it goes after 1.0."""
+    os.makedirs(work)
+    for name in ("one", "two"):
+        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+            fh.write('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'
+                     f"<title>Page {name}</title></head>\n<body><main>"
+                     f"<h1>Page {name}</h1><p>Text.</p></main></body></html>\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.adopt\n"
+                 "  title: The Adopted Book\n  contents: [one]\n")
+
+    def package(manifest, *options):
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", work,
+             "-o", os.path.join(work, manifest)] + list(options),
+            capture_output=True, text=True)
+    plain = package("plain.xml")
+    new = package("new.xml", "--include-all-html")
+    old = package("old.xml", "--includeallhtml")
+    usage = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "--help"],
+                           capture_output=True, text=True)
+
+    def manifest(name):
+        return read(work, name) if exists(work, name) else ""
+    return [
+        ("a page contents doesn't list is left out, the run naming the option "
+         "that appends it",
+         lambda: plain.returncode == 0 and "one.html" in manifest("plain.xml")
+         and "two.html" not in manifest("plain.xml")
+         and "  two.html\n  Use --include-all-html to append them." in plain.stderr),
+        ("--include-all-html appends it, with no warning",
+         lambda: new.returncode == 0 and "two.html" in manifest("new.xml")
+         and "WARNING" not in new.stderr),
+        ("--includeallhtml, its old name, does the same, with one warning "
+         "naming the new name",
+         lambda: old.returncode == 0 and manifest("old.xml") == manifest("new.xml")
+         and old.stderr.count("WARNING: --includeallhtml is deprecated and goes "
+                              "after 1.0: use --include-all-html") == 1),
+        ("--help names the new name alone",
+         lambda: usage.returncode == 0 and "--include-all-html" in usage.stdout
+         and "includeallhtml" not in usage.stdout),
+    ]
+
 CASES = [
     ("a bare directory", case_bare),
     ("the output check, with --quick and without", case_quick),
     ("where the book is named", case_book_name),
+    ("a page contents doesn't list, and --include-all-html", case_include_all_html),
     ("a markdown target that merges", case_merge),
     ("a Markdown target, round trip", case_markdown_target),
     ("a formula's empty row, through Markdown and AsciiDoc", case_empty_rows),

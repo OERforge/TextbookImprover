@@ -7,7 +7,7 @@ optionally the .imscc archive) from a directory of HTML pages.
     build-cartridge.py --check             # validate, write nothing
     build-cartridge.py --zip               # also build the archive
     build-cartridge.py --init              # write packaging-sample.yaml and stop
-    build-cartridge.py --includeallhtml    # adopt unlisted pages
+    build-cartridge.py --include-all-html  # adopt unlisted pages
 
 This script is read-only with respect to page content: it never edits an
 HTML file, an image, or anything under a media directory. It writes only
@@ -954,9 +954,13 @@ def main():
                         help="manifest to write (default: <dir>/imsmanifest.xml)")
     parser.add_argument("--zip", action="store_true",
                         help="also build the .imscc archive")
-    parser.add_argument("--includeallhtml", action="store_true",
+    parser.add_argument("--include-all-html", action="store_true",
                         help="append pages that contents doesn't list, "
                              f"and write {PROJECT_SAMPLE_NAME} with them")
+    # The option's name before every option of more than one word was
+    # hyphenated, kept working, with a warning, until it goes after 1.0.
+    parser.add_argument("--includeallhtml", action="store_true",
+                        dest="include_all_html_old", help=argparse.SUPPRESS)
     parser.add_argument("--toc", metavar="PDF-OR-EPUB",
                         help="take the order and the headings from this "
                              "PDF's bookmark outline or EPUB's navigation "
@@ -993,6 +997,10 @@ def main():
                              "convert.py to read, then stop. Writes only into "
                              "DIR, never into the content directory.")
     args = parser.parse_args()
+    if args.include_all_html_old:
+        print("WARNING: --includeallhtml is deprecated and goes after 1.0: use "
+              "--include-all-html, the same option.", file=sys.stderr)
+        args.include_all_html = True
 
     base = args.dir
     config_path = args.config or os.path.join(base, CONFIG_NAME)
@@ -1239,7 +1247,7 @@ def main():
                 note += (f"; {len(leftover)} the outline does not mention are "
                          f"under \"{unsorted_title}\"")
             notes.append(note + ".")
-        elif args.includeallhtml:
+        elif args.include_all_html:
             # A page whose filename names its chapter can be placed
             # without guessing, so place it: into the chapter's existing
             # group if there is one, otherwise into a new chapter group at
@@ -1322,7 +1330,7 @@ def main():
                   "contents and were left out:", file=sys.stderr)
             for stem in extra:
                 print(f"  {stem}.html", file=sys.stderr)
-            print("  Use --includeallhtml to append them.", file=sys.stderr)
+            print("  Use --include-all-html to append them.", file=sys.stderr)
 
     # Under --init with no pages to read, contents can only fail to match.
     for problem in problems if stems or not args.init else []:
@@ -1483,7 +1491,7 @@ def main():
                   file=sys.stderr)
             return 1
 
-    if (extra and args.includeallhtml) or args.toc or guessed_contents:
+    if (extra and args.include_all_html) or args.toc or guessed_contents:
         settled, sample_targets = sample_inputs(
             resolved, documents, target, contents_from_tree(tree))
         # Contents are the project's, so they go where the book is named.

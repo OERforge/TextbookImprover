@@ -6322,7 +6322,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Convert the .docx files here, one output per target.",
         epilog="Anything else is passed to build-cartridge.py: --zip, "
-               "--toc FILE, --check, --includeallhtml.")
+               "--toc FILE, --check, --include-all-html.")
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
     parser.add_argument("--linked-documents", action="store_true",

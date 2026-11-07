@@ -13,7 +13,9 @@
 --    a macron set over it, y-hat as one precomposed character, and a null
 --    hypothesis's zero as a slashed O. Each has one right form. The micro
 --    sign, y-hat, and the slashed O are also characters no math font in
---    LaTeX maps, so the PDF dropped them.
+--    LaTeX maps, so the PDF dropped them. An equation's own text (\text{})
+--    gets its en dashes made minus signs where the text is math, as the
+--    economics textbook types its equations as text (text_minus).
 --
 -- 2. Math typed as text (math.from_text): italic letters, Greek, digits,
 --    sub- and superscripts, and a relation between them, written as
@@ -271,14 +273,75 @@ local EQUATION_FIXES = {
 -- Where a \text{...} was set aside while the rest is repaired.
 local TEXT_OPEN, TEXT_CLOSE = '\u{E000}', '\u{E001}'
 
+-- A letter or a digit beside an en dash in an equation's text.
+local function text_letter(cp)
+  return (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
+    or (cp >= 0xC0 and cp <= 0x24F and cp ~= 0xD7 and cp ~= 0xF7)
+    or (cp >= 0x370 and cp <= 0x3FF)
+end
+local function text_digit(cp) return cp >= 48 and cp <= 57 end
+
+-- An en dash in an equation's own text is a minus sign there too, where
+-- the text is math, as an equation typed as text is: a number's sign
+-- (\text{–1}), a charge's (\text{Cl}^{\text{–}}), or a difference
+-- (\text{16~–~2P}, as the economics book types its equations). It stays
+-- a dash between two letters with nothing between them, a bond
+-- (\text{H–Cl}), between two digits so, a range, and beside another dash
+-- (\text{–––}). Written as a minus sign in the text; a text that
+-- holds nothing but the dash, and space, is the operator itself (body
+-- returned as nil, and the dash in its place). body has its braces.
+local TEXT_SPACE = {[32] = true, [126] = true, [0xA0] = true}
+
+local function text_minus(body)
+  local cps = {}
+  for _, cp in utf8.codes(body) do cps[#cps + 1] = cp end
+  local alone = true
+  for i, cp in ipairs(cps) do
+    local edge = (i == 1 and cp == 123) or (i == #cps and cp == 125)
+    local escaped_space = cp == 92 and cps[i + 1] == 32
+    local after_escape = cp == 32 and cps[i - 1] == 92
+    if cp ~= 0x2013 and not (edge or TEXT_SPACE[cp] or escaped_space or after_escape) then
+      alone = false
+    end
+  end
+  local dashes = 0
+  for i, cp in ipairs(cps) do
+    if cp == 0x2013 then
+      dashes = dashes + 1
+      local a, b = cps[i - 1] or 0, cps[i + 1] or 0
+      if not ((text_letter(a) and text_letter(b)) or (text_digit(a) and text_digit(b))
+              or a == 0x2013 or b == 0x2013) then
+        cps[i] = 0x2212
+      end
+    end
+  end
+  if alone and dashes == 1 then return nil end
+  local out = {}
+  for i, cp in ipairs(cps) do out[i] = utf8.char(cp) end
+  return table.concat(out)
+end
+
+-- A text set over or under something as its mark (\underset{\text{–}}),
+-- an underline a book draws so, isn't a sign.
+local function a_mark(tex, position)
+  local before = tex:sub(1, position - 1)
+  return before:match('\\underset{$') or before:match('\\overset{$')
+end
+
 local function repair_tex(tex)
-  -- \text{...} is set aside and given only the fixes marked text: its en
-  -- dashes are dashes, and its middle dots and y-hats stay characters,
-  -- since \text{\cdot} is an error and the equation would be shown as TeX.
+  -- \text{...} is set aside and given only the fixes marked text, and its
+  -- en dashes made minus signs where the text is math (text_minus); its
+  -- middle dots and y-hats stay characters, since \text{\cdot} is an error
+  -- and the equation would be shown as TeX.
   local texts = {}
-  local fixed = tex:gsub('\\text(%b{})', function(body)
+  local fixed = tex:gsub('()\\text(%b{})', function(position, body)
     for _, pair in ipairs(EQUATION_FIXES) do
       if pair.text then body = replace_plain(body, pair[1], pair[2]) end
+    end
+    if not a_mark(tex, position) then
+      local signed_body = text_minus(body)
+      if signed_body == nil then return '\u{2013}' end
+      body = signed_body
     end
     texts[#texts + 1] = body
     return '\\text' .. TEXT_OPEN .. #texts .. TEXT_CLOSE
@@ -1259,13 +1322,21 @@ local function minus_in_text(block)
 end
 
 -- A picture's description, which a screen reader reads as it reads text:
--- the same signs, its own stretch of text. A Word source's copy keeps the
--- descriptions its pictures have, as it keeps them unless the image-alt
--- sidecar gives one.
+-- the same signs, its own stretch of text. A Word source's copy gets them
+-- in the description its picture has there, the image-alt sidecar's or
+-- its own, each place a row naming the picture by its file (picture, its
+-- path, which en dash of the description).
 local function minus_in_description(image)
   local fixed, chars = signs_in(image.caption)
   local content = signed(image.caption, fixed, chars)
   if not content then return nil end
+  local n = 0
+  for i, c in ipairs(chars) do
+    if c.cp == EN_DASH then
+      n = n + 1
+      if fixed[i] then minus_place('picture', image.src, n) end
+    end
+  end
   image.caption = content
   return image
 end

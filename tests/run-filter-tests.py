@@ -978,13 +978,13 @@ text only a character for a character: $x_{2}\text{···}x_{n} + \text{µ ŷ}$.
 """
 
 
-def math_run(work, name, settings):
+def math_run(work, name, settings, text=MATH_TEXT):
     """The sample through math-repair.lua alone: its equations' TeX and
     the report's rows."""
     os.makedirs(work, exist_ok=True)
     source = os.path.join(work, name + ".md")
     with open(source, "w", encoding="utf-8") as fh:
-        fh.write(MATH_TEXT)
+        fh.write(text)
     report = os.path.join(work, name + ".csv")
     environment = dict(os.environ, MATH_REPAIRED=report, **settings)
     result = subprocess.run(
@@ -1098,6 +1098,41 @@ def case_math_repair(work):
         ("each row that kept something is recorded, and only those",
          lambda: {r[0] for r in kept_rows} == {"expression", "symbol", "equation"}
          and not any("\u03b2" in r[2] for r in kept_rows)),
+    ]
+
+
+# An equation's own text, as the economics book types its equations, and
+# what stays a dash: a bond, a range, a mark set under or over something, a
+# run of dashes.
+EQUATION_TEXT = (
+    "Text: $\\text{16~\u2013~2P~\u2013~2}$, $\\text{Cl}^{\\text{\u2013}}$, "
+    "$\\frac{.177\\text{~\u2013~}.189}{.015}$, $\\text{~~=~\u2013\\$10,000}$, "
+    "$\\text{\u2013}\\frac{20}{5}$; and $\\text{H\u2013Cl}$, $\\text{1990\u20132000}$, "
+    "$\\underset{\\text{\u2013}}{x}$, $\\overset{\\text{\u2013}}{y}$, $x\\text{\u2013\u2013\u2013}$.\n")
+
+
+def case_equation_text(work):
+    """math-repair.lua: an en dash in an equation's own text is a minus sign
+    where the text is math, and a dash where it's a bond, a range, a mark,
+    or beside another dash; a text that's the dash alone is the operator."""
+    maths, rows = math_run(work, "on", {}, EQUATION_TEXT)
+    off, _ = math_run(work, "off", {"MATH_REPAIR_EQUATIONS": "false"}, EQUATION_TEXT)
+    return [
+        ("a difference's en dashes are minus signs in its text, a charge's too",
+         lambda: "\\text{16~\u2212~2P~\u2212~2}" in maths and "\\text{Cl}^{-}" in maths),
+        ("a text that's the dash alone, and space, is the operator",
+         lambda: "\\frac{.177-.189}{.015}" in maths and "-\\frac{20}{5}" in maths),
+        ("a sign after a relation in text is one",
+         lambda: "\\text{~~=~\u2212\\$10,000}" in maths),
+        ("a bond, a range, a mark under or over something, and a run of dashes stay",
+         lambda: all(m in maths for m in ("\\text{H\u2013Cl}", "\\text{1990\u20132000}",
+                                          "\\underset{\\text{\u2013}}{x}",
+                                          "\\overset{\\text{\u2013}}{y}",
+                                          "x\\text{\u2013\u2013\u2013}"))),
+        ("each equation changed is reported, and only those",
+         lambda: len([r for r in rows if r and r[0] == "equation"]) == 5),
+        ("math.repair_equations off leaves them as they are",
+         lambda: "\\text{16~\u2013~2P~\u2013~2}" in off and "\u2212" not in "".join(off)),
     ]
 
 
@@ -1399,6 +1434,9 @@ def case_minus_in_text(work):
         ("a paragraph's places are its en dashes, counted, for a Word source's copy",
          lambda: [p[3] for p in places if p[1] == "1"] == [str(n) for n in range(1, 9)]
          and all(p[0] == "on" and p[4:] == ["\u2013", "\u2212"] for p in places)),
+        ("a picture's description has its places, by the picture's path, for a Word "
+         "source's copy",
+         lambda: ["on", "picture", "graph.png", "1", "\u2013", "\u2212"] in places),
         ("and only those it makes minus signs: an exponent's, not the range's between them",
          lambda: [p[3] for p in places if p[2].startswith("Exponents")] == ["1", "3"]),
         ("a place's paragraph is its text as it was, a superscript's in line with the rest, "
@@ -1556,6 +1594,7 @@ CASES = [
     ("split at grouping bands", case_split),
     ("equations, MathSpeak, and spacers", case_math),
     ("math repaired, and math typed as text", case_math_repair),
+    ("an equation's own text", case_equation_text),
     ("an en dash in text made a minus sign", case_minus_in_text),
     ("a title's formulas as text, after the repairs", case_title_formulas),
     ("a declared title that is its heading's, its formulas as text", case_declared_formula_title),

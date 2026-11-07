@@ -48,7 +48,8 @@ What it changes, all of it decided elsewhere in the pipeline:
   the file reads back as the pages already read. With math.from_text, math
   typed as text made Word's equation where the filter made one in the
   page (remediate_text_math); with math.minus_in_text, an en dash in text
-  made a minus sign where the filter made one (remediate_text_minus).
+  made a minus sign where the filter made one (remediate_text_minus), and
+  in a picture's description (remediate_picture_minus).
 - **Compatibility mode 15**, only when asked for.
 
 Everything else is left as it was: the XML is edited as text, never parsed
@@ -391,17 +392,244 @@ MATH_RUN = re.compile(r"(<m:r>)((?:(?!</m:r>).)*?)(<m:t(?:\s[^>]*)?>)([^<]*)(</m
 # a limit, with a macron, which NVDA read, in place of an en dash.
 BAR = '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e>%s</m:e></m:acc>'
 HAT = '<m:acc><m:accPr><m:chr m:val="\u0302" /></m:accPr><m:e>%s</m:e></m:acc>'
-SUB_SLASHED_O = re.compile(r"(<m:sub><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>)\u00d8(</m:t></m:r></m:sub>)", re.S)
+# A subscript's slashed O in a run of math: a run of text (m:nor, m:lit) is
+# \text{} to Pandoc, which the filter's fix doesn't reach; nor its bars.
+SUB_SLASHED_O = re.compile(r"(<m:sub><m:r>(?:(?!</m:r>|<m:nor\b|<m:lit\b).)*?<m:t(?:\s[^>]*)?>)\u00d8"
+                           r"(</m:t></m:r></m:sub>)", re.S)
 EQUATION_CHARACTERS = {"\u00b5": "\u03bc", "\u2206": "\u0394"}
+
+
+def _text_letter(ch):
+    """A letter beside an en dash in an equation's text, as math-repair.lua's
+    text_letter has it."""
+    cp = ord(ch) if ch else 0
+    return (65 <= cp <= 90 or 97 <= cp <= 122 or (0xC0 <= cp <= 0x24F and cp not in (0xD7, 0xF7))
+            or 0x370 <= cp <= 0x3FF)
+
+
+def _text_minus(text):
+    """(text, alone): an equation's normal text, each en dash a minus sign
+    where the text is math, as math-repair.lua's text_minus decides: not
+    between two letters with nothing between them (a bond, H\u2013Cl), nor two
+    digits so (a range), nor beside another dash; alone: the text is that
+    dash and space, nothing else."""
+    chars = list(text)
+    alone = text.replace(" ", "").replace("\u00a0", "") == "\u2013"
+    for i, ch in enumerate(chars):
+        if ch != "\u2013":
+            continue
+        a = text[i - 1] if i > 0 else ""
+        b = text[i + 1] if i + 1 < len(text) else ""
+        if ((_text_letter(a) and _text_letter(b)) or ("0" <= a <= "9" and a and "0" <= b <= "9" and b)
+                or "\u2013" in (a, b)):
+            continue
+        chars[i] = "\u2212"
+    return "".join(chars), alone
+
+
+# How Pandoc reads an equation's text (texmath's OMML reader), so the copy
+# gives each \text{} what math-repair.lua gives it in the pages. A run is
+# text when it's normal text (m:nor), or literal (m:lit): \text{} in no
+# style of its own, \textbf{} and the like in one. Runs of text side by side
+# in m:oMath, m:num, m:den, m:lim, m:sub, m:sup or m:deg are one \text{},
+# what isn't an equation's own between them (a w:proofErr, a bookmark)
+# dropped; in an m:e or an m:fName each run is a \text{} of its own.
+TAG = re.compile(r"""<(/?)([^\s>/]+)((?:\s+[^\s=>/]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(/?)>""")
+MERGING = {"m:oMath", "m:num", "m:den", "m:lim", "m:sub", "m:sup", "m:deg"}
+STRUCTURES = {"m:acc", "m:bar", "m:box", "m:borderBox", "m:d", "m:eqArr", "m:f", "m:func",
+              "m:groupChr", "m:limLow", "m:limUpp", "m:m", "m:nary", "m:phant", "m:rad", "m:sPre",
+              "m:sSub", "m:sSubSup", "m:sSup"}
+# What texmath takes for an operator, written with its limit as a script
+# (\lim_{...}) rather than set under it: these names, and these characters.
+OPERATOR_NAMES = {"arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc", "deg",
+                  "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lg", "lim", "liminf", "limsup",
+                  "ln", "log", "max", "min", "Pr", "sec", "sin", "sinh", "sup", "tan", "tanh"}
+BIG_OPERATORS = (set(range(0x220F, 0x2212)) | set(range(0x222B, 0x2234)) | set(range(0x22C0, 0x22C4))
+                 | set(range(0x27D5, 0x27DA)) | {0x29F8, 0x29F9} | (set(range(0x2A00, 0x2A22)) - {0x2A0A})
+                 | {0x2AFC, 0x2AFF})
+VALUE = re.compile(r'\bm:val\s*=\s*"([^"]*)"')
+STYLE = re.compile(r"<m:(?:nor|lit|sty|scr)\b[^>]*/>")
+
+
+def _tree(eq):
+    """An equation's elements: each a dict (name, attrs, start, end,
+    children, parent), from its tags; None if they don't nest."""
+    root = {"name": None, "children": [], "parent": None}
+    stack = [root]
+    for m in TAG.finditer(eq):
+        closing, name, attrs, empty = m.groups()
+        if closing:
+            if len(stack) < 2 or stack[-1]["name"] != name:
+                return None
+            stack.pop()["end"] = m.end()
+            continue
+        node = {"name": name, "attrs": attrs, "start": m.start(), "children": [],
+                "parent": stack[-1]}
+        stack[-1]["children"].append(node)
+        if empty:
+            node["end"] = m.end()
+        else:
+            stack.append(node)
+    return root if len(stack) == 1 else None
+
+
+def _child(node, name):
+    return next((c for c in node["children"] if c["name"] == name), None)
+
+
+def _value(node, name):
+    """The m:val of node's child of that name, or None."""
+    child = node and _child(node, name)
+    found = child and VALUE.search(child["attrs"])
+    return found.group(1) if found else None
+
+
+RUN_PROPS = re.compile(r"<m:rPr\b[^>]*?(?:/>|>.*?</m:rPr>)", re.S)
+STYLED_PROPS = re.compile(r'<m:(?:sty\b[^>]*\bm:val\s*=\s*"(?:b|i|bi)"|scr\b[^>]*\bm:val\s*=\s*'
+                          r'"(?:script|fraktur|double-struck|sans-serif|monospace)")')
+
+
+def _run_kind(run):
+    """What Pandoc reads an m:r (its XML) as: "text" (\\text{}), "styled"
+    (text in a style of its own, \\textbf{}), "math", or "styled math"."""
+    found = RUN_PROPS.search(run)
+    props = found.group(0) if found else ""
+    styled = STYLED_PROPS.search(props) is not None
+    if re.search(r"<m:nor\b", props):
+        return "text"
+    if re.search(r"<m:lit\b", props):
+        return "styled" if styled else "text"
+    return "styled math" if styled else "math"
+
+
+def _run_text(eq, run):
+    """An m:r's text, or None where it isn't one m:t."""
+    simple = MATH_RUN.fullmatch(eq, run["start"], run["end"])
+    return simple.group(4) if simple else None
+
+
+def _operator(eq, base):
+    """Whether texmath takes an m:e for an operator: one run of math, in no
+    style of its own, an operator's name or character."""
+    kids = [k for k in base["children"] if k["name"] == "m:r" or k["name"] in STRUCTURES]
+    if len(kids) != 1 or kids[0]["name"] != "m:r":
+        return False
+    text = _run_text(eq, kids[0])
+    if _run_kind(eq[kids[0]["start"]:kids[0]["end"]]) != "math" or text is None:
+        return False
+    return text in OPERATOR_NAMES or (len(text) == 1 and ord(text) in BIG_OPERATORS)
+
+
+def _a_mark(eq, container):
+    """Whether a \\text{} first in container is set under or over something
+    as its mark, as Pandoc writes it (\\underset{\\text{...}}): an m:lim whose
+    base isn't an operator, or the m:e of a group character Pandoc sets it
+    over or under."""
+    parent = container["parent"]
+    if not parent:
+        return False
+    if container["name"] == "m:lim" and parent["name"] in ("m:limLow", "m:limUpp"):
+        base = _child(parent, "m:e")
+        return base is not None and not _operator(eq, base)
+    if container["name"] == "m:e" and parent["name"] == "m:groupChr":
+        props = _child(parent, "m:groupChrPr")
+        return (_value(props, "m:pos") == "top") == (_value(props, "m:vertJC") == "top")
+    return False
+
+
+def _text_groups(eq):
+    """Each \\text{} Pandoc reads from an equation: (its runs, whether it's
+    a mark, whether each run is one m:t, so it can be written)."""
+    root = _tree(eq)
+    if root is None:
+        return []
+    groups = []
+
+    def walk(node):
+        for child in node["children"]:
+            walk(child)
+        if node["name"] not in MERGING and node["name"] not in ("m:e", "m:fName"):
+            return
+        merging = node["name"] in MERGING
+        kids = []
+        for child in node["children"]:
+            if node["name"] == "m:oMath" and child["name"].startswith("w:"):
+                kids += child["children"]
+            else:
+                kids.append(child)
+        current, seen = None, False
+
+        def close():
+            if current:
+                groups.append((current[0], current[1], current[2]))
+        for child in kids:
+            if child["name"] == "m:r":
+                kind, text = _run_kind(eq[child["start"]:child["end"]]), _run_text(eq, child)
+                if kind == "text":
+                    if current and not merging:
+                        close()
+                        current = None
+                    if not current:
+                        current = [[], not seen and _a_mark(eq, node), True]
+                    current[0].append(child)
+                    current[2] = current[2] and text is not None
+                    seen = True
+                    continue
+                if kind == "math" and text == "":
+                    continue
+            elif child["name"] not in STRUCTURES:
+                continue
+            close()
+            current, seen = None, True
+        close()
+    walk(root)
+    return groups
+
+
+def _normal_text_minus(eq, counts):
+    """eq with each \\text{} Pandoc reads from it given its en dashes as
+    math-repair.lua gives a \\text{} its own (_text_minus): minus signs where
+    the text is math, written into its runs, but in a mark (_a_mark); a text
+    that's the dash alone, and space, is the operator, one run of math, its
+    style its own no longer. Returns eq."""
+    if "\u2013" not in eq:
+        return eq
+    edits = []
+    for runs, mark, writable in _text_groups(eq):
+        if mark or not writable:
+            continue
+        parts = [MATH_RUN.fullmatch(eq, r["start"], r["end"]) for r in runs]
+        signed, alone = _text_minus("".join(p.group(4) for p in parts))
+        if alone:
+            for p in parts:
+                if "\u2013" not in p.group(4):
+                    edits.append((p.start(), p.end(), ""))
+                    continue
+                props = STYLE.sub("", p.group(2)).replace("<m:rPr></m:rPr>", "").replace("<m:rPr/>", "")
+                edits.append((p.start(), p.end(), p.group(1) + props + p.group(3) + "\u2212"
+                              + p.group(5) + p.group(6)))
+            counts["equation_characters"] += 1
+            continue
+        at = 0
+        for p in parts:
+            text = signed[at:at + len(p.group(4))]
+            at += len(p.group(4))
+            if text != p.group(4):
+                counts["equation_characters"] += sum(a != b for a, b in zip(p.group(4), text))
+                edits.append((p.start(4), p.end(4), text))
+    for start, end, text in sorted(edits, reverse=True):
+        eq = eq[:start] + text + eq[end:]
+    return eq
 
 
 def _repair_run(m, counts):
     """One m:r: its characters, and y-hat as an accent over y, the run
     split around it with its properties on each part. Normal text (m:nor),
     which is what \\text{} becomes, gets only the characters, as the filter
-    gives \\text{} only those."""
+    gives \\text{} only those, its en dashes given before
+    (_normal_text_minus)."""
     start, props, t_open, text, t_close, end = m.groups()
-    normal = "<m:nor" in props
+    normal = _run_kind(m.group(0)) == "text"
     fixed = text
     for old, new in EQUATION_CHARACTERS.items():
         fixed = fixed.replace(old, new)
@@ -425,8 +653,8 @@ def _repair_run(m, counts):
 
 LIMIT_OPEN = re.compile(r"<m:limUpp>")
 LIMIT_HEAD = re.compile(r"(?:<m:limUppPr>(?:(?!</m:limUppPr>).)*</m:limUppPr>)?<m:e>", re.S)
-LIMIT_TAIL = re.compile(r"</m:e><m:lim><m:r>(?:(?!</m:r>).)*?<m:t(?:\s[^>]*)?>([\u00af\u2013])</m:t>"
-                        r"</m:r></m:lim></m:limUpp>", re.S)
+LIMIT_TAIL = re.compile(r"</m:e><m:lim><m:r>(?:(?!</m:r>|<m:nor\b|<m:lit\b).)*?<m:t(?:\s[^>]*)?>"
+                        r"([\u00af\u2013])</m:t></m:r></m:lim></m:limUpp>", re.S)
 BASE_TAG = re.compile(r"<m:e>|</m:e>")
 
 
@@ -521,8 +749,8 @@ def equation_texs(parts, name):
 def remediate_equations(xml, skip=(), pattern=None, macron_bars=False):
     """The characters of each of Word's equations, as math.repair_equations
     repairs them in the pages: mu for the micro sign, Delta for the
-    increment sign, a minus for an en dash, the dot operator for a middle
-    dot, a bar for an upper limit that
+    increment sign, a minus for an en dash, in normal text too where it's
+    math, the dot operator for a middle dot, a bar for an upper limit that
     is a macron or an en dash, a hat over y for the one-character y-hat,
     and 0 for a subscript's slashed O. Only inside m:oMath; the text around
     an equation is left to math.from_text. pattern: the regular expression
@@ -542,6 +770,7 @@ def remediate_equations(xml, skip=(), pattern=None, macron_bars=False):
         counts["equation_characters"] += bars
         fixed, zeros = SUB_SLASHED_O.subn(r"\g<1>0\g<2>", fixed)
         counts["equation_characters"] += zeros
+        fixed = _normal_text_minus(fixed, counts)
         fixed = MATH_RUN.sub(lambda r: _repair_run(r, counts), fixed)
         if fixed != eq:
             counts["equations_repaired"] += 1
@@ -780,7 +1009,8 @@ def minus_places(path):
     """{page: [(number, paragraph, occurrence, old, new)]} from the rows
     math-repair.lua wrote for math.minus_in_text, each once, in order: the
     occurrence-th en dash (old) of the paragraph's text made a minus sign
-    (new)."""
+    (new); or, where number is "picture", of the description of the
+    picture whose path paragraph is."""
     import csv
     out, seen = {}, set()
     if not path or not os.path.exists(path):
@@ -791,8 +1021,52 @@ def minus_places(path):
                 continue
             seen.add(tuple(row))
             page, number, paragraph, occurrence, old, new = row
-            out.setdefault(page, []).append((int(number), paragraph, int(occurrence), old, new))
+            out.setdefault(page, []).append(
+                (number if number == "picture" else int(number), paragraph,
+                 int(occurrence), old, new))
     return out
+
+
+# A character of an attribute's value as the XML has it: a reference, or
+# one character.
+ATTRIBUTE_CHARACTER = re.compile(r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z]+);|[^&]")
+
+
+def remediate_picture_minus(xml, pictures):
+    """pictures: [("picture", path, occurrence, old, new)], the filter's
+    places in pictures' descriptions. Each drawing whose picture embeds the
+    one a path names (rId9.png names rId9) gets its description's
+    occurrence-th en dash made a minus sign, in the description it has by
+    now, the image-alt sidecar's or its own, as the filter read it; what
+    else the attribute holds is as it was, character for character.
+    Returns (xml, the places made, as (relationship id, occurrence))."""
+    wanted = {}
+    for _, path, occurrence, old, new in pictures:
+        rid = os.path.splitext(os.path.basename(path))[0]
+        wanted.setdefault(rid, {})[occurrence] = (old, new)
+    made = set()
+
+    def one(m):
+        drawing = m.group(0)
+        embed = re.search(r'r:embed="([^"]+)"', drawing)
+        if not embed or embed.group(1) not in wanted:
+            return drawing
+        edits = wanted[embed.group(1)]
+        described = re.search(r'(<wp:docPr\b[^>]*?\sdescr=")([^"]*)"', drawing)
+        if not described:
+            return drawing
+        pieces, n = [], 0
+        for piece in ATTRIBUTE_CHARACTER.findall(described.group(2)):
+            if html.unescape(piece) == "\u2013":
+                n += 1
+                if n in edits and edits[n][0] == "\u2013":
+                    piece = edits[n][1]
+                    made.add((embed.group(1), n))
+            pieces.append(piece)
+        return (drawing[:described.start(2)] + "".join(pieces)
+                + drawing[described.end(2):])
+    xml = re.sub(r"<w:drawing>.*?</w:drawing>", one, xml, flags=re.S)
+    return xml, made
 
 
 def _replace_in_run(run, edits):
@@ -1110,13 +1384,18 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
     document's default where it has none; replace_language, the language
     the file's own marks say ("" for none), when language replaces it
     (languages.for_copy); places and minus, the filter's places for this
-    file's math typed as text and its minus signs (math_places,
-    minus_places). Returns a dict of counts."""
+    file's math typed as text and its minus signs, its pictures'
+    descriptions' too (math_places, minus_places). Returns a dict of
+    counts."""
     counts = {"compat": 0, "links": 0, "equations_repaired": 0,
               "equation_characters": 0, "text_equations": 0,
               "text_equations_left": 0, "equations_kept": 0, "relanguaged": 0,
               "text_minus": 0, "text_minus_left": 0}
     replacing = language and replace_language is not None
+    # A picture's description is found by its picture, a paragraph by its
+    # text.
+    pictures = [place for place in minus or [] if place[0] == "picture"]
+    minus = [place for place in minus or [] if place[0] != "picture"]
     with zipfile.ZipFile(source) as z:
         infos = z.infolist()
         parts = {i.filename: z.read(i.filename) for i in infos}
@@ -1131,6 +1410,9 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
         counts.update(found)
         new, found = remediate_images(new, alts or {})
         counts.update(found)
+        new, made = remediate_picture_minus(new, pictures)
+        counts["text_minus"] += len(made)
+        counts["text_minus_left"] += len(pictures) - len(made)
         rels_name = "word/_rels/document.xml.rels"
         rels = text(rels_name) if rels_name in parts else ""
         new, counts["links"] = remediate_links(new, rels, titles or {})

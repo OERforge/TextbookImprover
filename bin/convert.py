@@ -4133,8 +4133,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     if totals.get("text_minus_left"):
         say(f"{target.name}: {totals['text_minus_left']} minus sign(s) the pages make of an "
             "en dash in text not written into the Word file: its runs there aren't what the "
-            "filter read, or hold a field, a tracked change, or a text box. They're in "
-            "math-repaired.csv.")
+            "filter read, or hold a field, a tracked change, or a text box; or it's in a "
+            "picture's description, and the picture is in a note, or its description there "
+            "isn't the page's. They're in math-repaired.csv.")
     if totals.get("captions_left"):
         say(f"{target.name}: {totals['captions_left']} table description(s) not written: "
             "the table, its caption, or the label paragraph beside it isn't what the filter "

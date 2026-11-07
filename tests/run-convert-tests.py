@@ -5160,7 +5160,7 @@ def case_word_equations(work):
          lambda: '<m:acc><m:accPr><m:chr m:val="\u00af" /></m:accPr><m:e><m:r><m:t>x</m:t>'
          in on_xml and "<m:limUpp>" not in on_xml and on_xml.count("<m:acc>") == 3
          and "\\mu_{\\overline{x}}" in on_alone),
-        ("an en dash in normal text stays an en dash",
+        ("a range's en dash in normal text stays an en dash",
          lambda: "1\u20135" in on),
         ("the run says how many equations it repaired, and how many characters: mu, the "
          "bar, the minus, the zero, the hat, and Delta",
@@ -5179,6 +5179,119 @@ def case_word_equations(work):
          "anything; text's still is",
          lambda: "1 row(s) of math-keep.csv kept nothing" in off_kept_said
          and "expression,,\u03b2 = 7" in off_kept_said and "equation,eq," not in off_kept_said),
+    ]
+
+
+def _text_run(text, props=""):
+    return ('<m:r><m:rPr><m:nor />%s</m:rPr><m:t xml:space="preserve">%s</m:t></m:r>'
+            % (props, text))
+
+
+# An equation's text in each shape Pandoc reads differently: runs side by
+# side one \text{} (Word splits a run where it likes), but each its own in
+# parentheses, an m:e; a bond, a range, a charge, a mark set under
+# something, a limit under lim, a text set over x, literal text, a
+# subscript's slashed O as text, a bond in a fraction across a spelling
+# mark and an empty run, a run in an insertion, text set over a brace and
+# under one, and text after math in a limit, which isn't a mark.
+WORD_EQUATION_TEXTS = [
+    _text_run("16 \u2013 2P") + _text_run(" \u2013 ") + _text_run("2"),
+    _text_run("H") + '<w:proofErr w:type="spellStart" />' + _text_run("\u2013Cl"),
+    "<m:d><m:e>" + _text_run("16 ") + _text_run("\u2013 ", '<m:sty m:val="b" />')
+    + _text_run("2P") + "</m:e></m:d>",
+    _text_run("1990\u20132000"),
+    "<m:sSup><m:e>" + _text_run("Cl") + "</m:e><m:sup>" + _text_run("\u2013") + "</m:sup></m:sSup>",
+    "<m:limLow><m:e>" + _text_run("of") + "</m:e><m:lim>" + _text_run("\u2013")
+    + "</m:lim></m:limLow>",
+    '<m:limLow><m:e><m:r><m:rPr><m:sty m:val="p" /></m:rPr><m:t>lim</m:t></m:r></m:e><m:lim>'
+    + _text_run("n \u2013 1") + "</m:lim></m:limLow>",
+    "<m:limUpp><m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim>" + _text_run("\u2013")
+    + "</m:lim></m:limUpp>",
+    '<m:r><m:t>a</m:t></m:r><m:r><m:rPr><m:lit /></m:rPr><m:t>\u00b7</m:t></m:r>'
+    '<m:r><m:rPr><m:lit /></m:rPr><m:t> \u2013 </m:t></m:r><m:r><m:t>b</m:t></m:r>',
+    "<m:sSub><m:e><m:r><m:t>H</m:t></m:r></m:e><m:sub>" + _text_run("\u00d8") + "</m:sub></m:sSub>",
+    "<m:f><m:num>" + _text_run("H") + '<w:proofErr w:type="spellStart" />' + _text_run("\u2013Cl")
+    + "</m:num><m:den>" + _text_run("H") + "<m:r><m:t></m:t></m:r>" + _text_run("\u2013Cl")
+    + "</m:den></m:f>",
+    _text_run("16 \u2013 2P") + '<w:ins w:id="1" w:author="A">' + _text_run(" \u2013 2") + "</w:ins>",
+    "<m:groupChr><m:e>" + _text_run("a \u2013 b") + "</m:e></m:groupChr>",
+    '<m:groupChr><m:groupChrPr><m:chr m:val="\u23de" /><m:pos m:val="top" /></m:groupChrPr><m:e>'
+    + _text_run("a \u2013 b") + "</m:e></m:groupChr>",
+    "<m:limLow><m:e><m:r><m:t>x</m:t></m:r></m:e><m:lim><m:r><m:t>y</m:t></m:r>"
+    + _text_run("\u2013") + "</m:lim></m:limLow>",
+]
+
+
+def case_word_equation_text(work):
+    """format: source gives an equation's text in a Word file what
+    math-repair.lua gives its \\text{} in the page: each of the copy's
+    equations, read back as a conversion reads it, is the page's."""
+    os.makedirs(work)
+    subprocess.run(["pandoc", "-o", os.path.join(work, "et.docx")], check=True, text=True,
+                   input="# Equation text\n\n" + "".join(
+                       "Equation %d: $a$.\n\n" % n for n in range(len(WORD_EQUATION_TEXTS))))
+    path = os.path.join(work, "et.docx")
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    texts = iter(WORD_EQUATION_TEXTS)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            if info.filename == "word/document.xml":
+                data = re.sub(r"<m:oMath>.*?</m:oMath>",
+                              lambda m: "<m:oMath>%s</m:oMath>" % next(texts),
+                              data.decode("utf-8"), flags=re.S).encode("utf-8")
+            z.writestr(info, data)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  source:\n    format: source\n")
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                            cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import docxrepair
+    copy = os.path.join(work, "read-et.docx")
+    docxrepair.repaired_copy(os.path.join(work, "source", "et.docx"), copy)
+    back = subprocess.run(["pandoc", "-f", "docx", "-t", "json", copy],
+                          capture_output=True, text=True)
+    copied = [n["c"][1] for n in walk_json(json.loads(back.stdout or "{}"))
+              if n.get("t") == "Math"]
+    with open(os.path.join(work, "et.filtered.json"), encoding="utf-8") as fh:
+        paged = [n["c"][1] for n in walk_json(json.load(fh)) if n.get("t") == "Math"]
+
+    def bare(tex):
+        return "".join(tex.split())
+    pairs = list(zip(paged, copied))
+    return [
+        ("each of the copy's equations reads back as the page's",
+         lambda: len(paged) == len(copied) == len(WORD_EQUATION_TEXTS)
+         and all(bare(a) == bare(b) for a, b in pairs)),
+        ("runs side by side are one text: a difference's en dashes are minus signs, and a "
+         "bond across two runs stays",
+         lambda: "\\text{16 \u2212 2P \u2212 2}" in copied[0] and copied[1] == "\\text{H\u2013Cl}"),
+        ("in parentheses the run that's the dash alone is the operator",
+         lambda: bare(copied[2]) == "\\left(\\text{16}-\\text{2P}\\right)"),
+        ("a range stays, and a charge is a minus sign",
+         lambda: copied[3] == "\\text{1990\u20132000}" and copied[4] == "\\text{Cl}^{-}"),
+        ("a mark set under something stays, a limit under lim gets its sign, and text set over "
+         "x stays",
+         lambda: copied[5] == "\\underset{\\text{\u2013}}{\\text{of}}"
+         and copied[6] == "\\lim_{\\text{n \u2212 1}}"
+         and copied[7] == "\\overset{\\text{\u2013}}{x}"),
+        ("literal text is text, one with the literal run beside it: its middle dot stays, "
+         "and its en dash is a minus sign",
+         lambda: copied[8] == "a\\text{\u00b7 \u2212 }b"),
+        ("a subscript's slashed O as text stays, as the page's does",
+         lambda: copied[9] == "H_{\\text{\u00d8}}"),
+        ("a fraction's runs side by side are one text across a spelling mark and an empty "
+         "run, and an insertion's run is one with the run beside it",
+         lambda: copied[10] == "\\frac{\\text{H\u2013Cl}}{\\text{H\u2013Cl}}"
+         and copied[11] == "\\text{16 \u2212 2P \u2212 2}"),
+        ("text Pandoc sets over a brace below it is a mark, and stays; text under a brace "
+         "above it gets its sign",
+         lambda: copied[12].startswith("\\overset{\\text{a \u2013 b}}")
+         and copied[13] == "\\overbrace{\\text{a \u2212 b}}"),
+        ("text after math in a limit isn't its mark: a dash alone there is the operator",
+         lambda: "".join(copied[14].split()) == "\\underset{y-}{x}"),
+        ("the run counts the characters",
+         lambda: "given the characters they mean (10 change(s))" in result.stdout + result.stderr),
     ]
 
 
@@ -5259,16 +5372,26 @@ def case_word_text_minus(work):
     """format: source writes math.minus_in_text into a Word file: an en dash
     written for a minus sign made one in the run it's in, the run's
     formatting kept, a range left as written, as the page beside it has
-    them."""
-    os.makedirs(work)
-    subprocess.run(["pandoc", "-o", os.path.join(work, "mn.docx")], check=True, text=True,
+    them, a picture's description too."""
+    os.makedirs(os.path.join(work, "assets"))
+    for name in ("chart", "rule"):
+        solid_png(os.path.join(work, "assets", name + ".png"))
+    subprocess.run(["pandoc", "-o", "mn.docx"], cwd=work, check=True, text=True,
                    input="# Minus signs\n\n"
                          "A balance of \u2013$922.0, a slope of **\u20131.5**, and 1 \u2013 0.05 = 0.95 here.\n\n"
                          "The same: \u20132 here.\n\n"
                          "The same: \u20132 here.\n\n"
                          "We know *\u03bc* = 34 and a slope of \u20132.5 here.\n\n"
                          "A range 1990\u20132000 and pages 3\u20135 stay, and 10^\u20134^ m.\n\n"
+                         "Chart: ![A graph near \u20132% of GDP](assets/chart.png) here, and "
+                         "![Placeholder](assets/rule.png) there.\n\n"
                          "ONE-RUN\n")
+    # The second picture's description is the image-alt sidecar's.
+    with zipfile.ZipFile(os.path.join(work, "mn.docx")) as z:
+        embeds = re.findall(r'r:embed="([^"]+)"', z.read("word/document.xml").decode("utf-8"))
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\nmn/media/%s.png,Falls to \u20135 by 2030 from 1990\u20132000 levels\n"
+                 % embeds[1])
     # Word keeps a run of plain text together, where Pandoc writes a run a
     # word: two signs in this one.
     path = os.path.join(work, "mn.docx")
@@ -5298,9 +5421,14 @@ def case_word_text_minus(work):
         page = html_lib.unescape(read(work, "html", "mn.html")) \
             if exists(work, "html", "mn.html") else ""
         return result.stdout + result.stderr, back.stdout, page
+
+    def descriptions():
+        with zipfile.ZipFile(os.path.join(work, "source", "mn.docx")) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        return xml, [html_lib.unescape(d) for d in
+                     re.findall(r'<wp:docPr\b[^>]*?\sdescr="([^"]*)"', xml)]
     said, on, page = build("")
-    with zipfile.ZipFile(os.path.join(work, "source", "mn.docx")) as z:
-        copy = z.read("word/document.xml").decode("utf-8")
+    copy, described = descriptions()
     colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
     with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
         rows = [(r["Kind"], r["Page"], r["Before"]) for r in csv.DictReader(fh)]
@@ -5310,6 +5438,7 @@ def case_word_text_minus(work):
     kept_said, kept, kept_page = build("")
     os.remove(os.path.join(work, "math-keep.csv"))
     _, off, off_page = build("    math:\n      minus_in_text: false\n")
+    _, off_described = descriptions()
     return [
         ("a sign and a difference are minus signs in the copy, a bold run's too",
          lambda: "A balance of \u2212\\$922.0, a slope of **\u22121.5**, and 1 \u2212 0.05 = 0.95 here." in on),
@@ -5322,19 +5451,27 @@ def case_word_text_minus(work):
         ("two in one run of text are made in it, its formatting kept",
          lambda: colored == ["Level \u22120.5 and 3 \u2212 1 = 2 here."]),
         ("the run says how many it wrote, and none was left",
-         lambda: "9 en dash(es) in text made a minus sign" in said
+         lambda: "11 en dash(es) in text made a minus sign" in said
          and "not written into the Word file" not in said),
         ("the page has them, and math-repaired.csv a row of kind minus for each stretch, one "
          "for a stretch two paragraphs share",
          lambda: "A balance of \u2212$922.0" in page and "1990\u20132000" in page
          and ("minus", "mn", "1 \u2013 0.05 = 0.95") in rows
-         and len([r for r in rows if r[0] == "minus"]) == 8),
+         and len([r for r in rows if r[0] == "minus"]) == 10),
+        ("a picture's description gets its signs in the copy, its own and the image-alt "
+         "sidecar's, a range in it left, as the page's has them",
+         lambda: described == ["A graph near \u22122% of GDP",
+                               "Falls to \u22125 by 2030 from 1990\u20132000 levels"]
+         and 'alt="A graph near \u22122% of GDP"' in page
+         and 'alt="Falls to \u22125 by 2030 from 1990\u20132000 levels"' in page),
         ("a row of math-keep.csv keeps its en dash on the page and in the copy, and only that",
          lambda: "slope of \u20132.5 here" in kept and "slope of \u20132.5 here" in kept_page
          and "The same: \u22122 here." in kept and "kept nothing" not in kept_said),
         ("with math.minus_in_text off, the page's and the copy's text are as they were",
          lambda: "A balance of \u2013\\$922.0" in off and "\u2212" not in off
-         and "\u2013$922.0" in off_page and "\u2212" not in off_page.split("<body")[-1]),
+         and "\u2013$922.0" in off_page and "\u2212" not in off_page.split("<body")[-1]
+         and off_described == ["A graph near \u20132% of GDP",
+                               "Falls to \u20135 by 2030 from 1990\u20132000 levels"]),
     ]
 
 
@@ -9410,6 +9547,7 @@ CASES = [
     ("a remediated copy of a Word file", case_remediate_docx),
     ("format: source", case_source_target),
     ("format: source repairs Word's equations", case_word_equations),
+    ("format: source gives a Word equation's text what its page's has", case_word_equation_text),
     ("format: source makes equations of math typed as text in Word", case_word_text_math),
     ("format: source makes minus signs of en dashes in Word", case_word_text_minus),
     ("word.tracked_deletions and word.headings", case_word_repairs),

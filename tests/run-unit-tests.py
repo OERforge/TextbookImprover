@@ -1409,22 +1409,55 @@ def check_list_continuations():
 
 
 def check_word_equation_text():
-    """Normal text in Word's equation, \\text{} in TeX, gets only the
-    characters that are characters for others, as math-repair.lua gives
-    \\text{} only those."""
+    """Text in Word's equation (normal text, or literal in no style of its
+    own), \\text{} in TeX, gets only the characters that are characters for
+    others, and the en dashes that are minus signs, as math-repair.lua gives
+    \\text{} only those: decided on the text as Pandoc reads it, runs side by
+    side one \\text{} but in an m:e, and a mark set under something left."""
     import docxremediate
     math = ('<m:oMath><m:r><m:t>ŷ=µ·x</m:t></m:r>'
             '<m:r><m:rPr><m:nor /></m:rPr><m:t>ŷ 1–5 µ·</m:t></m:r></m:oMath>')
     fixed, counts = docxremediate.remediate_equations(math)
+
+    def text(t, props=""):
+        return '<m:r><m:rPr><m:nor />%s</m:rPr><m:t>%s</m:t></m:r>' % (props, t)
+
+    def one(eq):
+        return docxremediate.remediate_equations("<m:oMath>%s</m:oMath>" % eq)
+    split, split_counts = one(text("16 – 2P") + text(" – ") + text("2"))
+    bond = text("H") + '<w:proofErr w:type="spellStart" />' + text("–Cl")
+    bond_fixed, _ = one(bond)
+    paren, paren_counts = one("<m:d><m:e>" + text("16 ") + text("– ", '<m:sty m:val="b" />')
+                              + text("2P") + "</m:e></m:d>")
+    mark = "<m:limLow><m:e>" + text("of") + "</m:e><m:lim>" + text("–") + "</m:lim></m:limLow>"
+    mark_fixed, _ = one(mark)
+    lim, _ = one('<m:limLow><m:e><m:r><m:rPr><m:sty m:val="p" /></m:rPr><m:t>lim</m:t></m:r>'
+                 "</m:e><m:lim>" + text("n – 1") + "</m:lim></m:limLow>")
+    literal = '<m:r><m:rPr><m:lit /></m:rPr><m:t>·</m:t></m:r>'
+    literal_fixed, _ = one(literal)
     return [
         ("a y-hat in math is a hat over y, the micro sign mu, and a middle dot the "
          "dot operator Pandoc writes for \\cdot",
          lambda: fixed.startswith('<m:oMath><m:acc>') and "<m:t>=μ⋅x</m:t>" in fixed),
-        ("in normal text the y-hat, the en dash, and the middle dot stay, and the micro "
-         "sign is mu",
+        ("in normal text the y-hat, a range's en dash, and the middle dot stay, and the "
+         "micro sign is mu",
          lambda: "<m:t>ŷ 1–5 μ·</m:t>" in fixed and fixed.count("<m:acc>") == 1),
         ("each character changed is counted",
          lambda: counts == {"equations_repaired": 1, "equation_characters": 4}),
+        ("runs of text side by side are one text, as Pandoc reads them, each en dash between "
+         "terms a minus sign in its own run",
+         lambda: split == "<m:oMath>" + text("16 − 2P") + text(" − ") + text("2") + "</m:oMath>"
+         and split_counts["equation_characters"] == 2),
+        ("a bond across two runs, a spelling mark between them, stays",
+         lambda: bond_fixed == "<m:oMath>" + bond + "</m:oMath>"),
+        ("in parentheses each run is a text of its own, so a run that's the dash alone is "
+         "the operator, a run of math in no style",
+         lambda: paren == "<m:oMath><m:d><m:e>" + text("16 ") + "<m:r><m:t>−</m:t></m:r>"
+         + text("2P") + "</m:e></m:d></m:oMath>" and paren_counts["equation_characters"] == 1),
+        ("a mark set under something stays, but a limit under lim is a script, its text math",
+         lambda: mark_fixed == "<m:oMath>" + mark + "</m:oMath>" and text("n − 1") in lim),
+        ("literal text is text too, its middle dot a character",
+         lambda: literal_fixed == "<m:oMath>" + literal + "</m:oMath>"),
     ]
 
 
@@ -8507,7 +8540,7 @@ GROUPS = [
     ("repairing a .docx on the way in", check_docx_repair),
     ("a list item's later paragraphs, indented as Pandoc 3.13 writes them",
      check_list_continuations),
-    ("normal text in a Word equation", check_word_equation_text),
+    ("text in a Word equation", check_word_equation_text),
     ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("Pandoc's bar accent, written and read", check_bar_accents),
     ("a bare link's replacement in a source copy", check_link_replacements),

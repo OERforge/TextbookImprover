@@ -5938,10 +5938,23 @@ def case_cut_characters(work):
 
 def case_fidelity_epub(work):
     """fidelity.csv for an EPUB target, and a frame in Word: what the
-    target filter turns into a link or text as it writes."""
+    target filter turns into a link or text as it writes, but not in a
+    passage for another target, which it leaves out."""
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "handout.pdf"), "wb") as fh:
         fh.write(b"%PDF-1.4\n%%EOF\n")
+    for name in ("syllabus.pdf", "reading.pdf"):
+        with open(os.path.join(work, name), "wb") as fh:
+            fh.write(b"%PDF-1.4\n%%EOF\n")
+    with open(os.path.join(work, "web.md"), "w", encoding="utf-8") as fh:
+        fh.write("# For the web\n\n::: {targets=\"web\"}\n"
+                 "![A remote square](https://example.org/square.png)\n\n"
+                 "The [syllabus](syllabus.pdf).\n:::\n\nWords for every edition, and "
+                 "[![a remote circle](https://example.org/circle.png) and the "
+                 "[reading list](reading.pdf)]{targets=\"web\"} in a line.\n")
+    # Two pages, so the book's title is the project's, not the one page's.
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.fidelity\n  title: Fidelity\n")
     with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Page</title></head><body><h1>Page</h1>'
                  '<iframe src="https://www.youtube.com/embed/abc123" title="A lecture"></iframe>'
@@ -5957,6 +5970,11 @@ def case_fidelity_epub(work):
          lambda: "epub,(book),frame,A lecture" in report
          and "epub,(book),remote-image,https://example.org/chart.png" in report
          and "epub,(book),file-link,handout.pdf" in report),
+        ("but not those in a passage for another target, a div or a span, which it leaves "
+         "out",
+         lambda: "epub,(book),frame" in report and "square.png" not in report
+         and "syllabus.pdf" not in report and "circle.png" not in report
+         and "reading.pdf" not in report),
         ("and a Word target reports the frame it writes as a link",
          lambda: "word,page,frame,A lecture" in report),
     ]

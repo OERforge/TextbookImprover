@@ -499,8 +499,12 @@ end
 
 return {
   { Pandoc = add_footer },
-  { Div = resolve, Span = resolve, Image = remote_image,
-    Link = local_file_link },
+  -- A passage for other targets is gone before anything is made of what
+  -- it holds: in one pass, Pandoc gives each image and link to its
+  -- function before the div or span around it, and an EPUB reported a
+  -- picture on another server and a link to a file it left out.
+  { Div = resolve, Span = resolve },
+  { Image = remote_image, Link = local_file_link },
   { Link = notes_after },
   separate_notes,
   { Pandoc = display_styles },

@@ -160,7 +160,7 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
     return [], []
 
 
-def audit_pages(files, validators, verbose, version, level, best_practice):
+def audit_pages(files, validators, verbose, version, level, best_practice, experimental):
     """(findings, sections) of axe-core's rules on the HTML pages and EPUBs
     among the files, in one worker for all of them, its section saying
     whether they ran; for --wcag."""
@@ -172,8 +172,8 @@ def audit_pages(files, validators, verbose, version, level, best_practice):
     if validators:
         # Each finding filed under the file audited, an EPUB's under the EPUB.
         found, lines = axecheck.check(pages, epubs, version=version, level=level,
-                                      best_practice=best_practice, verbose=verbose,
-                                      by_epub=True)
+                                      best_practice=best_practice, experimental=experimental,
+                                      verbose=verbose, by_epub=True)
     for line in lines:
         print(f"  {line}", file=sys.stderr)
     return found, [("HTML pages and EPUBs: axe-core's WCAG checks",
@@ -229,7 +229,7 @@ def main():
         print(pdfcheck.WCAG_ALONE, file=sys.stderr)
     if wcag_lib.choices_given(args) and not args.wcag:
         print(wcag_lib.CHOICES_ALONE, file=sys.stderr)
-    version, level, best_practice = wcag_lib.chosen(args)
+    version, level, best_practice, experimental = wcag_lib.chosen(args)
     options = {"quick": bool(args.quick), "wcag": bool(args.wcag)}
     per_file = {"quick": bool(args.quick)}
     # Nothing changed since the last audit: say so and leave the report
@@ -268,7 +268,7 @@ def main():
         # After the cache has each file's own findings: axe-core's, like
         # veraPDF's, turn on what's installed, which it can't see.
         found, extra = audit_pages(files, not args.quick, args.verbose, version, level,
-                                   best_practice)
+                                   best_practice, experimental)
         all_found += found
         sections += extra
     if cache is not None:

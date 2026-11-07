@@ -202,13 +202,14 @@ def conformance(version=DEFAULT_VERSION, level=DEFAULT_LEVEL):
     return f"WCAG {version} {level}"
 
 
-CHOICES_ALONE = ("--wcag-version, --wcag-level, and --best-practice choose what --wcag "
-                 "checks; without it, they change nothing.")
+CHOICES_ALONE = ("--wcag-version, --wcag-level, --best-practice, and --experimental choose "
+                 "what --wcag checks; without it, they change nothing.")
 
 
 def add_choices(parser):
-    """--wcag-version, --wcag-level, and --best-practice, as each tool that
-    takes --wcag takes them; None, None, and False when not given."""
+    """--wcag-version, --wcag-level, --best-practice, and --experimental,
+    as each tool that takes --wcag takes them; None, None, False, and
+    False when not given."""
     parser.add_argument("--wcag-version", choices=VERSIONS,
                         help="with --wcag, the version of WCAG checked against, the "
                              "criteria of the versions before it among its own (default "
@@ -219,23 +220,30 @@ def add_choices(parser):
     parser.add_argument("--best-practice", action="store_true",
                         help="with --wcag, axe-core's best practices on pages too "
                              "(landmarks, heading order), beyond WCAG's criteria")
+    parser.add_argument("--experimental", action="store_true",
+                        help="with --wcag, axe-core's experimental rules on pages too, "
+                             "those within the version and level (a table's headers, a "
+                             "paragraph styled as a heading), and with --best-practice its "
+                             "experimental best practices; rules axe-core is still trying")
 
 
 def chosen(args):
-    """(version, level, best_practice) the arguments choose, the defaults
-    for those not given."""
+    """(version, level, best_practice, experimental) the arguments
+    choose, the defaults for those not given."""
     return (args.wcag_version or DEFAULT_VERSION, args.wcag_level or DEFAULT_LEVEL,
-            bool(args.best_practice))
+            bool(args.best_practice), bool(args.experimental))
 
 
 def choices_given(args):
-    """Whether any of --wcag-version, --wcag-level, and --best-practice
-    was given."""
-    return bool(args.wcag_version or args.wcag_level or args.best_practice)
+    """Whether any of --wcag-version, --wcag-level, --best-practice, and
+    --experimental was given."""
+    return bool(args.wcag_version or args.wcag_level or args.best_practice
+                or args.experimental)
 
 
 def choice_flags(args):
     """The arguments again, for a tool to pass on: those given, in order."""
     return ((["--wcag-version", args.wcag_version] if args.wcag_version else [])
             + (["--wcag-level", args.wcag_level] if args.wcag_level else [])
-            + (["--best-practice"] if args.best_practice else []))
+            + (["--best-practice"] if args.best_practice else [])
+            + (["--experimental"] if args.experimental else []))

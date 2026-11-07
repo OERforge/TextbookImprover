@@ -192,9 +192,10 @@ def say(text):
 
 def output_check_flags(args, checkable):
     """The flags the run gives the output check: --quick, and --wcag, with
-    the version, level, and best practices it checks and --verbose, only
-    when the run made a page, an EPUB, or a PDF for them to check
-    (checkable): given nothing, the check would check its setup."""
+    the version, level, best practices, and experimental rules it checks
+    and --verbose, only when the run made a page, an EPUB, or a PDF for
+    them to check (checkable): given nothing, the check would check its
+    setup."""
     asked = bool(args.wcag and checkable)
     return ((["--quick"] if args.quick else [])
             + (["--wcag"] + wcag.choice_flags(args) if asked else [])

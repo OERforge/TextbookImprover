@@ -876,6 +876,23 @@ COLORED = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>C
 </head><body><main><h1>Colored</h1>
 <p>A difference in a color of its own,
 <math><mi>x</mi><mo mathcolor="#999999">−</mo><mn>2</mn></math>.</p></main></body></html>"""
+# What only axe-core's experimental rules and its best practices find: a
+# paragraph styled as a heading, a large table without headers, a caption
+# written in a table's first cell, and a paragraph outside the landmarks.
+TRYING = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Trying</title>
+<style>body { margin: 1em; }</style></head><body><main><h1>Trying</h1>
+<p><b><i>Results</i></b></p>
+<p>The scores for the first three weeks, and the totals after them.</p>
+<table border="1"><caption>Scores</caption>
+<tr><td>Week</td><td>Ana</td><td>Ben</td><td>Cy</td></tr>
+<tr><td>1</td><td>9</td><td>8</td><td>7</td></tr>
+<tr><td>2</td><td>8</td><td>7</td><td>6</td></tr>
+<tr><td>3</td><td>7</td><td>6</td><td>5</td></tr></table>
+<table border="1"><tr><td colspan="3">Table 2: Totals</td></tr>
+<tr><th>Name</th><th>Total</th><th>Rank</th></tr>
+<tr><td>Ana</td><td>24</td><td>1</td></tr>
+<tr><td>Ben</td><td>21</td><td>2</td></tr></table></main>
+<p>Outside the main content.</p></body></html>"""
 
 
 def presentation(folder, slides=None, start=None, before="", reveal_tail=b"", oer_tail=""):
@@ -1060,6 +1077,14 @@ def axe_cases(work):
                                                "dark.html", "formulas.html", "colored.html")] \
         + list(shows.values())
     ran = run("--wcag", *checked, "--epub", book, "--report", report)
+    trying = os.path.join(work, "trying.html")
+    with open(trying, "w", encoding="utf-8") as fh:
+        fh.write(TRYING)
+    tried_report = os.path.join(work, "trying.csv")
+    tried = run("--wcag", "--experimental", "--best-practice", trying, "--report", tried_report)
+    tried_rows = [r for r in rows_of(tried_report) if r["Tool"] == "axe"] \
+        if os.path.exists(tried_report) else []
+    untried = run("--wcag", trying)
     rows = [r for r in rows_of(report) if r["Tool"] == "axe"] if os.path.exists(report) else []
     loud_report = os.path.join(work, "axe-verbose.csv")
     other_axe = os.path.join(work, "other-axe")
@@ -1099,7 +1124,28 @@ def axe_cases(work):
     overlaps = {"image-without-alt": "axe:image-alt", "no-lang": "axe:html-has-lang",
                 "no-title": "axe:document-title"}
     built_in = [r for r in rows_of(report)] if os.path.exists(report) else []
+    experimental = {"axe:td-has-header", "axe:table-fake-caption", "axe:p-as-heading"}
     cases += [
+        ("--experimental and --best-practice: the summary names the rules, axe-core's "
+         "experimental ones among them, and its best practices",
+         lambda: "ran its 96 rules, its experimental ones among them, for WCAG 2.1 AA and its "
+                 "best practices on 1 page(s)" in tried or fail("got: " + tried)),
+        ("each experimental rule's finding says it's a rule axe-core is still trying, and its "
+         "line in the summary that it's experimental: a large table's missing headers, a "
+         "caption in a table's cell, a paragraph styled as a heading",
+         lambda: {r["Check"] for r in tried_rows} >= experimental
+         and all("by a rule axe-core is still trying" in r["Detail"]
+                 for r in tried_rows if r["Check"] in experimental)
+         and not any("still trying" in r["Detail"]
+                     for r in tried_rows if r["Check"] not in experimental)
+         and "axe:td-has-header, 1.3.1 Info and Relationships (A), an experimental rule: "
+             in tried or fail("got: " + tried)),
+        ("a best practice runs too: content outside the landmarks",
+         lambda: "axe:region" in {r["Check"] for r in tried_rows} or fail("got: " + tried)),
+        ("without them, none of those runs",
+         lambda: "ran its 63 rules for WCAG 2.1 AA on 1 page(s)" in untried
+         and not any(check in untried for check in experimental | {"axe:region"})
+         or fail("got: " + untried)),
         ("a Chromium that doesn't start: a line saying why, and how to install it",
          lambda: "axe's WCAG checks not run on the pages: Playwright's Chromium doesn't start ("
                  in absent and "playwright install --with-deps --only-shell chromium" in absent

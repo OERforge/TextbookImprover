@@ -7301,25 +7301,28 @@ def check_wcag_context():
 
 def check_output_check_flags():
     """What convert.py gives the output check: --quick when asked, and
-    --wcag, the version, level, and best practices it checks, and
-    --verbose only when the run made a page, an EPUB, or a PDF, --verbose
-    only with --wcag."""
+    --wcag, the version, level, best practices, and experimental rules it
+    checks, and --verbose only when the run made a page, an EPUB, or a
+    PDF, --verbose only with --wcag."""
     import argparse
     convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_flags")
 
     def flags(checkable, **given):
         args = argparse.Namespace(**dict({"quick": False, "wcag": False, "verbose": False,
                                           "wcag_version": None, "wcag_level": None,
-                                          "best_practice": False}, **given))
+                                          "best_practice": False, "experimental": False},
+                                         **given))
         return convert.output_check_flags(args, checkable)
     return [
         ("--wcag and --verbose passed on with something to check",
          lambda: flags(True, wcag=True, verbose=True) == ["--wcag", "--verbose"]
          and flags(True, quick=True, wcag=True) == ["--quick", "--wcag"]),
-        ("with the version, level, and best practices it was given, and only those",
+        ("with the version, level, best practices, and experimental rules it was given, "
+         "and only those",
          lambda: flags(True, wcag=True, wcag_version="2.2", wcag_level="AAA",
-                       best_practice=True) == ["--wcag", "--wcag-version", "2.2",
-                                               "--wcag-level", "AAA", "--best-practice"]
+                       best_practice=True, experimental=True)
+         == ["--wcag", "--wcag-version", "2.2", "--wcag-level", "AAA", "--best-practice",
+             "--experimental"]
          and flags(True, wcag=True, wcag_level="AAA") == ["--wcag", "--wcag-level", "AAA"]),
         ("and none of them with nothing to check, nor --verbose without --wcag",
          lambda: flags(False, wcag=True, verbose=True, wcag_level="AAA") == []
@@ -7847,7 +7850,8 @@ def check_wcag_choices():
     parser = argparse.ArgumentParser()
     wcag.add_choices(parser)
     given = parser.parse_args(["--wcag-version", "2.2", "--wcag-level", "aaa",
-                               "--best-practice"])
+                               "--best-practice", "--experimental"])
+    trying = parser.parse_args(["--experimental"])
     plain = parser.parse_args([])
     return [
         ("a criterion within a version and level, and not one beyond either",
@@ -7860,10 +7864,12 @@ def check_wcag_choices():
          and not wcag.within("9.9.9", "2.2", "AAA")),
         ("WCAG 2.1 AA by default, a level read in either case, and the flags passed on "
          "as given",
-         lambda: wcag.chosen(plain) == ("2.1", "AA", False) and not wcag.choices_given(plain)
-         and wcag.chosen(given) == ("2.2", "AAA", True) and wcag.choices_given(given)
+         lambda: wcag.chosen(plain) == ("2.1", "AA", False, False)
+         and not wcag.choices_given(plain)
+         and wcag.chosen(given) == ("2.2", "AAA", True, True) and wcag.choices_given(given)
          and wcag.choice_flags(given) == ["--wcag-version", "2.2", "--wcag-level", "AAA",
-                                          "--best-practice"]
+                                          "--best-practice", "--experimental"]
+         and wcag.choices_given(trying) and wcag.choice_flags(trying) == ["--experimental"]
          and wcag.choice_flags(plain) == [] and wcag.conformance("2.0", "AAA") == "WCAG 2.0 AAA"),
     ]
 
@@ -7886,10 +7892,11 @@ def axe_rules():
 def check_axe_rules():
     """The rules --wcag runs on pages: those whose WCAG criteria, from
     their tags, are within the version and level, and axe-core's best
-    practices when asked for, never an experimental or a deprecated rule;
-    chosen so, they're the rules axe-core's own level tags choose, which
-    a release that retags a rule would make otherwise. And the vendored
-    axe-core is the file and the release its README names."""
+    practices when asked for, an experimental rule among them only when
+    asked for, never a deprecated rule; chosen so, they're the rules
+    axe-core's own level tags choose, which a release that retags a rule
+    would make otherwise. And the vendored axe-core is the file and the
+    release its README names."""
     import axecheck
     import wcag
     rules = axe_rules()
@@ -7904,11 +7911,15 @@ def check_axe_rules():
                       if names & set(rule["tags"])
                       and not {"experimental", "deprecated"} & set(rule["tags"]))
 
-    def chosen(version, level, best_practice=False):
+    def chosen(version, level, best_practice=False, experimental=False):
         return sorted(rule["id"] for rule in axecheck.select(rules, version, level,
-                                                             best_practice))
+                                                             best_practice, experimental))
     counts = {(v, l): len(chosen(v, l)) for v in wcag.VERSIONS for l in ("AA", "AAA")}
     practices = set(chosen("2.1", "AA", True)) - set(chosen("2.1", "AA"))
+    trying = set(chosen("2.1", "AA", experimental=True)) - set(chosen("2.1", "AA"))
+    trying_2_0 = set(chosen("2.0", "AA", experimental=True)) - set(chosen("2.0", "AA"))
+    trying_practices = (set(chosen("2.1", "AA", True, True)) - set(chosen("2.1", "AA", True))
+                        - trying)
     with open(os.path.join(ROOT, "vendor", "axe-core", "axe.min.js"), "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
     with open(os.path.join(ROOT, "vendor", "axe-core", "README.md"), encoding="utf-8") as fh:
@@ -7935,6 +7946,17 @@ def check_axe_rules():
          lambda: len(practices) == 27 and "heading-order" in practices
          and not {"td-has-header", "p-as-heading", "duplicate-id", "css-orientation-lock"}
          & set(chosen("2.2", "AAA", True))),
+        ("with experimental, the experimental rules within the version and level, as the "
+         "docs name them: tables' headers, a caption faked in a cell, a paragraph styled as a "
+         "heading, and from 2.1 an orientation locked; with best practices two more; a "
+         "deprecated rule never",
+         lambda: trying == {"td-has-header", "table-fake-caption", "p-as-heading",
+                            "css-orientation-lock"}
+         and trying_2_0 == trying - {"css-orientation-lock"}
+         and trying_practices == {"focus-order-semantics", "hidden-content"}
+         and not {"duplicate-id", "aria-roledescription", "audio-caption"}
+         & set(chosen("2.2", "AAA", True, True))
+         or fail(str((trying, trying_2_0, trying_practices)))),
         ("the rules overlapping a check of the output check's own are axe-core's, and the "
          "rules run again in dark mode",
          lambda: set(axecheck.OVERLAPS) <= set(ids) and set(axecheck.DARK_RULES) <= set(ids)),

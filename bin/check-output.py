@@ -177,7 +177,7 @@ def main():
     if wcag.choices_given(args) and not args.wcag:
         notes.append(wcag.CHOICES_ALONE)
     if args.wcag:
-        version, level, best_practice = wcag.chosen(args)
+        version, level, best_practice, experimental = wcag.chosen(args)
         named = bool(args.pages or args.pages_file or args.epub or args.pdf or args.pptx)
         # With nothing named to check, each checks the setup alone; with
         # none of its kind among what's named, it says so, even with
@@ -189,7 +189,7 @@ def main():
         else:
             wcag_findings, wcag_lines = axecheck.check(
                 pages, epubs, version=version, level=level, best_practice=best_practice,
-                verbose=args.verbose)
+                experimental=experimental, verbose=args.verbose)
         command = None if args.quick else outputcheck.find_validator("verapdf")
         if not pdfs and named:
             wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")

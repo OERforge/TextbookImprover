@@ -19,7 +19,8 @@ when the run that started it does (watch_parent).
 Which rules run: those whose WCAG criteria, from their tags (wcag143 is
 1.4.3), are in the version and level --wcag-version and --wcag-level
 choose, WCAG 2.1 AA by default (wcag.within), and axe-core's best
-practices with --best-practice. Its experimental and deprecated rules
+practices with --best-practice. Its experimental rules among those run
+with --experimental, and what they find says so; its deprecated rules
 never run. The unit suite holds the criteria to axe-core's own level
 tags (wcag2aa, wcag21aa), so a release that retags a rule is noticed.
 
@@ -142,14 +143,15 @@ def criteria(tags):
 
 
 def select(rules, version=wcag.DEFAULT_VERSION, level=wcag.DEFAULT_LEVEL,
-           best_practice=False):
+           best_practice=False, experimental=False):
     """The rules to run, of axe-core's (dicts with id and tags): those with
     a criterion within the version and level, and with best_practice its
-    best practices; never an experimental or deprecated one."""
+    best practices; an experimental one of those only with experimental,
+    and never a deprecated one."""
     chosen = []
     for rule in rules:
         tags = rule.get("tags") or []
-        if "experimental" in tags or "deprecated" in tags:
+        if ("experimental" in tags and not experimental) or "deprecated" in tags:
             continue
         if any(wcag.within(c, version, level) for c in criteria(tags)) \
                 or (best_practice and "best-practice" in tags):
@@ -157,11 +159,18 @@ def select(rules, version=wcag.DEFAULT_VERSION, level=wcag.DEFAULT_LEVEL,
     return chosen
 
 
-def described(version, level, best_practice, count=None):
+def described(version, level, best_practice, count=None, experimental=False):
     """What ran, as the summary says it: "its 63 rules for WCAG 2.1 AA"."""
     rules = f"its {count} rules" if count is not None else "its rules"
+    if experimental:
+        rules += ", its experimental ones among them,"
     return (f"{rules} for {wcag.conformance(version, level)}"
             + (" and its best practices" if best_practice else ""))
+
+
+def is_experimental(meta):
+    """Whether a rule (axe-core's account of it) is one it's still trying."""
+    return "experimental" in (meta.get("tags") or [])
 
 
 # --------------------------------------------------------------------------
@@ -240,8 +249,8 @@ def budget(limits, presentation):
 
 
 def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAULT_LEVEL,
-          best_practice=False, verbose=False, policy="local", root=None, timeout=None,
-          by_epub=False, limits=None):
+          best_practice=False, experimental=False, verbose=False, policy="local", root=None,
+          timeout=None, by_epub=False, limits=None):
     """(findings, lines) for axe-core's rules on the pages and on each
     EPUB's content documents: a note for each rule a page fails, or that
     axe-core couldn't decide, and the lines for the run's summary or a
@@ -279,7 +288,8 @@ def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAUL
                           "epub": os.path.basename(epub)})
     revealjs = revealtarget.revealjs_folder()
     job = {"policy": policy, "axe": axe, "version": version, "level": level,
-           "best_practice": bool(best_practice), "verbose": bool(verbose),
+           "best_practice": bool(best_practice), "experimental": bool(experimental),
+           "verbose": bool(verbose),
            "limits": limits, "width": max(1, min(4, os.cpu_count() or 1, len(items) or 1)),
            "revealjs": revealjs if policy == "local" and revealjs != revealtarget.VENDORED
            else None, "probe_presentation": any(i["presentation"] for i in items) or not items,
@@ -496,7 +506,7 @@ def report(items, events, stopped, said, job, note=""):
 def head_line(ready, job, plain, presentations, slides, documents, items):
     """The summary's first line: what ran, on what, and how."""
     what = described(job["version"], job["level"], job["best_practice"],
-                     len(ready.get("rules") or []))
+                     len(ready.get("rules") or []), job.get("experimental", False))
     places = []
     if plain:
         places.append(f"{plain} page(s)")
@@ -558,6 +568,8 @@ def rule_findings(item, where, prefix, rule, meta, verbose, dark=False):
     lead = ("In dark mode: " if dark else "") + str(meta.get("help") or rule.get("id"))
     if rule.get("impact"):
         lead += f" ({rule['impact']})"
+    if is_experimental(meta):
+        lead += ", by a rule axe-core is still trying"
     if prefix == "axe-review":
         lead += ", which axe-core couldn't decide, for a person to judge"
     nodes, count = rule.get("nodes") or [], int(rule.get("count") or 0)
@@ -653,6 +665,8 @@ def rule_lines(groups, meta, verbose):
         about = meta.get(rule, {})
         found = criteria(about.get("tags") or [])
         named = " and ".join(wcag.named(c) for c in found) or "a best practice"
+        if is_experimental(about):
+            named += ", an experimental rule"
         overlap = f", as {OVERLAPS[rule]} checks too" if rule in OVERLAPS else ""
         first = group["first"]
         review = check.startswith("axe-review:")
@@ -661,7 +675,7 @@ def rule_lines(groups, meta, verbose):
                      + (" axe-core couldn't decide, for a person to judge" if review else "")
                      + (f", the first in {first[0]} at {first[1]}" if first else "")
                      + (reasons({"keys": group["keys"]}) if review else "")
-                     + f": {about.get('help') or rule}. "
+                     + f": {str(about.get('help') or rule).rstrip('.')}. "
                      + (wcag.url(found[0]) if found else
                         str(about.get("url") or "").split("?", 1)[0]))
         if verbose:
@@ -1156,7 +1170,7 @@ class Checker:
             version = await page.evaluate("() => axe.version")
             rules = await page.evaluate(RULES)
             chosen = select(rules, self.job["version"], self.job["level"],
-                            self.job["best_practice"])
+                            self.job["best_practice"], self.job.get("experimental", False))
             self.options = axe_options([rule["id"] for rule in chosen])
             dark = [rule["id"] for rule in chosen if rule["id"] in DARK_RULES]
             self.dark_options = axe_options(dark) if dark else None

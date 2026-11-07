@@ -88,7 +88,10 @@ end
 -- An image on another server can't be in an EPUB: the package holds its
 -- images, and a reading system won't fetch one (epubcheck: RSC-007). So
 -- for an EPUB it's a link to the image, named by its alt text; every
--- other writer keeps the image. The same decision as for a frame.
+-- other writer keeps the image. The same decision as for a frame. Each
+-- link so made is kept by its address and its text, for hidden_caption
+-- to tell it from an author's link in a figure.
+local remote_links = {}
 local function remote_image(img)
   if not FORMAT:match('epub') then return nil end
   if not (img.src:match('^%a[%w+.-]*://') or img.src:match('^//')) then
@@ -99,6 +102,7 @@ local function remote_image(img)
     text = 'Image at ' .. (img.src:match('^%a*:?//([^/?#]+)') or img.src)
   end
   lost('remote-image', img.src)
+  remote_links[img.src .. '\0' .. text] = true
   return pandoc.Link(text, img.src)
 end
 
@@ -333,11 +337,12 @@ end
 -- text. With the formula's text in the alt text and its TeX in the
 -- caption's, the writer would show the caption to a screen reader beside
 -- the alt text, the words said twice, so the caption's words are hidden in
--- a span (aria-hidden) where, each formula its text, they're the alt text's
--- (hidden_captions, after an EPUB's image on another server is a link,
--- beside which the writer hides no caption), but for a caption with a link
--- or a note, whose mark is a link, which a screen reader can't reach
--- hidden (axe-core's aria-hidden-focus).
+-- a span (aria-hidden) where, each formula its text, they're the alt text's;
+-- and so beside the link an EPUB makes of a picture on another server,
+-- named by its alt text, beside which the writer hides no caption, a
+-- formula in it or not (hidden_captions, once the link is made); but for a
+-- caption with a link or a note, whose mark is a link, which a screen
+-- reader can't reach hidden (axe-core's aria-hidden-focus).
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
 
@@ -373,17 +378,23 @@ end
 
 local function hidden_caption(fig)
   local body = fig.content
-  if #body ~= 1 or body[1].t ~= 'Plain' or #body[1].content ~= 1
-      or body[1].content[1].t ~= 'Image' then
+  if #body ~= 1 or body[1].t ~= 'Plain' or #body[1].content ~= 1 then return nil end
+  local only, caption, alt = body[1].content[1], fig.caption, nil
+  if only.t == 'Image' then
+    -- A caption with no formula the writer hides itself; beside a picture
+    -- with an alt attribute, it compares the caption with that.
+    if only.attributes.alt ~= nil or not holds(caption.long, FORMULA) then return nil end
+    alt = pandoc.utils.stringify(only.caption)
+  elseif only.t == 'Link'
+      and remote_links[only.target .. '\0' .. pandoc.utils.stringify(only.content)] then
+    -- An EPUB's link for a picture on another server, named by its alt
+    -- text, beside which the writer hides no caption, a formula in it or
+    -- not, as it would beside the picture.
+    alt = pandoc.utils.stringify(only.content)
+  else
     return nil
   end
-  local img = body[1].content[1]
-  local caption = fig.caption
-  if img.attributes.alt ~= nil or not holds(caption.long, FORMULA)
-      or pandoc.utils.stringify(mathtext.texted(caption.long))
-         ~= pandoc.utils.stringify(img.caption) then
-    return nil
-  end
+  if pandoc.utils.stringify(mathtext.texted(caption.long)) ~= alt then return nil end
   for _, block in ipairs(caption.long) do
     if (block.t ~= 'Plain' and block.t ~= 'Para') or holds(block.content, REACHED) then
       return nil
@@ -602,8 +613,8 @@ return {
   { Div = resolve, Span = resolve },
   -- A formula in a picture's description is its text before an EPUB names
   -- a link by the description, and a caption is compared with the alt
-  -- text once the link is made, and before a formula in display style is
-  -- raw HTML.
+  -- text, or with that link's text, once the link is made, and before a
+  -- formula in display style is raw HTML.
   { Pandoc = formula_alts },
   { Image = remote_image, Link = local_file_link },
   { Pandoc = hidden_captions },

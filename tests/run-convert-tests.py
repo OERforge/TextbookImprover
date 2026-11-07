@@ -4751,13 +4751,29 @@ A caption of its own, $\\frac{c}{d}$.
 An icon ![an icon of $\\sqrt{x}$](square.png) in a line.
 """
 
-# A picture on another server, for the EPUB alone, which makes it a link.
+# Pictures on another server, for the EPUB alone, which makes each a link.
 ALT_FORMULAS_REMOTE_MD = """# Remote
 
-::: {targets="ebook"}
+:::: {targets="ebook"}
 ![A square of side $z^2$](https://example.org/square.png)
+
+![A plain circle](https://example.org/circle.png)
+
+::: {.figure}
+![A remote triangle](https://example.org/triangle.png)
+
+::: caption
+A caption of its own.
 :::
+:::
+::::
 """
+
+# A figure of an author's link, whose caption says what the link does, as
+# Pandoc's HTML reader reads one: no picture's, so the writer's to show.
+ALT_FORMULAS_LINK_HTML = ('<!DOCTYPE html><html lang="en"><head><title>A link</title></head>'
+                          '<body><h1>A link</h1><figure><a href="https://example.org/">A '
+                          'square</a><figcaption>A square</figcaption></figure></body></html>\n')
 
 
 def case_alt_formulas(work):
@@ -4770,14 +4786,21 @@ def case_alt_formulas(work):
     repeating the alt text from a screen reader, its words are hidden in a
     span, but for a caption with a link or a note; a caption the alt text
     doesn't repeat is shown, its formula MathML, a figure div's own among
-    them; and one with no formula is the writer's to hide, as it does. And
-    an EPUB's link for a picture on another server is named by the
-    formula's text, the caption beside it shown, as beside one with no
-    formula."""
+    them; and one with no formula is the writer's to hide, as it does. An
+    EPUB's link for a picture on another server is named by the formula's
+    text, and a caption beside it that says the same is hidden in a span,
+    as beside a picture, which the writer hides beside no link, a formula
+    in it or not; one of its own is shown, and one beside an author's
+    link, which is no picture's."""
     os.makedirs(work)
     for name, page in (("01-squares", ALT_FORMULAS_MD), ("02-remote", ALT_FORMULAS_REMOTE_MD)):
         with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(page)
+    import importlib.util
+    html_read = bool(importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml"))
+    if html_read:
+        with open(os.path.join(work, "04-link.html"), "w", encoding="utf-8") as fh:
+            fh.write(ALT_FORMULAS_LINK_HTML)
     with open(os.path.join(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
@@ -4849,9 +4872,23 @@ def case_alt_formulas(work):
          lambda: img_alts(chapter("Squares")) == alts and hidden_first(chapter("Squares"))
          and shown_rest(chapter("Squares")) and writer_hidden(chapter("Squares"))),
         ("an EPUB's link for a picture on another server is named by the formula's text, "
-         "the caption beside it shown, as beside one with no formula",
+         "and a caption beside it that says the same is hidden in a span, as beside a "
+         "picture, a formula in it or not; one of its own is shown",
          lambda: re.search(r'<a href="https://example\.org/square\.png">A square of side z²</a>'
-                           r'\s*<figcaption>A square of side <math\b', chapter("Remote"))),
+                           r'\s*<figcaption><span aria-hidden="true">A square of side <math\b',
+                           chapter("Remote"))
+         and re.search(r'<a href="https://example\.org/circle\.png">A plain circle</a>\s*'
+                       r'<figcaption><span aria-hidden="true">A plain circle</span></figcaption>',
+                       chapter("Remote"))
+         and re.search(r'<a href="https://example\.org/triangle\.png">A remote triangle</a>\s*'
+                       r'<figcaption>(<p>)?A caption of its own\.', chapter("Remote"))),
+        ("but not one beside an author's link, which is no picture's, as the writer shows it"
+         if html_read else "skip: an HTML source needs html5lib or lxml",
+         lambda: not html_read or (
+             re.search(r'<a href="https://example\.org/">A square</a>\s*'
+                       r'<figcaption>A square</figcaption>', text("html", "04-link.html"))
+             and re.search(r'<a href="https://example\.org/">A square</a>\s*'
+                           r'<figcaption>A square</figcaption>', chapter("A link")))),
         ("a Word file's description has the formulas' text",
          lambda: descriptions() == alts),
         ("Markdown keeps the formula in the description, which is the figure's caption",

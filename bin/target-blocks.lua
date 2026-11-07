@@ -406,11 +406,20 @@ local function title_heading(doc)
   if language ~= '' and not SOURCE_WRITERS[FORMAT] then
     meta.lang = pandoc.MetaString(language)
   end
-  -- A declared title with a formula, which the HTML writer shows in the
-  -- title block: its formulas as text in <title>, which Pandoc gives the
-  -- title's TeX.
-  if TITLE_WRITER == 'html' and meta.pagetitle == nil and holds_formula(meta.title) then
-    meta.pagetitle = pandoc.MetaString(title_text(meta.title, texts))
+  -- A declared title with a formula, which Pandoc's writers give the
+  -- formula's TeX where they make the title text ("The x^2 law"): its
+  -- formulas as text in <title>, where the HTML writer shows the title in
+  -- the title block, and a deck's reveal.js presentation's; and in a
+  -- deck's PDF's properties and its PowerPoint file's, title-meta, which
+  -- the PDF's template gives hyperref and deck-pptx.lua takes for the
+  -- file's title.
+  if holds_formula(meta.title) then
+    local text = pandoc.MetaString(title_text(meta.title, texts))
+    if (TITLE_WRITER == 'html' or FORMAT == 'revealjs') and meta.pagetitle == nil then
+      meta.pagetitle = text
+    elseif (FORMAT == 'beamer' or FORMAT == 'pptx') and meta['title-meta'] == nil then
+      meta['title-meta'] = text
+    end
   end
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK

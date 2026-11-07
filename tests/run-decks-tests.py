@@ -1138,6 +1138,66 @@ def case_shared_alt(work):
     ]
 
 
+def case_title_formula(work):
+    """A deck's title with a formula in it, title: The $x^2$ law, has the
+    formula's text where a file's title is text, as a page's has: its
+    reveal.js presentation's <title>, its PowerPoint file's title, and its
+    PDF's, its information dictionary's and its XMP's, where each had the
+    formula's TeX ("The x^2 law"); its pages had it already. The title
+    slide keeps the formula."""
+    decks_given = {"law.md": "---\ntitle: The $x^2$ law\n---\n\n# Why it grows\n\n"
+                             "## A slide\n\nText.\n"}
+    old_reveal = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    old_pptx = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    no_pdf = pdf_ready()
+    for problem, what in ((old_reveal, "presentation's"), (old_pptx, "PowerPoint file's"),
+                          (no_pdf, "PDF's")):
+        if problem:
+            print(f"  skip  {problem}; a deck's {what} title isn't checked")
+    work = folder(work, "targets:\n  pages:\n    format: html\n"
+                        + ("" if old_reveal else "  show:\n    format: revealjs\n")
+                        + ("" if old_pptx else "  slides:\n    format: pptx\n")
+                        + ("" if no_pdf else "  print:\n    format: pdf\n"),
+                  decks_given=decks_given)
+    result = convert(work, "--quick")
+    wanted = "The x\u00b2 law"
+
+    def title(folder_name):
+        path = os.path.join(work, folder_name, "law.html")
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            found = re.search(r"<title>(.*?)</title>", fh.read(), re.S)
+        return html.unescape(found.group(1)) if found else None
+
+    def slide_title():
+        with open(os.path.join(work, "show", "law.html"), encoding="utf-8") as fh:
+            return re.search(r'<h1 class="title">(.*?)</h1>', fh.read(), re.S).group(1)
+
+    def core_titles():
+        import zipfile
+        with zipfile.ZipFile(os.path.join(work, "slides", "law.pptx")) as z:
+            core = z.read("docProps/core.xml").decode("utf-8")
+        return [html.unescape(t) for t in re.findall(r"<dc:title>(.*?)</dc:title>", core)]
+
+    def pdf_titles():
+        path = os.path.join(work, "print", "law.pdf")
+        with pikepdf.open(path) as pdf:
+            return document_info(path, "/Title"), pdf.open_metadata().get("dc:title")
+    checks = [("the deck is converted", lambda: result.returncode == 0),
+              ("its pages' <title> has the formula's text", lambda: title("pages") == wanted)]
+    if not old_reveal:
+        checks.append(("so does its presentation's <title>, and its title slide keeps the "
+                       "formula", lambda: title("show") == wanted
+                       and re.match(r"The\s*<math\b", slide_title())))
+    if not old_pptx:
+        checks.append(("and its PowerPoint file's title, one", lambda: core_titles() == [wanted]))
+    if not no_pdf:
+        checks.append(("and its PDF's, in the information dictionary and the XMP",
+                       lambda: pdf_titles() == (wanted, wanted)))
+    return checks
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -5044,6 +5104,7 @@ def case_revealjs_settings(work):
 CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("one alt text on a deck's different pictures", case_shared_alt),
+         ("a deck's title with a formula", case_title_formula),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),

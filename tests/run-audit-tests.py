@@ -346,7 +346,7 @@ def case_wcag():
     rule's, notes that leave the exit status the other findings', a
     section of the report saying the checks ran and may be wrong, a run
     with --wcag never taking the report for current, since what it finds
-    turns on a setup the cache can't see, a report made with other
+    turns on what's installed too, a report made with other
     options not taken for the one asked for, and a page read with
     another --quick read again. At AAA, whose rule for 2.4.9 the stand-in
     fails; a section on axe-core's checks of the page, which say why they
@@ -437,6 +437,225 @@ def case_wcag():
          and "page.html: unchanged" not in quick.stderr),
         ("and another with --quick finds the report current",
          lambda: "is current" in quick_again.stderr),
+    ]
+
+
+def case_verapdf_cache():
+    """veraPDF's WCAG findings on each PDF kept in the cache, with the
+    stand-in for veraPDF: the next audit gives an unchanged PDF no run of
+    the profile, has the first's findings, and says so, veraPDF asked
+    once which it is; another level and --verbose read what was kept; a
+    PDF changed is checked again, and only it, its entry replacing its
+    last; a part that isn't what the audit wrote is started again; one
+    renamed is named by its new name; a changed folder of modules,
+    --force, each setting veraPDF's run turns on, and another veraPDF
+    check every PDF again; a PDF written again as veraPDF read it, a run
+    with a warning, a veraPDF that doesn't say which it is, and a folder
+    with a file that can't be read keep nothing; and --no-cache leaves
+    the cache as it was."""
+    sys.path.insert(0, HERE)
+    import fakeverapdf
+    import pdfcheck
+    try:
+        import pypdf
+    except ImportError:
+        print("  skip  pypdf not installed; veraPDF's WCAG checks aren't asked of a PDF")
+        return []
+    folder = os.path.join(WORK, "vcache")
+    out = os.path.join(WORK, "vcache-out")
+    os.makedirs(folder)
+    probe = os.path.join(WORK, "vcache-probe.pdf")
+    with open(probe, "wb") as fh:
+        fh.write(pdfcheck.wcag_probe())
+
+    def pdf(name, title):
+        writer = pypdf.PdfWriter(clone_from=probe)
+        writer.add_metadata({"/Title": title})
+        with open(os.path.join(folder, name), "wb") as fh:
+            writer.write(fh)
+    pdf("book.pdf", "A Book")
+    pdf("other.pdf", "Another")
+    log = os.path.join(WORK, "vcache-log.jsonl")
+    modules = fakeverapdf.modules(os.path.join(WORK, "vcache-modules"))
+    env = dict(os.environ, VERAPDF=fakeverapdf.install(os.path.join(WORK, "vcache-fake")),
+               VERAPDF_WCAG=modules, FAKE_VERAPDF_LOG=log)
+
+    def audit(*flags, program=os.path.join(BIN, "audit.py"), **more):
+        open(log, "w").close()
+        result = subprocess.run([sys.executable, program, folder,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True,
+                                text=True, stdin=subprocess.DEVNULL, env=dict(env, **more))
+        with open(log, encoding="utf-8") as fh:
+            runs = [json.loads(line)["args"] for line in fh if line.strip()]
+        checked = sorted(os.path.basename(arg) for args in runs if "-p" in args
+                         for arg in args if arg.endswith(".pdf")
+                         and os.path.basename(arg) != "wcag-probe.pdf")
+        wcag = sorted((f.where, f.check, f.detail) for f in fl.read_csv(
+            os.path.join(out, "audit.csv")) if f.check.startswith("verapdf-wcag:"))
+        with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
+            report = fh.read()
+        return {"result": result, "checked": checked, "wcag": wcag, "report": report,
+                "asked": sum("--version" in args for args in runs)}
+    first = audit("--wcag")
+    second = audit("--wcag")
+    aaa = audit("--wcag", "--wcag-level", "AAA")
+    loud = audit("--wcag", "--verbose")
+    pdf("other.pdf", "Another, changed")
+    changed = audit("--wcag")
+    cache_file = os.path.join(out, "audit-cache.json")
+
+    def part():
+        with open(cache_file, encoding="utf-8") as fh:
+            return json.load(fh)["__verapdf-wcag__"]
+    entries = len(part()["pdfs"])
+    with open(cache_file, encoding="utf-8") as fh:
+        broken = json.load(fh)
+    broken["__verapdf-wcag__"]["pdfs"] = None
+    with open(cache_file, "w", encoding="utf-8") as fh:
+        json.dump(broken, fh)
+    unbroken = audit("--wcag")
+    unbroken_entries = len(part()["pdfs"])
+    os.rename(os.path.join(folder, "book.pdf"), os.path.join(folder, "renamed.pdf"))
+    renamed = audit("--wcag")
+    open(os.path.join(modules, "extra-1.0.jar"), "w").close()
+    remodeled = audit("--wcag")
+    with open(os.path.join(modules, "WCAG-2-2-Machine.xml"), "a", encoding="utf-8") as fh:
+        fh.write("<!-- edited -->\n")
+    reprofiled = audit("--wcag")
+    forced = audit("--wcag", "--force")
+    # Each setting in turn, the ones before it kept: every PDF checked
+    # again shows that one is in the key.
+    settings, java = {}, os.path.join(WORK, "vcache-java")
+    os.makedirs(java)
+    with open(os.path.join(java, "java"), "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(java, "java"), 0o755)
+    shutil.copytree(modules, os.path.join(WORK, "vcache-modules-2"))
+    second_fake = fakeverapdf.install(os.path.join(WORK, "vcache-fake-2"))
+    steps = []
+    for name, value in (("CLASSPATH_PREFIX", os.path.join(WORK, "nowhere", "*")),
+                        ("JAVACMD", os.path.join(java, "java")),
+                        ("JAVA_HOME", os.path.join(WORK, "no-java")),
+                        ("JAVA_OPTS", "-Xmx512m"),
+                        ("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8"),
+                        ("JDK_JAVA_OPTIONS", "-Duser.language=en"),
+                        ("PATH", java + os.pathsep + os.environ.get("PATH", "")),
+                        ("VERAPDF", second_fake),
+                        ("VERAPDF_WCAG", os.path.join(WORK, "vcache-modules-2"))):
+        settings[name] = value
+        steps.append((name, audit("--wcag", **settings)["checked"]))
+    with open(second_fake, "a", encoding="utf-8") as fh:
+        fh.write("# edited\n")
+    steps.append(("the launcher edited", audit("--wcag", **settings)["checked"]))
+    code = os.path.join(WORK, "vcache-code")
+    for name in ("bin", "lib"):
+        shutil.copytree(os.path.join(ROOT, name), os.path.join(code, name))
+    with open(os.path.join(code, "lib", "pdfcheck.py"), "a", encoding="utf-8") as fh:
+        fh.write("# edited\n")
+    steps.append(("pdfcheck.py edited", audit("--wcag", program=os.path.join(
+        code, "bin", "audit.py"), **settings)["checked"]))
+    steps.append(("all of them again", audit("--wcag", program=os.path.join(
+        code, "bin", "audit.py"), **settings)["checked"]))
+    # A PDF a build writes again as veraPDF reads it: what veraPDF found
+    # isn't kept for the bytes it had before.
+    open(os.path.join(modules, "extra-1.5.jar"), "w").close()
+    saved = {name: open(os.path.join(folder, name), "rb").read()
+             for name in ("other.pdf", "renamed.pdf")}
+    rewritten = audit("--wcag", FAKE_VERAPDF_REWRITE="1")
+    for name, data in saved.items():
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(data)
+    after_rewritten = audit("--wcag")
+    upgraded = audit("--wcag", FAKE_VERAPDF_VERSION="1.30.4")
+    # Each of these after a file more in the folder, so the cache has
+    # nothing for the setup, and what the run keeps is all there is.
+    open(os.path.join(modules, "extra-2.0.jar"), "w").close()
+    garbled = audit("--wcag", FAKE_VERAPDF_GARBLED="1")
+    after_garbled = audit("--wcag")
+    open(os.path.join(modules, "extra-3.0.jar"), "w").close()
+    error = 'Exception in thread "main" java.lang.IllegalStateException: a check undone\n'
+    erred = audit("--wcag", FAKE_VERAPDF_STDERR=error)
+    after_erred = audit("--wcag")
+    unsaid = [audit("--wcag", FAKE_VERAPDF_NO_VERSION="1") for _ in range(2)]
+    # A file in the folder that can't be read: no key, so nothing kept.
+    pdfcheck._SAID[(fakeverapdf.install(os.path.join(WORK, "vcache-fake-3")),)] = "veraPDF 1.30.3"
+    held_digest = pdfcheck.digest
+
+    def unreadable(path):
+        raise PermissionError(13, "Permission denied", path)
+    pdfcheck.digest = unreadable
+    try:
+        no_key = pdfcheck.wcag_setup([os.path.join(WORK, "vcache-fake-3", "verapdf")], modules)
+    finally:
+        pdfcheck.digest = held_digest
+    with open(cache_file, encoding="utf-8") as fh:
+        kept = fh.read()
+    uncached = audit("--wcag", "--no-cache")
+    with open(cache_file, encoding="utf-8") as fh:
+        kept_after = fh.read()
+    both = ["book.pdf", "other.pdf"]
+    held = "1 PDF(s) weren't checked again: each is unchanged since the audit that checked it ("
+    return [
+        ("the first audit runs the profile on each PDF, a note for its rule within WCAG 2.1 "
+         "AA",
+         lambda: first["checked"] == both and [w[:2] for w in first["wcag"]] == [
+             ("book.pdf", "verapdf-wcag:1.3.1-1"), ("other.pdf", "verapdf-wcag:1.3.1-1")]),
+        ("the second runs it on neither, its findings the first's, saying each PDF wasn't "
+         "checked again, and asks veraPDF once which it is",
+         lambda: second["checked"] == [] and second["wcag"] == first["wcag"]
+         and second["result"].stderr.count(held) == 2
+         and second["result"].stderr.count("WCAG 2.2 machine checks ran on no PDF again") == 2
+         and second["asked"] == 1 and held in second["report"]),
+        ("at AAA, the rule beyond AA is a note too, from what was kept, veraPDF not run",
+         lambda: aaa["checked"] == [] and [w[:2] for w in aaa["wcag"]] == [
+             ("book.pdf", "verapdf-wcag:1.3.1-1"), ("book.pdf", "verapdf-wcag:2.4.9-1"),
+             ("other.pdf", "verapdf-wcag:1.3.1-1"), ("other.pdf", "verapdf-wcag:2.4.9-1")]),
+        ("with --verbose, each failed check a note at its page, from what was kept",
+         lambda: loud["checked"] == [] and [w[:2] for w in loud["wcag"]] == [
+             ("book.pdf#page=653", "verapdf-wcag:1.3.1-1"),
+             ("other.pdf#page=653", "verapdf-wcag:1.3.1-1")]),
+        ("a PDF changed is checked again, and only it, its entry in the cache replacing the "
+         "last, by where the PDF is",
+         lambda: changed["checked"] == ["other.pdf"] and entries == 2),
+        ("a part of the cache that isn't what the audit wrote is started again",
+         lambda: "Traceback" not in unbroken["result"].stderr
+         and unbroken["checked"] == ["book.pdf", "other.pdf"] and unbroken_entries == 2),
+        ("one renamed isn't, and its findings have its new name",
+         lambda: renamed["checked"] == [] and [w[:2] for w in renamed["wcag"]] == [
+             ("other.pdf", "verapdf-wcag:1.3.1-1"), ("renamed.pdf", "verapdf-wcag:1.3.1-1")]
+         and "book.pdf" not in renamed["report"]),
+        ("a file more in the modules' folder has every PDF checked again, and so does a "
+         "profile edited there",
+         lambda: remodeled["checked"] == ["other.pdf", "renamed.pdf"]
+         and reprofiled["checked"] == ["other.pdf", "renamed.pdf"]),
+        ("and so does --force",
+         lambda: forced["checked"] == ["other.pdf", "renamed.pdf"]),
+        ("and CLASSPATH_PREFIX, each setting the Java veraPDF runs turns on, the java on the "
+         "path, another launcher, the modules' folder at another place, the launcher edited, "
+         "and pdfcheck.py edited, each in turn, all of them the same after",
+         lambda: steps == [(name, ["other.pdf", "renamed.pdf"]) for name, _ in steps[:-1]]
+         + [("all of them again", [])] and len(steps) == 12
+         or fail(repr(steps))),
+        ("a PDF written again as veraPDF read it isn't kept for the bytes it had",
+         lambda: rewritten["checked"] == ["other.pdf", "renamed.pdf"]
+         and after_rewritten["checked"] == ["other.pdf", "renamed.pdf"]),
+        ("and another veraPDF, which the summary names",
+         lambda: upgraded["checked"] == ["other.pdf", "renamed.pdf"]
+         and "veraPDF 1.30.4's WCAG 2.2 machine checks ran on 1 PDF(s)"
+         in upgraded["result"].stderr),
+        ("a run that veraPDF didn't report on keeps nothing, so the next checks every PDF",
+         lambda: "veraPDF didn't report on" in garbled["result"].stderr
+         and after_garbled["checked"] == ["other.pdf", "renamed.pdf"]),
+        ("nor does one with an error veraPDF wrote as it checked",
+         lambda: "veraPDF wrote an error as it checked" in erred["result"].stderr
+         and erred["checked"] == ["other.pdf", "renamed.pdf"]
+         and after_erred["checked"] == ["other.pdf", "renamed.pdf"]),
+        ("a veraPDF that doesn't say which it is has nothing kept, nor read from the cache",
+         lambda: [u["checked"] for u in unsaid] == [["other.pdf", "renamed.pdf"]] * 2),
+        ("nor does a folder holding a file that can't be read",
+         lambda: no_key is None),
+        ("--no-cache checks every PDF and leaves the cache as it was",
+         lambda: uncached["checked"] == ["other.pdf", "renamed.pdf"] and kept_after == kept),
     ]
 
 
@@ -764,6 +983,7 @@ def main():
                         case_own_reports),
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
+                       ("veraPDF's WCAG findings, cached", case_verapdf_cache),
                        ("axe-core's results, cached", case_axe_cache),
                        ("DAISY's Ace, asked for", case_ace),
                        ("convert.py --check-only", case_check_only)]:

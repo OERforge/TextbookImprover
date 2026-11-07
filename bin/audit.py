@@ -30,9 +30,9 @@ there. With --wcag, DAISY's Ace runs on each EPUB too, when it's
 installed, its own checks notes as the rest are. axe-core's findings on
 a page are kept in the cache too, and a page isn't checked again while
 it and every file it loads are unchanged and so are axe-core,
-Playwright, and the rules, nor an EPUB by Ace while it and Ace are; a
-PDF's WCAG checks run on every run with --wcag, since veraPDF's WCAG
-modules, which the cache can't see, decide what they find.
+Playwright, and the rules, nor an EPUB by Ace while it and Ace are, nor
+a PDF by veraPDF's WCAG profile while it, veraPDF, and the folder of its
+WCAG modules are; a PDF's other checks run every time.
 
 Copyright 2026 Robert Szarka
 
@@ -140,13 +140,17 @@ def gather(paths):
 
 
 def audit_one(path, kind, validators, wcag=False, verbose=False,
-              version=wcag_lib.DEFAULT_VERSION, level=wcag_lib.DEFAULT_LEVEL):
+              version=wcag_lib.DEFAULT_VERSION, level=wcag_lib.DEFAULT_LEVEL,
+              wcag_cache=None, reuse=True):
     """(findings, sections) for one file. wcag: a PDF is checked against
     veraPDF's WCAG 2.2 machine profile too, for the criteria of WCAG
     version at level, its own section saying whether the checks ran;
     verbose: each of its failed checks a finding, and an item in the
-    section, where each rule's are counted in one. A page's and an
-    EPUB's WCAG checks are audit_pages'."""
+    section, where each rule's are counted in one. wcag_cache: the audit
+    cache's part for those checks, a PDF's kept there and, with reuse,
+    read again while it, veraPDF, and its WCAG modules are the same
+    (pdfcheck.wcag_setup). A page's and an EPUB's WCAG checks are
+    audit_pages'."""
     name = os.path.basename(path)
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
@@ -200,7 +204,8 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
             else:
                 more, lines = pdfcheck.run_verapdf_wcag(command, [path], verbose=verbose,
                                                         wcag_version=version,
-                                                        wcag_level=level)
+                                                        wcag_level=level, cache=wcag_cache,
+                                                        reuse=reuse)
                 found += more
             for line in lines:
                 print(f"  {line}", file=sys.stderr)
@@ -330,9 +335,10 @@ def main():
     per_file = {"quick": bool(args.quick)}
     # Nothing changed since the last audit: say so and leave the report
     # as it is, so its date stays the date of the audit it records. Not
-    # with --wcag, whose findings turn on veraPDF's WCAG modules, which the
-    # cache can't see: a report made before they were set up isn't current
-    # once they are.
+    # with --wcag, whose findings turn on what's installed too, veraPDF
+    # and its WCAG modules, axe-core and Playwright, and Ace, which only
+    # each one's own part of the cache asks after, as it runs: a report
+    # made before the modules were set up isn't current once they are.
     if cache is not None and not args.force and not args.wcag \
             and os.path.exists(report_md) \
             and all(cache.lookup(i["sha256"], per_file) is not None for i in inputs) \
@@ -353,7 +359,10 @@ def main():
             all_found += cached
             continue
         found, extra = audit_one(path, kind, not args.quick, args.wcag, args.verbose,
-                                 version, level)
+                                 version, level,
+                                 cache.part("verapdf-wcag")
+                                 if cache is not None and kind == "pdf" and args.wcag
+                                 else None, not args.force)
         print(f"  {os.path.basename(path)}: {len(found)} finding(s)",
               file=sys.stderr)
         all_found += found

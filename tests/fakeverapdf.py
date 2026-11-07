@@ -23,8 +23,14 @@ FAKE_VERAPDF_STDERR is written to its stderr, as bytes, beside its
 report; FAKE_VERAPDF_KILLED, set, has a run with a profile end there,
 killed, as the kernel kills a JVM short of memory; FAKE_VERAPDF_REFLOW,
 set, fails any other PDF on 1.4.10-1 too, a figure with no bounding
-box, for a criterion WCAG 2.1 brought; and FAKE_VERAPDF_SLEEP is how
-many seconds it waits first.
+box, for a criterion WCAG 2.1 brought; FAKE_VERAPDF_SLEEP is how
+many seconds it waits first; and FAKE_VERAPDF_VERSION is the version it
+is, 1.30.3 unless it says, which --version prints first, as veraPDF
+does, then a build's date and a line of its own; FAKE_VERAPDF_NO_VERSION,
+set, has --version print its usage and end with 2, as a launcher that
+doesn't take it might; and FAKE_VERAPDF_REWRITE, set, has a run with a
+profile add a line to each PDF it's given but the probe, as a build
+writing a PDF again while veraPDF reads it would change it.
 
 Copyright 2026 Robert Szarka
 
@@ -62,6 +68,15 @@ if log:
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"args": args,
                              "prefix": os.environ.get("CLASSPATH_PREFIX", "")}) + "\n")
+version = os.environ.get("FAKE_VERAPDF_VERSION") or "1.30.3"
+if "--version" in args and os.environ.get("FAKE_VERAPDF_NO_VERSION"):
+    print("Usage: veraPDF [options] FILES")
+    sys.exit(2)
+if "--version" in args:
+    print(f"veraPDF {version}")
+    print("Built: Tue Oct 21 10:00:00 UTC 2026")
+    print("A stand-in for veraPDF, in TextbookImprover's suites.")
+    sys.exit(0)
 files = [a for a in args if a.lower().endswith(".pdf")]
 profile = args[args.index("-p") + 1] if "-p" in args else None
 if profile and os.environ.get("FAKE_VERAPDF_KILLED"):
@@ -75,6 +90,11 @@ if profile and os.environ.get("FAKE_VERAPDF_GARBLED"):
     sys.exit(2)
 skip = os.environ.get("FAKE_VERAPDF_SKIP")
 files = [name for name in files if os.path.basename(name) != skip]
+if profile and os.environ.get("FAKE_VERAPDF_REWRITE"):
+    for name in files:
+        if os.path.basename(name) != "wcag-probe.pdf":
+            with open(name, "ab") as fh:
+                fh.write(b"%rewritten as veraPDF read it\n")
 first = os.environ.get("CLASSPATH_PREFIX", "").split(os.pathsep)[0]
 loads = bool(profile) and first.endswith("*") and os.path.exists(
     os.path.join(os.path.dirname(first), "LOADS"))
@@ -121,7 +141,7 @@ for name in files:
         "compliant": not rules, "details": {"passedRules": 90, "failedRules": len(rules),
                                             "ruleSummaries": rules}}]})
 print(json.dumps({"report": {"buildInformation": {"releaseDetails": [
-    {"id": "core", "version": "1.30.3"}, {"id": "apps", "version": "1.30.3"}]},
+    {"id": "core", "version": version}, {"id": "apps", "version": version}]},
     "jobs": jobs}}))
 sys.exit(1 if any(job["validationResult"][0]["details"]["ruleSummaries"]
                   for job in jobs) else 0)

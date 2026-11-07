@@ -26,10 +26,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from collections import Counter
@@ -37,7 +39,7 @@ from xml.etree import ElementTree
 
 import alttext
 import wcag
-from findings import Finding, describe_input, md_code, md_text
+from findings import Finding, describe_input, digest, md_code, md_text, now
 
 try:
     import pypdf
@@ -753,8 +755,80 @@ def wcag_modules(folder):
     return found
 
 
+# What veraPDF said of itself, and the setups worked out, once a run.
+_SAID = {}
+_SETUPS = {}
+
+
+def verapdf_said(command, timeout=60):
+    """What veraPDF's --version prints, which says which veraPDF it is:
+    its name and version (veraPDF 1.30.3), its build's date, and its
+    rights statement (VeraPdfCli.showVersionInfo, read in veraPDF-apps'
+    source at v1.30.3, which looks for an update only with --verbose);
+    "" when it says nothing like it. Asked once a run."""
+    key = tuple(command)
+    if key not in _SAID:
+        try:
+            result = subprocess.run(command + ["--version"], capture_output=True,
+                                    encoding="utf-8", errors="replace", timeout=timeout,
+                                    stdin=subprocess.DEVNULL)
+            said = result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            said = ""
+        _SAID[key] = said if re.match(r"veraPDF \S", said) else ""
+    return _SAID[key]
+
+
+# What decides the Java veraPDF's launcher runs, and how: JAVACMD, else
+# JAVA_HOME's, else the java on the path (verapdf.sh, read in
+# veraPDF-apps' source at v1.30.3), given JAVA_OPTS, and the options any
+# JVM picks up.
+JAVA_SETTINGS = ("JAVACMD", "JAVA_HOME", "JAVA_OPTS", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS")
+
+
+def wcag_setup(command, folder):
+    """What a PDF's WCAG findings turn on besides the PDF, as a key for
+    the audit's cache, or None when veraPDF doesn't say which it is, or
+    a file the key is made of can't be read: veraPDF, by its launcher,
+    the launcher's SHA-256, and what its --version says; the Java it
+    runs (JAVA_SETTINGS, and the java on the path, by where it really
+    is); every file in the modules' folder by its SHA-256, the jars, all
+    of which go on veraPDF's class path, the profiles, and anything else
+    there; CLASSPATH_PREFIX, as it's set, which the folder goes ahead of;
+    and this file, which asks veraPDF for the report the findings are
+    read from. Worked out once a run."""
+    said = verapdf_said(command)
+    if not said:
+        return None
+    where = os.path.realpath(folder)
+    key = (tuple(command), where)
+    if key not in _SETUPS:
+        try:
+            files = [(name, digest(os.path.join(where, name)))
+                     for name in sorted(os.listdir(where))
+                     if os.path.isfile(os.path.join(where, name))]
+            launcher = os.path.realpath(command[-1])
+            parts = [launcher, digest(launcher), said,
+                     [os.environ.get(name, "") for name in JAVA_SETTINGS],
+                     os.path.realpath(shutil.which("java") or ""), where, files,
+                     os.environ.get("CLASSPATH_PREFIX", ""), digest(os.path.abspath(__file__))]
+        except OSError:
+            parts = None
+        _SETUPS[key] = None if parts is None else hashlib.sha256(
+            json.dumps(parts).encode("utf-8")).hexdigest()
+    return _SETUPS[key]
+
+
+def kept_job(path, entry):
+    """A job as veraPDF's report gives one, for the PDF at path, holding
+    the rules the audit's cache kept for it, read as a run's are
+    (wcag_jobs)."""
+    return {"itemDetails": {"name": path},
+            "validationResult": [{"details": {"ruleSummaries": entry["rules"]}}]}
+
+
 def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
-                     wcag_version=None, wcag_level=None):
+                     wcag_version=None, wcag_level=None, cache=None, reuse=True):
     """veraPDF's WCAG 2.2 machine checks on the PDFs, as (findings,
     lines): a note for each of the profile's own rules a PDF failed,
     counting its failed checks, and the lines for the run's summary or a
@@ -769,7 +843,12 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
     modules and the profiles are, VERAPDF_WCAG's when not given.
     wcag_version and wcag_level: only the rules for criteria within them
     are reported (wcag.within), and a line counts the others; without
-    them, every rule the profile has."""
+    them, every rule the profile has. cache: a dict an audit keeps, each
+    PDF's own rules failed, with their failed checks, kept from a run that
+    checked it with nothing amiss, by where the PDF is, with its SHA-256,
+    and, with reuse, read again in place of a run while the PDF, veraPDF,
+    and the modules' folder are the same (wcag_setup), what's reported
+    decided as for a run's: by verbose, wcag_version, and wcag_level."""
     if folder is None:
         folder = os.environ.get(WCAG_VARIABLE, "").strip()
     if not folder:
@@ -828,52 +907,114 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
                      for major, why in whys.items() if why]
         fit = [major for major in ("2", "1") if not whys[major]]
         groups = {fit[0]: []} if fit else {}
-    if not groups:
+    # A PDF whose rules the cache kept, from a run of this setup, isn't
+    # given veraPDF again but read from them; one checked here with
+    # nothing amiss, no warning before or in its run, and its bytes the
+    # same after the run as before, is kept, by where it is, with its
+    # SHA-256, so a PDF made again replaces its own (as axe-core's part
+    # keeps a page), and one renamed or copied is found by its SHA-256.
+    held, shas, stored = [], {}, None
+    setup = wcag_setup(command, folder) if cache is not None and paths else None
+    if setup is not None:
+        if cache.get("setup") != setup or not isinstance(cache.get("pdfs"), dict):
+            cache.clear()
+            cache.update({"setup": setup, "pdfs": {}})
+        stored = cache["pdfs"]
+        by_sha = {}
+        for entry in stored.values():
+            if isinstance(entry, dict) and isinstance(entry.get("rules"), list):
+                by_sha.setdefault(entry.get("sha"), entry)
+        for major in list(groups):
+            fresh = []
+            for path in groups[major]:
+                shas[path] = digest(path)
+                entry = stored.get(os.path.realpath(path)) if reuse else None
+                if not (isinstance(entry, dict) and entry.get("sha") == shas[path]
+                        and isinstance(entry.get("rules"), list)):
+                    entry = by_sha.get(shas[path]) if reuse else None
+                if entry:
+                    held.append((path, entry))
+                else:
+                    fresh.append(path)
+            if fresh:
+                groups[major] = fresh
+            else:
+                del groups[major]
+    if not groups and not held:
         return [], warnings + unfitting
-    environment = dict(os.environ)
-    environment["CLASSPATH_PREFIX"] = os.pathsep.join(
-        [os.path.join(os.path.abspath(folder), "*")]
-        + ([environment["CLASSPATH_PREFIX"]] if environment.get("CLASSPATH_PREFIX")
-           else []))
     findings, rules, ran, left_out = [], [], [], []
-    with tempfile.TemporaryDirectory() as work:
-        probe = os.path.join(work, "wcag-probe.pdf")
-        with open(probe, "wb") as fh:
-            fh.write(wcag_probe())
-        for major, group in sorted(groups.items(), reverse=True):
-            result = _run_wcag(command, profiles[major], probe, group, environment, timeout)
-            if isinstance(result, str):
-                warnings.append(result)
-                continue
-            report, stderr = result
-            try:
-                read = wcag_report(report, probe, folder, modules, group, verbose,
-                                   wcag_version, wcag_level)
-            except Exception as exc:        # a report no veraPDF writes
-                warnings.append(f"WARNING: --wcag: veraPDF's report on "
-                                f"{WCAG_PROFILES[major]} couldn't be read: {exc}")
-                continue
-            warnings += read["warnings"]
-            if not read["loaded"]:
-                break                       # nor will they with the other profile
-            findings += read["findings"]
-            rules += read["rules"]
-            left_out += read["left_out"]
-            ran.append(read)
-            said = _java_error(stderr)
-            if said:
-                warnings.append("WARNING: --wcag: veraPDF wrote an error as it checked, "
-                                f"which may have left some checks undone: {said}")
+    if groups:
+        environment = dict(os.environ)
+        environment["CLASSPATH_PREFIX"] = os.pathsep.join(
+            [os.path.join(os.path.abspath(folder), "*")]
+            + ([environment["CLASSPATH_PREFIX"]] if environment.get("CLASSPATH_PREFIX")
+               else []))
+        with tempfile.TemporaryDirectory() as work:
+            probe = os.path.join(work, "wcag-probe.pdf")
+            with open(probe, "wb") as fh:
+                fh.write(wcag_probe())
+            for major, group in sorted(groups.items(), reverse=True):
+                result = _run_wcag(command, profiles[major], probe, group, environment,
+                                   timeout)
+                if isinstance(result, str):
+                    warnings.append(result)
+                    continue
+                report, stderr = result
+                try:
+                    read = wcag_report(report, probe, folder, modules, group, verbose,
+                                       wcag_version, wcag_level)
+                except Exception as exc:        # a report no veraPDF writes
+                    warnings.append(f"WARNING: --wcag: veraPDF's report on "
+                                    f"{WCAG_PROFILES[major]} couldn't be read: {exc}")
+                    continue
+                warnings += read["warnings"]
+                if not read["loaded"]:
+                    break                       # nor will they with the other profile
+                findings += read["findings"]
+                rules += read["rules"]
+                left_out += read["left_out"]
+                ran.append(read)
+                said = _java_error(stderr)
+                if said:
+                    warnings.append("WARNING: --wcag: veraPDF wrote an error as it checked, "
+                                    f"which may have left some checks undone: {said}")
+                if stored is not None and not warnings:
+                    when = now()
+                    for path in group:
+                        kept = read["kept"].get(os.path.realpath(path))
+                        if kept is not None and digest(path) == shas[path]:
+                            stored[os.path.realpath(path)] = {
+                                "sha": shas[path], "rules": kept, "version": read["version"],
+                                "when": when}
+    if held:
+        read = {"version": str(held[0][1].get("version") or "?"), "checked": 0,
+                "findings": [], "rules": [], "warnings": [], "left_out": []}
+        wcag_jobs(read, [kept_job(path, entry) for path, entry in held], (), verbose,
+                  wcag_version, wcag_level)
+        findings += read["findings"]
+        rules += read["rules"]
+        left_out += read["left_out"]
+        warnings += read["warnings"]
     head = []
-    if ran:
-        version = ran[0]["version"]
+    if ran or held:
+        version = ran[0]["version"] if ran else read["version"]
         if paths:
             within = (f" for {wcag.conformance(wcag_version, wcag_level)}"
                       if wcag_version and wcag_level else "")
-            head = [f"veraPDF {version}'s WCAG 2.2 machine checks ran on "
-                    f"{sum(read['checked'] for read in ran)} PDF(s){within}, with its WCAG "
-                    f"modules from {folder}: {WCAG_CAVEAT}, so what they find is a note, "
-                    "never a failure."]
+            head = [f"veraPDF {version}'s WCAG 2.2 machine checks "
+                    + (f"ran on {sum(read['checked'] for read in ran)} PDF(s)" if ran
+                       else "ran on no PDF again")
+                    + f"{within}, with its WCAG modules from {folder}: {WCAG_CAVEAT}, so "
+                    "what they find is a note, never a failure."]
+            if held:
+                whens = sorted({str(entry.get("when") or "?") for _, entry in held})
+                one = len(whens) == 1
+                head.append(f"{len(held)} PDF(s) weren't checked again: each is unchanged "
+                            "since " + ("the audit that checked it" if one
+                                        else "the audits that checked them")
+                            + f" ({whens[0] if one else whens[0] + ' to ' + whens[-1]}), as "
+                            "veraPDF and its WCAG modules are, so their findings are "
+                            + ("that audit's." if one else "those audits'."))
         else:
             files = ("PDF 2.0 and PDF 1.x files alike" if len(fit) == 2 else
                      f"a {WCAG_FILES[fit[0]]} file, as a PDF/UA-{fit[0]} build is, but not "
@@ -1022,10 +1163,23 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
         read["warnings"].append(f"WARNING: --wcag: veraPDF {version} loaded wcag-validation "
                                 f"{' and '.join(ours)} from {folder}, which should be its "
                                 f"own version ({WCAG_DOCS}).")
+    wcag_jobs(read, [job for job in jobs if job is not probed], expected, verbose,
+              wcag_version, wcag_level)
+    return read
+
+
+def wcag_jobs(read, jobs, expected=(), verbose=False, wcag_version=None, wcag_level=None):
+    """Reads each job of a run of a WCAG profile but the probe's into
+    read, as wcag_report's: a PDF's findings, its rules' lines, the rules
+    left out, a warning for a PDF veraPDF couldn't check, and for one
+    given that it didn't report on (expected); and in read["kept"], by
+    each PDF's real path, the profile's own rules it failed, each with
+    the checks that failed, as the audit's cache keeps them, a job read
+    whole. A job the cache kept is read so again, in a job of its own
+    (kept_job)."""
+    read.setdefault("kept", {})
     seen = set()
     for job in jobs:
-        if job is probed:
-            continue
         path = str(_dict(job.get("itemDetails")).get("name") or "")
         name = os.path.basename(path)
         if path:
@@ -1040,11 +1194,13 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
                                         + _task_exception(job))
                 continue
             read["checked"] += 1
+            kept = []
             for profile in results:
                 for rule in _list(_dict(profile.get("details")).get("ruleSummaries")):
                     if not isinstance(rule, dict) or not str(
                             rule.get("specification", "")).startswith("WCAG"):
                         continue
+                    kept.append(dict(rule, checks=_failed_checks(rule)))
                     clause = str(rule.get("clause", ""))
                     if wcag_version and wcag_level and not wcag.within(
                             clause, wcag_version, wcag_level):
@@ -1056,6 +1212,8 @@ def wcag_report(report, probe, folder="", modules=None, expected=(), verbose=Fal
                     read["findings"] += found
                     read["rules"].append((_rule_key(name, rule),
                                           [wcag_rule_line(name, rule, pages)] + lines))
+            if path:
+                read["kept"][os.path.realpath(path)] = kept
         except Exception as exc:            # a job no veraPDF writes, read as far as it goes
             read["warnings"].append(f"WARNING: --wcag: veraPDF's report on {name} couldn't "
                                     f"be read: {exc}")

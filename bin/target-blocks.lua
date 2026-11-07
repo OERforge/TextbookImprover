@@ -415,6 +415,15 @@ local function title_heading(doc)
   if not marked or meta.title == nil or TITLE_WRITER == '' then return doc end
   if TITLE_WRITER == 'html' and TITLE_BLOCK
       and (meta.subtitle or meta.date or meta.abstract) then
+    -- The title block shows the title, the subtitle, date, and abstract
+    -- under it, and the heading isn't written; where the title is the
+    -- heading's words, with a formula among them, it shows the heading,
+    -- the formula as a formula, where it had shown the title's text
+    -- ("Limits a/b"), and <title> has the text.
+    if holds_formula(marked) and title_text(marked, texts) == title_text(meta.title, texts) then
+      meta.pagetitle = pandoc.MetaString(title_text(meta.title, texts))
+      meta.title = pandoc.MetaInlines(marked)
+    end
     return doc
   end
   local content = marked

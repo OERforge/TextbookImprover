@@ -4688,6 +4688,43 @@ def case_declared_formula_titles(work):
     ]
 
 
+def case_title_block_formula(work):
+    """A page with a subtitle, a date, or an abstract keeps the HTML title
+    block, which shows its title; where the title is the page's heading's
+    words, the block shows the heading, a formula in it as a formula, where
+    it had shown the title's text, and <title> the text. A title the page
+    declares, which a longer heading says, stands there as written."""
+    os.makedirs(work)
+    heading = "# Limits $\\frac{a}{b}$ and more\n\nText.\n"
+    pages = {"01-own": "---\nsubtitle: A subtitle\n---\n\n" + heading,
+             "02-declared": "---\ntitle: Limits\nsubtitle: A subtitle\n---\n\n" + heading}
+    for name, text in pages.items():
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
+
+    def page(name):
+        return read(work, "html", name + ".html") if exists(work, "html", name + ".html") else ""
+
+    def block(name):
+        found = re.search(r'<h1 class="title">(.*?)</h1>', page(name), re.S)
+        return found.group(1) if found else ""
+
+    def title(name):
+        found = re.search(r"<title>(.*?)</title>", page(name), re.S)
+        return html_lib.unescape(found.group(1)) if found else None
+    return [
+        ("a title made from the heading is the heading in the title block, its formula "
+         "MathML, the subtitle under it",
+         lambda: re.match(r"Limits\s*<math\b", block("01-own"))
+         and '<p class="subtitle">A subtitle</p>' in page("01-own")
+         and title("01-own") == "Limits a/b and more"),
+        ("a declared title the heading says more than stands there as written",
+         lambda: block("02-declared") == "Limits" and "<math" not in block("02-declared")
+         and title("02-declared") == "Limits"),
+    ]
+
+
 def case_numbered_titles(work):
     """A numbered book's page has its number in its <title> and its own
     heading, whatever its title holds: a character outside ASCII, which the
@@ -9358,6 +9395,7 @@ CASES = [
     ("an AsciiDoc target", case_asciidoc_target),
     ("a page title that is also a heading", case_title_id),
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
+    ("a title block's heading with a formula", case_title_block_formula),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),

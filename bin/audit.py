@@ -23,8 +23,11 @@ browser for all of them (with Playwright, optional), and veraPDF's WCAG
 error, one for each rule a file fails, and the report has a section
 saying whether the checks ran; --verbose makes each element axe-core
 names and each check veraPDF failed a note, with what the file has
-there. Each is checked again on every run with --wcag, since what's
-installed, which the cache can't see, decides what they find.
+there. axe-core's findings on a page are kept in the cache too, and a
+page isn't checked again while it and every file it loads are unchanged
+and so are axe-core, Playwright, and the rules; a PDF's WCAG checks run
+on every run with --wcag, since veraPDF's WCAG modules, which the cache
+can't see, decide what they find.
 
 Copyright 2026 Robert Szarka
 
@@ -160,10 +163,13 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
     return [], []
 
 
-def audit_pages(files, validators, verbose, version, level, best_practice, experimental):
+def audit_pages(files, validators, verbose, version, level, best_practice, experimental,
+                cache=None, reuse=True):
     """(findings, sections) of axe-core's rules on the HTML pages and EPUBs
     among the files, in one worker for all of them, its section saying
-    whether they ran; for --wcag."""
+    whether they ran; for --wcag. cache: the audit cache's part for them,
+    each page's result kept there and, with reuse, used again where the
+    page hasn't changed (axecheck.kept)."""
     pages = [path for path, kind in files if kind == "html"]
     epubs = [path for path, kind in files if kind == "epub"]
     if not pages and not epubs:
@@ -173,7 +179,7 @@ def audit_pages(files, validators, verbose, version, level, best_practice, exper
         # Each finding filed under the file audited, an EPUB's under the EPUB.
         found, lines = axecheck.check(pages, epubs, version=version, level=level,
                                       best_practice=best_practice, experimental=experimental,
-                                      verbose=verbose, by_epub=True)
+                                      verbose=verbose, by_epub=True, cache=cache, reuse=reuse)
     for line in lines:
         print(f"  {line}", file=sys.stderr)
     return found, [("HTML pages and EPUBs: axe-core's WCAG checks",
@@ -265,10 +271,13 @@ def main():
         if cache is not None:
             cache.store(item["sha256"], found, per_file)
     if args.wcag:
-        # After the cache has each file's own findings: axe-core's, like
-        # veraPDF's, turn on what's installed, which it can't see.
+        # After the cache has each file's own findings: axe-core's turn on
+        # what's installed too, and on every file a page loads, so they're
+        # kept apart, with what they turn on.
         found, extra = audit_pages(files, not args.quick, args.verbose, version, level,
-                                   best_practice, experimental)
+                                   best_practice, experimental,
+                                   None if cache is None else cache.part("axe"),
+                                   not args.force)
         all_found += found
         sections += extra
     if cache is not None:

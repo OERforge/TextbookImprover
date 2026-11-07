@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import csv
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -343,6 +344,130 @@ def case_wcag():
     ]
 
 
+def fail(message):
+    print("        " + message[:2000])
+    return False
+
+
+def browser_problem():
+    """Why a page can't be checked in a browser here, or None."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "Playwright isn't installed"
+    try:
+        with sync_playwright() as play:
+            play.chromium.launch().close()
+    except Exception as exc:
+        return f"Playwright's Chromium doesn't start ({str(exc).strip()[:200]})"
+    return None
+
+
+def case_axe_cache():
+    """--wcag keeps axe-core's results on each page in the cache, and
+    checks a page again only when it, or a file it loads, has changed,
+    an EPUB's content documents each on its own, or when the rules have,
+    or with --force; with --no-cache, every page, the cache untouched."""
+    problem = browser_problem()
+    if problem:
+        print(f"  skip  {problem}: axe-core's results aren't cached here")
+        return []
+    folder = os.path.join(WORK, "axe-cache")
+    os.makedirs(folder)
+    out = os.path.join(WORK, "axe-cache-out")
+    page = ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Page {0}'
+            '</title><link rel="stylesheet" href="page.css"></head><body><main><h1>Page {0}'
+            '</h1><p class="faint">Faint {0}.</p>{1}</main></body></html>\n')
+    for name, text in (("one.html", page.format(1, '<p><img src="later.png" alt=""></p>')),
+                       ("two.html", page.format(2, "")),
+                       ("page.css", "body { color: #222; } .faint { color: #bbb; }\n")):
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    chapter = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+               'lang="en" xml:lang="en"><head><title>{0}</title><style>p {{ color: #222; }}'
+               '</style></head><body><main><h1>{0}</h1><p>{1}</p></main></body></html>')
+
+    def epub(second):
+        with zipfile.ZipFile(os.path.join(folder, "book.epub"), "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr("META-INF/container.xml", (
+                '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:'
+                'opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/'
+                'content.opf" media-type="application/oebps-package+xml"/></rootfiles>'
+                "</container>"))
+            archive.writestr("EPUB/content.opf", (
+                '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+                'version="3.0"><manifest><item id="a" href="a.xhtml" media-type="application/'
+                'xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>'
+                '</manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>'))
+            archive.writestr("EPUB/a.xhtml", chapter.format("One", "First."))
+            archive.writestr("EPUB/b.xhtml", chapter.format("Two", second))
+    epub("Second.")
+
+    def audit(*flags):
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
+                                 "-o", out, "--wcag", *flags], cwd=WORK, capture_output=True,
+                                text=True, stdin=subprocess.DEVNULL)
+        rows = sorted((f.where.replace(os.sep, "/").split("/")[-1], f.check)
+                      for f in fl.read_csv(os.path.join(out, "audit.csv")) if f.tool == "axe")
+        return result.stderr, rows
+    first, first_rows = audit()
+    second, second_rows = audit()
+    with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+        stored = json.load(fh).get("__axe__", {}).get("items", {})
+    with open(os.path.join(folder, "page.css"), "w", encoding="utf-8") as fh:
+        fh.write("body { color: #222; } .faint { color: #555; }\n")
+    restyled, restyled_rows = audit()
+    with open(os.path.join(folder, "later.png"), "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n")
+    pictured, _ = audit()
+    epub("Second, changed.")
+    rebuilt, _ = audit()
+    other, _ = audit("--best-practice")
+    forced, _ = audit("--best-practice", "--force")
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        kept_bytes = fh.read()
+    uncached, _ = audit("--best-practice", "--no-cache")
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        after_bytes = fh.read()
+    everything = "2 page(s) and 2 content document(s) of 1 EPUB(s)"
+    one = next((entry for key, entry in stored.items() if "one.html" in key), {})
+    return [
+        ("the first audit checks every page and content document",
+         lambda: f"ran its 63 rules for WCAG 2.1 AA on {everything}," in first
+         or fail("got: " + first)),
+        ("the second checks nothing again, saying why, and has the first's findings",
+         lambda: f"checked nothing again, since each of {everything}, and every file it "
+                 "loads, is unchanged since the audit that checked it" in second
+         and second_rows == first_rows and ("one.html", "axe:color-contrast") in first_rows
+         or fail("got: " + second)),
+        ("a page's result is kept with what its check read: the page, its stylesheet, and "
+         "a picture that isn't there",
+         lambda: set(one.get("read") or {}) == {"one.html", "page.css", "later.png"}
+         and one["read"]["later.png"] is None),
+        ("a changed stylesheet has the pages that load it checked again, and their findings "
+         "are the new ones",
+         lambda: "ran its 63 rules for WCAG 2.1 AA on 2 page(s)," in restyled
+         and "2 content document(s) of 1 EPUB(s) weren't checked again" in restyled
+         and ("one.html", "axe:color-contrast") not in restyled_rows
+         or fail("got: " + restyled)),
+        ("a picture that's there now has its page checked again, and only it",
+         lambda: "ran its 63 rules for WCAG 2.1 AA on 1 page(s)," in pictured
+         or fail("got: " + pictured)),
+        ("an EPUB made again has only the content document that changed checked again",
+         lambda: "on 1 content document(s) of 1 EPUB(s)," in rebuilt
+         and "1 page(s)" not in rebuilt.split("weren't checked again")[0].split("ran its")[-1]
+         or fail("got: " + rebuilt)),
+        ("other rules have every page checked again, and so does --force",
+         lambda: f"ran its 90 rules for WCAG 2.1 AA and its best practices on {everything},"
+                 in other and f"its best practices on {everything}," in forced
+         or fail("got: " + other + forced)),
+        ("--no-cache checks every page, and leaves the cache as it was",
+         lambda: f"its best practices on {everything}," in uncached
+         and after_bytes == kept_bytes or fail("got: " + uncached)),
+    ]
+
+
 # Text a file holds that is markup in Markdown: a heading's, and a PDF's
 # title. Pandoc passes raw HTML through, and makes a link of [...](...)
 # even without it, so the report wrote them into audit.html as markup.
@@ -449,6 +574,7 @@ def main():
                        ("the front door", case_front_door),
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
+                       ("axe-core's results, cached", case_axe_cache),
                        ("convert.py --check-only", case_check_only)]:
         print(f"\n{name}")
         try:

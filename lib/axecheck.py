@@ -250,7 +250,7 @@ def budget(limits, presentation):
 
 def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAULT_LEVEL,
           best_practice=False, experimental=False, verbose=False, policy="local", root=None,
-          timeout=None, by_epub=False, limits=None):
+          timeout=None, by_epub=False, limits=None, cache=None, reuse=True):
     """(findings, lines) for axe-core's rules on the pages and on each
     EPUB's content documents: a note for each rule a page fails, or that
     axe-core couldn't decide, and the lines for the run's summary or a
@@ -263,7 +263,10 @@ def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAUL
     limits: LIMITS's, in seconds for a page's load and for axe-core, and
     the most slides of a presentation; and timeout the whole worker's,
     past which it's stopped, by default a budget() for each page shared
-    among those checked at once, and three minutes."""
+    among those checked at once, and three minutes. cache: a dict an
+    audit keeps between runs, each page's result kept in it and, with
+    reuse, a page's kept result used where nothing it turns on has
+    changed (kept), the page not checked again."""
     limits = dict(LIMITS, **(limits or {}))
     if importlib.util.find_spec("playwright") is None:
         return [], [f"{NOT_RUN} on the pages: Playwright isn't installed ({INSTALL})."]
@@ -289,18 +292,133 @@ def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAUL
     revealjs = revealtarget.revealjs_folder()
     job = {"policy": policy, "axe": axe, "version": version, "level": level,
            "best_practice": bool(best_practice), "experimental": bool(experimental),
-           "verbose": bool(verbose),
-           "limits": limits, "width": max(1, min(4, os.cpu_count() or 1, len(items) or 1)),
+           "verbose": bool(verbose), "limits": limits,
            "revealjs": revealjs if policy == "local" and revealjs != revealtarget.VENDORED
-           else None, "probe_presentation": any(i["presentation"] for i in items) or not items,
-           "pages": [{k: v for k, v in item.items() if k in ("id", "kind", "presentation",
-                                                              "folder", "archive", "path")}
-                     for item in items]}
-    if timeout is None:
-        each = sum(budget(limits, i["presentation"]) for i in items)
-        timeout = 180 + each / job["width"]
-    events, stopped, said = run_worker(job, timeout)
+           else None}
+    held = kept(items, job, cache, reuse)
+    fresh = [item for item in items if item["id"] not in held]
+    events, stopped, said = [], False, ""
+    if fresh or not items:
+        job.update({
+            "width": max(1, min(4, os.cpu_count() or 1, len(fresh) or 1)),
+            "probe_presentation": any(i["presentation"] for i in fresh) or not fresh,
+            "pages": [{k: v for k, v in item.items() if k in ("id", "kind", "presentation",
+                                                               "folder", "archive", "path")}
+                      for item in fresh]})
+        if timeout is None:
+            each = sum(budget(limits, i["presentation"]) for i in fresh)
+            timeout = 180 + each / job["width"]
+        events, stopped, said = run_worker(job, timeout)
+        keep(items, events, cache)
+    else:
+        events = [dict(cache["ready"], kept=True)]
+    events += [dict(held[i]["result"], event="page", id=i, kept=held[i]["when"]) for i in held]
     return report(items, events, stopped, said, job, note)
+
+
+# --------------------------------------------------------------------------
+# an audit's cache of results
+# --------------------------------------------------------------------------
+
+def setup_key(job):
+    """What a page's result turns on besides the files its check reads:
+    axe-core, by its file's SHA-256; Playwright's version, which decides
+    its Chromium's; the rules and --verbose; the limits; the scripts a
+    presentation may run; and this check's own code."""
+    def digest(path):
+        try:
+            with open(path, "rb") as fh:
+                return hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            return None
+    try:
+        from importlib import metadata
+        playwright = metadata.version("playwright")
+    except Exception:
+        playwright = "?"
+    parts = {"axe": digest(job["axe"]), "playwright": playwright,
+             "rules": [job["version"], job["level"], job["best_practice"],
+                       job["experimental"], job["verbose"]],
+             "limits": job["limits"], "policy": job["policy"],
+             "scripts": sorted(shipped_scripts(job["revealjs"])),
+             "code": [digest(path) for path in (os.path.abspath(__file__), lockedbrowser.__file__,
+                                                revealtarget.__file__, revealtarget.SCRIPT)]}
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def identity(item):
+    """A page's name in the cache: its kind, its folder or EPUB, and its
+    path there."""
+    return json.dumps([item["kind"], item.get("folder") or item.get("archive"), item["path"]])
+
+
+def kept(items, job, cache, reuse=True):
+    """{id: entry} of the items whose result the cache holds and still
+    stands: kept with this setup (setup_key), and every file the check
+    read, the page itself among them, reading the same now, one that
+    wasn't there still not. A cache kept with another setup is emptied."""
+    if cache is None:
+        return {}
+    setup = setup_key(job)
+    if cache.get("setup") != setup:
+        cache.clear()
+        cache.update({"setup": setup, "items": {}})
+    stored = cache.setdefault("items", {})
+    if not reuse or not cache.get("ready"):
+        return {}
+    sources, read, held = {}, {}, {}
+
+    def now(where, path):
+        """A file's SHA-256 now, as the check would read it, None if it
+        isn't there; each file read once."""
+        if (where, path) not in read:
+            data = sources[where].read(path)
+            read[(where, path)] = hashlib.sha256(data).hexdigest() \
+                if isinstance(data, bytes) else None
+        return read[(where, path)]
+    try:
+        for item in items:
+            entry = stored.get(identity(item))
+            if not entry or not isinstance(entry.get("read"), dict):
+                continue
+            where = item.get("archive") or item["folder"]
+            try:
+                if where not in sources:
+                    sources[where] = (lockedbrowser.Archive(where) if item.get("archive")
+                                      else lockedbrowser.Folder(where))
+            except Exception:           # an EPUB that's gone, or isn't one now
+                continue
+            if all(now(where, path) == digest for path, digest in entry["read"].items()):
+                held[item["id"]] = entry
+    finally:
+        for source in sources.values():
+            if hasattr(source, "close"):
+                source.close()
+    return held
+
+
+def keep(items, events, cache):
+    """The worker's results into the cache: its setup's report (the run's
+    first event), and each page's result whose check read what it says
+    it read, which a page past its time, or a worker that failed, hasn't.
+    Nothing when the probes found a problem."""
+    if cache is None:
+        return
+    ready = next((e for e in events if e.get("event") == "ready"), None)
+    if ready is None or ready.get("problems"):
+        return
+    import findings as findings_lib
+    cache["ready"] = {k: v for k, v in ready.items() if k != "kept"}
+    stored = cache.setdefault("items", {})
+    by_id = {item["id"]: item for item in items}
+    when = findings_lib.now()
+    for event in events:
+        item = by_id.get(event.get("id"))
+        if event.get("event") == "page" and item is not None and isinstance(event.get("read"),
+                                                                              dict):
+            stored[identity(item)] = {"read": event["read"], "when": when,
+                                      "result": {k: v for k, v in event.items()
+                                                 if k not in ("event", "id", "read", "kept")}}
 
 
 def run_worker(job, timeout):
@@ -395,7 +513,8 @@ def report(items, events, stopped, said, job, note=""):
     results = {e["id"]: e for e in events if e.get("event") == "page" and "id" in e}
     findings, groups = [], {}
     unchecked, scripted, outside, frames, past = [], [], [], [], []
-    slides = presentations = documents = plain = 0
+    # What was checked now, and what the cache kept, its audits' times.
+    fresh, held, whens = Tally(), Tally(), set()
     symbols, symbol_pages = 0, set()
     for item in items:
         result = results.get(item["id"])
@@ -403,18 +522,15 @@ def report(items, events, stopped, said, job, note=""):
             unchecked.append((item, "the worker was stopped before it" if stopped
                               else "the worker stopped before it"))
             continue
+        if result.get("kept"):
+            whens.add(str(result["kept"]))
         if result.get("status") != "checked":
             unchecked.append((item, result.get("why") or "it couldn't be"))
             continue
-        if item["presentation"]:
-            presentations += 1
-            slides += len(result.get("places") or [])
-            if result.get("past"):
-                past.append((item, int(result["past"]), len(result.get("places") or [])))
-        elif item["kind"] == "epub":
-            documents += 1
-        else:
-            plain += 1
+        tally = held if result.get("kept") else fresh
+        tally.add(item, result)
+        if item["presentation"] and result.get("past"):
+            past.append((item, int(result["past"]), len(result.get("places") or [])))
         if result.get("scripts"):
             scripted.append(item)
         if result.get("outside"):
@@ -446,20 +562,16 @@ def report(items, events, stopped, said, job, note=""):
                                     summary_text(node.get("summary")))
                             group["first"] = group["first"] or seen
                             group["each"].append(seen)
-    lines = [head_line(ready, job, plain, presentations, slides, documents, items)]
+    if ready.get("kept"):
+        lines = [held_line(ready, job, held, whens, alone=True)]
+    else:
+        lines = [head_line(ready, job, fresh, items)]
+        if held.places():
+            lines.append(held_line(ready, job, held, whens))
     if note:
         lines.append(note)
-    sandbox, network = ready.get("sandbox") or [None, ""], ready.get("network") or ""
-    if sandbox[0] is False:
-        lines.append(f"Chromium's sandbox wasn't on ({sandbox[1]}): a page that broke out of "
-                     "Chromium's renderer would be outside it, which matters for a page from "
-                     f"someone else ({INSTALL}).")
-    elif sandbox[0] is None:
-        lines.append(f"Whether Chromium's sandbox was on couldn't be seen ({sandbox[1]}), "
-                     "though it was asked for.")
-    if network:
-        lines.append(f"The check wasn't off the network ({network}): what the browser was "
-                     "served, and its resolving no name, kept the pages from reaching it.")
+    if not ready.get("kept"):
+        lines += lockdown_lines(ready)
     if failed:
         lines.append(f"WARNING: the worker that runs axe-core failed partway: {failed.get('why')}.")
     lines += unchecked_lines(unchecked)
@@ -503,18 +615,77 @@ def report(items, events, stopped, said, job, note=""):
     return findings, lines
 
 
-def head_line(ready, job, plain, presentations, slides, documents, items):
+def lockdown_lines(ready):
+    """A line for each layer of the lockdown a run that opened pages
+    didn't have: Chromium's sandbox, and the network."""
+    lines = []
+    sandbox, network = ready.get("sandbox") or [None, ""], ready.get("network") or ""
+    if sandbox[0] is False:
+        lines.append(f"Chromium's sandbox wasn't on ({sandbox[1]}): a page that broke out of "
+                     "Chromium's renderer would be outside it, which matters for a page from "
+                     f"someone else ({INSTALL}).")
+    elif sandbox[0] is None:
+        lines.append(f"Whether Chromium's sandbox was on couldn't be seen ({sandbox[1]}), "
+                     "though it was asked for.")
+    if network:
+        lines.append(f"The check wasn't off the network ({network}): what the browser was "
+                     "served, and its resolving no name, kept the pages from reaching it.")
+    return lines
+
+
+class Tally:
+    """The pages, presentations, slides, and EPUBs' content documents
+    checked, as the summary counts them."""
+
+    def __init__(self):
+        self.plain = self.presentations = self.slides = self.documents = 0
+        self.epubs = set()
+
+    def add(self, item, result):
+        if item["presentation"]:
+            self.presentations += 1
+            self.slides += len(result.get("places") or [])
+        elif item["kind"] == "epub":
+            self.documents += 1
+            self.epubs.add(item.get("epub"))
+        else:
+            self.plain += 1
+
+    def places(self):
+        out = []
+        if self.plain:
+            out.append(f"{self.plain} page(s)")
+        if self.presentations:
+            out.append(f"{self.slides} slide(s) of {self.presentations} presentation(s)")
+        if self.documents:
+            out.append(f"{self.documents} content document(s) of {len(self.epubs)} EPUB(s)")
+        return listed(out)
+
+
+def held_line(ready, job, held, whens, alone=False):
+    """The line for what the cache kept: what wasn't checked again, and
+    why, the first line when nothing was."""
+    ordered = sorted(whens) or ["?"]
+    when = ordered[0] if len(ordered) == 1 else f"{ordered[0]} to {ordered[-1]}"
+    one = len(ordered) == 1
+    audits = "the audit that checked it" if one else "the audits that checked them"
+    theirs = "that audit's" if one else "those audits'"
+    if alone:
+        what = described(job["version"], job["level"], job["best_practice"],
+                         len(ready.get("rules") or []), job.get("experimental", False))
+        return (f"axe-core {ready.get('axe', '?')} checked nothing again, since each of "
+                f"{held.places() or 'the pages'}, and every file it loads, is unchanged since "
+                f"{audits} ({when}), as are axe-core, Playwright, and the rules ({what}): "
+                f"their findings are {theirs}, and {CAVEAT}.")
+    return (f"{held.places()} weren't checked again: each, and every file it loads, is "
+            f"unchanged since {audits} ({when}), as are axe-core, Playwright, and the "
+            f"rules, so their findings are {theirs}.")
+
+
+def head_line(ready, job, fresh, items):
     """The summary's first line: what ran, on what, and how."""
     what = described(job["version"], job["level"], job["best_practice"],
                      len(ready.get("rules") or []), job.get("experimental", False))
-    places = []
-    if plain:
-        places.append(f"{plain} page(s)")
-    if presentations:
-        places.append(f"{slides} slide(s) of {presentations} presentation(s)")
-    if documents:
-        epubs = len({i.get("epub") for i in items if i["kind"] == "epub"})
-        places.append(f"{documents} content document(s) of {epubs} EPUB(s)")
     browser = (f"in Playwright {ready.get('playwright', '?')}'s Chromium "
                f"{str(ready.get('chromium', '?')).split('.')[0]}")
     sandboxed = (ready.get("sandbox") or [None])[0]
@@ -528,8 +699,8 @@ def head_line(ready, job, plain, presentations, slides, documents, items):
                 "didn't run, its requests elsewhere were refused, and its refresh canceled, "
                 "so pages can be checked" + (", and presentations TextbookImprover wrote too"
                                              if ready.get("presentation") else "") + ".")
-    own = ", but in a presentation TextbookImprover's own" if presentations else ""
-    return (f"axe-core {ready.get('axe', '?')} ran {what} on {listed(places) or 'nothing'}, "
+    own = ", but in a presentation TextbookImprover's own" if fresh.presentations else ""
+    return (f"axe-core {ready.get('axe', '?')} ran {what} on {fresh.places() or 'nothing'}, "
             f"{browser}, {how}, with each page's own scripts blocked{own}: {CAVEAT}.")
 
 
@@ -1108,6 +1279,21 @@ async def work(job, network, emit):
             await lockedbrowser.close_quietly(browser)
 
 
+class Recorded:
+    """A page's source, each file its check reads recorded, {path:
+    SHA-256}, None for one that isn't there or is too large: everything
+    the check's result turns on, besides the setup, which an audit's
+    cache reads again before it keeps the result (kept)."""
+
+    def __init__(self, source):
+        self.source, self.reads = source, {}
+
+    def read(self, path):
+        data = self.source.read(path)
+        self.reads[path] = hashlib.sha256(data).hexdigest() if isinstance(data, bytes) else None
+        return data
+
+
 class Checker:
     """What the worker checks pages with: the browser, axe-core, the
     rules, and the scripts a presentation may run."""
@@ -1277,11 +1463,12 @@ class Checker:
         presentation = bool(item.get("presentation"))
         seconds = budget(self.limits, presentation)
         try:
-            source = self.source(item)
+            source = Recorded(self.source(item))
             check = self.check_presentation if presentation else self.check_page
-            return await lockedbrowser.within(
+            result = await lockedbrowser.within(
                 check(source, item["path"]), seconds,
                 f"it wasn't checked in the {seconds} seconds it was given")
+            return dict(result, read=source.reads)
         except lockedbrowser.Slow as exc:
             return {"status": "not checked", "why": str(exc)}
         except Exception as exc:        # Playwright's, the page's, or the source's

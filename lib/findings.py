@@ -468,6 +468,15 @@ class Cache:
     def audited_at(self):
         return (self.data.get("__report__") or {}).get("when", "?")
 
+    def part(self, name):
+        """A dict of its own in the cache, for a check that keeps more
+        than an input's findings: axe-core's results, each with what it
+        turns on (axecheck.kept)."""
+        part = self.data.get(f"__{name}__")
+        if not isinstance(part, dict):
+            part = self.data[f"__{name}__"] = {}
+        return part
+
     def save(self):
         with open(self.path, "w", encoding="utf-8") as fh:
             json.dump(self.data, fh, indent=1)

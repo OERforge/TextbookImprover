@@ -8420,6 +8420,84 @@ def check_page_limits():
     ]
 
 
+def check_axe_cache():
+    """An audit's cache of axe-core's results: a page's result kept with
+    every file its check read, and used again only while each reads the
+    same, a file that wasn't there still not, and the setup is the same;
+    a result without what it read, or from a run whose probes found a
+    problem, never kept."""
+    import shutil
+    import tempfile
+    import axecheck
+    folder = tempfile.mkdtemp(prefix="axe-cache-")
+    try:
+        for name, text in (("p.html", "<p>One</p>"), ("q.html", "<p>Two</p>"),
+                           ("page.css", "p { color: #222; }")):
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+
+        def sha(name):
+            with open(os.path.join(folder, name), "rb") as fh:
+                return hashlib.sha256(fh.read()).hexdigest()
+        items = [{"id": 0, "kind": "html", "presentation": False, "folder": folder,
+                  "path": "p.html"},
+                 {"id": 1, "kind": "html", "presentation": False, "folder": folder,
+                  "path": "q.html"}]
+        job = {"axe": os.path.join(axecheck.VENDORED, "axe.min.js"), "version": "2.1",
+               "level": "AA", "best_practice": False, "experimental": False, "verbose": False,
+               "limits": dict(axecheck.LIMITS), "policy": "local", "revealjs": None}
+        cache = {}
+        before = axecheck.kept(items, job, cache)
+        ready = {"event": "ready", "axe": "4.14.0", "rules": [], "problems": []}
+        events = [ready,
+                  {"event": "page", "id": 0, "status": "checked", "places": [],
+                   "read": {"p.html": sha("p.html"), "page.css": sha("page.css"),
+                            "gone.png": None}},
+                  {"event": "page", "id": 1, "status": "not checked",
+                   "why": "it wasn't checked in the 90 seconds it was given"}]
+        axecheck.keep(items, events, cache)
+        stored, stored_ready = dict(cache["items"]), cache.get("ready")
+        both = axecheck.kept(items, job, cache)
+        refused = {}
+        axecheck.keep(items, [dict(ready, problems=["the probe page's script ran"]),
+                              events[1]], refused)
+        forced = axecheck.kept(items, job, cache, reuse=False)
+        with open(os.path.join(folder, "gone.png"), "wb") as fh:
+            fh.write(b"now")
+        appeared = axecheck.kept(items, job, cache)
+        os.remove(os.path.join(folder, "gone.png"))
+        with open(os.path.join(folder, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write("p { color: #999; }")
+        restyled = axecheck.kept(items, job, cache)
+        other = axecheck.kept(items, dict(job, best_practice=True), cache)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    entry = stored.get(axecheck.identity(items[0])) or {}
+    return [
+        ("nothing kept before a run", lambda: before == {}),
+        ("a page's result kept with what its check read, its event's own fields set aside, "
+         "and one past its time, which didn't say, not kept",
+         lambda: set(entry) == {"read", "result", "when"}
+         and entry["result"] == {"status": "checked", "places": []}
+         and axecheck.identity(items[1]) not in stored and stored_ready == ready),
+        ("used again while everything it read reads the same, a file that wasn't there "
+         "still not",
+         lambda: list(both) == [0]),
+        ("but not with --force, nor once the file that wasn't there is, nor once its "
+         "stylesheet changes",
+         lambda: forced == {} and appeared == {} and restyled == {}),
+        ("other rules empty the cache, which is kept with its setup",
+         lambda: other == {} and cache["items"] == {}
+         and cache["setup"] == axecheck.setup_key(dict(job, best_practice=True))),
+        ("nothing kept from a run whose probes found a problem",
+         lambda: "items" not in refused and "ready" not in refused),
+        ("the setup names axe-core's file, Playwright, the rules and --verbose, and the code",
+         lambda: len({axecheck.setup_key(dict(job, **change)) for change in (
+             {}, {"verbose": True}, {"experimental": True}, {"level": "AAA"},
+             {"limits": dict(axecheck.LIMITS, slides=2)})}) == 5),
+    ]
+
+
 def check_axe_setup():
     """What check() finds before the worker runs: AXE_CORE_DIR's copy, a
     4.x release named in a note and another refused, the repository's own
@@ -8523,6 +8601,7 @@ GROUPS = [
     ("a presentation's scripts, held to TextbookImprover's", check_presentation_scripts),
     ("axe-core's results, as findings and the summary's lines", check_axe_report),
     ("axe-core's setup, and what's read before the browser", check_axe_setup),
+    ("an audit's cache of axe-core's results", check_axe_cache),
     ("a page that holds the check up, given up on", check_page_limits),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),

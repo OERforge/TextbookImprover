@@ -3649,7 +3649,23 @@ def warn_title_numbers(found):
             "titles them with the number.")
 
 
-def say_title_formulas(found):
+def passage_wants(spec, target):
+    """Whether a passage whose targets attribute is spec is kept for the
+    target named, as target-blocks.lua's wanted() decides: a name keeps,
+    "!name" leaves out, and a list of exclusions alone keeps the rest."""
+    keep, plain = False, False
+    for word in spec.split():
+        if word.startswith("!"):
+            if word[1:] == target:
+                return False
+        else:
+            plain = True
+            if word == target:
+                keep = True
+    return keep if plain else True
+
+
+def say_title_formulas(found, alt_targets=()):
     """The formulas in headings the filters couldn't write as text, said
     once (title-formulas.lua, TITLE_FORMULAS, one formula of a page's a
     line, as JSON): each is its TeX between dollar signs in a title made
@@ -3659,34 +3675,52 @@ def say_title_formulas(found):
     a formula in a heading no title is made from, one below the split's
     level, is in none. A title the source declares with such a formula in
     it (its row's title true) is its TeX where a title is text too, and
-    the note says so. Counted once a page, which is filtered once for each
-    target whose filter settings differ."""
+    the note says so. And those in pictures' descriptions (alt true), each
+    its TeX between dollar signs in the picture's alt text, where
+    target-blocks.lua gives the rest their text, in every target but a
+    Markdown copy, which keeps the formula: said where a target that
+    writes alt text so (alt_targets, by name) has the picture, among those
+    its page was filtered for (served) and kept by each passage around it
+    (targets). Counted once a page, which is filtered once for each target
+    whose filter settings differ."""
     if not os.path.exists(found):
         return
-    kept, titled = {}, set()
+    kept, titled, described = {}, set(), {}
     with open(found, encoding="utf-8") as fh:
         for line in fh:
             try:
                 row = json.loads(line)
                 key = (str(row["page"]), str(row["tex"]))
+                if row.get("alt") is True:
+                    served = str(row["served"]).split() if "served" in row else None
+                    specs = [str(spec) for spec in row.get("targets") or []]
+                    if any(all(passage_wants(spec, name) for spec in specs)
+                           for name in alt_targets if served is None or name in served):
+                        described[key] = None
+                    continue
                 kept[key] = None
                 if row.get("title") is True:
                     titled.add(key)
             except (ValueError, KeyError, TypeError):
                 continue
-    if not kept:
-        return
-    shown = list(dict.fromkeys(" ".join(tex.split()) for _, tex in kept))
-    listed = "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
-    if not titled:
+
+    def listed(keys):
+        shown = list(dict.fromkeys(" ".join(tex.split()) for _, tex in keys))
+        return "; ".join(shown[:5]) + ("; and more" if len(shown) > 5 else "")
+    if kept and not titled:
         say(f"NOTE: {len(kept)} formula(s) in headings couldn't be written as text, as the "
             "others are, and are their TeX in a title made from their heading, a page's, a "
-            f"piece's, or an EPUB chapter's: {listed}. The headings set them as formulas.")
-        return
-    where = "titles" if len(titled) == len(kept) else "headings and titles"
-    say(f"NOTE: {len(kept)} formula(s) in {where} couldn't be written as text, as the "
-        "others are, and are their TeX where a title is text, a page's <title> and its "
-        f"entry in the contents among them: {listed}. The pages set them as formulas.")
+            f"piece's, or an EPUB chapter's: {listed(kept)}. The headings set them as formulas.")
+    elif kept:
+        where = "titles" if len(titled) == len(kept) else "headings and titles"
+        say(f"NOTE: {len(kept)} formula(s) in {where} couldn't be written as text, as the "
+            "others are, and are their TeX where a title is text, a page's <title> and its "
+            f"entry in the contents among them: {listed(kept)}. The pages set them as "
+            "formulas.")
+    if described:
+        say(f"NOTE: {len(described)} formula(s) in pictures' descriptions couldn't be written "
+            "as text, as the others are, and are their TeX in the pictures' alt text, every "
+            f"format's but a Markdown copy's, which keeps the formula: {listed(described)}.")
 
 
 def say_headings_moved(found):
@@ -6817,6 +6851,10 @@ def main():
             if target.pages_dir in pages_by_dir:
                 continue
             fenv = filter_env(target, base, paths, env, filter_reads)
+            # The targets these pages are filtered for, a variant's alone,
+            # for the note on pictures' descriptions (say_title_formulas).
+            fenv["TITLE_TARGETS"] = " ".join(t.name for t in targets
+                                             if t.pages_dir == target.pages_dir)
             raw = read_variants(base, target, work, env)
             variant_languages(base, target, raw, project)
             variant_stems = [s for s in raw if s not in stems]
@@ -6930,7 +6968,8 @@ def main():
                             if not any(t[key] for t in targets)])
             warn_unreviewed(paths)
         warn_title_numbers(collected["title_numbers"])
-        say_title_formulas(collected["title_formulas"])
+        say_title_formulas(collected["title_formulas"],
+                           [t.name for t in targets if t.format not in ("markdown", "source")])
         say_headings_moved(collected["headings_moved"])
         if PPTX_RUN:
             deck_math_report(collected, reports, paths, targets, work)

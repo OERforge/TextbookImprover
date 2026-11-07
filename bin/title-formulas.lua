@@ -34,7 +34,13 @@
 -- dollar signs in those titles too, and each is recorded for the run to
 -- say once which formulas are (TITLE_FORMULAS: one formula of a page's a
 -- line, as JSON, by the page, since a page is filtered once for each
--- target whose filter settings differ).
+-- target whose filter settings differ). So is one in a picture's
+-- description (alt), which is its TeX between dollar signs in the
+-- picture's alt text in every writer but Markdown's, where
+-- target-blocks.lua gives the rest their text, with the targets of each
+-- passage around it (targets), which target-blocks.lua leaves out of the
+-- other targets, and the targets the page is filtered for (served), a
+-- variant's alone, so that the run says only those a target keeps.
 --
 -- Copyright 2026 Robert Szarka
 --
@@ -53,6 +59,8 @@
 
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
+-- The targets the page is filtered for, by name (convert.py).
+local SERVED = os.getenv('TITLE_TARGETS')
 
 local function note(doc)
   local texts, any, kept, plain = {}, false, {}, {}
@@ -71,6 +79,42 @@ local function note(doc)
   end
   if doc.meta['title-heading'] ~= nil then each(doc.meta['title-heading']) end
   doc.blocks:walk({ Header = function(heading) each(heading.content) end })
+  -- A picture's description's, once a page for each list of passages
+  -- around it (specs, outermost first), a passage's description too.
+  local described = {}
+  local function describe(list, specs, in_description)
+    local function passage(el)
+      local spec = el.attributes['targets']
+      if spec == nil then return nil end
+      local inner = { table.unpack(specs) }
+      inner[#inner + 1] = spec
+      describe(el.t == 'Div' and pandoc.Blocks(el.content) or pandoc.Inlines(el.content),
+               inner, in_description)
+      return el, false
+    end
+    list:walk({
+      traverse = 'topdown',
+      Div = passage,
+      Span = passage,
+      Image = function(img)
+        describe(pandoc.Inlines(img.caption), specs, true)
+        return img, false
+      end,
+      Math = function(math_)
+        if not in_description then return nil end
+        local key = math_.text .. '\0' .. table.concat(specs, '\0')
+        if described[key] == nil then
+          local _, tex = mathtext.title_text(math_)
+          described[key] = true
+          if tex then
+            kept[#kept + 1] = { tex = math_.text, alt = true,
+                                targets = #specs > 0 and specs or nil }
+          end
+        end
+      end,
+    })
+  end
+  describe(doc.blocks, {}, false)
   local remade = doc.meta['title-is-heading'] ~= nil
   doc.meta['title-is-heading'] = nil
   if remade and doc.meta['title-heading'] ~= nil then
@@ -80,8 +124,6 @@ local function note(doc)
   elseif pandoc.utils.type(doc.meta.title) == 'Inlines' then
     each(doc.meta.title, true)
   end
-  if not any then return remade and doc or nil end
-  doc.meta['formula-texts'] = pandoc.MetaMap(texts)
   local found = os.getenv('TITLE_FORMULAS')
   if #kept > 0 and found and found ~= '' then
     local handle = io.open(found, 'a')
@@ -90,11 +132,16 @@ local function note(doc)
       for _, row in ipairs(kept) do
         local record = { page = page, tex = row.tex }
         if row.title then record.title = true end
+        if row.alt then record.alt = true end
+        if row.targets then record.targets = row.targets end
+        if row.alt and SERVED and SERVED ~= '' then record.served = SERVED end
         handle:write(pandoc.json.encode(record) .. '\n')
       end
       handle:close()
     end
   end
+  if not any then return remade and doc or nil end
+  doc.meta['formula-texts'] = pandoc.MetaMap(texts)
   return doc
 end
 

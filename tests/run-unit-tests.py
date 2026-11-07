@@ -3666,6 +3666,30 @@ def check_formula_titles():
         with contextlib.redirect_stderr(heard):
             convert.say_title_formulas(path)
         declared[name] = heard.getvalue()
+    # Pictures' descriptions (alt), said apart from the headings', where a
+    # target that writes alt text so has the picture: not where none does,
+    # a Markdown copy alone, nor of one a passage around it leaves out of
+    # them (targets), or whose page was filtered for none of them (served),
+    # a variant's.
+    described = os.path.join(work, "described.txt")
+    with open(described, "w", encoding="utf-8") as fh:
+        for page, tex, alt, more in (
+                ("a.json", "\\binom{n}{k}", True, {}), ("a.json", "\\binom{n}{k}", True, {}),
+                ("b.json", "\\binom{n}{k}", True, {}),
+                ("b.json", "\\begin{matrix} a & b \\end{matrix}", True, {}),
+                ("b.json", "\\begin{pmatrix}a\\end{pmatrix}", False, {}),
+                ("c.json", "\\binom{p}{q}", True, {"targets": ["md"]}),
+                ("c.json", "\\binom{r}{s}", True, {"targets": ["!md", "html web"]}),
+                ("c.json", "\\binom{t}{u}", True, {"targets": ["html", "!html"]}),
+                ("c.json", "\\binom{v}{w}", True, {"served": "md"}),
+                ("c.json", "\\binom{x}{y}", True, {"served": "md html"})):
+            fh.write(json.dumps(dict({"page": page, "tex": tex},
+                                     **({"alt": True} if alt else {}), **more)) + "\n")
+    heard_alt, heard_markdown = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(heard_alt):
+        convert.say_title_formulas(described, ["html", "word"])
+    with contextlib.redirect_stderr(heard_markdown):
+        convert.say_title_formulas(described, [])
     titled = {"title": {"t": "MetaInlines", "c": [
         {"t": "Str", "c": "The"}, {"t": "Space"},
         {"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]}, {"t": "Space"},
@@ -3694,6 +3718,19 @@ def check_formula_titles():
          and "NOTE: 3 formula(s) in headings couldn't be written as text, as the others "
              "are, and are their TeX in a title made from their heading" in said.getvalue()
          and "\\binom{n}{k}; \\begin{pmatrix}a\\end{pmatrix}." in said.getvalue()),
+        ("a formula in a picture's description is said apart, once a page, each listed "
+         "once, beside a heading's, where a target that writes alt text so has it, but not "
+         "of one a passage leaves out of them, or whose page was filtered for none of them",
+         lambda: heard_alt.getvalue().count("NOTE:") == 2
+         and "NOTE: 1 formula(s) in headings couldn't be written as text" in heard_alt.getvalue()
+         and "NOTE: 5 formula(s) in pictures' descriptions couldn't be written as text, as the "
+             "others are, and are their TeX in the pictures' alt text, every format's but a "
+             "Markdown copy's, which keeps the formula: \\binom{n}{k}; "
+             "\\begin{matrix} a & b \\end{matrix}; \\binom{r}{s}; \\binom{x}{y}."
+             in heard_alt.getvalue()),
+        ("nor where no target writes alt text so",
+         lambda: "pictures' descriptions" not in heard_markdown.getvalue()
+         and "NOTE: 1 formula(s) in headings" in heard_markdown.getvalue()),
         ("a formula of a declared title is said to be in titles, beside the headings' or alone",
          lambda: "NOTE: 2 formula(s) in headings and titles couldn't be written as text, as "
                  "the others are, and are their TeX where a title is text, a page's <title> "
@@ -3709,6 +3746,42 @@ def check_formula_titles():
          lambda: convert.title_text(titled) == "The x^2 law"
          and bookassembly.page_title({"meta": titled}, "stem") == "The x^2 law"
          and docxtarget.page_title_text({"meta": titled}) == "The x^2 law"),
+    ]
+
+
+def check_passage_targets():
+    """A passage's targets attribute, read by convert.py's passage_wants
+    for the note on pictures' descriptions as target-blocks.lua reads it
+    to keep the passage or leave it out: each of a dozen attributes for
+    each of four targets, the Lua's kept by Pandoc."""
+    if not shutil.which("pandoc"):
+        return [("a passage's targets are read alike", lambda: print("  skip  no pandoc to run "
+                                                                       "Lua") or True)]
+    import json
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_passages")
+    specs = ["html", "md", "html md", "!md", "!html", "!md !word", "html !md", "!html html",
+             "", "  word  html ", "!", "htm"]
+    names = ["html", "md", "word", "adoc"]
+    api = json.loads(subprocess.run(["pandoc", "-f", "markdown", "-t", "json"], input="",
+                                    capture_output=True, text=True).stdout)["pandoc-api-version"]
+    doc = {"pandoc-api-version": api, "meta": {}, "blocks": [
+        {"t": "Div", "c": [["", [], [["targets", spec]]],
+                           [{"t": "Para", "c": [{"t": "Str", "c": f"p{n}"}]}]]}
+        for n, spec in enumerate(specs)]}
+    by_lua, by_python = {}, {}
+    for name in names:
+        result = subprocess.run(["pandoc", "-f", "json", "-t", "plain", "--lua-filter",
+                                 os.path.join(ROOT, "bin", "target-blocks.lua")],
+                                input=json.dumps(doc), capture_output=True, text=True,
+                                env=dict(os.environ, TARGET_NAME=name))
+        words = result.stdout.split()
+        by_lua[name] = [f"p{n}" in words for n in range(len(specs))]
+        by_python[name] = [convert.passage_wants(spec, name) for spec in specs]
+    return [
+        ("Python and the Lua filter keep a passage for the same targets, every way",
+         lambda: by_lua == by_python and any(not kept for row in by_lua.values() for kept in row)
+         and any(kept for row in by_lua.values() for kept in row)
+         or print("    %r\n    %r" % (by_lua, by_python))),
     ]
 
 
@@ -8663,6 +8736,8 @@ GROUPS = [
     ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),
     ("a title's formulas as text in an EPUB chapter's title, a piece's, a declared title's, "
      "and the run's note", check_formula_titles),
+    ("a passage's targets, as the run's note and the target filter read them",
+     check_passage_targets),
     ("a PDF's blocks of code fitted, and still too wide", check_code_fit_report),
     ("the latex target's master and the files it includes", check_latex_split),
     ("the installation page's TeX packages", check_tex_packages),

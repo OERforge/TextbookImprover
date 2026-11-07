@@ -4775,6 +4775,29 @@ ALT_FORMULAS_LINK_HTML = ('<!DOCTYPE html><html lang="en"><head><title>A link</t
                           '<body><h1>A link</h1><figure><a href="https://example.org/">A '
                           'square</a><figcaption>A square</figcaption></figure></body></html>\n')
 
+# A formula math-text.lua can't write, which is its TeX in the alt text,
+# one in the text beside it, which is no picture's, and four in passages:
+# a span's in a description and a div's for the page alone, which writes
+# alt text so, and a div's for the Markdown copy alone, which keeps the
+# formula, and a span's in a description in that div, for every target
+# but the Word file.
+ALT_FORMULAS_CHOOSE_MD = """# Choose
+
+An icon ![a choice $\\binom{n}{k}$](square.png) here, and a choice $\\binom{e}{f}$ in the
+text, which is no picture's.
+
+And ![a spanned [$\\binom{c}{d}$]{targets="html"} choice](square.png) for the page.
+
+::: {targets="html"}
+For the page ![a pick $\\binom{r}{s}$](square.png) alone.
+:::
+
+::: {targets="md"}
+For the copy ![a pick $\\binom{p}{q}$](square.png) alone, and
+![a nested [$\\binom{g}{h}$]{targets="!word"} pick](square.png) in it.
+:::
+"""
+
 
 def case_alt_formulas(work):
     """A formula in a picture's description is its text in the alt text,
@@ -4791,9 +4814,16 @@ def case_alt_formulas(work):
     text, and a caption beside it that says the same is hidden in a span,
     as beside a picture, which the writer hides beside no link, a formula
     in it or not; one of its own is shown, and one beside an author's
-    link, which is no picture's."""
+    link, which is no picture's. A formula that can't be text is its TeX
+    between dollar signs in the alt text, as in a title, and the run says
+    so once, of a passage's too, a span's in a description among them,
+    where a target that writes alt text so keeps it, but not of one in the
+    text, which is no picture's, nor of one only a Markdown copy keeps, a
+    passage's or a page's variant's for it, nor where a Markdown copy is
+    all the run writes."""
     os.makedirs(work)
-    for name, page in (("01-squares", ALT_FORMULAS_MD), ("02-remote", ALT_FORMULAS_REMOTE_MD)):
+    for name, page in (("01-squares", ALT_FORMULAS_MD), ("02-remote", ALT_FORMULAS_REMOTE_MD),
+                       ("03-choose", ALT_FORMULAS_CHOOSE_MD)):
         with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(page)
     import importlib.util
@@ -4803,9 +4833,32 @@ def case_alt_formulas(work):
             fh.write(ALT_FORMULAS_LINK_HTML)
     with open(os.path.join(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
-                  "  word:\n    format: docx\n  md:\n    format: markdown\n"
-                  "  adoc:\n    format: asciidoc\n", fixtures=())
+    run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
+                        "  word:\n    format: docx\n  md:\n    format: markdown\n"
+                        "  adoc:\n    format: asciidoc\n", fixtures=())
+    choice = "a choice $\\binom{n}{k}$"
+    # The same page in a book whose only target is a Markdown copy, which
+    # keeps the formula: nothing to say.
+    alone = os.path.join(work, "markdown-alone")
+    os.makedirs(alone)
+    with open(os.path.join(alone, "03-choose.md"), "w", encoding="utf-8") as fh:
+        fh.write(ALT_FORMULAS_CHOOSE_MD)
+    with open(os.path.join(alone, "square.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    markdown_alone = convert(alone, "targets:\n  md:\n    format: markdown\n", fixtures=())
+    # A page's variant for the Markdown copy, whose formula no target that
+    # writes alt text so has: nothing to say either.
+    variant = os.path.join(work, "variant")
+    os.makedirs(variant)
+    for name, page in (("05-pick.md", "# Pick\n\nText.\n"),
+                       ("05-pick.md.md", "# Pick\n\nAn icon ![a pick $\\binom{v}{w}$](square.png)"
+                                         " here.\n")):
+        with open(os.path.join(variant, name), "w", encoding="utf-8") as fh:
+            fh.write(page)
+    with open(os.path.join(variant, "square.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    varied = convert(variant, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n",
+                     fixtures=())
     alts = ["A square of side x²", "A square, in words of its own",
             "A square of side x², after a link", "A square of side x², with a note",
             "A square of side y²", "A plain square", "an icon of √x"]
@@ -4889,6 +4942,27 @@ def case_alt_formulas(work):
                        r'<figcaption>A square</figcaption>', text("html", "04-link.html"))
              and re.search(r'<a href="https://example\.org/">A square</a>\s*'
                            r'<figcaption>A square</figcaption>', chapter("A link")))),
+        ("a formula that can't be text is its TeX between dollar signs in the alt text, and "
+         "the run says so once, of a passage's too, a span's in a description among them, "
+         "where a target that writes alt text so keeps it, but not of one in the text",
+         lambda: f'alt="{choice}"' in text("html", "03-choose.html")
+         and 'alt="a pick $\\binom{r}{s}$"' in text("html", "03-choose.html")
+         and 'alt="a spanned $\\binom{c}{d}$ choice"' in text("html", "03-choose.html")
+         and run.stderr.count("formula(s) in pictures' descriptions") == 1
+         and "NOTE: 3 formula(s) in pictures' descriptions couldn't be written as text, as "
+             "the others are, and are their TeX in the pictures' alt text, every format's but "
+             "a Markdown copy's, which keeps the formula: \\binom{n}{k}; \\binom{c}{d}; "
+             "\\binom{r}{s}." in run.stderr and "\\binom{e}{f}" not in run.stderr),
+        ("but not of one in a passage for the Markdown copy alone, which keeps the formula, "
+         "nor where that copy is all the run writes, nor of a page's variant for it",
+         lambda: "\\binom{p}{q}" not in run.stderr and "\\binom{g}{h}" not in run.stderr
+         and "![a pick $\\binom{p}{q}$](square.png)" in text("md", "03-choose.md")
+         and markdown_alone.returncode == 0
+         and "pictures' descriptions" not in markdown_alone.stderr
+         and "![a choice $\\binom{n}{k}$](square.png)" in text("markdown-alone", "md",
+                                                                  "03-choose.md")
+         and varied.returncode == 0 and "pictures' descriptions" not in varied.stderr
+         and "![a pick $\\binom{v}{w}$](square.png)" in text("variant", "md", "05-pick.md")),
         ("a Word file's description has the formulas' text",
          lambda: descriptions() == alts),
         ("Markdown keeps the formula in the description, which is the figure's caption",
@@ -4901,7 +4975,7 @@ def case_alt_formulas(work):
          "for each picture whose alt text had a formula, saying what happens, and not for "
          "one in a passage for another target, which they leave out",
          lambda: lost() == sorted((target, alt, True) for target in ("adoc", "word")
-                                  for alt in alts if alt not in (alts[1], alts[5]))),
+                                  for alt in alts + [choice] if alt not in (alts[1], alts[5]))),
     ]
 
 

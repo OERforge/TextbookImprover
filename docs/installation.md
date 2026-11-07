@@ -138,6 +138,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 | reveal.js 6 | A `revealjs` target for decks written in Markdown ([Slides](slides.md#the-revealjs-presentation)), which also needs Pandoc 3.12 or later | nothing: the repository has a copy, and `REVEALJS_DIR` can name another; see [below](#for-a-revealjs-target-revealjs) |
 | LibreOffice Impress | Optional. Saving a deck in ODP or PowerPoint 97-2003's format (`.odp`, `.ppt`) as PowerPoint, which a slides run reads ([Slides](slides.md#decks-in-other-formats)); without it, the run says how to save one by hand, and the slides suite's case that uses it skips | `sudo apt install libreoffice-impress`, or `LIBREOFFICE` naming it, as a path or a command |
 | Python's Playwright and its Chromium | Optional. `--wcag` on pages, presentations, and EPUBs, with axe-core, which the repository has ([Checking](checking.md#axe-cores-wcag-checks)), and the suites' checks in a browser; without them, `--wcag` says so and checks the rest, and those checks skip | in a virtual environment; see [below](#optional-playwright-and-its-chromium) |
+| DAISY's Ace | Optional. `--wcag` on EPUBs, Ace's checks of each one's package (its language and the accessibility metadata EPUB Accessibility 1.1 asks for) and of the roles and page breaks in its pages ([Checking](checking.md#daisys-ace)), in Playwright's Chromium; without it, `--wcag` says so and checks the rest | Node 20 or later, from nvm, then npm, neither with `sudo`; see [below](#optional-ace-by-daisy) |
 | fontTools | Optional, and for the test suites only: the PDF suite makes the variable fonts in CFF2 its checks of them set with it, and skips them without it | `sudo apt install python3-fonttools` |
 | `zip` | Only if you package with the printed command instead of `--zip` | `sudo apt install zip` |
 
@@ -439,26 +440,62 @@ When these are missing, the suites say what and how to install them, and `run-al
 
 ## Optional: Ace by DAISY
 
-With `--wcag`, the output check and the audit run DAISY's [Ace](https://daisy.github.io/ace/) on each EPUB too when it's installed ([Checking](checking.md#daisys-ace)). Ace 1.4.6 needs Node 20 or later, where Ubuntu 24.04 packages Node 18.19 ([`nodejs`](https://packages.ubuntu.com/noble/nodejs)), so install a later one first, with [nvm](https://github.com/nvm-sh/nvm) say, which keeps it in your home folder, where `npm install -g` can write without `sudo`. Ace's package then installs four commands. The one to use is `ace-puppeteer`, which checks in Chromium without a window; `ace` itself runs Electron, which wants a display. As they install, Ace's packages download a browser each, Puppeteer's Chrome and Electron; with Playwright's Chromium installed for `--wcag` ([above](#optional-playwright-and-its-chromium)), skip both and name Playwright's:
+With `--wcag`, the output check and the audit run DAISY's [Ace](https://daisy.github.io/ace/) on each EPUB too when it's installed ([Checking](checking.md#daisys-ace)). Set up as below, Ace checks in the headless Chromium that Playwright installs for `--wcag` ([above](#optional-playwright-and-its-chromium)), so install that first. Ace is a Node.js program, and Ace 1.4.6 needs Node 20 or later, where Ubuntu 24.04 packages Node 18.19 ([`nodejs`](https://packages.ubuntu.com/noble/nodejs)). So there are three steps: a later Node, from nvm; Ace, from npm; and a line in `~/.bashrc` that gives Ace Playwright's Chromium. None of them needs `sudo`.
+
+**Node, from nvm.** [nvm](https://github.com/nvm-sh/nvm) keeps Node in your home folder, where `npm install -g` can write without `sudo`, and it's what Microsoft's [guide to Node.js on WSL](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-wsl) recommends. Its installer is one command, as [its README](https://github.com/nvm-sh/nvm#install-script) gives it, with nvm's latest release in the address (v0.41.0 here; take the README's where it names a later one):
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash
+```
+
+That puts nvm in `~/.nvm` and adds the lines that load it to `~/.bashrc`. Open a new terminal (or run `source ~/.bashrc` in this one); `command -v nvm` then says `nvm`. Install Node's current long-term-support release, Node 26 since October 2026, and check it:
+
+```bash
+nvm install --lts
+node --version
+```
+
+The first Node nvm installs becomes its default, the one each new terminal has; `node --version` says which, and Ace needs `v20` or later.
+
+**Ace, from npm.** As Ace's packages install, two of them download a browser each, Puppeteer's Chrome and Electron. Ace is to use Playwright's Chromium instead, so the two variables skip both:
 
 ```bash
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 PUPPETEER_SKIP_DOWNLOAD=1 npm install -g @daisy/ace
-echo 'export PUPPETEER_EXECUTABLE_PATH='"$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -1)" >> ~/.bashrc
 ```
 
-That's about 110 MB. Open a new terminal, and check the setup:
+It takes about 110 MB and installs four commands. The one to use is `ace-puppeteer`, which checks in Chromium without a window; `ace` itself runs Electron, which wants a display. npm 11.20, which Node 26.13 comes with, ends with a warning that the two packages' install scripts aren't covered by `allowScripts`, without which npm 12 won't run them: they're the two downloads, so there's nothing to allow. Its warnings of deprecated packages Ace uses, and its notice of a newer npm, don't matter here either.
+
+**Ace given Playwright's Chromium.** Add this line to `~/.bashrc`, as the validators' lines go in ([above](#optional-the-full-validators)):
 
 ```bash
+export PUPPETEER_EXECUTABLE_PATH="$(ls -dv ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | tail -1)"
+```
+
+What's in `$(...)` runs as each terminal opens, naming the newest headless Chromium Playwright has installed, so Ace follows Playwright when it's upgraded.
+
+**Checking it.** Open a new terminal, activate the environment Playwright is in (`source ~/venv/bin/activate`, unless `~/.bashrc` does), and run:
+
+```bash
+command -v node npm ace-puppeteer
+ace-puppeteer --version
+echo "$PUPPETEER_EXECUTABLE_PATH"
 python3 $T/bin/check-output.py --wcag
 ```
 
-Ace's line comes after axe-core's, saying Ace found what its probe EPUB lacks, so EPUBs can be checked:
+The first names three files under `~/.nvm/versions/node/`. Under WSL, the folders of the Windows path come after Linux's on the path, so a Node installed on the Windows side can have its `npm` found there, under `/mnt/c`, wherever nvm's isn't loaded. The second says `1.4.6`, and the third names a `chrome-headless-shell` under `~/.cache/ms-playwright`, where an empty line means Playwright's headless Chromium isn't installed (its `playwright install` line [above](#optional-playwright-and-its-chromium) installs it). The check's Ace line comes after axe-core's, saying Ace found what its probe EPUB lacks, so EPUBs can be checked:
 
 ```
   Ace by DAISY 1.4.6 checked a probe EPUB of its own and found what it lacks (metadata-accessmode), so EPUBs can be checked: what it finds is a note, never a failure.
 ```
 
-The run finds `ace-puppeteer` on the path; `ACE` names another command, or Ace's `bin/ace.js`, which runs with `node`. Ace 1.4.6 ran so with Node 22 and Playwright 1.63's headless Chromium in an Ubuntu 24.04 container; not yet tried under WSL.
+Name an EPUB, and Ace checks it too, its findings after axe-core's, each `ace:` and Ace's rule; an audit's cache keeps them for its next run while the EPUB is unchanged:
+
+```bash
+python3 $T/bin/check-output.py --wcag --epub book.epub
+python3 $T/bin/audit.py --wcag book.epub
+```
+
+Ace belongs to the Node it was installed with: a Node nvm installs later has no Ace until the `npm install -g` line runs with it. The run finds `ace-puppeteer` on the path; `ACE` names another command, or Ace's `bin/ace.js`, which runs with `node`. Ace 1.4.6 ran so under WSL 2, set up as above, on _Principles of Marketing_'s EPUB, and with Node 26.13.0 and 22.23.4 and Playwright 1.63's headless Chromium in an Ubuntu 24.04 container.
 
 ## Checking the whole setup
 

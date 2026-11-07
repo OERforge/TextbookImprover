@@ -4055,15 +4055,48 @@ def cff_programs(path):
     return programs
 
 
+def cff2_lacking():
+    """What the CFF2 face's checks lack here, as a skip says it, or None:
+    LuaLaTeX, which sets the face, or fontTools, which makes it
+    (make_cff2_face), for the tests alone (docs/installation.md)."""
+    if not shutil.which("lualatex"):
+        return "no LuaLaTeX to set a CFF2 variable font in"
+    try:
+        from fontTools import varLib  # noqa: F401
+        from fontTools.designspaceLib import DesignSpaceDocument  # noqa: F401
+        from fontTools.fontBuilder import FontBuilder  # noqa: F401
+        from fontTools.pens.t2CharStringPen import T2CharStringPen  # noqa: F401
+    except ImportError:
+        return ("no fontTools to make a CFF2 variable font with (sudo apt install "
+                "python3-fonttools, or pip install fonttools in a venv)")
+    return None
+
+
+def explained(ok, why):
+    """ok, where it holds, or an AssertionError saying why() where it
+    doesn't, which the suite prints beside the check's name: a check that
+    fails now and then says what the run did, which the suite doesn't
+    keep."""
+    if not ok:
+        raise AssertionError(why())
+    return True
+
+
+def last_lines(said, count=12):
+    """The last lines of what a run said, on one line."""
+    return " | ".join(line.strip() for line in said.strip().splitlines()[-count:]) or "nothing"
+
+
 def cff2_face_checks(result):
     """The checks of CFF2_FACE's pages and book (build_cff2_face), or none,
-    said, where it wasn't built."""
+    said, where it wasn't built, with what's lacking (cff2_lacking)."""
     if result is None:
-        print("  skip  no fontTools or no LuaLaTeX to make and set a CFF2 variable font; "
-              "its embedding isn't checked")
+        print(f"  skip  {cff2_lacking() or 'the CFF2 face was not made'}; its embedding "
+              "isn't checked")
         return []
     pages, said, built = result
     told = "TextbookImprover CFF2 face, 2 axes:\n" + CFF2_FACE
+    warning = f"WARNING: {CFF2_FACE} is a variable font in CFF2"
 
     def drawn(way):
         """Whether the way's PDF draws its glyphs: each charstring ending with
@@ -4100,10 +4133,14 @@ def cff2_face_checks(result):
          lambda: drawn("weight") and drawn("black") and high("weight", 160)
          and high("black", 160) and not high("weight", 60)
          and "TextbookImprover CFF2 face" not in pages["weight"][1] + pages["black"][1]),
-        ("a book in it is built in both modes, and warns once, for the target that sets it "
-         "in HarfBuzz mode",
-         lambda: built["harf"] and built["node"]
-         and said.count(f"WARNING: {CFF2_FACE} is a variable font in CFF2") == 1),
+        ("a book in it is built in both modes",
+         lambda: explained(built["harf"] and built["node"], lambda: (
+             f"built {built}; the run's last lines: {last_lines(said)}"))),
+        ("and warns once, for the target that sets it in HarfBuzz mode",
+         lambda: explained(said.count(warning) == 1, lambda: (
+             f"warned {said.count(warning)} time(s); the run's warnings: "
+             + last_lines("\n".join(line for line in said.splitlines()
+                                     if "WARNING" in line), 20)))),
     ]
 
 

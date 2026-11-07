@@ -3879,8 +3879,15 @@ def build_math_font(work):
 # glyphs' streams empty (a provider registered first that gives none);
 # in HarfBuzz mode; and in node mode as it is, which reads this face. And
 # a book in it, one target in each mode, whose build warns of the face
-# where HarfBuzz mode writes it.
+# where HarfBuzz mode writes it. The faces are in a folder whose name has
+# an underscore and an apostrophe (CFF2_FOLDER): Pandoc's writer had
+# escaped the underscore in the book's Path for the template's
+# \setmainfont, so that LaTeX stopped there ("Missing \begin{document}"),
+# as it did wherever tempfile named the suite's folder with one, and its
+# smart reading of the metadata file makes the apostrophe curly, which the
+# faces the build sets again had kept (build-pdf.py, FACE_FIELDS, written).
 CFF2_FACE = "OERTestVariable.otf"
+CFF2_FOLDER = "author's_fonts"
 CFF2_WEIGHT = "OERTestWeight.otf"
 CFF2_TEXT = "Words with spaces between them, and figures 2026."
 CFF2_LOST = (r"""\directlua{
@@ -3980,9 +3987,10 @@ def build_cff2_face(work):
     where fontTools or LuaLaTeX isn't there."""
     if not shutil.which("lualatex"):
         return None
-    os.makedirs(os.path.join(work, "fonts"))
-    if not (make_cff2_face(os.path.join(work, "fonts", CFF2_FACE))
-            and make_cff2_face(os.path.join(work, "fonts", CFF2_WEIGHT), 1)):
+    fonts = os.path.join(work, CFF2_FOLDER)
+    os.makedirs(fonts)
+    if not (make_cff2_face(os.path.join(fonts, CFF2_FACE))
+            and make_cff2_face(os.path.join(fonts, CFF2_WEIGHT), 1)):
         return None
     import latexbuild
     pages = {}
@@ -4001,7 +4009,7 @@ def build_cff2_face(work):
             fh.write("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n" + first
                      + latexbuild.STATIC_FONTS + "\\documentclass{article}\n"
                      "\\usepackage{fontspec}\n"
-                     f"\\setmainfont{{{face}}}[Path={os.path.join(work, 'fonts')}/{options}]\n"
+                     f"\\setmainfont{{{face}}}[Path={fonts}/{options}]\n"
                      f"\\begin{{document}}\n{CFF2_TEXT}\n\\end{{document}}\n")
         run(["lualatex", "-interaction=nonstopmode", "-halt-on-error", way + ".tex"], work)
         log = os.path.join(work, way + ".log")
@@ -4018,7 +4026,7 @@ def build_cff2_face(work):
                  for way in ("harf", "node"))}
     for way, renderer in (("harf", "  - Renderer=HarfBuzz\n"), ("node", "")):
         files[way + ".yaml"] = (f"mainfont: {CFF2_FACE}\nmainfontoptions:\n"
-                                f"  - Path={os.path.join(work, 'fonts')}/\n" + renderer)
+                                f"  - Path={fonts}/\n" + renderer)
     for name, text in files.items():
         with open(os.path.join(book, name), "w", encoding="utf-8") as fh:
             fh.write(text)

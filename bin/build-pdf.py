@@ -270,6 +270,81 @@ NOT_MATH = re.compile(r"Package unicode-math Warning: The first font loaded by u
                       r"must\s+be")
 MATH_NAMED = "textbookimprover-mathfont"
 NOTO_MATH = "NotoSansMath-Regular.ttf"
+# The fields Pandoc's template writes into fontspec's commands as they are
+# (font-settings.latex, and common.latex's \babelfont; 3.9, by its source,
+# 3.12.1, and 3.13): a face's name, its options, and its fallbacks. The
+# writer escapes a field's text for LaTeX, a MetaString's too, so an
+# underscore in a face's file or in the folder its Path names was \_
+# there, and LaTeX stopped at the template's \setmainfont: "Missing
+# \begin{document}" for Path=fonts/Open\_Sans/, a folder of the kind
+# a downloaded face often comes in, and "Missing \endcsname inserted"
+# for a file so named (measured with fontspec 2.9g and LaTeX 2026-06-01),
+# where the faces set again below, which the build writes itself, had the
+# underscore as it is. The PDF suite's CFF2 book stopped so wherever
+# tempfile named its folder with one. Each is raw LaTeX, its text as the
+# file gives it, in the document Pandoc writes (raw_face_fields).
+FACE_FIELDS = ("mainfont", "sansfont", "monofont", "mathfont", "CJKmainfont", "CJKsansfont",
+               "CJKmonofont", "mainfontoptions", "sansfontoptions", "monofontoptions",
+               "mathfontoptions", "CJKoptions", "mainfontfallback", "sansfontfallback",
+               "monofontfallback")
+
+
+# What Pandoc's smart reading of a metadata file makes of what it was
+# given, a face's name or a Path's folder too: an apostrophe, a single
+# quote, two hyphens and three, and three periods.
+SMART_MARKS = str.maketrans({"’": "'", "‘": "'", "–": "--", "—": "---",
+                             "…": "..."})
+
+
+def written(value):
+    """A metadata field's text as its file gives it, as near as Pandoc's
+    reading of the file leaves it: meta_plain's, but raw LaTeX in it as
+    written, where meta_plain leaves it out, a quotation with its marks,
+    and the marks smart reading made as they were typed (SMART_MARKS), a
+    face's folder "author's_fonts" where it had been "author’s_fonts"."""
+    def text(node):
+        if isinstance(node, list):
+            return "".join(text(child) for child in node)
+        if not isinstance(node, dict):
+            return ""
+        kind = node.get("t")
+        if kind == "Str":
+            return node["c"].translate(SMART_MARKS)
+        if kind in ("Space", "SoftBreak", "LineBreak"):
+            return " "
+        if kind in ("RawInline", "Code", "Math"):
+            return node["c"][1]
+        if kind == "Quoted":
+            mark = '"' if node["c"][0].get("t") == "DoubleQuote" else "'"
+            return mark + text(node["c"][1]) + mark
+        if kind == "Note":
+            return ""
+        return text(node.get("c", []))
+    if value.get("t") == "MetaString":
+        return " ".join(str(value["c"]).split())
+    return " ".join(text(value.get("c", [])).split())
+
+
+def raw_face_fields(meta):
+    """A copy of the metadata (meta) for Pandoc, each of FACE_FIELDS in it,
+    and each item of one that's a list, raw LaTeX of its text (written),
+    which the template writes into fontspec's commands as the file gives
+    it. The build's own reading of the fields is meta's."""
+    def raw(value):
+        return {"t": "MetaInlines", "c": [{"t": "RawInline", "c": ["latex", written(value)]}]}
+    fixed = dict(meta)
+    for field in FACE_FIELDS:
+        value = meta.get(field)
+        if not isinstance(value, dict):
+            continue
+        if value.get("t") == "MetaList":
+            fixed[field] = {"t": "MetaList", "c": [
+                raw(item) if isinstance(item, dict)
+                and item.get("t") in ("MetaString", "MetaInlines") else item
+                for item in value["c"]]}
+        elif value.get("t") in ("MetaString", "MetaInlines"):
+            fixed[field] = raw(value)
+    return fixed
 
 
 def named(meta, field):
@@ -1024,15 +1099,15 @@ def book_metadata(project, resolved, base, numbered):
 
     def given(field):
         """The options the metadata gives the field's face, as the template
-        writes them."""
+        writes them (written, raw_face_fields)."""
         value = meta.get(field + "options")
         value = value["c"] if value and value.get("t") == "MetaList" \
             else [value] if value else []
-        return [meta_plain(o) for o in value if meta_plain(o)]
+        return [written(o) for o in value if isinstance(o, dict) and written(o)]
     for field, command, _plex, _latin in FAMILIES:
         if not named(meta, field):
             continue
-        name = meta_plain(meta[field])
+        name = written(meta[field])
         if field + "fallback" not in meta:
             # Set again, as the template set it, with the fallbacks: for
             # the text's face, babel's too, which the template gives the
@@ -1064,7 +1139,7 @@ def book_metadata(project, resolved, base, numbered):
         options = given("mathfont")
         if not named(meta, "mainfont"):
             options = rescaled(options)
-        name = meta_plain(meta.pop("mathfont"))
+        name = written(meta.pop("mathfont"))
         meta.pop("mathfontoptions", None)
         meta[MATH_NAMED] = meta_string(name)
         faces.append(math_font_latex(name, options))
@@ -1659,7 +1734,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     document = {
         "pandoc-api-version": load_page(pages_dir,
                                         real[0])["pandoc-api-version"],
-        "meta": meta,
+        "meta": raw_face_fields(meta),
         "blocks": assembly.blocks,
     }
 

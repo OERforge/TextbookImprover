@@ -3388,6 +3388,79 @@ def check_bookmark_said():
     ]
 
 
+def check_face_fields():
+    """The faces a PDF's metadata file names, as Pandoc's template writes
+    them into fontspec's commands (build-pdf.py, raw_face_fields): a face's
+    name, its options, and its fallbacks raw LaTeX of their text, a list's
+    each item, an underscore as it is, where the writer had written \\_,
+    on which LaTeX stopped, a brace as it is, where it had written \\{,
+    raw LaTeX in an option and a quotation's marks kept, and an apostrophe
+    smart reading made curly one again (written); the build's own copy of
+    the metadata, and its other fields, a title among them, as they
+    were."""
+    build_pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "build_pdf")
+
+    def inlines(*nodes):
+        return {"t": "MetaInlines", "c": list(nodes)}
+
+    def words(text):
+        return inlines({"t": "Str", "c": text})
+    meta = {
+        "title": words("A_title"),
+        "lang": {"t": "MetaString", "c": "en-US"},
+        "mainfont": words("Open_Sans-Regular.ttf"),
+        "mainfontoptions": {"t": "MetaList", "c": [
+            words("Path=fonts/author\u2019s_fonts/"), words("RawFeature={+smcp}"),
+            inlines({"t": "Str", "c": "BoldFont="},
+                    {"t": "RawInline", "c": ["latex", "\\boldname"]})]},
+        "monofont": {"t": "MetaString", "c": "Mono_Face.otf"},
+        "sansfont": inlines({"t": "Quoted", "c": [{"t": "DoubleQuote"},
+                                                  [{"t": "Str", "c": "Odd"}]]},
+                            {"t": "Space"}, {"t": "Str", "c": "Sans"})}
+    before = json.dumps(meta, sort_keys=True)
+    fixed = build_pdf.raw_face_fields(meta)
+
+    def raw(value):
+        return value.get("t") == "MetaInlines" and [i["t"] for i in value["c"]] == ["RawInline"] \
+            and value["c"][0]["c"][1]
+    checks = [
+        ("a face's name, a list of its options item by item, a MetaString, and a quotation "
+         "are raw LaTeX of their text, raw LaTeX in an option as written and an apostrophe "
+         "straight",
+         lambda: raw(fixed["mainfont"]) == "Open_Sans-Regular.ttf"
+         and [raw(o) for o in fixed["mainfontoptions"]["c"]]
+         == ["Path=fonts/author's_fonts/", "RawFeature={+smcp}", "BoldFont=\\boldname"]
+         and raw(fixed["monofont"]) == "Mono_Face.otf" and raw(fixed["sansfont"]) == '"Odd" Sans'),
+        ("and the other fields, the build's own copy of them too, are as they were",
+         lambda: fixed["title"] == meta["title"] and fixed["lang"] == meta["lang"]
+         and json.dumps(meta, sort_keys=True) == before),
+    ]
+    if not shutil.which("pandoc"):
+        return checks + [("the template writes them as given",
+                          lambda: print("  skip  no pandoc to write the template") or True)]
+    api = [int(n) for n in subprocess.run(
+        ["pandoc", "-f", "markdown", "-t", "json"], input="x", capture_output=True,
+        text=True).stdout.split('"pandoc-api-version":[', 1)[1].split("]", 1)[0].split(",")]
+
+    def written(metadata):
+        doc = {"pandoc-api-version": api, "meta": metadata,
+               "blocks": [{"t": "Para", "c": [{"t": "Str", "c": "x"}]}]}
+        return subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s"],
+                              input=json.dumps(doc), capture_output=True, text=True).stdout
+    latex, escaped = written(fixed), written(meta)
+    options = "[Path=fonts/author's_fonts/,RawFeature={+smcp},BoldFont=\\boldname]"
+    return checks + [
+        ("Pandoc's template writes them into fontspec's commands as given, \\babelfont's "
+         "too, and the title as text",
+         lambda: "\\setmainfont" + options + "{Open_Sans-Regular.ttf}" in latex
+         and "\\babelfont{rm}" + options + "{Open_Sans-Regular.ttf}" in latex
+         and "{Mono_Face.otf}" in latex and '{"Odd" Sans}' in latex and "A\\_title" in latex),
+        ("where it had escaped them, an underscore \\_ and a brace \\{",
+         lambda: "\\_fonts/" in escaped and "{Open\\_Sans-Regular.ttf}" in escaped
+         and "RawFeature=\\{+smcp\\}" in escaped),
+    ]
+
+
 def check_heading_bookmarks():
     """The PDF filter's headings' formulas (pdf-target.lua, bookmarks), in
     the LaTeX it writes: a formula is its text in \\texorpdfstring's second
@@ -8405,6 +8478,7 @@ GROUPS = [
     ("a CFF charstring's end, as the font setting reads it", check_charstring_end),
     ("a LaTeX book's tagged copy, the font setting before its class", check_tagged_copy_fonts),
     ("the PDF build's note of headings' formulas left as TeX in bookmarks", check_bookmark_said),
+    ("the faces a PDF's metadata file names, as the template writes them", check_face_fields),
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
      check_heading_bookmarks),
     ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),

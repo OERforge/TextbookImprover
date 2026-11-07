@@ -23,7 +23,11 @@
 --
 -- A formula whose TeX opens with \displaystyle is in display style in the
 -- MathML of a page, an EPUB, and a deck's reveal.js presentation too, but
--- in a heading or a picture's description, whose text the writer reads.
+-- in a heading, whose text the writer reads.
+--
+-- A formula in a picture's description is its text there, for every writer
+-- but Markdown's: the writers make the description the picture's alt text,
+-- and gave a formula its TeX in it.
 --
 -- A note in a link's text goes after the link, for every writer but
 -- those two: a page's note in a link was an anchor in an anchor. And two
@@ -309,17 +313,109 @@ local function display_style(math_)
     .. '<mstyle displaystyle="true">' .. body .. '</mstyle>' .. annotation)
 end
 
--- Each such formula in the body, but in a picture's description or a
--- heading, whose text the writer reads, a raw formula giving it none: a
--- picture's alt text, and an EPUB's contents and its chapter's title. There
--- the formula keeps its TeX, \displaystyle and all, in text style.
+-- A formula in a picture's description as its text there, "A square of
+-- side x²" for ![A square of side $x^2$](sq.png), as a title has it
+-- (math-text.lua's title_text). The writers make the description text for
+-- the picture's alt text, a page's, an EPUB's, and a reveal.js
+-- presentation's alt, a PDF's /Alt, a Word file's and a PowerPoint file's
+-- description, and AsciiDoc's alt, a formula its TeX there ("x^2", as
+-- Pandoc's stringify gives it), which a screen reader read as written; a
+-- link the EPUB makes of an image on another server is named so too
+-- (remote_image). Not for Markdown, whose writer keeps the formula, the
+-- description being a figure's caption too where they're the same, and
+-- read again; AsciiDoc's alt and a Word file's description hold text alone,
+-- and reading the file again finds the text, a loss (alt-formula).
+--
+-- Pandoc's HTML writer hides a figure's caption from a screen reader where
+-- it says what the figure's one picture's alt text says, comparing the
+-- caption's text with the alt text (captionIsAlt, Writers/HTML.hs, 3.13),
+-- as a Markdown figure's image, ![caption](file), has its caption for alt
+-- text. With the formula's text in the alt text and its TeX in the
+-- caption's, the writer would show the caption to a screen reader beside
+-- the alt text, the words said twice, so the caption's words are hidden in
+-- a span (aria-hidden) where, each formula its text, they're the alt text's
+-- (hidden_captions, after an EPUB's image on another server is a link,
+-- beside which the writer hides no caption), but for a caption with a link
+-- or a note, whose mark is a link, which a screen reader can't reach
+-- hidden (axe-core's aria-hidden-focus).
+local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                           'math-text.lua' }))
+
+local function holds(content, kinds)
+  local found = false
+  local walker = {
+    Inline = function(inline)
+      if kinds[inline.t] then found = true end
+    end,
+  }
+  if pandoc.utils.type(content) == 'Blocks' then content:walk(walker)
+  else pandoc.Inlines(content):walk(walker) end
+  return found
+end
+
+local FORMULA = { Math = true }
+local REACHED = { Link = true, Note = true }
+
+local function formula_alts(doc)
+  if FORMAT == 'markdown' then return nil end
+  doc.blocks = doc.blocks:walk({
+    Image = function(img)
+      if not holds(img.caption, FORMULA) then return nil end
+      img.caption = mathtext.texted(img.caption)
+      if FORMAT == 'asciidoc' or FORMAT == 'docx' then
+        lost('alt-formula', pandoc.utils.stringify(img.caption))
+      end
+      return img
+    end,
+  })
+  return doc
+end
+
+local function hidden_caption(fig)
+  local body = fig.content
+  if #body ~= 1 or body[1].t ~= 'Plain' or #body[1].content ~= 1
+      or body[1].content[1].t ~= 'Image' then
+    return nil
+  end
+  local img = body[1].content[1]
+  local caption = fig.caption
+  if img.attributes.alt ~= nil or not holds(caption.long, FORMULA)
+      or pandoc.utils.stringify(mathtext.texted(caption.long))
+         ~= pandoc.utils.stringify(img.caption) then
+    return nil
+  end
+  for _, block in ipairs(caption.long) do
+    if (block.t ~= 'Plain' and block.t ~= 'Para') or holds(block.content, REACHED) then
+      return nil
+    end
+  end
+  caption.long = caption.long:map(function(block)
+    block.content = { pandoc.Span(block.content, pandoc.Attr('', {}, { { 'aria-hidden', 'true' } })) }
+    return block
+  end)
+  fig.caption = caption
+  return fig
+end
+
+local function hidden_captions(doc)
+  if not (FORMAT:match('html') or FORMAT:match('epub') or FORMAT == 'revealjs') then
+    return nil
+  end
+  doc.blocks = doc.blocks:walk({ Figure = hidden_caption })
+  return doc
+end
+
+-- Each such formula in the body, but in a heading, whose text the writer
+-- reads, a raw formula giving it none: an EPUB's contents and its
+-- chapter's title. There the formula keeps its TeX, \displaystyle and all,
+-- in text style. A picture's description holds none by now, each its text
+-- there (formula_alts).
 local function display_styles(doc)
   if not (FORMAT:match('html') or FORMAT:match('epub') or FORMAT == 'revealjs') then
     return nil
   end
   doc.blocks = doc.blocks:walk({
     traverse = 'topdown',
-    Image = function(img) return img, false end,
     Header = function(h) return h, false end,
     Math = display_style,
   })
@@ -504,7 +600,13 @@ return {
   -- function before the div or span around it, and an EPUB reported a
   -- picture on another server and a link to a file it left out.
   { Div = resolve, Span = resolve },
+  -- A formula in a picture's description is its text before an EPUB names
+  -- a link by the description, and a caption is compared with the alt
+  -- text once the link is made, and before a formula in display style is
+  -- raw HTML.
+  { Pandoc = formula_alts },
   { Image = remote_image, Link = local_file_link },
+  { Pandoc = hidden_captions },
   { Link = notes_after },
   separate_notes,
   { Pandoc = display_styles },

@@ -45,9 +45,10 @@
 --    caption dropped. Each picture is titled oer-pic-N, for pptxtarget.py
 --    to find it and write its alt text, or its decorative mark, in its
 --    description; and it shows a figure's caption, as the deck's page and
---    PDF do, and no other. A caption that repeats the alt text is
---    recorded, for pptxtarget.py to mark decorative, as the page hides
---    one from a screen reader (aria-hidden).
+--    PDF do, and no other. A caption that repeats the alt text, a formula
+--    in it as its text, as in the alt text, is recorded, for
+--    pptxtarget.py to mark decorative, as the page hides one from a
+--    screen reader (aria-hidden).
 -- 6. An image in a line of text, a list, or a table is written as its alt
 --    text: each is counted.
 -- 7. A table's header column isn't written: each table's first cell
@@ -99,6 +100,12 @@
 -- along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 local stringify = pandoc.utils.stringify
+-- A figure's caption with each formula as its text, as target-blocks.lua,
+-- which runs before this filter, makes a picture's description, its alt
+-- text, so that a caption repeating the alt text is found so with a
+-- formula in it.
+local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                           'math-text.lua' }))
 
 local RECORD = os.getenv('DECK_PPTX_RECORD')
 local LEVEL = tonumber(os.getenv('DECK_SLIDE_LEVEL') or '')
@@ -188,7 +195,7 @@ local function picture(img, caption)
   pictures = pictures + 1
   local mark = decorative(img)
   local alt = mark and '' or alt_text(img)
-  local own = caption and squeezed(stringify(caption)) or ''
+  local own = caption and squeezed(stringify(mathtext.texted(caption))) or ''
   record.pictures[tostring(pictures)] = {
     alt = alt, decorative = mark, caption = own ~= '', repeats = own ~= '' and own == alt,
   }
@@ -630,7 +637,7 @@ local function shapes(blocks)
             img.caption = caption
           end
           facts.caption = true
-          facts.repeats = squeezed(stringify(img.caption)) == facts.alt
+          facts.repeats = squeezed(stringify(mathtext.texted(img.caption))) == facts.alt
         end
         out:extend(inner)
       end

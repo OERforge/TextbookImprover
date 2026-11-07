@@ -1,8 +1,10 @@
--- math-text.lua -- a formula as text, for a PDF's bookmark and a title:
--- loaded by pdf-target.lua, for a heading's bookmark, deck-pdf.lua, for a
--- slide's, figures-and-tables.lua, for a page's <title>, and
--- title-formulas.lua, for the titles made outside the filters, with
--- dofile, so that all of them write the same text.
+-- math-text.lua -- a formula as text, for a PDF's bookmark, a title, and
+-- a picture's alt text: loaded by pdf-target.lua, for a heading's
+-- bookmark, deck-pdf.lua, for a slide's, figures-and-tables.lua, for a
+-- page's <title>, title-formulas.lua, for the titles made outside the
+-- filters, target-blocks.lua, for a picture's alt text, and deck-pptx.lua,
+-- for a figure's caption beside it, with dofile, so that all of them write
+-- the same text.
 --
 -- The text is Pandoc's plain writer's, in Unicode where texmath can: x²,
 -- α ≤ β, p̂. Where it can't write a formula, it gives the formula's TeX
@@ -355,6 +357,20 @@ function M.title_text(math_)
   if text then return text, false end
   local fence = math_.mathtype == 'DisplayMath' and '$$' or '$'
   return fence .. math_.text .. fence, true
+end
+
+-- Inlines or blocks with each formula as its text in a title
+-- (title_text): a picture's description, which the writers make text for
+-- its alt text, as they make a title text, a formula its TeX
+-- (target-blocks.lua), and a figure's caption compared with it
+-- (target-blocks.lua, deck-pptx.lua). A formula it can't write is its TeX
+-- between dollar signs there too.
+function M.texted(content)
+  local walker = {
+    Math = function(math_) return pandoc.Str((M.title_text(math_))) end,
+  }
+  if pandoc.utils.type(content) == 'Blocks' then return content:walk(walker) end
+  return pandoc.Inlines(content):walk(walker)
 end
 
 return M

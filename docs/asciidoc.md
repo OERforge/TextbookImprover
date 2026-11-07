@@ -39,6 +39,7 @@ Some things have no form that reads back, and the target changes them and says s
 
 - An address containing `::` (MDN's `::after` page, for instance) is written with the colons percent-encoded (`%3A%3A`), which a web server reads as the same address.
 - An alt text containing double quotes is written with typographic ones.
+- A formula in an image's alt text is written as its text, `alt="A square of side x²"`, as every format but Markdown writes it ([A picture's alt text](formats.md#a-pictures-alt-text)): an AsciiDoc alt text holds text alone, so it reads back as text.
 - A footnote of several paragraphs becomes one, and a list or a quotation inside one keeps its words and loses its structure: an AsciiDoc footnote is one paragraph.
 - Display math inside a definition list is written inline: Pandoc's writer indents the math block's delimiters there, which breaks the list.
 - A root with an index (`\sqrt[3]{x}`) is written as Asciidoctor reads it, `\sqrt[3\]{x}`. Pandoc's reader ends the formula at that `\]`, and in a footnote loses the whole footnote, so reading an AsciiDoc source gives such a formula's brackets as character references first, which the reading filter turns back: the pipeline reads its own files back whole.

@@ -178,6 +178,8 @@ And amssymb's squares, which unicode-math has no names for: $\square \blacksquar
 
 A rule between paragraphs: ![](assets/rule.png){.decorative width=900px height=2px}
 
+A picture in a line, a formula in its description: ![a square of side $x^2$](assets/red.png)
+
 ![](assets/blank.png)
 
 ![IMG_2041](assets/photo.png)
@@ -8120,8 +8122,13 @@ def checks(work, jobs=1):
          lambda: any(str(f.get("/Alt")) == "A cell's nucleus, its |bar|, 1 < 2 > 0, x~y, a\\b, "
                      "x^2, \u201cquoted\u201d and \u2018single\u2019 it\u2019s 1\u20135 "
                      "a\u2014b, and -- as typed" for f in figures)),
+        # target-blocks.lua: a formula in a picture's description is its
+        # text there, which the writer passes on as the alt key; it had
+        # passed the formula's TeX, x^2.
+        ("a formula in a picture's description is its text in the alt text",
+         lambda: any(str(f.get("/Alt")) == "a square of side x\u00b2" for f in figures)),
         ("the decorative image is no figure",
-         lambda: len(figures) == 11),
+         lambda: len(figures) == 12),
         # Each inner figure's empty \caption{} was the float's too, three
         # Captions in one Aside, which veraPDF rejects (ISO 14289-2,
         # 8.2.5.27).

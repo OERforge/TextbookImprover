@@ -3583,11 +3583,12 @@ def case_display_style(work):
     which texmath's writer doesn't write; the page read again has the same
     formula. And a formula whose TeX opens with \\displaystyle in a Markdown
     source is in display style on its page too, laid out as a display is,
-    a sum's limits under and over it, but in a picture's description or a
-    heading, whose text the writer reads: there it keeps its TeX. And a
-    formula in running text a page sets in display style, kept so by a
-    target with math.display_style_in_text, its variant of a page too,
-    repaired first, so that math-keep.csv keeps it in either target."""
+    a sum's limits under and over it, but in a heading, whose text the
+    writer reads: there it keeps its TeX; in a picture's description it's
+    its text, as any formula there is (case_alt_formulas). And a formula in
+    running text a page sets in display style, kept so by a target with
+    math.display_style_in_text, its variant of a page too, repaired first,
+    so that math-keep.csv keeps it in either target."""
     import importlib.util
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
@@ -3626,7 +3627,7 @@ def case_display_style(work):
         chapters = "".join(text for text in texts.values() if "Marked:" in text)
         areas_chapter = "".join(text for text in texts.values() if "The curve" in text)
         contents = "".join(text for name, text in texts.items() if name.endswith(".ncx"))
-    alt = 'alt="The graph of \\displaystyle y=\\frac{1}{x} for positive x"'
+    alt = 'alt="The graph of y = 1/x for positive x"'
     # The page read again, as a source of its own.
     again = os.path.join(work, "again")
     os.makedirs(again)
@@ -3748,9 +3749,9 @@ def case_display_style(work):
          "another sum's are its scripts",
          lambda: sums.count('<semantics><mstyle displaystyle="true"><mrow><munderover>') == 1
          and sums.count("<mstyle") == 1 and sums.count("<msubsup><mo>&#x2211;</mo>") == 1),
-        ("but one in a picture's description or a heading keeps its TeX, in text style, "
-         "where the writer reads text from it: the picture's alt text on its page and in an "
-         "EPUB, and the heading in the EPUB's contents",
+        ("but one in a heading keeps its TeX, in text style, where the writer reads text "
+         "from it, the EPUB's contents; and one in a picture's description is its text, as "
+         "any formula there is, in the picture's alt text on its page and in an EPUB",
          lambda: alt in areas and alt in areas_chapter and "<mstyle" not in areas
          and "The area \\displaystyle \\int_0^1 x\\,dx" in contents),
     ]
@@ -4722,6 +4723,148 @@ def case_title_block_formula(work):
         ("a declared title the heading says more than stands there as written",
          lambda: block("02-declared") == "Limits" and "<math" not in block("02-declared")
          and title("02-declared") == "Limits"),
+    ]
+
+
+ALT_FORMULAS_MD = """# Squares
+
+![A square of side $x^2$](square.png)
+
+![Its caption, $\\frac{a}{b}$](square.png){alt="A square, in words of its own"}
+
+![A square of side $x^2$, after [a link](https://example.org/)](square.png)
+
+![A square of side $x^2$, with a note[^square]](square.png)
+
+[^square]: A note on the square.
+
+::: {.figure}
+![A square of side $y^2$](square.png)
+
+::: caption
+A caption of its own, $\\frac{c}{d}$.
+:::
+:::
+
+![A plain square](square.png)
+
+An icon ![an icon of $\\sqrt{x}$](square.png) in a line.
+"""
+
+# A picture on another server, for the EPUB alone, which makes it a link.
+ALT_FORMULAS_REMOTE_MD = """# Remote
+
+::: {targets="ebook"}
+![A square of side $z^2$](https://example.org/square.png)
+:::
+"""
+
+
+def case_alt_formulas(work):
+    """A formula in a picture's description is its text in the alt text,
+    as in a title, x² where the writers had given its TeX, x^2: a page's
+    and an EPUB's alt, a Word file's and AsciiDoc's, the two last a loss
+    the run reports, but for a picture in a passage for another target;
+    Markdown keeps the formula, its description the figure's caption read
+    again. Where the HTML writer would have hidden a figure's caption
+    repeating the alt text from a screen reader, its words are hidden in a
+    span, but for a caption with a link or a note; a caption the alt text
+    doesn't repeat is shown, its formula MathML, a figure div's own among
+    them; and one with no formula is the writer's to hide, as it does. And
+    an EPUB's link for a picture on another server is named by the
+    formula's text, the caption beside it shown, as beside one with no
+    formula."""
+    os.makedirs(work)
+    for name, page in (("01-squares", ALT_FORMULAS_MD), ("02-remote", ALT_FORMULAS_REMOTE_MD)):
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+    with open(os.path.join(work, "square.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
+                  "  word:\n    format: docx\n  md:\n    format: markdown\n"
+                  "  adoc:\n    format: asciidoc\n", fixtures=())
+    alts = ["A square of side x²", "A square, in words of its own",
+            "A square of side x², after a link", "A square of side x², with a note",
+            "A square of side y²", "A plain square", "an icon of √x"]
+
+    def text(*parts):
+        return read(work, *parts) if exists(work, *parts) else ""
+
+    def chapter(heading):
+        path = os.path.join(work, "ebook", "org.example.fixtures.epub")
+        if not os.path.exists(path):
+            return ""
+        with zipfile.ZipFile(path) as epub:
+            return "".join(t for t in (epub.read(name).decode("utf-8") for name in epub.namelist()
+                                       if name.endswith(".xhtml") and "/text/" in name)
+                           if f">{heading}</h1>" in t)
+
+    def img_alts(markup):
+        return [html_lib.unescape(a) for a in re.findall(r'<img\b[^>]*?\balt="([^"]*)"', markup)]
+
+    def captions(markup):
+        return re.findall(r"<figcaption([^>]*)>(.*?)</figcaption>", markup, re.S)
+
+    def hidden_first(markup):
+        found = captions(markup)
+        return len(found) == 6 and found[0][0] == "" \
+            and re.match(r'<span aria-hidden="true">A square of side\s*<math\b', found[0][1])
+
+    def shown_rest(markup):
+        found = captions(markup)
+        return len(found) == 6 and all(attrs == "" and "aria-hidden" not in words
+                                       for attrs, words in found[1:5]) \
+            and "<math" in found[1][1] and "<a href" in found[2][1] \
+            and 'href="#fn' in found[3][1] \
+            and re.match(r"(<p>)?A caption of its own,\s*<math\b", found[4][1])
+
+    def writer_hidden(markup):
+        found = captions(markup)
+        return len(found) == 6 and found[5] == (' aria-hidden="true"', "A plain square")
+
+    def descriptions():
+        path = os.path.join(work, "word", "01-squares.docx")
+        if not os.path.exists(path):
+            return []
+        with zipfile.ZipFile(path) as docx:
+            xml = docx.read("word/document.xml").decode("utf-8")
+        return [html_lib.unescape(d) for d in re.findall(r'<wp:docPr\b[^>]*?\bdescr="([^"]*)"', xml)]
+
+    def lost():
+        rows = list(csv.reader(text("fidelity.csv").lstrip("﻿").splitlines()))[1:]
+        return sorted((row[0], row[3], "alt text" in row[4]) for row in rows
+                      if len(row) > 4 and row[2] == "alt-formula")
+    return [
+        ("a page's alt text has each formula's text, the alt text a picture has of its own "
+         "as given",
+         lambda: img_alts(text("html", "01-squares.html")) == alts),
+        ("and a figure's caption repeating it is hidden in a span, its formula MathML",
+         lambda: hidden_first(text("html", "01-squares.html"))),
+        ("but one the alt text doesn't repeat is shown, its formula MathML, a figure div's "
+         "own caption too, and so is one with a link, and one with a note",
+         lambda: shown_rest(text("html", "01-squares.html"))),
+        ("and one with no formula the writer hides itself",
+         lambda: writer_hidden(text("html", "01-squares.html"))),
+        ("an EPUB's alt text and its captions are the page's",
+         lambda: img_alts(chapter("Squares")) == alts and hidden_first(chapter("Squares"))
+         and shown_rest(chapter("Squares")) and writer_hidden(chapter("Squares"))),
+        ("an EPUB's link for a picture on another server is named by the formula's text, "
+         "the caption beside it shown, as beside one with no formula",
+         lambda: re.search(r'<a href="https://example\.org/square\.png">A square of side z²</a>'
+                           r'\s*<figcaption>A square of side <math\b', chapter("Remote"))),
+        ("a Word file's description has the formulas' text",
+         lambda: descriptions() == alts),
+        ("Markdown keeps the formula in the description, which is the figure's caption",
+         lambda: "![A square of side $x^2$](square.png)" in text("md", "01-squares.md")
+         and "![an icon of $\\sqrt{x}$](square.png)" in text("md", "01-squares.md")),
+        ("AsciiDoc's alt has the formula's text",
+         lambda: 'alt="A square of side x²"' in text("adoc", "01-squares.adoc")
+         and 'alt="an icon of √x"' in text("adoc", "01-squares.adoc")),
+        ("and the two files that read again, AsciiDoc's and Word's, report the loss once "
+         "for each picture whose alt text had a formula, saying what happens, and not for "
+         "one in a passage for another target, which they leave out",
+         lambda: lost() == sorted((target, alt, True) for target in ("adoc", "word")
+                                  for alt in alts if alt not in (alts[1], alts[5]))),
     ]
 
 
@@ -9551,6 +9694,7 @@ CASES = [
     ("a page title that is also a heading", case_title_id),
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
     ("a title block's heading with a formula", case_title_block_formula),
+    ("a formula in a picture's alt text", case_alt_formulas),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),

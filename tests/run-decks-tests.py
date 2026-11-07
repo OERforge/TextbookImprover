@@ -1198,6 +1198,76 @@ def case_title_formula(work):
     return checks
 
 
+def case_alt_formula(work):
+    """A formula in a picture's description is its text in the picture's
+    alt text, x², where it had been its TeX, x^2: the deck's pages' and its
+    presentation's alt, its PowerPoint file's description, and its PDF's
+    /Alt. A figure's caption that repeats the alt text, the formula and
+    all, is kept from a screen reader as one without a formula is: hidden
+    in a span on the pages and in the presentation, its formula shown, and
+    marked decorative in the PowerPoint file, where a figure of two
+    pictures' caption repeating the last one's is marked so too. On the
+    pages it's shown, as the writer shows one with no formula."""
+    decks_given = {"shapes.md": "---\ntitle: Shapes\n---\n\n# Squares\n\n## A square\n\n"
+                                "![A square of side $x^2$](square.png)\n\n## A pair\n\n"
+                                "::: {.figure}\n![A circle](square.png)\n\n"
+                                "![A square of side $y^2$](square.png)\n\n"
+                                "::: caption\nA square of side $y^2$\n:::\n:::\n"}
+    old_reveal = too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    old_pptx = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    no_pdf = pdf_ready()
+    for problem, what in ((old_reveal, "presentation's"), (old_pptx, "PowerPoint file's"),
+                          (no_pdf, "PDF's")):
+        if problem:
+            print(f"  skip  {problem}; a deck's {what} alt text isn't checked")
+    reveal_problem = None if old_reveal else revealjs_ready()
+    if reveal_problem:
+        return [("a copy of reveal.js to build the presentation with: " + reveal_problem,
+                 lambda: False)]
+    work = folder(work, "targets:\n  pages:\n    format: html\n"
+                        + ("" if old_reveal else "  show:\n    format: revealjs\n")
+                        + ("" if old_pptx else "  slides:\n    format: pptx\n")
+                        + ("" if no_pdf else "  print:\n    format: pdf\n"),
+                  decks_given=decks_given)
+    png(os.path.join(work, "square.png"), 90, 90, 200)
+    result = convert(work, "--quick")
+    wanted = "A square of side x²"
+    alts = [wanted, "A circle", "A square of side y²"]
+
+    def html_alt(folder_name):
+        path = os.path.join(work, folder_name, "shapes.html")
+        markup = read(path) if os.path.exists(path) else ""
+        body = markup[markup.find("<body"):]
+        alts = [html.unescape(a) for a in re.findall(r'<img\b[^>]*?\balt="([^"]*)"', body)]
+        captions = re.findall(r"<figcaption([^>]*)>(.*?)</figcaption>", body, re.S)
+        return alts, [(attrs, bool(re.match(r'<span aria-hidden="true">A square of side\s*'
+                                            r'<math\b', words))) for attrs, words in captions]
+
+    def picture(title):
+        slide = slide_titled(pptx_deck(os.path.join(work, "slides", "shapes.pptx")), title)
+        shapes = [s for s in slide.shapes if not s.is_title] if slide else []
+        return ([s.descr for s in shapes if s.kind == "pic"],
+                [s.decorative for s in shapes if s.kind != "pic"])
+    checks = [("the deck is converted", lambda: result.returncode == 0),
+              ("its pages' alt text has the formula's text, the caption repeating it hidden "
+               "in a span, its formula MathML, and a figure of two pictures' caption shown, as "
+               "the writer shows one",
+               lambda: html_alt("pages") == (alts, [("", True), ("", True), ("", False)]))]
+    if not old_reveal:
+        checks.append(("so does its presentation's",
+                       lambda: html_alt("show") == (alts, [("", True), ("", True), ("", False)])))
+    if not old_pptx:
+        checks.append(("and its PowerPoint file's picture's description, the caption repeating "
+                       "it marked decorative, a figure of two pictures' too",
+                       lambda: picture("A square") == ([wanted], [True])
+                       and picture("A pair") == (["A circle"], [])
+                       and picture("A pair (2)") == ([alts[2]], [True])))
+    if not no_pdf:
+        checks.append(("and its PDF's figure's alt text",
+                       lambda: figures(os.path.join(work, "print", "shapes.pdf")) == alts))
+    return checks
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -5109,6 +5179,7 @@ CASES = [("the pieces", case_pieces),
          ("a folder of decks", case_folder),
          ("one alt text on a deck's different pictures", case_shared_alt),
          ("a deck's title with a formula", case_title_formula),
+         ("a formula in a picture's alt text", case_alt_formula),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),

@@ -6321,6 +6321,9 @@ SOURCE_TARGET_LOSSES = {
     "frame": "a frame becomes a link to what it shows, a video's own page for a video",
     "remote-image": "an image on another server becomes a link to it, named by its alt text",
     "file-link": "a link to a local file keeps only its text (the output check lists it too)",
+    # AsciiDoc and Word (target-blocks.lua)
+    "alt-formula": "a formula in an image's alt text is written as its text, which an "
+                   "alt text holds alone: read back, it's text",
 }
 FIDELITY_KINDS = dict(docxtarget.LOSSES, **SOURCE_TARGET_LOSSES)
 

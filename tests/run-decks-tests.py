@@ -2270,6 +2270,10 @@ def case_pdf(work):
          "a/b, and as its TeX where it can't be, a binomial",
          lambda: ("Power x\u00b2 + y\u2081, \u211d\u207f, a to b, a/b, and \\binom{n}{k}", [])
          in outline(odd)),
+        ("and as its bookmark has it in the title of its title's structure element, where"
+         " its formulas' TeX had stood beside their text",
+         lambda: "Power x\u00b2 + y\u2081, \u211d\u207f, a to b, a/b, and \\binom{n}{k}"
+         in titles(odd)),
         ("a slide in a div is a slide: bookmarked, its title's footnote set",
          lambda: ("Wrapped Slide", []) in outline(more) and "Wrapped Slide5" in more_text
          and "5The wrapped" in more_text),

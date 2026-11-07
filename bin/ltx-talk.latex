@@ -145,6 +145,12 @@ $oer-macros$
     role / new-tag = oerframetitle3 / H3 ,
     role / new-tag = oerframetitle4 / H4
   }
+% A slide's title is its structure element's title too, made plain
+% (\text_purify:n), which has no rule for \texorpdfstring, in which
+% pdf-target.lua sets a formula in a heading, and so kept both of its
+% arguments, the formula's TeX and its text, side by side. The text, as
+% the slide's bookmark has it, is the title's.
+\text_declare_purify_equivalent:Nn \texorpdfstring { \use_ii:nn }
 \cs_new_protected:Npn \__oer_talk_frame_title_tagged:n #1
   {
    \__talk_header_tag_begin:e

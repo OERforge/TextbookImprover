@@ -682,7 +682,8 @@ def case_axe_cache():
     """--wcag keeps axe-core's results on each page in the cache, and
     checks a page again only when it, or a file it loads, has changed,
     an EPUB's content documents each on its own, or when the rules have,
-    or with --force; with --no-cache, every page, the cache untouched."""
+    or with --force; a part of the cache that isn't what the audit wrote
+    is started again; with --no-cache, every page, the cache untouched."""
     problem = browser_problem()
     if problem:
         print(f"  skip  {problem}: axe-core's results aren't cached here")
@@ -740,6 +741,20 @@ def case_axe_cache():
     rebuilt, _ = audit()
     other, _ = audit("--best-practice")
     forced, _ = audit("--best-practice", "--force")
+
+    def broken(change):
+        """An audit after the cache's part for axe-core is changed so."""
+        cache_file = os.path.join(out, "audit-cache.json")
+        with open(cache_file, encoding="utf-8") as fh:
+            data = json.load(fh)
+        change(data["__axe__"])
+        with open(cache_file, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return audit("--best-practice")[0]
+    no_items = broken(lambda part: part.update(items=None))
+    no_ready = broken(lambda part: part.update(ready="not a report"))
+    one_entry = broken(lambda part: part["items"].update(
+        {next(key for key in part["items"] if "two.html" in key): "not an entry"}))
     with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
         kept_bytes = fh.read()
     uncached, _ = audit("--best-practice", "--no-cache")
@@ -777,6 +792,13 @@ def case_axe_cache():
          lambda: f"ran its 90 rules for WCAG 2.1 AA and its best practices on {everything},"
                  in other and f"its best practices on {everything}," in forced
          or fail("got: " + other + forced)),
+        ("a part of the cache that isn't what the audit wrote, or its kept setup, is "
+         "started again, and an entry that isn't one has its page checked again",
+         lambda: "Traceback" not in no_items + no_ready + one_entry
+         and f"its best practices on {everything}," in no_items
+         and f"its best practices on {everything}," in no_ready
+         and "its best practices on 1 page(s)," in one_entry
+         or fail("got: " + no_items + no_ready + one_entry)),
         ("--no-cache checks every page, and leaves the cache as it was",
          lambda: f"its best practices on {everything}," in uncached
          and after_bytes == kept_bytes or fail("got: " + uncached)),
@@ -788,7 +810,8 @@ def case_ace():
     (tests/fakeace.py): its own findings notes, filed under the EPUB, a
     section of the report saying it ran; the next audit keeps each
     unchanged EPUB's result, Ace not run, and runs it again on an EPUB
-    that has changed, and on every one with --force; --no-cache runs it
+    that has changed, and on every one with --force; a part of the cache
+    that isn't what the audit wrote is started again; --no-cache runs it
     and leaves the cache alone; --quick and no --wcag don't run it."""
     sys.path.insert(0, HERE)
     import fakeace
@@ -842,6 +865,19 @@ def case_ace():
     book("two.epub", "Two, again")
     changed = audit("--wcag")
     forced = audit("--wcag", "--force")
+
+    def broken(change):
+        """An audit after the cache's part for Ace is changed so."""
+        cache_file = os.path.join(out, "audit-cache.json")
+        with open(cache_file, encoding="utf-8") as fh:
+            data = json.load(fh)
+        change(data["__ace__"])
+        with open(cache_file, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return audit("--wcag")
+    no_epubs = broken(lambda part: part.update(epubs=None))
+    one_entry = broken(lambda part: part["epubs"].update(
+        {next(iter(sorted(part["epubs"]))): "not an entry"}))
     with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
         kept_bytes = fh.read()
     uncached = audit("--wcag", "--no-cache")
@@ -870,6 +906,11 @@ def case_ace():
         ("an EPUB that has changed is checked again, and only it, and --force checks every one",
          lambda: changed[3] == 1 and "checked 1 EPUB(s)" in changed[0] and forced[3] == 2
          or fail("got: " + changed[0])),
+        ("a part of the cache that isn't what the audit wrote is started again, and an entry "
+         "that isn't one has its EPUB checked again",
+         lambda: "Traceback" not in no_epubs[0] + one_entry[0] and no_epubs[3] == 2
+         and one_entry[3] == 1 and no_epubs[1] == one_entry[1] == expected
+         or fail("got: " + no_epubs[0] + one_entry[0])),
         ("--no-cache runs it, and leaves the cache as it was",
          lambda: uncached[3] == 2 and after_bytes == kept_bytes),
     ]

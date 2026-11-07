@@ -229,25 +229,26 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
     warning for each EPUB it didn't check, then one for each rule. With no
     EPUB, a probe of its own, which checks the setup. cache: a dict an
     audit keeps, each EPUB's result kept by its SHA-256 and, with reuse,
-    used while the EPUB and Ace are the same."""
+    used while the EPUB and Ace are the same; one that isn't what an
+    audit wrote is started again."""
     if not epubs:
         return [], probe(command, timeout)
     said_version = version(command)
     stored = {}
     if cache is not None:
         setup = setup_key(command, said_version)
-        if cache.get("setup") != setup:
+        if cache.get("setup") != setup or not isinstance(cache.get("epubs"), dict):
             cache.clear()
             cache.update({"setup": setup, "epubs": {}})
-        stored = cache.setdefault("epubs", {})
+        stored = cache["epubs"]
     found, failed, results, whens = [], [], [], set()
     when = findings_lib.now()
     for epub in epubs:
         sha = digest(epub) if cache is not None else None
         entry = stored.get(sha) if reuse and sha else None
-        if entry:
+        if isinstance(entry, dict) and isinstance(entry.get("result"), dict):
             result = entry["result"]
-            whens.add(entry["when"])
+            whens.add(str(entry.get("when") or "?"))
         else:
             result = run(command, epub, timeout)
             if "error" in result:

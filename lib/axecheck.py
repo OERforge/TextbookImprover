@@ -356,15 +356,16 @@ def kept(items, job, cache, reuse=True):
     """{id: entry} of the items whose result the cache holds and still
     stands: kept with this setup (setup_key), and every file the check
     read, the page itself among them, reading the same now, one that
-    wasn't there still not. A cache kept with another setup is emptied."""
+    wasn't there still not. A cache kept with another setup is emptied,
+    as is one that isn't what an audit wrote."""
     if cache is None:
         return {}
     setup = setup_key(job)
-    if cache.get("setup") != setup:
+    if cache.get("setup") != setup or not isinstance(cache.get("items"), dict):
         cache.clear()
         cache.update({"setup": setup, "items": {}})
-    stored = cache.setdefault("items", {})
-    if not reuse or not cache.get("ready"):
+    stored = cache["items"]
+    if not reuse or not isinstance(cache.get("ready"), dict):
         return {}
     sources, read, held = {}, {}, {}
 
@@ -379,7 +380,8 @@ def kept(items, job, cache, reuse=True):
     try:
         for item in items:
             entry = stored.get(identity(item))
-            if not entry or not isinstance(entry.get("read"), dict):
+            if not isinstance(entry, dict) or not isinstance(entry.get("read"), dict) \
+                    or not isinstance(entry.get("result"), dict):
                 continue
             where = item.get("archive") or item["folder"]
             try:

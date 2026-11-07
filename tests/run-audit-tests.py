@@ -243,6 +243,102 @@ def case_front_door():
     ]
 
 
+def case_own_reports():
+    """The reports in the folder the audit writes to, the first folder
+    given unless -o names another, aren't among what it reads, and it
+    writes over no file there that an audit didn't write."""
+    audit = os.path.join(BIN, "audit.py")
+    d = os.path.join(WORK, "own")
+    os.makedirs(d)
+    with open(os.path.join(d, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: One\nlang: en\n---\n\n# One\n\nText.\n")
+    run([audit, d, "--quick", "--report-html", "--report-docx"], d)
+    # --force reads every file again, not the cache's findings.
+    again = run([audit, d, "--quick", "--force", "--report-html", "--report-docx"], d)
+    report = open(os.path.join(d, "audit.md"), encoding="utf-8").read()
+    third = run([audit, d, "--quick"], d)
+    # Named from the folder, the report is the file -o's path names.
+    named = run([audit, "audit.md", "-o", d, "--quick"], d)
+    # A report by a name in other letters is one too.
+    shutil.copy(os.path.join(d, "audit.html"), os.path.join(d, "Audit.html"))
+    elsewhere = run([audit, d, "-o", os.path.join(WORK, "own-out"), "--quick"], d)
+    asked = run([audit, os.path.join(d, "audit.md"), "-o", os.path.join(WORK, "own-out"),
+                 "--quick"], d)
+    # A book whose own files have the reports' names: a chapter on
+    # audits, a page, and a Word file.
+    b = os.path.join(WORK, "own-book")
+    os.makedirs(b)
+    chapter = "---\ntitle: Audits\nlang: en\n---\n\n# Audits\n\nAn audit checks.\n"
+    page = ('<!DOCTYPE html><html lang="en"><head><title>Audits</title></head>'
+            '<body><h1>Audits</h1><p>An audit checks.</p></body></html>\n')
+    for name, text in (("audit.md", chapter), ("audit.html", page)):
+        with open(os.path.join(b, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    shutil.copy(os.path.join(FIXTURES, "media-a.docx"), os.path.join(b, "audit.docx"))
+    word = open(os.path.join(b, "audit.docx"), "rb").read()
+
+    def same(name, text):
+        with open(os.path.join(b, name), "rb") as fh:
+            return fh.read() == (text.encode("utf-8") if isinstance(text, str) else text)
+
+    stopped = run([audit, b, "--quick"], b)
+    stopped_kept = not os.path.exists(os.path.join(b, "audit.csv")) \
+        and same("audit.md", chapter)
+    away = run([audit, b, "-o", os.path.join(WORK, "own-book-out"), "--quick"], b)
+    os.rename(os.path.join(b, "audit.md"), os.path.join(b, "chapter.md"))
+    read = run([audit, b, "--quick"], b)
+    read_kept = same("audit.html", page) and same("audit.docx", word)
+    html_stopped = run([audit, b, "--quick", "--report-html"], b)
+    docx_stopped = run([audit, b, "--quick", "--report-docx"], b)
+    stopped_kept_both = same("audit.html", page) and same("audit.docx", word)
+    c = os.path.join(WORK, "own-csv")
+    os.makedirs(c)
+    with open(os.path.join(c, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: One\nlang: en\n---\n\n# One\n\nText.\n")
+    table = "Name,Value\nx,1\n"
+    with open(os.path.join(c, "audit.csv"), "w", encoding="utf-8") as fh:
+        fh.write(table)
+    csv_stopped = run([audit, c, "--quick"], c)
+    csv_kept = open(os.path.join(c, "audit.csv"), encoding="utf-8").read() == table
+
+    def lines(result):
+        return re.findall(r"^  ([^:\n]+): ", result.stderr, re.M)
+
+    refused = "wasn't written by an audit, and this one would write over it"
+    return [
+        ("a folder audited again, its reports in it, has its own file read, not the "
+         "reports, audit.md, audit.html, and audit.docx",
+         lambda: lines(again) == ["one.md"] and again.returncode == 0),
+        ("and the report lists that file alone among its inputs",
+         lambda: re.findall(r"^- `[^`]*/([^/`]+)` \u2014", report, re.M) == ["one.md"]),
+        ("so with nothing changed, the next audit says its report is current",
+         lambda: "is current" in third.stderr),
+        ("the report named as a file to audit is passed over, as the one this audit "
+         "writes",
+         lambda: "Skipping audit.md: it's this audit's own report." in named.stderr
+         and "Nothing to audit." in named.stderr),
+        ("a folder's reports aren't read when the audit writes elsewhere either, nor one "
+         "named Audit.html",
+         lambda: lines(elsewhere) == ["one.md"]),
+        ("but a report named, one this audit doesn't write, is read as asked",
+         lambda: lines(asked) == ["audit.md"]),
+        ("a chapter of the book named audit.md stops the audit, which says so, writes "
+         "nothing, and leaves the chapter as it was",
+         lambda: stopped.returncode != 0 and refused in stopped.stderr and stopped_kept),
+        ("with -o another folder, it's read as the book's, as are the page and the Word "
+         "file",
+         lambda: lines(away) == ["audit.docx", "audit.html", "audit.md"]),
+        ("a page named audit.html and a Word file named audit.docx are read as the book's "
+         "when the audit writes neither",
+         lambda: lines(read) == ["audit.docx", "audit.html", "chapter.md"] and read_kept),
+        ("and each stops the audit that would write over it",
+         lambda: all(r.returncode != 0 and refused in r.stderr
+                     for r in (html_stopped, docx_stopped)) and stopped_kept_both),
+        ("and so does a CSV of the book's named audit.csv",
+         lambda: csv_stopped.returncode != 0 and refused in csv_stopped.stderr and csv_kept),
+    ]
+
+
 def case_wcag():
     """--wcag, with a stand-in for veraPDF: a note for each rule of the
     WCAG profile a PDF fails, counting its failed checks, and with
@@ -664,6 +760,8 @@ def main():
                        ("the source check agrees with the filter",
                         case_agreement),
                        ("the front door", case_front_door),
+                       ("the audit's own reports, in the folder it writes to",
+                        case_own_reports),
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("axe-core's results, cached", case_axe_cache),

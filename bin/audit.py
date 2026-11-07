@@ -10,7 +10,10 @@ directory given, or -o): audit.csv, one finding per row in the format
 every check here shares, and audit.md, the same findings as a report a
 person reads, with each PDF's metadata and claims. A file already
 audited and unchanged since (by SHA-256) is not read again unless
---force says so.
+--force says so. The reports aren't among what it reads, nor is a
+report an audit wrote found in a directory given, and it writes over
+nothing in the output directory that an audit didn't write: a file
+there by the name of one it writes stops it, unless an audit wrote it.
 
 Depends on lib/ and on Pandoc (to read a source), and optionally on
 pypdf (PDFs), epubcheck, the Nu HTML checker, and veraPDF, each found
@@ -49,7 +52,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import os
+import re
 import sys
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
@@ -68,17 +73,59 @@ import wcag as wcag_lib  # noqa: E402
 VERSION = "0.9"
 KIND_OF = {".docx": "source-docx", ".md": "source-md", ".html": "html",
            ".xhtml": "html", ".epub": "epub", ".pdf": "pdf", ".pptx": "source-pptx"}
+# The report's three forms, by their names in the folder the audit writes
+# to, and what one an audit wrote opens with, its tags dropped: the
+# report's heading and the line that dates it, as fl.write_report has
+# written them since the audit came in (0.6). The CSV opens with the
+# columns every findings file shares (fl.read_csv).
+REPORTS = ("audit.md", "audit.html", "audit.docx")
+REPORT_OPENING = re.compile(r"(?:#\s*)?Accessibility audit\s+Produced\s")
+CSV_OPENING = ",".join(fl.COLUMNS[:3])
+
+
+def opening(path):
+    """A file's text from its start, its tags dropped and its spaces made
+    one: a Word file's document's, a page's from its body (a report's
+    stylesheet is in its head); "" when it can't be read."""
+    try:
+        if path.lower().endswith(".docx"):
+            with zipfile.ZipFile(path) as z:
+                text = z.read("word/document.xml").decode("utf-8", "replace")
+        else:
+            with open(path, encoding="utf-8-sig", errors="replace") as fh:
+                text = fh.read()
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+    if not path.lower().endswith(".md"):
+        body = re.search(r"<(?:w:)?body\b", text)
+        text = re.sub(r"<[^>]*>", " ", text[body.start():] if body else text)
+    return " ".join(text.split())
+
+
+def written_by_audit(path):
+    """Whether a file named as one an audit writes is one an audit wrote:
+    a report, in any of its forms, or its CSV."""
+    if path.lower().endswith(".csv"):
+        try:
+            with open(path, encoding="utf-8-sig", errors="replace") as fh:
+                return fh.readline().startswith(CSV_OPENING)
+        except OSError:
+            return False
+    return bool(REPORT_OPENING.match(opening(path)))
 
 
 def gather(paths):
-    """The files to audit, from files and directories given."""
+    """The files to audit, from files and directories given. A report an
+    audit wrote, found in a directory, isn't one: an audit of a folder
+    writes its reports into it unless -o says otherwise."""
     out = []
     for path in paths:
         if os.path.isdir(path):
             for name in sorted(os.listdir(path)):
                 full = os.path.join(path, name)
                 kind = KIND_OF.get(os.path.splitext(name)[1].lower())
-                if kind and os.path.isfile(full) and not name.startswith("~$"):
+                if kind and os.path.isfile(full) and not name.startswith("~$") \
+                        and not (name.lower() in REPORTS and written_by_audit(full)):
                     out.append((full, kind))
         elif os.path.isfile(path):
             kind = KIND_OF.get(os.path.splitext(path)[1].lower())
@@ -242,11 +289,30 @@ def main():
                              "runs on it")
     args = parser.parse_args()
 
-    files = gather(args.paths)
-    if not files:
-        sys.exit("Nothing to audit.")
     out_dir = args.output or next(
         (p for p in args.paths if os.path.isdir(p)), ".")
+    # What this audit writes goes over nothing in its folder that an
+    # audit didn't write (a book's chapter named audit.md, say), and none
+    # of it is read as a file to audit, even named.
+    names = ["audit.csv", "audit.md"]
+    if args.report_html:
+        names.append("audit.html")
+    if args.report_docx:
+        names.append("audit.docx")
+    writes = [os.path.join(out_dir, name) for name in names]
+    for target in writes:
+        if os.path.exists(target) and not written_by_audit(target):
+            sys.exit(f"{target} wasn't written by an audit, and this one would write "
+                     "over it: -o names another folder for what it writes.")
+    files = []
+    for path, kind in gather(args.paths):
+        if any(os.path.exists(target) and os.path.samefile(path, target)
+               for target in writes):
+            print(f"Skipping {path}: it's this audit's own report.", file=sys.stderr)
+        else:
+            files.append((path, kind))
+    if not files:
+        sys.exit("Nothing to audit.")
     os.makedirs(out_dir, exist_ok=True)
     cache = None if args.no_cache else fl.Cache(os.path.join(out_dir,
                                                              "audit-cache.json"))

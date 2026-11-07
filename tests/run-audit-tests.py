@@ -468,6 +468,98 @@ def case_axe_cache():
     ]
 
 
+def case_ace():
+    """--wcag runs DAISY's Ace on each EPUB, a stand-in here
+    (tests/fakeace.py): its own findings notes, filed under the EPUB, a
+    section of the report saying it ran; the next audit keeps each
+    unchanged EPUB's result, Ace not run, and runs it again on an EPUB
+    that has changed, and on every one with --force; --no-cache runs it
+    and leaves the cache alone; --quick and no --wcag don't run it."""
+    sys.path.insert(0, HERE)
+    import fakeace
+    folder = os.path.join(WORK, "ace")
+    os.makedirs(folder)
+    out = os.path.join(WORK, "ace-out")
+    log = os.path.join(WORK, "ace-runs.jsonl")
+    fake = fakeace.install(os.path.join(WORK, "fake-ace"))
+
+    def book(name, title):
+        document = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/'
+                    'xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">'
+                    f'<head><title>{title}</title></head><body><section epub:type="chapter">'
+                    f"<h1>{title}</h1><p>Text.</p></section></body></html>")
+        with zipfile.ZipFile(os.path.join(folder, name), "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
+            archive.writestr("META-INF/container.xml", (
+                '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:'
+                'opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/p.opf" '
+                'media-type="application/oebps-package+xml"/></rootfiles></container>'))
+            archive.writestr("EPUB/p.opf", (
+                '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+                'version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                f"<dc:title>{title}</dc:title><dc:language>en</dc:language></metadata>"
+                '<manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>'
+                '</manifest><spine><itemref idref="a"/></spine></package>'))
+            archive.writestr("EPUB/a.xhtml", document)
+    book("one.epub", "One")
+    book("two.epub", "Two")
+
+    def runs():
+        if not os.path.exists(log):
+            return 0
+        with open(log, encoding="utf-8") as fh:
+            return sum(1 for line in fh if '"-o"' in line)
+
+    def audit(*flags):
+        before = runs()
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL,
+                                env=dict(os.environ, ACE=fake, FAKE_ACE_LOG=log))
+        found = sorted((f.where, f.check, f.file, f.severity)
+                       for f in fl.read_csv(os.path.join(out, "audit.csv")) if f.tool == "ace")
+        with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
+            return result.stderr, found, fh.read(), runs() - before
+    plain = audit()
+    quick = audit("--wcag", "--quick")
+    first = audit("--wcag")
+    second = audit("--wcag")
+    book("two.epub", "Two, again")
+    changed = audit("--wcag")
+    forced = audit("--wcag", "--force")
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        kept_bytes = fh.read()
+    uncached = audit("--wcag", "--no-cache")
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        after_bytes = fh.read()
+    expected = [("EPUB/a.xhtml", "ace:epub-type-has-matching-role", "one.epub", "note"),
+                ("EPUB/a.xhtml", "ace:epub-type-has-matching-role", "two.epub", "note"),
+                ("EPUB/p.opf", "ace:metadata-accessmode", "one.epub", "note"),
+                ("EPUB/p.opf", "ace:metadata-accessmode", "two.epub", "note")]
+    return [
+        ("without --wcag, and with --quick, Ace doesn't run",
+         lambda: plain[3] == 0 and quick[3] == 0 and "Ace's checks not run (--quick)." in quick[0]
+         or fail("got: " + quick[0])),
+        ("with --wcag it runs on each EPUB, its own findings notes filed under the EPUB, and the "
+         "report has a section saying it ran",
+         lambda: first[3] == 2 and first[1] == expected
+         and "## EPUBs: DAISY's Ace" in first[2]
+         and "- Ace by DAISY 1.4.6 checked 2 EPUB(s): 4 finding(s) of its own" in first[2]
+         or fail("got: " + first[0])),
+        ("the next audit keeps each unchanged EPUB's result, Ace not run, and says so",
+         lambda: second[3] == 0 and second[1] == expected
+         and "Ace by DAISY 1.4.6 checked no EPUB again: 4 finding(s) of its own on 2 EPUB(s)"
+             in second[0]
+         and "2 EPUB(s) weren't checked again: each is unchanged since the audit that checked "
+             "it" in second[0] or fail("got: " + second[0])),
+        ("an EPUB that has changed is checked again, and only it, and --force checks every one",
+         lambda: changed[3] == 1 and "checked 1 EPUB(s)" in changed[0] and forced[3] == 2
+         or fail("got: " + changed[0])),
+        ("--no-cache runs it, and leaves the cache as it was",
+         lambda: uncached[3] == 2 and after_bytes == kept_bytes),
+    ]
+
+
 # Text a file holds that is markup in Markdown: a heading's, and a PDF's
 # title. Pandoc passes raw HTML through, and makes a link of [...](...)
 # even without it, so the report wrote them into audit.html as markup.
@@ -575,6 +667,7 @@ def main():
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("axe-core's results, cached", case_axe_cache),
+                       ("DAISY's Ace, asked for", case_ace),
                        ("convert.py --check-only", case_check_only)]:
         print(f"\n{name}")
         try:

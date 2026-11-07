@@ -454,6 +454,7 @@ def main():
              or fail("got: " + " | ".join(notes))),
         ]
         cases += wcag_cases(work)
+        cases += ace_cases(work)
         cases += axe_cases(work)
         for label, predicate in cases:
             try:
@@ -949,6 +950,116 @@ def epub(path, documents):
         for name, text in documents.items():
             archive.writestr("EPUB/" + name, text)
     return path
+
+
+def ace_cases(work):
+    """--wcag on an EPUB with a stand-in for DAISY's Ace (tests/fakeace.py):
+    its own findings notes, after the verdict and not in its count, the
+    package's under the package document and a content document's under
+    it, its axe-core results left out and counted; with nothing named,
+    its probe; and the lines for no EPUB, --quick, a run that fails, an
+    ACE that names nothing, and no Ace at all; without --wcag, not run."""
+    sys.path.insert(0, HERE)
+    import fakeace
+    import acecheck
+    folder = os.path.join(work, "ace")
+    os.makedirs(folder)
+    fake = fakeace.install(os.path.join(folder, "bin"))
+    log = os.path.join(folder, "runs.jsonl")
+    document = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+                'xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en"><head><title>'
+                'One</title></head><body><section epub:type="chapter"><h1>One</h1><p><img '
+                'src="a.png"/></p></section></body></html>')
+    nav = ('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+           'xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en"><head><title>Nav'
+           '</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">One</a></li>'
+           '</ol></nav></body></html>')
+    book = epub(os.path.join(folder, "book.epub"), {"one.xhtml": document, "nav.xhtml": nav})
+    # The navigation document, which Ace names from the EPUB's root.
+    with zipfile.ZipFile(book) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    parts["EPUB/p.opf"] = parts["EPUB/p.opf"].replace(
+        b'href="nav.xhtml" media-type="application/xhtml+xml"',
+        b'href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"')
+    with zipfile.ZipFile(book, "w") as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data, zipfile.ZIP_STORED if name == "mimetype"
+                             else zipfile.ZIP_DEFLATED)
+    tool = os.path.join(ROOT, "bin", "check-output.py")
+    empty = os.path.join(folder, "empty-path")
+    os.makedirs(empty)
+
+    def run(*flags, **env):
+        environ = dict(os.environ, ACE=fake, FAKE_ACE_LOG=log)
+        environ.pop("VERAPDF", None)
+        environ.update(env)
+        for name, value in env.items():
+            if value is None:
+                environ.pop(name, None)
+        return subprocess.run([sys.executable, tool, *flags], capture_output=True, text=True,
+                              env=environ, cwd=folder, stdin=subprocess.DEVNULL).stderr
+
+    def runs():
+        if not os.path.exists(log):
+            return 0
+        with open(log, encoding="utf-8") as fh:
+            return sum(1 for line in fh if '"-o"' in line)
+    report = os.path.join(folder, "ace.csv")
+    quick = run("--wcag", "--quick", "--epub", book)
+    quick_runs = runs()
+    ran = run("--wcag", "--epub", book, "--report", report)
+    with open(report, newline="", encoding="utf-8-sig") as fh:
+        rows = [r for r in csv.DictReader(fh) if r["Tool"] == "ace"]
+    probe = run("--wcag")
+    blind = run("--wcag", FAKE_ACE_BLIND="1")
+    pages = run("--wcag", os.path.join(work, "good.html"))
+    before_plain = runs()
+    plain = run("--epub", book)
+    plain_runs = runs() - before_plain
+    failed = run("--wcag", "--epub", book, FAKE_ACE_FAIL="1")
+    nothing = run("--wcag", "--epub", book, ACE=os.path.join(folder, "no-such-ace"))
+    absent = run("--wcag", "--epub", book, ACE=None, PATH=empty)
+    return [
+        ("Ace's own findings are notes, the package's under the package document and a content "
+         "document's under it, by the tool ace",
+         lambda: sorted((r["Where"], r["Check"], r["Severity"], r["Standard"]) for r in rows) == [
+             ("EPUB/nav.xhtml", "ace:epub-type-has-matching-role", "note", "Ace best practice"),
+             ("EPUB/one.xhtml", "ace:epub-type-has-matching-role", "note", "Ace best practice"),
+             ("EPUB/p.opf", "ace:metadata-accessmode", "note", "EPUB Accessibility 1.1")]
+         or fail("got: " + json.dumps(rows))),
+        ("its axe-core results are left out and counted, after the verdict and not in its count",
+         lambda: "Ace by DAISY 1.4.6 checked 1 EPUB(s): 3 finding(s) of its own, a note each, "
+                 "as axe-core's are; its axe-core results, 1 element(s) failing 1 rule(s) "
+                 "(image-alt), are left out, since --wcag runs axe-core's rules itself." in ran
+         and "ace:image-alt" not in ran and not [r for r in rows if r["Check"] == "ace:image-alt"]
+         and ran.index("Output check:") < ran.index("Ace by DAISY")
+         and "ace:metadata-accessmode, EPUB Accessibility 1.1: 1 finding(s), the first in "
+             "EPUB/p.opf: Publications must declare the 'schema:accessMode' metadata (serious)"
+             in ran or fail("got: " + ran)),
+        ("with nothing named, its probe, which checks the setup",
+         lambda: "Ace by DAISY 1.4.6 checked a probe EPUB of its own and found what it lacks "
+                 f"({acecheck.PROBE_RULE}), so EPUBs can be checked" in probe
+         or fail("got: " + probe)),
+        ("and a warning when it doesn't find what the probe lacks",
+         lambda: "WARNING: Ace by DAISY 1.4.6 checked a probe EPUB of its own, and didn't find "
+                 f"what it lacks ({acecheck.PROBE_RULE}): it found nothing." in blind
+         or fail("got: " + blind)),
+        ("its lines come between axe-core's and veraPDF's",
+         lambda: probe.index("axe") < probe.index("Ace by DAISY") < probe.index("veraPDF")
+         or fail("got: " + probe)),
+        ("pages and no EPUB, and --quick, say it didn't run, and it doesn't",
+         lambda: acecheck.NOT_RUN_NO_EPUB in pages and acecheck.NOT_RUN_QUICK in quick
+         and quick_runs == 0 or fail("got: " + pages + quick)),
+        ("without --wcag it doesn't run",
+         lambda: plain_runs == 0 and "Ace" not in plain or fail("got: " + plain)),
+        ("a run that fails is a warning saying why, in Ace's words",
+         lambda: "WARNING: Ace didn't check book.epub: Could not find Chrome (ver. 148.0.7778.97). "
+                 "This can occur if either." in failed or fail("got: " + failed)),
+        ("an ACE that names nothing, and no Ace on the path, say so",
+         lambda: f"Ace's checks not run: ACE is {os.path.join(folder, 'no-such-ace')}, which "
+                 "isn't there." in nothing and acecheck.NOT_FOUND in absent
+         or fail("got: " + nothing + absent)),
+    ]
 
 
 def axe_cases(work):

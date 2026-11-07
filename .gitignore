@@ -10,6 +10,7 @@ tests/fixtures/_dot.png
 *.json
 # ... except test fixtures, which are data, not intermediates.
 !tests/fixtures/mathjax/*.json
+!tests/fixtures/ace-report.json
 # ... and reveal.js's, which names its version (vendor/reveal.js/README.md).
 !vendor/reveal.js/package.json
 # ... and axe-core's, which names its (vendor/axe-core/README.md).

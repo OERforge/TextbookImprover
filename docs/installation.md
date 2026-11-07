@@ -437,6 +437,29 @@ Activating it lasts for that terminal (`deactivate` ends it early). Add `source 
 
 When these are missing, the suites say what and how to install them, and `run-all.sh` counts what was skipped and lists why at its end: without Playwright, or with a Chromium that doesn't start, the decks suite's twelve checks in a browser skip, in one line saying how many it stands for, and so do the check suite's of axe-core, the line for `--wcag` saying why it didn't run.
 
+## Optional: Ace by DAISY
+
+With `--wcag`, the output check and the audit run DAISY's [Ace](https://daisy.github.io/ace/) on each EPUB too when it's installed ([Checking](checking.md#daisys-ace)). Ace 1.4.6 needs Node 20 or later, where Ubuntu 24.04 packages Node 18.19 ([`nodejs`](https://packages.ubuntu.com/noble/nodejs)), so install a later one first, with [nvm](https://github.com/nvm-sh/nvm) say, which keeps it in your home folder, where `npm install -g` can write without `sudo`. Ace's package then installs four commands. The one to use is `ace-puppeteer`, which checks in Chromium without a window; `ace` itself runs Electron, which wants a display. As they install, Ace's packages download a browser each, Puppeteer's Chrome and Electron; with Playwright's Chromium installed for `--wcag` ([above](#optional-playwright-and-its-chromium)), skip both and name Playwright's:
+
+```bash
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 PUPPETEER_SKIP_DOWNLOAD=1 npm install -g @daisy/ace
+echo 'export PUPPETEER_EXECUTABLE_PATH='"$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -1)" >> ~/.bashrc
+```
+
+That's about 110 MB. Open a new terminal, and check the setup:
+
+```bash
+python3 $T/bin/check-output.py --wcag
+```
+
+Ace's line comes after axe-core's, saying Ace found what its probe EPUB lacks, so EPUBs can be checked:
+
+```
+  Ace by DAISY 1.4.6 checked a probe EPUB of its own and found what it lacks (metadata-accessmode), so EPUBs can be checked: what it finds is a note, never a failure.
+```
+
+The run finds `ace-puppeteer` on the path; `ACE` names another command, or Ace's `bin/ace.js`, which runs with `node`. Ace 1.4.6 ran so with Node 22 and Playwright 1.63's headless Chromium in an Ubuntu 24.04 container; not yet tried under WSL.
+
 ## Checking the whole setup
 
 From the directory you cloned into:

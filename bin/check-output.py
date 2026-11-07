@@ -22,11 +22,12 @@ with no language or title, and an EPUB whose manifest, spine, and
 archive disagree or whose package document lacks the metadata every
 EPUB needs; and a PowerPoint file a deck's pptx target wrote as a
 PowerPoint deck is checked (lib/pptxcheck.py). They are not epubcheck,
-the Nu HTML checker, or Ace, which know their specifications in full. epubcheck and the Nu checker are run
-as well when they are installed -- named by EPUBCHECK_JAR and VNU_JAR,
-or as commands on the path -- and their findings go into the same
-report with the tool's own message id as the check; --quick skips them,
-and veraPDF, and convert.py --quick passes it on.
+the Nu HTML checker, or Ace, which know their specifications in full.
+epubcheck and the Nu checker are run as well when they are installed --
+named by EPUBCHECK_JAR and VNU_JAR, or as commands on the path -- and
+their findings go into the same report with the tool's own message id
+as the check; --quick skips them, and veraPDF and Ace, and convert.py
+--quick passes it on.
 
 --wcag checks against WCAG's machine-testable criteria too, WCAG 2.1 AA
 unless --wcag-version and --wcag-level choose another version and level,
@@ -49,12 +50,17 @@ apart from the verdict:
   when they didn't. Each rule a PDF fails is one note, with how many of
   its checks failed and on which pages; a rule for a criterion beyond
   the version and level is left out, and counted.
+- each EPUB, with DAISY's Ace, when it's installed, named by ACE or a
+  command on the path (lib/acecheck.py): its own checks of the package
+  and the content documents, each a note; its axe-core results, which
+  are the rules above, left out and counted.
 
 --verbose makes each element axe-core names, and each check veraPDF
 failed, a note of its own, with what the page or the PDF has there (an
 element's markup, a link's address, the line repeated characters are
 on), and lists them in the summary. Given nothing to check, --wcag runs
-the probes alone, axe-core's and veraPDF's, which checks the setup.
+the probes alone, axe-core's, veraPDF's, and Ace's, which checks the
+setup.
 convert.py and audit.py pass the flags on.
 
 Copyright 2026 Robert Szarka
@@ -80,6 +86,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import acecheck  # noqa: E402
 import axecheck  # noqa: E402
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
@@ -108,14 +115,15 @@ def main():
                              "the pages are one without it")
     parser.add_argument("--report", help="write findings here as CSV")
     parser.add_argument("--quick", action="store_true",
-                        help="skip epubcheck, the Nu checker, and veraPDF "
+                        help="skip epubcheck, the Nu checker, veraPDF, and Ace "
                              "even if installed")
     parser.add_argument("--wcag", action="store_true",
                         help="check against WCAG's machine-testable criteria too: axe-core "
                              "on each page, presentation, and EPUB's content document, in "
-                             "Playwright's Chromium, locked down, and veraPDF's WCAG 2.2 "
+                             "Playwright's Chromium, locked down, veraPDF's WCAG 2.2 "
                              "machine profile on each PDF, with its WCAG modules from "
-                             "VERAPDF_WCAG; what they find is a note, never an error; with "
+                             "VERAPDF_WCAG, and DAISY's Ace on each EPUB, when it's "
+                             "installed; what they find is a note, never an error; with "
                              "nothing else to check, check the setup")
     wcag.add_choices(parser)
     parser.add_argument("--verbose", action="store_true",
@@ -170,7 +178,8 @@ def main():
         pdf_findings += found
     # The WCAG checks, when asked for: information, never a verdict, so
     # they're counted and summarized apart from the rest, axe-core's on the
-    # pages, then veraPDF's on the PDFs, in the verdict's order.
+    # pages, Ace's on the EPUBs, then veraPDF's on the PDFs, in the
+    # verdict's order.
     wcag_findings, wcag_lines = [], []
     if args.verbose and not args.wcag:
         notes.append(pdfcheck.WCAG_ALONE)
@@ -190,6 +199,19 @@ def main():
             wcag_findings, wcag_lines = axecheck.check(
                 pages, epubs, version=version, level=level, best_practice=best_practice,
                 experimental=experimental, verbose=args.verbose)
+        # DAISY's Ace on each EPUB, when it's installed: its own checks,
+        # notes as the rest are, and with nothing named, its probe.
+        ace, why = (None, "") if args.quick else acecheck.find()
+        if not epubs and named:
+            wcag_lines.append(acecheck.NOT_RUN_NO_EPUB)
+        elif args.quick:
+            wcag_lines.append(acecheck.NOT_RUN_QUICK)
+        elif not ace:
+            wcag_lines.append(why)
+        else:
+            found, lines = acecheck.check(ace, epubs)
+            wcag_findings += found
+            wcag_lines += lines
         command = None if args.quick else outputcheck.find_validator("verapdf")
         if not pdfs and named:
             wcag_lines.append("veraPDF's WCAG checks not run: no PDF to check.")

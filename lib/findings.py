@@ -362,6 +362,9 @@ class Finding:
             # are, so what's installed never decides a verdict. Its finding
             # names the criteria (axecheck.py), which the check doesn't.
             meaning = (describe(check), "note", "", "manual")
+        if meaning is None and check.startswith("ace:"):
+            # DAISY's Ace (--wcag on an EPUB): its own checks, a note too.
+            meaning = (describe(check), "note", "", "manual")
         self.severity = severity or (meaning[1] if meaning else "warning")
         self.standard = standard if standard is not None else (
             meaning[2] if meaning else "")
@@ -391,6 +394,8 @@ def describe(check):
     if check.startswith("axe-review:"):
         return (f"elements axe-core's rule {check.split(':', 1)[1]} couldn't decide, for a "
                 "person to judge")
+    if check.startswith("ace:"):
+        return f"what DAISY's Ace found by its rule {check.split(':', 1)[1]}"
     return check
 
 

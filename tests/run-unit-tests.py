@@ -8498,6 +8498,50 @@ def check_axe_cache():
     ]
 
 
+def check_ace_report():
+    """DAISY's Ace's report read (lib/acecheck.py), on a report Ace 1.4.6
+    wrote (tests/fixtures/ace-report.json): its own findings, the
+    package's and a content document's, each named by its path in the
+    EPUB, its own rule in its copy of axe-core among them, and axe-core's
+    rules counted and left out; each a note under the path, filed under
+    the EPUB with by_epub."""
+    import acecheck
+    with open(os.path.join(ROOT, "tests", "fixtures", "ace-report.json"),
+              encoding="utf-8") as fh:
+        report = json.load(fh)
+    read = acecheck.read_report(report)
+    places = sorted((own["document"], own["rule"]) for own in read["own"])
+    found = acecheck.own_findings(read, "/books/bad.epub")
+    filed = acecheck.own_findings(read, "/books/bad.epub", by_epub=True)
+    return [
+        ("Ace's version, from the report",
+         lambda: read["version"] == "1.4.6"),
+        ("its own findings on the package, named by its path, and on the content documents, "
+         "the navigation document's from the EPUB's root and the rest from the package's "
+         "folder",
+         lambda: places == [("EPUB/content.opf", rule) for rule in (
+             "epub-lang", "metadata-accessibilityfeature", "metadata-accessibilityhazard",
+             "metadata-accessibilitysummary", "metadata-accessmode",
+             "metadata-accessmodesufficient")]
+         + [("EPUB/nav.xhtml", "epub-type-has-matching-role")]
+         + [("EPUB/one.xhtml", "epub-type-has-matching-role")] * 2 or fail(str(places))),
+        ("axe-core's own rules counted and left out",
+         lambda: read["axe"] == {"rules": ["html-has-lang", "image-alt"], "elements": 2}),
+        ("each a note by the tool ace, its standard EPUB Accessibility's for a check of the "
+         "EPUB, else a best practice of Ace's, its detail with the element and Ace's page",
+         lambda: {(f.check, f.standard) for f in found} >= {
+             ("ace:metadata-accessmode", "EPUB Accessibility 1.1"),
+             ("ace:epub-type-has-matching-role", "Ace best practice")}
+         and all(f.severity == "note" and f.tool == "ace" and f.kind == "epub" for f in found)
+         and any(f.detail.startswith("Element has no ARIA role matching its epub:type "
+                                     "(moderate), at section: ") and "Ace's rule: http" in f.detail
+                 for f in found)),
+        ("a content document's finding filed under its own name, or the EPUB's with by_epub",
+         lambda: {f.file for f in found} == {"content.opf", "nav.xhtml", "one.xhtml"}
+         and {f.file for f in filed} == {"bad.epub"}),
+    ]
+
+
 def check_axe_setup():
     """What check() finds before the worker runs: AXE_CORE_DIR's copy, a
     4.x release named in a note and another refused, the repository's own
@@ -8602,6 +8646,7 @@ GROUPS = [
     ("axe-core's results, as findings and the summary's lines", check_axe_report),
     ("axe-core's setup, and what's read before the browser", check_axe_setup),
     ("an audit's cache of axe-core's results", check_axe_cache),
+    ("DAISY's Ace's report, read", check_ace_report),
     ("a page that holds the check up, given up on", check_page_limits),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),

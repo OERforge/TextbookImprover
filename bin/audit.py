@@ -23,11 +23,13 @@ browser for all of them (with Playwright, optional), and veraPDF's WCAG
 error, one for each rule a file fails, and the report has a section
 saying whether the checks ran; --verbose makes each element axe-core
 names and each check veraPDF failed a note, with what the file has
-there. axe-core's findings on a page are kept in the cache too, and a
-page isn't checked again while it and every file it loads are unchanged
-and so are axe-core, Playwright, and the rules; a PDF's WCAG checks run
-on every run with --wcag, since veraPDF's WCAG modules, which the cache
-can't see, decide what they find.
+there. With --wcag, DAISY's Ace runs on each EPUB too, when it's
+installed, its own checks notes as the rest are. axe-core's findings on
+a page are kept in the cache too, and a page isn't checked again while
+it and every file it loads are unchanged and so are axe-core,
+Playwright, and the rules, nor an EPUB by Ace while it and Ace are; a
+PDF's WCAG checks run on every run with --wcag, since veraPDF's WCAG
+modules, which the cache can't see, decide what they find.
 
 Copyright 2026 Robert Szarka
 
@@ -52,6 +54,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
+import acecheck  # noqa: E402
 import axecheck  # noqa: E402
 import findings as fl  # noqa: E402
 import outputcheck  # noqa: E402
@@ -163,6 +166,26 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
     return [], []
 
 
+def audit_ace(files, validators, cache=None, reuse=True):
+    """(findings, sections) of DAISY's Ace on the EPUBs among the files,
+    when it's installed, its section saying whether it ran; for --wcag.
+    cache: the audit cache's part for it, each EPUB's result kept by its
+    SHA-256 and, with reuse, used again while it and Ace are the same."""
+    epubs = [path for path, kind in files if kind == "epub"]
+    if not epubs:
+        return [], []
+    found, lines = [], [acecheck.NOT_RUN_QUICK]
+    if validators:
+        command, why = acecheck.find()
+        lines = [why]
+        if command:
+            found, lines = acecheck.check(command, epubs, by_epub=True, cache=cache,
+                                          reuse=reuse)
+    for line in lines:
+        print(f"  {line}", file=sys.stderr)
+    return found, [("EPUBs: DAISY's Ace", [f"- {fl.md_text(line)}" for line in lines])]
+
+
 def audit_pages(files, validators, verbose, version, level, best_practice, experimental,
                 cache=None, reuse=True):
     """(findings, sections) of axe-core's rules on the HTML pages and EPUBs
@@ -201,9 +224,10 @@ def main():
                         help="skip the external validators")
     parser.add_argument("--wcag", action="store_true",
                         help="check against WCAG's machine-testable criteria too: axe-core "
-                             "on the HTML pages and EPUBs, with Playwright, and veraPDF's "
+                             "on the HTML pages and EPUBs, with Playwright, veraPDF's "
                              "WCAG 2.2 machine profile on each PDF, with its WCAG modules "
-                             "from VERAPDF_WCAG; what they find is a note, never an error")
+                             "from VERAPDF_WCAG, and DAISY's Ace on each EPUB, when it's "
+                             "installed; what they find is a note, never an error")
     wcag_lib.add_choices(parser)
     parser.add_argument("--verbose", action="store_true",
                         help="with --wcag, a note for each element axe-core names and each "
@@ -278,6 +302,10 @@ def main():
                                    best_practice, experimental,
                                    None if cache is None else cache.part("axe"),
                                    not args.force)
+        all_found += found
+        sections += extra
+        found, extra = audit_ace(files, not args.quick,
+                                 None if cache is None else cache.part("ace"), not args.force)
         all_found += found
         sections += extra
     if cache is not None:

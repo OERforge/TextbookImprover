@@ -2589,6 +2589,74 @@ def check_math_asked_for():
     ]
 
 
+def bound_twice(text):
+    """{name: [lines]} of the names a Python file's own statements bind
+    more than once at its top level: a constant, a function, or a class,
+    which the later binding replaces wherever the module reads it. A name
+    bound in an if or a try, as an import that may fail is, isn't one of
+    them, nor is setting an attribute or an item of one."""
+    import ast
+    found = {}
+    for node in ast.parse(text).body:
+        names = []
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                for part in ([target] + list(getattr(target, "elts", []))):
+                    if isinstance(part, ast.Name):
+                        names.append(part.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(node.name)
+        for name in names:
+            found.setdefault(name, []).append(node.lineno)
+    return {name: lines for name, lines in found.items() if len(lines) > 1}
+
+
+def check_bound_once():
+    """No Python file of the pipeline binds a name twice at its top level:
+    latexsource.py's second POINTS, a table of lengths for rules without
+    dd and cc, had replaced the first, so a space between words set in
+    didot points was taken for none. And the lengths it reads, in TeX's
+    units (latexsource.points, word_spaces)."""
+    twice, seen = [], 0
+    for folder in ("bin", "lib", "util", "tests"):
+        for top, _, files in os.walk(os.path.join(ROOT, folder)):
+            for name in sorted(files):
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(top, name)
+                with open(path, encoding="utf-8") as fh:
+                    found = bound_twice(fh.read())
+                seen += 1
+                twice += ["%s: %s at lines %s" % (os.path.relpath(path, ROOT), key,
+                                                   ", ".join(map(str, lines)))
+                          for key, lines in sorted(found.items())]
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    counter = {}
+    spaced = latexsource.word_spaces(
+        "Eff\\hspace{2dd}Gee, Ach\\hspace{1cc}Eye, Jay\\hspace{1.5dd}Kay, Ell\\hspace{2nd}Em, "
+        "Oh\\hspace{0.7mm}Pea, and Que\\hspace{1bp}Are.", counter)
+    return [
+        ("no Python file binds a name twice at its top level, a constant, a function, or a "
+         "class",
+         lambda: seen > 100 and bound_twice("A = 1\nB = 2\nA = 3\ndef f(): pass\nf = 4\n")
+         == {"A": [1, 3], "f": [4, 5]} and bound_twice(
+             "try:\n    import x\nexcept ImportError:\n    x = None\nX = {}\nX['a'] = 1\n")
+         == {} and _none_of(twice)()),
+        ("a length in each of TeX's units, didot and cicero among them, in points",
+         lambda: all(abs(latexsource.points(x) - y) < 1e-4 for x, y in (
+             ("2dd", 2.14002), ("1cc", 12.8401), ("1in", 72.27), ("1bp", 1.00375),
+             ("1mm", 2.84528), ("1nd", 1.06698), ("1nc", 12.80374), ("1pc", 12.0),
+             ("65536sp", 1.0))) and latexsource.points("2 furlongs") is None),
+        ("a space of 2 points or more between words, in didot, cicero, and new didot points, "
+         "is a space before its command; less is none",
+         lambda: spaced == "Eff \\hspace{2dd}Gee, Ach \\hspace{1cc}Eye, Jay\\hspace{1.5dd}Kay, "
+         "Ell \\hspace{2nd}Em, Oh\\hspace{0.7mm}Pea, and Que\\hspace{1bp}Are."
+         and counter == {"word_spaces": 3}),
+    ]
+
+
 def check_shortdoi():
     """util/shortdoi.py against a local stand-in for the shortDOI service:
     the DOIs without a Replacement get https://doi.org/ and the shortDOI,
@@ -8753,6 +8821,7 @@ GROUPS = [
      check_images_plan),
     ("the stand-in for Pandoc 3.9 (tests/pandoc39)", check_pandoc39_stand_in),
     ("MathML asked for in every call that writes HTML", check_math_asked_for),
+    ("a name bound once, and lengths in TeX's units", check_bound_once),
     ("front and back matter by name", check_matter_by_name),
     ("types by title", check_types_by_title),
     ("the project's sample", check_project_sample),

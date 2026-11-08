@@ -2033,8 +2033,14 @@ def environment_arguments(text, counter):
 # apart; one of less than 2pt, a sliver inside a name (OpenIntro's
 # sex\_\hspace{0.3mm}male), or less than none, is no space between words.
 WORD_SPACING = re.compile(r"\\(hspace\*?|hfill|hfil|quad|qquad|enspace|enskip)(?![A-Za-z@])")
-POINTS = {"pt": 1.0, "mm": 2.845, "cm": 28.45, "in": 72.27, "bp": 1.004, "pc": 12.0,
-          "dd": 1.07, "cc": 12.84, "em": 10.0, "ex": 4.3, "sp": 1 / 65536}
+# TeX's units in points, as the TeXbook gives them (chapter 10), and
+# pdfTeX's and LuaTeX's new didot and cicero (nd, nc); an em and an ex as
+# a 10-point Computer Modern's, the book's own font unknown here. One table
+# for every length read here: a second, for rules, without dd and cc, had
+# replaced this one, so \hspace{2dd} between words was taken for no space.
+POINTS = {"pt": 1.0, "pc": 12.0, "in": 72.27, "bp": 72.27 / 72, "cm": 72.27 / 2.54,
+          "mm": 72.27 / 25.4, "dd": 1238 / 1157, "cc": 12 * 1238 / 1157, "nd": 685 / 642,
+          "nc": 1370 / 107, "sp": 1 / 65536, "em": 10.0, "ex": 4.3}
 
 
 def word_spaces(text, counter, math_macros=()):
@@ -8408,11 +8414,11 @@ MATH_SPANS = re.compile(
     r"|(?<!\\)\\\[(.+?)\\\]|\\begin\{(equation|align|alignat|flalign|gather|multline"
     r"|eqnarray|displaymath|math)(\*?)\}(.+?)\\end\{\5\6\}", re.S)
 RULE = re.compile(r"\\rule\s*(?:\[[^]]*\])?\s*\{([^}]*)\}\s*\{([^}]*)\}")
-POINTS = {"pt": 1.0, "bp": 1.00375, "mm": 2.845, "cm": 28.45, "in": 72.27,
-          "em": 10.0, "ex": 4.3, "pc": 12.0, "sp": 1 / 65536}
 
 
 def points(length):
+    """A length in points (POINTS), or None for one in another unit, or
+    not a number and a unit."""
     m = re.match(r"\s*(-?[\d.]+)\s*([a-z]{2})\s*$", length or "")
     if not m or m.group(2) not in POINTS:
         return None

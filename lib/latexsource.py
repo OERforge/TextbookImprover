@@ -127,9 +127,38 @@ RENDERED = "rendered"
 # reading the text: what is code, and what is comment or verbatim
 # --------------------------------------------------------------------------
 
+# Inline code, as the reader takes it (3.12.1, Readers/LaTeX/Inline.hs):
+# listings' \lstinline, its options in brackets, and minted's \mintinline,
+# its options and its language, each up to the next of the character it
+# begins with, or to the first } after a { (doinlinecode); and fancyvrb's
+# \Verb, as \verb (doverb), its options too, which the reader takes for the
+# character. Not a } or a #, which a definition's code may have after the
+# command's name (\newcommand{\code}{\lstinline}). Group 1: the character.
+INLINE_CODE = re.compile(r"\\(?:lstinline\s*(?:\[[^]]*\])?"
+                         r"|mintinline\s*(?:\[[^]]*\])?\s*\{[^{}]*\}"
+                         r"|Verb\*?\s*(?:\[[^]]*\])?)\s*([^\sA-Za-z0-9\\%}#])")
+
+
+def closing_on_line(text, start, close):
+    """The index just past the first close at or after start on its line,
+    or -1: inline code ends there, as LaTeX ends \\verb and \\Verb ("\\verb
+    ended by end of line"), and one that went on would hide the rest of
+    the text from every repair."""
+    stop = text.find("\n", start)
+    end = text.find(close, start, len(text) if stop < 0 else stop)
+    return -1 if end < 0 else end + 1
+
+
+def inline_code_end(text, m):
+    """The index just past the inline code INLINE_CODE matched at m, on its
+    line (closing_on_line), or -1."""
+    return closing_on_line(text, m.end(), "}" if m.group(1) == "{" else m.group(1))
+
+
 def skip_spans(text):
     """Spans of text no rewrite may touch, as (start, end) pairs, in
-    order: comments, verbatim environments, and \\verb."""
+    order: comments, verbatim environments, \\verb, and inline code
+    (INLINE_CODE), each on its line (closing_on_line)."""
     spans = []
     i, n = 0, len(text)
     verb_env = re.compile(r"\\begin\s*\{(" + "|".join(
@@ -145,9 +174,11 @@ def skip_spans(text):
                 i = end
                 continue
             m = re.compile(r"\\verb\*?([^a-zA-Z\s*])").match(text, i)
-            if m:
-                end = text.find(m.group(1), m.end())
-                end = n if end < 0 else end + 1
+            end = closing_on_line(text, m.end(), m.group(1)) if m else -1
+            if end < 0:
+                m = INLINE_CODE.match(text, i)
+                end = inline_code_end(text, m) if m else -1
+            if end > 0:
                 spans.append((i, end))
                 i = end
                 continue

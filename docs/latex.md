@@ -42,7 +42,7 @@ A `README.md` beside the master is the repository's, not a page, and so are a `L
 
 ## What is put right before reading
 
-Pandoc's LaTeX reader (3.12) can't take some of what plain LaTeX books do, so the book is copied and the copy put right; the author's files are never written. Each of these was read in Pandoc's source and measured, and is described in `PANDOC-NOTES.md` in the repository, "The LaTeX reader":
+Pandoc's LaTeX reader (3.12) can't take some of what plain LaTeX books do, so the book is copied and the copy put right; the author's files are never written. Code is left as it is: a comment, a verbatim environment, `\verb`, and inline code, listings' `\lstinline`, minted's `\mintinline`, and fancyvrb's `\Verb`, each to its end on its line, as the reader reads it, up to the character it begins with, or the first `}` after a `{`. Each of these was read in Pandoc's source and measured, and is described in `PANDOC-NOTES.md` in the repository, "The LaTeX reader":
 
 - **ifthen's booleans** (`\newboolean`, `\setboolean`, `\ifthenelse{\boolean{...}}`) become etoolbox's toggles, which the reader evaluates. It drops `\ifthenelse`, both branches with it ([jgm/pandoc#11008](https://github.com/jgm/pandoc/issues/11008)). An `\ifthenelse` with any other condition is still dropped, and the run counts them.
 - **`\input file`**, TeX's own form without braces, is braced. The reader stops on it.

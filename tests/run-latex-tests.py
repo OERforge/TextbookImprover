@@ -921,6 +921,78 @@ def case_language(work):
     ]
 
 
+def case_inline_code(work):
+    """Inline code, listings' \\lstinline, minted's \\mintinline, and
+    fancyvrb's \\Verb, as written in the pages, which the reading's repairs
+    took for LaTeX: an environment the book defines in it and a boolean,
+    and \\input, which stopped the reader once the copy braced it, the
+    brace form's too, to its first }, as the reader reads it; each code to
+    its end on its line for every repair (skip_spans), its options and
+    minted's language with it, but not a command of another name, nor the
+    command's name in a definition's code, nor \\verb or inline code its
+    line doesn't close; and the author's files as they were."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    os.makedirs(work)
+    files = {
+        "book.tex": "\\documentclass{book}\n\\usepackage{listings,minted,fancyvrb,ifthen}\n"
+                    "\\newboolean{x}\n\\newenvironment{rouge}{}{}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\n"
+                   "A \\lstinline|\\begin{rouge}x\\end{rouge}| fin.\n\n"
+                   "B \\lstinline[columns=fixed]|\\setboolean{x}{true}| fin.\n\n"
+                   "C \\lstinline|\\input chapitre| fin.\n\n"
+                   "D \\lstinline{\\input chapitre} fin.\n\n"
+                   "E \\mintinline{text}|\\begin{rouge}x\\end{rouge}| fin.\n\n"
+                   "F \\Verb|\\begin{rouge}x\\end{rouge}| fin.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.code\n  title: Code\n"
+                 "  language: fr\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    page = read(work, "html", "one.html") if os.path.exists(
+        os.path.join(work, "html", "one.html")) else ""
+    text = re.sub(r"\s+", " ", page)
+
+    def code(letter, words, attributes=""):
+        """Whether the page has the paragraph of letter's code, as words."""
+        return re.search(r"<p>\s*%s <code%s>%s</code> fin\.\s*</p>" % (
+            letter, attributes, re.escape(words)), text) is not None
+
+    def spans(words):
+        return [words[start:end] for start, end in latexsource.skip_spans(words)]
+    return [
+        ("a LaTeX book is read whose inline code holds \\input, which stopped the reader",
+         lambda: result.returncode == 0 and bool(page)),
+        ("inline code is as written in the pages, an environment of the book's and a "
+         "boolean in it, and \\input, its brace form too",
+         lambda: code("A", "\\begin{rouge}x\\end{rouge}")
+         and code("B", "\\setboolean{x}{true}")
+         and code("C", "\\input chapitre") and code("D", "\\input chapitre")
+         and code("E", "\\begin{rouge}x\\end{rouge}", ' class="text"')
+         and code("F", "\\begin{rouge}x\\end{rouge}")),
+        ("each is code to its end on its line, as the reader reads it, its options and "
+         "minted's language with it, but not a command of another name, nor the command's "
+         "name in a definition's code, nor \\verb or inline code its line doesn't close",
+         lambda: spans("a \\lstinline[language=C]|x| b") == ["\\lstinline[language=C]|x|"]
+         and spans("a \\lstinline {x{y} b") == ["\\lstinline {x{y}"]
+         and spans("a \\mintinline[o]{py}{x} b") == ["\\mintinline[o]{py}{x}"]
+         and spans("a \\Verb[frame=single]|x| b [c]") == ["\\Verb[frame=single]|x|"]
+         and spans("a \\Verb*|x| b") == ["\\Verb*|x|"]
+         and spans("a \\lstinline|x") == []
+         and spans("\\lstinlinex|y|x \\Verbatim|z|a") == []
+         and spans("\\newcommand{\\code}{\\lstinline}\\newcommand{\\v}[1]{\\Verb#1}") == []
+         and spans("a \\Verb. b\n\nc. d") == [] and spans("a \\verb|x\ny| b") == []),
+        ("and the author's files are as they were",
+         lambda: all(read(work, name) == text for name, text in files.items())),
+    ]
+
+
 def case_babel_main(work):
     """A LaTeX book's tagged copy keeps babel's main language the book's, which
     babel takes from \\DocumentMetadata's lang where the book names none
@@ -8615,6 +8687,7 @@ def case_no_contents(work):
 
 CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
+         ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("a LaTeX book's pages in another language, in its copy and its PDF",

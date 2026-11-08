@@ -1375,6 +1375,17 @@ LATEX_READ_CHANGES = (
     ("babel_environment_items", "otherlanguage* or babeltags' environment holding a list's "
      "items read as a \\foreignlanguage of each item's words, which the reader read out of "
      "the list"),
+    ("language_aliases", "environment of the book's own whose code opens otherlanguage* "
+     "(\\newenvironment{allemand}) read as otherlanguage*, in its language, where the reader "
+     "printed the language's name and gave the passage none"),
+    ("item_macro_calls", "call of the book's own command that makes a list's item (\\item) "
+     "in otherlanguage* written out, so the item is in the list, in the language, where the "
+     "reader read it out of the list"),
+    ("own_inline_code", "use of the book's own \\Verb, \\lstinline, or \\mintinline "
+     "renamed, which the copy took for inline code"),
+    ("provided_inline_code", "\\providecommand of \\Verb, \\lstinline, or \\mintinline left "
+     "out where the book loads the package that defines it, which LaTeX then doesn't take, "
+     "and the reader would"),
     ("babel_paragraphs", "\\foreignlanguage's words holding a paragraph break read as a "
      "\\foreignlanguage in each paragraph, which stopped the reader"),
     ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read "
@@ -1705,9 +1716,10 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                                  for name in latexsource.author_names(a.get("c", []))]
         language = latexsource.preamble_language(prep["preamble"])
         LATEX_LANGUAGES[master] = language
-        unloaded = latexsource.babel_main_unloaded(prep["preamble"])
+        unloaded, where = latexsource.babel_main_unloaded(latexsource.preamble_pieces(
+            base, master, prep["preamble"]), with_file=True)
         if unloaded:
-            say(f"WARNING: babel's main= in {master} names {unloaded}, which babel takes "
+            say(f"WARNING: babel's main= in {where} names {unloaded}, which babel takes "
                 "whole, its modifier with it, for a language it hasn't: it loads none for it, "
                 "saying nothing, and sets the last it loaded as its main language. Leave out "
                 f"main= and give {unloaded} last among babel's options, which babel takes for "

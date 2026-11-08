@@ -58,6 +58,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import difflib
+import functools
 import glob
 import hashlib
 import json
@@ -175,28 +176,27 @@ def inline_code_end(text, m):
     return closing_on_line(text, m.end(), "}" if m.group(1) == "{" else m.group(1))
 
 
-def skip_spans(text):
+def skip_spans(text, inline_code=True):
     """Spans of text no rewrite may touch, as (start, end) pairs, in
     order: comments, verbatim environments, \\verb, and inline code
     (INLINE_CODE), each on its line (closing_on_line), and an address's
-    argument (ADDRESS_ARGUMENT), braced or on its line, a % in it none."""
+    argument (ADDRESS_ARGUMENT), braced or on its line, a % in it none;
+    without inline code where inline_code is false."""
     spans = []
     i, n = 0, len(text)
-    verb_env = re.compile(r"\\begin\s*\{(" + "|".join(
-        re.escape(v) for v in VERBATIM) + r")\}")
     while i < n:
         c = text[i]
         if c == "\\":
-            m = verb_env.match(text, i)
+            m = VERBATIM_BEGIN.match(text, i)
             if m:
                 end = text.find("\\end{" + m.group(1) + "}", m.end())
                 end = n if end < 0 else end + len("\\end{" + m.group(1) + "}")
                 spans.append((i, end))
                 i = end
                 continue
-            m = re.compile(r"\\verb\*?([^a-zA-Z\s*])").match(text, i)
+            m = VERB.match(text, i)
             end = closing_on_line(text, m.end(), m.group(1)) if m else -1
-            if end < 0:
+            if end < 0 and inline_code:
                 m = INLINE_CODE.match(text, i)
                 end = inline_code_end(text, m) if m else -1
             if end > 0:
@@ -557,16 +557,28 @@ def resolve(base, name, folder=""):
     return None
 
 
+# A file the book writes itself as LaTeX builds it, its name the group,
+# which the reader reads an \\input of from the environment, as LaTeX reads
+# it (readFileFromTexinputs, Readers/LaTeX.hs, 3.12.1 and 3.13).
+FILECONTENTS = re.compile(r"\\begin\s*\{\s*filecontents\*?\s*\}\s*(?:\[[^]]*\])?\s*"
+                          r"\{\s*([^{}]+?)\s*\}")
+
+
 def reached(base, master):
     """(files, missing): every .tex file the master reaches through
     \\input, \\include, and \\subfile, and through a call of one of the
     book's macros that does (include_macros), in the order first reached,
-    and the names it gives that aren't there. A name inside a macro's
-    definition made from its arguments (#2/TeX/#2) is the call's to make."""
+    and the names it gives that aren't there, but one a filecontents
+    environment of the book's writes. A name inside a macro's definition
+    made from its arguments (#2/TeX/#2) is the call's to make."""
     files, missing, texts, queue = [], [], {}, [master]
     folder = os.path.dirname(master)
+    written = set()
 
     def add(target, waiting):
+        name = target.strip().strip('"')
+        if name in written or name + ".tex" in written:
+            return
         path = resolve(base, target, folder)
         if path is None:
             if target not in missing:
@@ -580,6 +592,7 @@ def reached(base, master):
                 continue
             files.append(name)
             text = texts[name] = read_text(os.path.join(base, name))
+            written.update(m.group(1) for m in code_matches(FILECONTENTS, text))
             for m in code_matches(INPUT, text):
                 target = m.group(2) or m.group(3)
                 if not re.search(r"#\d", target):
@@ -700,7 +713,7 @@ BABEL_GIVEN = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[([^]]*)\])?\s*
                          r"|\\PassOptionsToPackage\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
 
 
-def babel_main_unloaded(preamble):
+def babel_main_unloaded(preamble, with_file=False):
     """main='s value where it names a language with a modifier
     (\\usepackage[main=ngerman.foo,english]{babel}), which babel loads
     none for: it keeps the value whole, finds no such language, and sets
@@ -710,19 +723,68 @@ def babel_main_unloaded(preamble):
     (BABEL_GIVEN), \\PassOptionsToPackage's before the package's own, and
     none after it's loaded; a second is an error babel reports ("Bad
     option 'main=…'", a previous setting), past which it keeps the first
-    (measured)."""
-    main = None
-    for m in code_matches(BABEL_GIVEN, preamble):
-        loads = m.group(2) is not None
-        if "babel" not in package_names(m.group(2) if loads else m.group(4)):
-            continue
-        for option in option_list(COMMENT.sub("", (m.group(1) if loads else m.group(3)) or "")):
-            key, _, value = option.partition("=")
-            if key.strip() == "main" and main is None:
-                main = value.strip()
-        if loads:
-            return main if main and "." in main else ""
-    return ""
+    (measured). preamble: its text, or [(file's name, text)], the pieces
+    LaTeX reads in order (preamble_pieces); with_file, (value, the name of
+    the file that gives it)."""
+    main = given = None
+    pieces = [("", preamble)] if isinstance(preamble, str) else preamble
+    for name, text in pieces:
+        for m in code_matches(BABEL_GIVEN, text):
+            loads = m.group(2) is not None
+            if "babel" not in package_names(m.group(2) if loads else m.group(4)):
+                continue
+            for option in option_list(COMMENT.sub("", (m.group(1) if loads
+                                                        else m.group(3)) or "")):
+                key, _, value = option.partition("=")
+                if key.strip() == "main" and main is None:
+                    main, given = value.strip(), name
+            if loads:
+                value = main if main and "." in main else ""
+                return (value, given if value else None) if with_file else value
+    return ("", None) if with_file else ""
+
+
+# A package's loading, its names the group.
+PACKAGE_LOAD = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^]]*\])?\s*\{([^{}]*)\}")
+
+
+def preamble_pieces(base, master, preamble):
+    """[(file's name, text)]: the master's preamble, and in their places,
+    each file its code \\input-s and each package of the book's own it
+    loads (a .sty in the master's folder or the book's), and theirs, as
+    LaTeX reads them, each piece by the file it's in; a file read once,
+    as a package is, and a few deep."""
+    folder, seen = os.path.dirname(master), set()
+
+    def own(name):
+        for where in dict.fromkeys((folder, "")):
+            path = os.path.normpath(os.path.join(where, name + ".sty"))
+            if os.path.isfile(os.path.join(base, path)):
+                return path
+        return None
+
+    def pieces(name, text, depth):
+        spans = skip_spans(text)
+        found = sorted(code_matches(INPUT, text, spans) + code_matches(PACKAGE_LOAD, text, spans),
+                       key=lambda m: m.start())
+        out, pos = [], 0
+        for m in found:
+            if m.re is INPUT:
+                if m.group(1) not in (None, "input"):
+                    continue
+                paths = [resolve(base, m.group(2) or m.group(3), folder)]
+            else:
+                paths = [own(n) for n in package_names(m.group(1))]
+            paths = [p for p in paths if p and p not in seen]
+            if not paths or depth > 8:
+                continue
+            out.append((name, text[pos:m.end()]))
+            for path in paths:
+                seen.add(path)
+                out += pieces(path, read_text(os.path.join(base, path)), depth + 1)
+            pos = m.end()
+        return out + [(name, text[pos:])]
+    return pieces(master, preamble, 0)
 
 
 def babel_main(options, class_options=()):
@@ -2427,6 +2489,50 @@ def babel_tags(texts, environments=False):
     return {tag: language for tag, language in tags.items() if "text" + tag not in defined}
 
 
+LANGUAGE_OPENING = re.compile(r"\s*\\begin\s*\{\s*otherlanguage\*\s*\}\s*\{\s*([A-Za-z]+|#1)\s*\}\s*")
+LANGUAGE_CLOSING = re.compile(r"\s*\\end\s*\{\s*otherlanguage\*\s*\}\s*")
+
+
+def language_aliases(texts):
+    """{name: language} for each environment the book defines, taking no
+    arguments, whose codes are babel's otherlanguage*'s beginning in the
+    language and its end, but for spaces and comments
+    (\\newenvironment{allemand}{\\begin{otherlanguage*}{ngerman}}
+    {\\end{otherlanguage*}}), or taking one, the language, its codes
+    otherlanguage*'s in it, its language "#1"
+    (\\newenvironment{langue}[1]{\\begin{otherlanguage*}{#1}}{...}), or
+    copies from one, in code, read in order, each replacing what came
+    before it: such an environment is otherlanguage* in that language,
+    where the reader expanded it to one, printing its language's name and
+    giving the passage none."""
+    found = {}
+    for text in texts:
+        for m in sorted(code_matches(BOOK_ENVIRONMENT, text)
+                        + code_matches(ENVIRONMENT_COPY, text), key=lambda m: m.start()):
+            name = m.group(1)
+            found.pop(name, None)
+            if m.re is ENVIRONMENT_COPY:
+                if m.group(2) in found:
+                    found[name] = found[m.group(2)]
+                continue
+            parts = [COMMENT.sub("", part) for part in environment_code(text, m)]
+            if "Document" in m.group(0):
+                if len(parts) != 3 or parts[0].strip() not in ("", "m"):
+                    continue
+                count, parts = len(parts[0].strip()), parts[1:]
+            else:
+                spec = re.compile(r"\s*(?:\[\s*(\d)\s*\])?(\s*\[)?").match(
+                    text, argument_space(text, m.end()))
+                if spec.group(2) or len(parts) != 2:     # a default: an optional one
+                    continue
+                count = int(spec.group(1) or 0)
+            opening = LANGUAGE_OPENING.fullmatch(parts[0])
+            if opening and LANGUAGE_CLOSING.fullmatch(parts[1]) \
+                    and count == (opening.group(1) == "#1"):
+                found[name] = opening.group(1)
+    return found
+
+
 def environment_code(text, m):
     """What a BOOK_ENVIRONMENT match defines its environment with: the
     text of each braced argument after the name, \\newenvironment's
@@ -2453,17 +2559,18 @@ def environment_code(text, m):
     return parts
 
 
-def book_environments(texts):
+def book_environments(texts, macros=()):
     """{name: kind} for the environments the book defines (BOOK_ENVIRONMENT)
     or copies (ENVIRONMENT_COPY), in code, that the reader takes inside a
     paragraph, as it expands them: "formula" for a copy of a formula's
     environment (INLINE_ENVIRONMENTS), which it expands to the formula;
     "text" for the rest, but not one whose code holds a paragraph break, a
     command the reader reads only as a block (BLOCK_COMMAND), \\section,
-    say, or an environment it doesn't take there, a list's or another of
-    the book's that does, nor a copy of one the book doesn't define, such
-    as itemize. Definitions and copies are read in order, each replacing
-    what came before it."""
+    say, a call of one of macros, the book's commands that make a block
+    (block_macros), or an environment it doesn't take there, a list's or
+    another of the book's that does, nor a copy of one the book doesn't
+    define, such as itemize. Definitions and copies are read in order,
+    each replacing what came before it."""
     codes, formulas = {}, set()
     for text in texts:
         found = sorted(code_matches(BOOK_ENVIRONMENT, text)
@@ -2496,7 +2603,10 @@ def book_environments(texts):
                    if not in_spans(b.start(), notes)) or any(
             name not in INLINE_ENVIRONMENTS and name not in formulas
             and (name not in codes or name in blocks) for name in inner) or any(
-            not in_spans(m.start(), notes) for m in code_matches(BLOCK_COMMAND, part, spans))
+            not in_spans(m.start(), notes) for m in code_matches(BLOCK_COMMAND, part, spans)) \
+            or bool(macros) and any(not in_spans(m.start(), notes)
+                                    for m in code_matches(calls, part, spans))
+    calls = macro_pattern(macros) if macros else None
 
     # Until no more are found, since one of the book's may hold another.
     while True:
@@ -2682,18 +2792,34 @@ def comment_tail(words, last, stop, skipped):
         tail = end = start
 
 
+def comment_head(words, last, stop, skipped):
+    """Where the comments that begin words[last:stop] end, with the spaces
+    and line ends before and between them, before the piece's first words;
+    last where none do. skipped: skip_spans(words)."""
+    head = at = last
+    while True:
+        at += len(words[at:stop]) - len(words[at:stop].lstrip())
+        end = next((e for s, e in skipped if s == at and words.startswith("%", s)), None)
+        if end is None or end > stop:
+            return head
+        head = at = end
+
+
 def passage_pieces(words, cuts, skipped, wrap, box=False):
     """words, cut at cuts, (start, end, what goes there) in order, each
     piece between them, but one of nothing but space, wrap(piece), the
     spaces at its ends outside, or for a box (box_line) inside, as they're
-    the box's: the comments that end a piece after its brace
-    (comment_tail), which the last would take, and a piece ending in a
-    backslash of its own, a control space with the line's end, keeping its
-    line end, or the backslash would take the brace. skipped:
-    skip_spans(words)."""
+    the box's: the comments that begin a piece before its command
+    (comment_head), and those that end it after its brace (comment_tail),
+    which the last would take, and a piece ending in a backslash of its
+    own, a control space with the line's end, keeping its line end, or the
+    backslash would take the brace. skipped: skip_spans(words)."""
     pieces, last = [], 0
     for cut in cuts + [None]:
         stop = cut[0] if cut else len(words)
+        head = comment_head(words, last, stop, skipped)
+        pieces.append(words[last:head])
+        last = head
         comment = comment_tail(words, last, stop, skipped)
         piece, tail = words[last:comment], words[comment:stop]
         if box:
@@ -2782,8 +2908,12 @@ def note_spans(text, skipped):
 
 def macro_pattern(macros):
     """A call of one of macros (their names): the command's name whole."""
-    return re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(
-        re.escape(n) for n in sorted(macros, key=len, reverse=True)))
+    return _macro_pattern(tuple(sorted(macros, key=lambda n: (-len(n), n))))
+
+
+@functools.lru_cache(maxsize=64)
+def _macro_pattern(names):
+    return re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(re.escape(n) for n in names))
 
 
 def holds_block(words, environments=(), macros=()):
@@ -2813,9 +2943,11 @@ def holds_block(words, environments=(), macros=()):
 
 
 def block_macros(texts, environments=()):
-    """{name: {"arguments": n, "default": d}}, as macro_calls takes them:
-    the macros the book defines, with \\newcommand and its kin or \\def
-    with plain arguments, read as LaTeX reads them (macro_walk), whose body
+    """{name: {"arguments": n, "default": d, "delimiters": t, "body": b}},
+    as macro_calls takes them: the macros the book defines, with \\newcommand
+    and its kin, \\DeclareRobustCommand, xparse's, or \\def, its
+    arguments delimited or not (definitions_in), read as LaTeX reads them
+    (macro_walk), whose body
     holds what the reader reads only as a block (holds_block), a call of
     another such macro among it, so a call of one in an inline command's
     words is set between them as the environment it makes is. texts:
@@ -2824,7 +2956,8 @@ def block_macros(texts, environments=()):
         "arguments": arguments, "default": default, "body": body})[0]
     found = {}
     while True:
-        more = {name: {"arguments": m["arguments"], "default": m["default"]}
+        more = {name: {"arguments": m["arguments"], "default": m["default"],
+                       "delimiters": m.get("delimiters"), "body": m["body"]}
                 for name, m in defined.items()
                 if name not in found and holds_block(m["body"], environments, found)}
         if not more:
@@ -2968,9 +3101,45 @@ def block_content(words, formula_names=(), environments=(), macros=()):
                              if not in_spans(m.start(), skipped)))
 
 
-def language_environments(text, counter, tags=None, environments=(), macros=()):
+def item_macro_calls(text, macros):
+    """(text, n): text with each call in its code of one of macros
+    (block_macros') whose body makes a list's item, an \\item outside its
+    groups and environments, or calls another that does, written out, its
+    arguments in it, as TeX expands it, and how many were; a body with a
+    parameter of a definition inside it (##1) left."""
+    items, defined = {}, {name: m for name, m in dict(macros).items()
+                          if "##" not in m.get("body", "##")}
+    while True:
+        more = {}
+        for name, m in defined.items():
+            if name in items:
+                continue
+            body = m["body"]
+            nested = outermost_environments(body, skip_spans(body)) or []
+            outside = [i.start() for i in top_level(ITEM, body)
+                       + (top_level(macro_pattern(items), body) if items else [])]
+            if any(not any(s <= at < e for s, e in nested) for at in outside):
+                more[name] = m
+        if not more:
+            break
+        items.update(more)
+    written = 0
+    # One call's body may hold another's: as TeX expands them, a few deep.
+    for _ in range(8):
+        calls = macro_calls(text, items, skip_spans(text)) if items else []
+        if not calls:
+            break
+        for start, end, name, args in reversed(calls):
+            text = text[:start] + with_arguments(items[name]["body"], args) + text[end:]
+        written += len(calls)
+    return text, written
+
+
+def language_environments(text, counter, tags=None, environments=(), macros=(), aliases=()):
     """otherlanguage* (OTHERLANGUAGE_STAR), and babeltags' environment, by
-    tags ({tag: language}, babel_tags' environments), in code, each read
+    tags ({tag: language}, babel_tags' environments), and the book's own
+    for otherlanguage*, aliases (language_aliases), among tags too, each
+    counted, in code, each read
     in its language as the reader can read what it holds: cut at each
     \\item outside its groups, its formulas, and the environments in it,
     as a passage in a list holds them, the \\item and its label between
@@ -3007,11 +3176,20 @@ def language_environments(text, counter, tags=None, environments=(), macros=()):
             language, name, opened = text[m.end():named - 1], "otherlanguage*", named
         else:
             language, name, opened = tags[m.group(1)], m.group(1), m.end()
+            if language == "#1":            # the book's, its language an argument
+                at = argument_space(text, opened)
+                named = matching_brace(text, at) if text.startswith("{", at) else -1
+                language = text[at + 1:named - 1].strip() if named > 0 else ""
+                if not re.fullmatch(r"[A-Za-z]+", language):
+                    continue
+                opened = named
         end = environment_close(text, name, m.start(), spans)
         close = re.compile(r"\\end\s*\{\s*%s\s*\}$" % re.escape(name)).search(
             text, m.start(), end) if end >= 0 else None
         if close and balanced(text, opened, close.start(), spans):
             passages.append((m.start(), opened, close.start(), end, language))
+            if name in aliases:
+                counter["language_aliases"] = counter.get("language_aliases", 0) + 1
     passages.sort()
 
     def region(start, stop, inside):
@@ -3032,6 +3210,10 @@ def language_environments(text, counter, tags=None, environments=(), macros=()):
     def passage(p, inside):
         start, opened, closing, end, language = p
         body = region(opened, closing, inside)
+        # The items one of the book's commands makes, so they're cut at.
+        body, written = item_macro_calls(body, macros)
+        if written:
+            counter["item_macro_calls"] = counter.get("item_macro_calls", 0) + written
         skipped = skip_spans(body)
         formulas = formula_spans(body, formula_names)
         nested = outermost_environments(body, skipped)
@@ -3070,13 +3252,14 @@ def language_environments(text, counter, tags=None, environments=(), macros=()):
     return region(0, len(text), passages)
 
 def inline_passages(text, counter, tags=None, environments=(), places=None,
-                    tag_environments=None, macros=()):
+                    tag_environments=None, macros=(), aliases=()):
     """The commands whose words the reader reads as inlines, in code, as
     it can read them, where they hold what it stops on, or are dropped.
     babel's for a passage in another language (FOREIGN_LANGUAGE):
     babeltags' \\textfr{X} as \\foreignlanguage{french}{X}, by tags
     (babel_tags); otherlanguage* and babeltags' environment, by
-    tag_environments, in their languages (language_environments);
+    tag_environments, and the book's own for otherlanguage*, by aliases
+    (language_aliases), in their languages (language_environments);
     \\foreignlanguage without its options; and its words,
     where they hold a paragraph break, a \\foreignlanguage of each
     paragraph, so the paragraph keeps the words before and after them, as
@@ -3100,8 +3283,8 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
     dropped them with their words. The boxes (LINE_BOX), whose words
     LaTeX sets on one line, a paragraph break as LaTeX takes it there
     (box_line), a passage's or a quotation's in their words too, as the
-    box's. A piece
-    of nothing the reader reads (NOTHING_READ) is left as it is. And for
+    box's. A piece of nothing the reader reads (NOTHING_READ) is left as
+    it is. And for
     them and the rest (FORMATTING), an environment the reader doesn't take
     there between the command around the words before it and after it,
     without the command's formatting, which the reader can't give a block,
@@ -3115,7 +3298,8 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
             re.escape(t) for t in sorted(tags, key=len, reverse=True)))
         text = substitute(command, text, lambda m: "\\foreignlanguage{%s}" % tags[m.group(1)],
                           counter, "babel_tags")
-    text = language_environments(text, counter, tag_environments, environments, macros)
+    text = language_environments(text, counter, dict(tag_environments or {}, **dict(aliases)),
+                                 environments, macros, aliases)
     spans = skip_spans(text)
     formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
     math = formula_spans(text, formula_names)
@@ -3538,8 +3722,96 @@ def vbox_paragraphs(text, counter, environments=(), macros=()):
     return text
 
 
+INLINE_CODE_NAMES = ("Verb", "lstinline", "mintinline")
+# The packages that define each: fancyvrb's \\Verb, which fvextra and minted
+# load.
+INLINE_CODE_PACKAGES = {"Verb": ("fancyvrb", "fvextra", "minted"), "lstinline": ("listings",),
+                        "mintinline": ("minted",)}
+
+
+# tcolorbox's libraries that load listings or minted, given as its options
+# or to \\tcbuselibrary (tcolorbox.sty 6.10.0): listingsutf8's and
+# documentation's load listings's, most is a list holding listingsutf8, and
+# all one holding it and minted.
+TCOLORBOX_LIBRARIES = {"listings": ("listings",), "listingsutf8": ("listings",),
+                       "documentation": ("listings",), "most": ("listings",),
+                       "minted": ("minted",), "all": ("listings", "minted")}
+TCOLORBOX_LIBRARY = re.compile(r"\\(?:usepackage|RequirePackage)\s*\[([^]]*)\]\s*"
+                               r"\{\s*tcolorbox\s*\}|\\tcbuselibrary\s*\{([^{}]*)\}")
+
+
+def loaded_packages(texts):
+    """The packages texts' code loads, by name, and the ones it loads
+    through tcolorbox's libraries (TCOLORBOX_LIBRARIES)."""
+    loaded = set()
+    for text in texts:
+        spans = skip_spans(text)
+        loaded.update(name for m in code_matches(PACKAGE_LOAD, text, spans)
+                      for name in package_names(m.group(1)))
+        for m in code_matches(TCOLORBOX_LIBRARY, text, spans):
+            for library in option_list(COMMENT.sub("", m.group(1) or m.group(2) or "")):
+                loaded.update(TCOLORBOX_LIBRARIES.get(library.strip(), ()))
+    return loaded
+
+
+def own_inline_code(texts, packages=()):
+    """(own, provided): the names of INLINE_CODE's commands, fancyvrb's
+    \\Verb, listings' \\lstinline, and minted's \\mintinline, that the book
+    defines itself, in code, in any form the reader reads
+    (COMMAND_DEFINITION), \\providecommand's and \\ProvideDocumentCommand's
+    where the book loads no package that defines it; and those it gives
+    only \\providecommand's or \\ProvideDocumentCommand's where it loads one,
+    which LaTeX doesn't take. The reader reads such a command as the book
+    defines it, either way, but the copy's rewrites took it for inline
+    code. A package is one texts load, or packages, the book's own
+    packages' code (preamble_pieces'), or one tcolorbox's libraries load
+    (loaded_packages)."""
+    defined, provided = set(), set()
+    for text in texts:
+        for m in code_matches(COMMAND_DEFINITION, text, skip_spans(text, False)):
+            name = m.group(1) or m.group(2) or m.group(3)
+            (provided if re.match(r"\\Provide", m.group(0), re.I) else defined).add(name)
+    loaded = loaded_packages(list(texts) + list(packages))
+    own = [name for name in INLINE_CODE_NAMES if name in defined or (
+        name in provided and not loaded.intersection(INLINE_CODE_PACKAGES[name]))]
+    return own, [name for name in INLINE_CODE_NAMES if name in provided and name not in own]
+
+
+def own_code_renamed(text, names, provided=(), counter=None):
+    """text with each of names (own_inline_code's) in code, a call or the
+    definition, renamed \\OERown<name>, which the copy's rewrites read as
+    any command, and the reader as the book defines it; and the
+    \\providecommand of each of provided left out, which LaTeX doesn't
+    take where the package defines the command, and the reader would."""
+    counter = {} if counter is None else counter
+    spans = skip_spans(text, False)
+    if provided:
+        cut = [d for d in definitions_in(text, spans) if d[2] in provided and d[6]]
+        for d in reversed(cut):
+            text = text[:d[0]] + text[d[1]:]
+        if cut:
+            counter["provided_inline_code"] = counter.get("provided_inline_code", 0) + len(cut)
+            spans = skip_spans(text, False)
+    if not names:
+        return text
+    pattern = re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(names))
+    return substitute_in_code(pattern, text, spans, lambda m: "\\OERown" + m.group(1),
+                              counter, "own_inline_code")
+
+
+def substitute_in_code(pattern, text, spans, make, counter, key):
+    """text with each of pattern's matches outside spans made make(m),
+    counted under key."""
+    found = [m for m in pattern.finditer(text) if not in_spans(m.start(), spans)]
+    for m in reversed(found):
+        text = text[:m.start()] + make(m) + text[m.end():]
+    if found:
+        counter[key] = counter.get(key, 0) + len(found)
+    return text
+
+
 def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
-                places=None, tag_environments=None, block_macros=()):
+                places=None, tag_environments=None, block_macros=(), language_aliases=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
@@ -3547,7 +3819,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     environments, the ones it defines (book_environments); places, a list
     for inline_passages' places; tag_environments, its babeltags whose
     environments are babel's (babel_tags); block_macros, its macros that
-    make a block (block_macros)."""
+    make a block (block_macros); language_aliases, its environments for
+    otherlanguage* (language_aliases)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -3578,7 +3851,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     text = language_marks(text, counter)
     text = vbox_paragraphs(text, counter, environments, block_macros)
     text = inline_passages(text, counter, tags, environments, places, tag_environments,
-                           macros=block_macros)
+                           macros=block_macros, aliases=language_aliases)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -4724,9 +4997,21 @@ def say_left_out(left_out, say):
 # --------------------------------------------------------------------------
 
 MACRO_DEFINITION = re.compile(
-    r"\\(?:(?:re)?newcommand|providecommand)\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))"
-    r"\s*(?:\[\s*(\d)\s*\])?\s*")
-PLAIN_DEFINITION = re.compile(r"\\[gex]?def\s*\\([A-Za-z@]+)\s*((?:#\d\s*)*)\{")
+    r"\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand)\*?\s*"
+    r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*(?:\[\s*(\d)\s*\])?\s*")
+# \def's parameter text, up to the body's brace: its parameters, and what
+# delimits them, characters and control sequences (\def\vocab#1;{...},
+# \def\pt(#1,#2){...}), a space among them, as TeX reads it; not a
+# parameter that runs to a brace (#1#{), which LaTeX keeps.
+PLAIN_DEFINITION = re.compile(r"\\[gex]?def\s*\\([A-Za-z@]+)\s*"
+                              r"((?:#\d|\\[A-Za-z@]+[ \t]*|\\[^A-Za-z@]|[^{}#%\\])*)\{")
+# xparse's definition of a command, \NewDocumentCommand{\name}{spec}{body},
+# and its kin; read where the spec is mandatory arguments (m, +m) after at
+# most one optional one with a default, first (O{...}), as \newcommand's.
+DOCUMENT_COMMAND = re.compile(
+    r"\\(New|Renew|Provide|Declare)(?:Expandable)?DocumentCommand\s*"
+    r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*\{")
+DOCUMENT_SPEC = re.compile(r"\s*(?:\+?\s*O\s*\{([^{}]*)\}\s*)?((?:\+?\s*m\s*)*)")
 BODY_GRAPHICS = re.compile(r"\\includegraphics\s*(\*)?\s*(\[[^]]*\])?\s*\{")
 ALT_ARGUMENT = re.compile(r"(?:^\[|,)\s*alt\s*=\s*(?:\{\s*#(\d)\s*\}|#(\d))\s*(?=[,\]])")
 OWN_KEY = re.compile(r"(?:^\[|,)\s*(?:alt\s*=|artifact\s*(?:=|(?=[,\]])))")
@@ -4788,13 +5073,47 @@ def image_macro(body, arguments, default):
             "keyed": bool(OWN_KEY.search(options)) and not alt}
 
 
+def parameter_delimiters(parameters):
+    """A \\def's parameter text (PLAIN_DEFINITION's) as (arguments,
+    delimiters): delimiters None where it's plain (#1#2), else what must
+    come before the first argument, and after each, "" for one that isn't
+    delimited, as TeX reads it: a space is one (#1 #2), but not after a
+    control word, which takes it. (None, None) for a parameter text with
+    no argument and something else, which isn't a definition read here
+    (\\expandafter\\def\\csname x\\endcsname{...})."""
+    parts = re.split(r"#\d", parameters)
+    if len(parts) == 1:
+        return (0, None) if not parameters.strip() else (None, None)
+    if not any(parts):
+        return len(parts) - 1, None
+    return len(parts) - 1, tuple(parts)
+
+
 def definitions_in(text, skip):
     """Each definition in text outside the spans in skip, \\newcommand and
-    its kin or \\def with plain arguments, in order: (start, end, name,
-    arguments, default, body, provide), end just past the body's closing
-    brace, default the first argument's when it's optional, else None, and
-    provide whether it's \\providecommand."""
+    its kin, \\DeclareRobustCommand, xparse's with a spec \\newcommand's
+    could be (DOCUMENT_SPEC), or \\def, in order: (start, end, name,
+    arguments, default, body, provide, delimiters), end just past the
+    body's closing brace, default the first argument's when it's optional,
+    else None, provide whether it's \\providecommand or
+    \\ProvideDocumentCommand, and delimiters a \\def's parameter text's
+    (parameter_delimiters), or None."""
     found = []
+    for m in DOCUMENT_COMMAND.finditer(text):
+        if in_spans(m.start(), skip):
+            continue
+        close = matching_brace(text, m.end() - 1)
+        spec = DOCUMENT_SPEC.fullmatch(text, m.end(), close - 1) if close > 0 else None
+        if not spec:
+            continue
+        at = argument_space(text, close)
+        body = matching_brace(text, at) if text.startswith("{", at) else -1
+        if body < 0:
+            continue
+        default = spec.group(1)
+        arguments = spec.group(2).count("m") + (default is not None)
+        found.append((m.start(), body, m.group(2) or m.group(3), arguments, default,
+                      text[at + 1:body - 1], m.group(1) == "Provide", None))
     for m in MACRO_DEFINITION.finditer(text):
         if in_spans(m.start(), skip):
             continue
@@ -4814,15 +5133,16 @@ def definitions_in(text, skip):
             continue
         found.append((m.start(), close, m.group(1) or m.group(2), int(m.group(3) or 0),
                       default, text[pos + 1:close - 1],
-                      text.startswith("\\providecommand", m.start())))
+                      text.startswith("\\providecommand", m.start()), None))
     for m in PLAIN_DEFINITION.finditer(text):
         if in_spans(m.start(), skip):
             continue
+        arguments, delimiters = parameter_delimiters(m.group(2))
         close = matching_brace(text, m.end() - 1)
-        if close < 0:
+        if close < 0 or arguments is None:
             continue
-        found.append((m.start(), close, m.group(1), len(re.findall(r"#\d", m.group(2))),
-                      None, text[m.end():close - 1], False))
+        found.append((m.start(), close, m.group(1), arguments, None, text[m.end():close - 1],
+                      False, delimiters))
     return sorted(found)
 
 
@@ -4903,16 +5223,17 @@ def macro_walk(texts, describe, includes=None, after_preamble=None, at=None, mac
     macros = {} if macros is None else macros
     defined, values, spans_by_text, snapshots = set(), {}, {}, {}
 
-    def define(found, arguments, default, body, provide):
+    def define(found, arguments, default, body, provide, delimiters=None):
         if provide and found in defined:
             return
         defined.add(found)
         macro = describe(body, arguments, default)
         if macro:
-            macros[found] = macro
+            # A \\def's delimiters, which its calls are read by.
+            macros[found] = dict(macro, delimiters=delimiters) if delimiters else macro
         else:
             macros.pop(found, None)
-        if arguments == 0 and default is None:
+        if arguments == 0 and default is None and not delimiters:
             values[found] = body
         else:
             values.pop(found, None)
@@ -5017,20 +5338,101 @@ def argument_space(text, pos):
     return ARGUMENT_SPACE.match(text, pos).end()
 
 
+# After a control word, the spaces TeX's tokenizer takes with it, and one
+# line end.
+WORD_SPACE = re.compile(r"[ \t]*(?:\n[ \t]*)?")
+
+
+def delimiter_pattern(delimiter):
+    """A \\def's delimiter (parameter_delimiters') as a pattern of the
+    text that matches it at a call, token by token, as TeX matches it: a
+    control word with the spaces after it, which TeX takes with it, a
+    space as any run of spaces and one line end, and a character as
+    itself."""
+    out, pos = [], 0
+    for t in re.finditer(r"\\[A-Za-z@]+[ \t\n]*|\\.|\s+|.", delimiter, re.S):
+        token = t.group(0)
+        if re.match(r"\\[A-Za-z@]", token):
+            out.append(re.escape(token.rstrip()) + r"(?![A-Za-z@])" + WORD_SPACE.pattern)
+        elif token.isspace():
+            out.append(r"(?:[ \t]+(?:\n[ \t]*)?|[ \t]*\n[ \t]*)")
+        else:
+            out.append(re.escape(token))
+    return re.compile("".join(out))
+
+
+def delimited_arguments(text, pos, delimiters):
+    """A call's arguments, read from pos, just past the command's name,
+    by a \\def's delimiters (parameter_delimiters'), as TeX reads them:
+    after the spaces the name takes, what comes before the first,
+    matched; an undelimited one braced, after the spaces TeX skips; a
+    delimited one the shortest text whose groups are whole that its
+    delimiter follows outside them, a comment none of it, the braces
+    around one group taken off. ([(text, start, end)], end) or
+    None, where the call doesn't match, or an undelimited argument isn't
+    braced, as macro_calls leaves it."""
+    pos = WORD_SPACE.match(text, pos).end()     # taken with the command's name
+    if delimiters[0]:
+        found = delimiter_pattern(delimiters[0]).match(text, pos)
+        if not found:
+            return None
+        pos = found.end()
+    args = []
+    for delimiter in delimiters[1:]:
+        if not delimiter:
+            at = argument_space(text, pos)
+            close = matching_brace(text, at) if text.startswith("{", at) else -1
+            if close < 0:
+                return None
+            args.append((text[at + 1:close - 1], at + 1, close - 1))
+            pos = close
+            continue
+        pattern, depth, i, n = delimiter_pattern(delimiter), 0, pos, len(text)
+        while True:
+            if i >= n:
+                return None
+            if depth == 0:
+                found = pattern.match(text, i)
+                if found:
+                    break
+            c = text[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c == "%":
+                end = text.find("\n", i)
+                i = n if end < 0 else end + 1
+                continue
+            depth += {"{": 1, "}": -1}.get(c, 0)
+            if depth < 0:
+                return None
+            i += 1
+        start, stop = pos, i
+        if text.startswith("{", start) and matching_brace(text, start) == stop:
+            start, stop = start + 1, stop - 1
+        args.append((text[start:stop], start, stop))
+        pos = found.end()
+    return args, pos
+
+
 def macro_calls(text, macros, skip):
     """(start, end, name, arguments) for each call in text of one of
     macros, outside the spans in skip; each argument (text, start, end)
     as written, an optional one not given its default with no place. A
-    call whose arguments aren't each braced is left out."""
+    call whose arguments aren't each braced is left out, but a \\def's
+    delimited ones (delimited_arguments)."""
     if not macros:
         return []
-    pattern = re.compile(r"\\(" + "|".join(
-        re.escape(n) for n in sorted(macros, key=len, reverse=True)) + r")(?![A-Za-z@])")
     calls = []
-    for m in pattern.finditer(text):
+    for m in macro_pattern(macros).finditer(text):
         if in_spans(m.start(), skip):
             continue
         macro, pos, args = macros[m.group(1)], m.end(), []
+        if macro.get("delimiters"):
+            read = delimited_arguments(text, pos, macro["delimiters"])
+            if read:
+                calls.append((m.start(), read[1], m.group(1), read[0]))
+            continue
         if macro["default"] is not None:
             p = argument_space(text, pos)
             if text.startswith("[", p):
@@ -5099,7 +5501,7 @@ def environment_definitions_in(text, spans=None):
     return [d for d in found if not any(o[0] < d[0] < o[1] for o in found)]
 
 
-def environment_definitions(texts, files, counter, environments=()):
+def environment_definitions(texts, files, counter, environments=(), math_macros=()):
     """Each environment the book defines with \\newenvironment written, in
     the reading copy, as LaTeX defines it: a command \\name for its opening
     code and \\endname for its closing, each \\begin{name} and \\end{name}
@@ -5130,9 +5532,10 @@ def environment_definitions(texts, files, counter, environments=()):
     words); and in a formula, a book's environment for one among them
     (environments, {name: kind}, book_environments), where TeX skips every
     space and an empty group would be a subformula of its own, a
-    superscript's base. A definition's code is read as text, where such a
-    space is meant more often: one used in a formula with a space after
-    an edge gives the superscript after it an empty base. texts: {name:
+    superscript's base; and in the code of a definition of one of
+    math_macros, the macros a formula uses (math_macros), which would give
+    a superscript after it an empty base, though where such a macro is
+    used in text, a space a group would keep is lost. texts: {name:
     text}, changed in place."""
     defined, arguments, openings = set(), set(), {}
     for name in files:
@@ -5151,6 +5554,9 @@ def environment_definitions(texts, files, counter, environments=()):
         # \begin{name} and \end{name} first, in the definitions' codes too.
         spans = skip_spans(text)
         math = formula_spans(text, formula_names)
+        if math_macros:
+            math = sorted(math + [(d[1] - 1 - len(d[5]), d[1] - 1)
+                                  for d in definitions_in(text, spans) if d[2] in math_macros])
         edges = []
         for m in ENVIRONMENT_EDGE.finditer(text):
             if m.group(2) in defined and not in_spans(m.start(), spans):
@@ -7986,18 +8392,40 @@ def prepare(base, work, master, say, macros=""):
     counts = {}
     texts = {}
     originals = [(name, read_text(os.path.join(base, name))) for name in files]
+    master_text = dict(originals).get(master, "")
+    begin = code_matches(BEGIN_DOCUMENT, master_text)
+    preamble_parts = preamble_pieces(base, master, master_text[:begin[0].start()]) \
+        if begin else []
+    # The book's own \Verb or \lstinline, which every rewrite would take
+    # for inline code, renamed first, by the packages its preamble's
+    # files load too.
+    own, provided = own_inline_code([t for _, t in originals],
+                                    [t for _, t in preamble_parts])
+    if own or provided:
+        originals = [(name, own_code_renamed(text, own, provided, counts))
+                     for name, text in originals]
     in_math = math_macros([t for _, t in originals])
     counting = book_counters(originals, originals[0][1] if originals else "")
     tags = babel_tags([t for _, t in originals])
     tag_environments = babel_tags([t for _, t in originals], environments=True)
+    aliases = language_aliases([t for _, t in originals])
     environments = book_environments([t for _, t in originals])
     macros_blocks = block_macros(originals, environments)
+    # An environment whose code calls one of the book's commands that
+    # makes a block makes one, and so does a command whose code holds
+    # that environment: until no more are found.
+    while True:
+        more = book_environments([t for _, t in originals], macros_blocks)
+        if more == environments:
+            break
+        environments = more
+        macros_blocks = block_macros(originals, environments)
     dropped = []
     for name, text in originals:
         places = []
         texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
                                   environments, places, tag_environments,
-                                  block_macros=macros_blocks)
+                                  block_macros=macros_blocks, language_aliases=aliases)
         dropped += sorted((name, author_line(text, line, command, words), command, words)
                           for line, command, words in places)
     # A chapter \include-d by the book's own macro, written out, so the
@@ -8006,7 +8434,7 @@ def prepare(base, work, master, say, macros=""):
     # colors as CSS.
     expand_include_macros(texts, files, counts)
     expand_cite_macros(texts, files, counts)
-    environment_definitions(texts, files, counts, environments)
+    environment_definitions(texts, files, counts, environments, in_math)
     resolve_colors(texts, files, counts)
     write_out_columns(texts, counts)
     write_out_item_refs(texts, counts, counting["ref_names"])

@@ -2235,6 +2235,245 @@ def case_reading_forms(work):
     ]
 
 
+def case_reading_macros(work):
+    """The book's own commands and environments the reader stopped on, or
+    read otherwise than LaTeX: a call of one that makes a block in an
+    inline command's words, defined with \\def and delimited arguments
+    (#1;), with \\DeclareRobustCommand, or with xparse's
+    \\NewDocumentCommand, set apart as \\newcommand's is, and an
+    environment of the book's whose code calls such a command; an
+    environment of the book's for otherlanguage* in its language; the
+    items a command of the book's makes in an otherlanguage* in a list,
+    each in it; one of the book's environments in the code of a command a
+    formula uses with no empty group, which gave a superscript an empty
+    base; a comment that opens a piece before its command; the book's own
+    \\Verb, which the copy took for inline code; babel's main= with a
+    modifier given in a file the preamble \\input-s, warned of, by it, and
+    babel loaded in a package of the book's own; a file the book writes
+    with filecontents there to \\input; a description written into a
+    \\def's delimited argument braced once more, as TeX takes a pair off;
+    a chapter \\include-d through a \\def's delimited argument a page; a
+    \\providecommand of \\Verb left out where fancyvrb is loaded, by a
+    package of the book's own too, or listings by tcolorbox's libraries;
+    the run saying what it read so, and the author's files as they were."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    book, main = os.path.join(work, "book"), os.path.join(work, "main")
+    books = {
+        book: {
+            "book.tex": "\\documentclass{book}\n\\usepackage{amsmath}\n"
+                        "\\usepackage[french,english]{babel}\n"
+                        "\\def\\vocab#1;{\\begin{tabular}{ll}#1\\end{tabular}}\n"
+                        "\\DeclareRobustCommand{\\glossaire}[1]{\\begin{tabular}{ll}#1"
+                        "\\end{tabular}}\n"
+                        "\\NewDocumentCommand{\\lexique}{O{ll} m}{\\begin{tabular}{#1}#2"
+                        "\\end{tabular}}\n"
+                        "\\newcommand{\\titre}[1]{\\section*{#1}}\n"
+                        "\\newenvironment{boite}{\\titre{Bo\\^ite}}{}\n"
+                        "\\newenvironment{enfrancais}{% le passage\n"
+                        "  \\begin{otherlanguage*}{french}}{\\end{otherlanguage*}}\n"
+                        "\\newenvironment{langue}[1]{\\begin{otherlanguage*}{#1}}"
+                        "{\\end{otherlanguage*}}\n"
+                        "\\newcommand{\\q}[1]{\\item #1}\n"
+                        "\\newenvironment{rouge}{}{}\n"
+                        "\\newcommand{\\foo}{\\begin{rouge} x \\end{rouge} }\n"
+                        "\\newcommand{\\Verb}[1]{\\textbf{#1}}\n"
+                        "\\def\\chap#1;{\\include{#1}}\n"
+                        "\\begin{document}\n\\include{one}\n\\chap two;\n\\end{document}\n",
+            "one.tex": "\\chapter{One}\n"
+                       "A \\textbf{gras \\vocab a & b; fin} after.\n\n"
+                       "B \\textbf{gras \\glossaire{a & b} fin} after.\n\n"
+                       "C \\textbf{gras \\lexique[lr]{a & b} fin} after.\n\n"
+                       "D \\textbf{gras \\begin{boite}x\\end{boite} fin} after.\n\n"
+                       "E \\begin{enfrancais}un mot\\end{enfrancais} ici.\n\n"
+                       "F \\begin{langue}{french}deux mots\\end{langue} ici.\n\n"
+                       "\\begin{itemize}\n\\begin{otherlanguage*}{french}\n\\q{un} \\q{deux}\n"
+                       "\\end{otherlanguage*}\n\\end{itemize}\n\n"
+                       "G $\\foo^2$ and \\foo{} text.\n\n"
+                       "H \\textbf{% une note\ngras \\begin{itemize}\\item un\\end{itemize} fin} "
+                       "after.\n\n"
+                       "I \\foreignlanguage{french}{un \\Verb{\\emph{z}} et\n\ndeux} fin.\n",
+            "two.tex": "\\chapter{Two}\nThe second.\n",
+        },
+        main: {
+            "book.tex": "\\documentclass{book}\n\\input{prefs}\n\\usepackage{maison}\n"
+                        "\\begin{document}\nText.\n\\end{document}\n",
+            "prefs.tex": "% Settings.\n\\PassOptionsToPackage{main=ngerman.foo}{babel}\n",
+            "maison.sty": "\\ProvidesPackage{maison}\n\\RequirePackage[ngerman,english]{babel}\n",
+        },
+    }
+    results, pages = {}, {}
+    for folder, files in books.items():
+        os.makedirs(folder)
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.macros\n  title: Macros\n"
+                     "  language: en\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        results[folder] = convert(folder)
+        page = os.path.join(folder, "html", "one.html")
+        pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
+            if os.path.exists(page) else ""
+    said = results[book].stdout + results[book].stderr
+    told = results[main].stdout + results[main].stderr
+    text = pages[book]
+    filed = os.path.join(work, "filed")
+    os.makedirs(filed)
+    # A \def's image macro whose description is a delimited argument, in
+    # the source target's copy: TeX takes the braces off such an argument
+    # where they're around it whole.
+    altdef = os.path.join(work, "altdef")
+    os.makedirs(altdef)
+    png(os.path.join(altdef, "chat.png"), (40, 40, 40))
+    png(os.path.join(altdef, "chien.png"), (80, 80, 80))
+    altdef_book = ("\\documentclass{article}\n\\usepackage{graphicx}\n"
+                   "\\def\\figalt#1;#2;{\\includegraphics[width=1cm,alt=#2]{#1}}\n"
+                   "\\def\\figbraced#1;#2;{\\includegraphics[width=1cm,alt={#2}]{#1}}\n"
+                   "\\begin{document}\nAvant \\figalt chat.png;Ancien; et "
+                   "\\figbraced chien.png;Vieux; fin.\n\\end{document}\n")
+    for name, content in (("book.tex", altdef_book),
+                          ("image-alt.csv", 'Image,Alt\nchat.png,"Un chat, noir"\n'
+                                            "chien.png,Un chien; noir\n"),
+                          ("conversion.yaml", "targets:\n  copy:\n    format: source\n")):
+        with open(os.path.join(altdef, name), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    altdef_run = convert(altdef)
+    altdef_copy = read(altdef, "copy", "book.tex") \
+        if os.path.exists(os.path.join(altdef, "copy", "book.tex")) else ""
+    # A \\providecommand of \\Verb beside fancyvrb, which defines it.
+    provided = os.path.join(work, "provided")
+    os.makedirs(provided)
+    for name, content in (("book.tex", "\\documentclass{book}\n\\usepackage{fancyvrb}\n"
+                                       "\\providecommand{\\Verb}[1]{\\textsc{#1}}\n"
+                                       "\\begin{document}\n\\include{one}\n\\end{document}\n"),
+                          ("one.tex", "\\chapter{One}\nTapez \\Verb|a_b| ici.\n"),
+                          ("conversion.yaml", "targets:\n  html:\n    format: html\n")):
+        with open(os.path.join(provided, name), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    convert(provided)
+    provided_page = re.sub(r"\s+", " ", read(provided, "html", "one.html")) \
+        if os.path.exists(os.path.join(provided, "html", "one.html")) else ""
+    # And beside fancyvrb loaded by a package of the book's own.
+    provided_sty = os.path.join(work, "provided-sty")
+    os.makedirs(provided_sty)
+    for name, content in (("book.tex", "\\documentclass{book}\n\\usepackage{maison}\n"
+                                       "\\providecommand{\\Verb}[1]{\\textsc{#1}}\n"
+                                       "\\begin{document}\n\\include{one}\n\\end{document}\n"),
+                          ("maison.sty", "\\ProvidesPackage{maison}\n\\RequirePackage{fancyvrb}\n"),
+                          ("one.tex", "\\chapter{One}\nTapez \\Verb|a_b| ici.\n"),
+                          ("conversion.yaml", "targets:\n  html:\n    format: html\n")):
+        with open(os.path.join(provided_sty, name), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    convert(provided_sty)
+    provided_sty_page = re.sub(r"\s+", " ", read(provided_sty, "html", "one.html")) \
+        if os.path.exists(os.path.join(provided_sty, "html", "one.html")) else ""
+    with open(os.path.join(filed, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\begin{filecontents*}[overwrite]{code.tex}\nx\n\\end{filecontents*}\n"
+                 "\\documentclass{book}\n\\NewDocumentCommand\\code{m}{\\input{#1}}\n"
+                 "\\begin{document}\n\\code{code.tex}\n\\input{code}\n\\end{document}\n")
+
+    def around(before, block, after):
+        """Whether the page has a paragraph ending in before, block, and
+        one beginning with after (patterns), in order."""
+        return re.search(r"<p>\s*%s\s*</p>\s*%s\s*<p>\s*%s\s*</p>" % (before, block, after),
+                         text) is not None
+
+    table = r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?"
+    item = r"<li>\s*(?:<p>)?%s(?:</p>)?\s*</li>"
+    return [
+        ("a LaTeX book is read whose own commands made blocks the reader stopped on",
+         lambda: results[book].returncode == 0 and bool(text)),
+        ("a call of one that makes a block, defined with \\def and delimited arguments, "
+         "\\DeclareRobustCommand, or xparse's \\NewDocumentCommand, is set apart",
+         lambda: around("A <strong>gras</strong>", table, "<strong>fin</strong> after\\.")
+         and around("B <strong>gras</strong>", table, "<strong>fin</strong> after\\.")
+         and around("C <strong>gras</strong>", table, "<strong>fin</strong> after\\.")
+         and latexsource.macro_calls("A \\vocab {a;b}; c \\pt (1,{2,3}) d", {
+             "vocab": {"arguments": 1, "default": None, "delimiters": ("", ";")},
+             "pt": {"arguments": 2, "default": None, "delimiters": ("(", ",", ")")}},
+             []) == [(2, 15, "vocab", [("a;b", 10, 13)]),
+                     (18, 31, "pt", [("1", 23, 24), ("2,3", 26, 29)])]
+         and [d[2:] for d in latexsource.definitions_in(
+             "\\def\\a#1 #2\\end {A}\\expandafter\\def\\csname b\\endcsname{B}"
+             "\\NewDocumentCommand\\c{s m}{C}\\def\\d#1#{D}", [])]
+         == [("a", 2, None, "A", False, ("", " ", "\\end "))]),
+        ("and so is an environment of the book's whose code calls one",
+         lambda: around("D <strong>gras</strong>",
+                        r"<h2[^>]*>Bo(?:\u00ee|&#xEE;)te</h2>", "x <strong>fin</strong> after\\.")),
+        ("an environment of the book's for otherlanguage* is read in its language, one that "
+         "takes the language too",
+         lambda: re.search(r'<p>\s*E <span lang="fr">un mot</span> ici\.\s*</p>', text)
+         is not None
+         and re.search(r'<p>\s*F <span lang="fr">deux mots</span> ici\.\s*</p>', text)
+         is not None),
+        ("the items a command of the book's makes in otherlanguage* in a list are the list's, "
+         "in the language",
+         lambda: re.search(r"<ul>\s*" + item % '<span lang="fr">un</span>' + r"\s*"
+                           + item % '<span lang="fr">deux</span>' + r"\s*</ul>", text)
+         is not None),
+        ("one of the book's environments in a formula's command gives no empty base",
+         lambda: re.search(r"<p>\s*G <math[^>]*>\s*<semantics>\s*<msup>\s*<mi>x</mi>\s*"
+                           r"<mn>2</mn>\s*</msup>", text) is not None
+         and re.search(r"</math> and x text\.\s*</p>", text) is not None),
+        ("a comment that opens a piece goes before its command",
+         lambda: around("H <strong>gras</strong>", r"<ul>\s*" + item % "un" + r"\s*</ul>",
+                        "<strong>fin</strong> after\\.")
+         and latexsource.inline_passages(
+             "A \\textbf{% c\ngras \\begin{itemize}\\item un\\end{itemize} fin} b", {})
+         == "A % c\n\\textbf{gras} \\begin{itemize}\\item un\\end{itemize} \\textbf{fin} b"),
+        ("the book's own \\Verb is read as it defines it, not as inline code",
+         lambda: re.search(r'<p>\s*I <span lang="fr">un <strong><em>z</em></strong> et</span>'
+                           r'\s*</p>\s*<p>\s*<span lang="fr">deux</span> fin\.\s*</p>', text)
+         is not None
+         and latexsource.own_inline_code(["\\usepackage{minted}\\newcommand{\\Verb}[1]{x}"
+                                          "\\let\\lstinline\\texttt"
+                                          "\\providecommand{\\mintinline}{y}"])
+         == (["Verb", "lstinline"], ["mintinline"])
+         and latexsource.own_inline_code(["\\providecommand{\\mintinline}{y}"])
+         == (["mintinline"], [])),
+        ("and a \\providecommand of \\Verb where fancyvrb is loaded, which LaTeX doesn't take, "
+         "is left out, so \\Verb is fancyvrb's code",
+         lambda: re.search(r"<p>\s*Tapez <code>a_b</code> ici\.\s*</p>", provided_page)
+         is not None),
+        ("and where a package of the book's own loads fancyvrb, or tcolorbox's libraries "
+         "listings",
+         lambda: re.search(r"<p>\s*Tapez <code>a_b</code> ici\.\s*</p>", provided_sty_page)
+         is not None
+         and latexsource.own_inline_code(["\\usepackage{tcolorbox}\\tcbuselibrary{listings}"
+                                          "\\providecommand{\\lstinline}{y}"])
+         == ([], ["lstinline"])
+         and latexsource.own_inline_code(["\\usepackage[most]{tcolorbox}"
+                                          "\\providecommand{\\lstinline}{y}"])
+         == ([], ["lstinline"])),
+        ("babel's main= with a modifier given in a file the preamble \\input-s is warned of, "
+         "by that file, babel loaded in a package of the book's own",
+         lambda: "WARNING: babel's main= in prefs.tex names ngerman.foo, which babel takes "
+                 "whole" in told),
+        ("the run says what it read so",
+         lambda: "2 environment of the book's own whose code opens otherlanguage*" in said
+         and "2 call of the book's own command that makes a list's item (\\item) in "
+             "otherlanguage* written out" in said
+         and "2 use of the book's own \\Verb, \\lstinline, or \\mintinline renamed" in said),
+        ("an image macro's description, a \\def's delimited argument, is braced once more in "
+         "the source target's copy, as TeX takes the braces off such an argument",
+         lambda: altdef_run.returncode == 0
+         and "Avant \\figalt chat.png;{{Un chat, noir}}; et \\figbraced chien.png;"
+             "{Un chien; noir}; fin." in altdef_copy),
+        ("a chapter the book \\include-s through a \\def's delimited argument is a page",
+         lambda: os.path.exists(os.path.join(book, "html", "two.html"))
+         and "The second." in read(book, "html", "two.html")),
+        ("a file the book writes with filecontents is there to read, as the reader reads "
+         "it, \\input by the book's own xparse command too",
+         lambda: latexsource.reached(filed, "book.tex") == (["book.tex"], [])),
+        ("and the author's files are as they were",
+         lambda: all(read(folder, name) == text for folder, files in books.items()
+                     for name, text in files.items())),
+    ]
+
+
 def case_page_languages(work):
     """A LaTeX book's pages in another language than the book's, in its copy
     and in its PDF built from its own files: each \\include-d file's page
@@ -9724,6 +9963,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a list or another environment in an inline command's words", case_inline_blocks),
          ("an address, a box, soul's commands, and polyglossia's passages the reader stopped "
           "on, or dropped", case_reading_forms),
+         ("the book's own commands and environments the reader stopped on, or read "
+          "otherwise", case_reading_macros),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

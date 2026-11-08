@@ -324,6 +324,13 @@ def remediate_file(base, name, text, alts, dirs, is_master=False, macros=None,
             # so a comma in it doesn't end the key; an optional argument
             # loses its outer braces, so it's braced again to keep them.
             written = escape(alt) if macro.get("alt_braced") else "{%s}" % escape(alt)
+            delimiters = macro.get("delimiters")
+            if delimiters and delimiters[macro["alt"]]:
+                # A \def's delimited argument, whose braces TeX takes off
+                # where they're around it whole (\figalt chat.png;{...};),
+                # braced once more, so a comma or its delimiter in the
+                # description doesn't end it.
+                written = "{%s}" % written
             if at is None:              # an optional argument not given
                 at = stop = start + 1 + len(macro_name)
                 edits.append((at, stop, "[{%s}]" % written, False))

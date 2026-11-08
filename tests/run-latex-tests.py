@@ -1152,8 +1152,9 @@ def case_babel_reading(work):
     reader stopped on, or dropped, read into its pages in their language:
     \\foreignlanguage with babel's option, \\foreignlanguage whose words
     hold a paragraph break, a blank line or \\par, the paragraphs as LaTeX
-    sets them, the words before and after in them, or a list, as a
-    division, the book's own list environment too; a note's paragraph
+    sets them, the words before and after in them, or a list, the list
+    as a division between them, as LaTeX sets a list, the book's own list
+    environment too, and one of the book's around one whole; a note's paragraph
     break, a blank line after \\\\, a formula, breqn's among them, an
     environment in a formula, and environments the book defines as text,
     each way it defines them, in them, as the reader read them; a
@@ -1280,30 +1281,29 @@ def case_babel_reading(work):
         ("and so are words holding \\par",
          lambda: paragraph("Again", '<span lang="fr">un.</span>')
          and paragraph('<span lang="fr">Deux</span>', "after.")),
-        ("words holding a list are a division in their language, the list in it, and so "
-         "are words holding a list environment the book defines, one defined with it, one "
-         "whose code ends a paragraph, one copied from itemize over the book's own, or one "
-         "whose code holds a formula it closes, or a dollar sign",
-         lambda: re.search(r'<div lang="fr">\s*<p>pour commencer</p>\s*<ul>\s*<li>\s*'
-                           r'(?:<p>)?un point(?:</p>)?\s*</li>\s*</ul>\s*<p>pour finir</p>\s*'
-                           r'</div>', text) is not None
-         and re.search(r'<p>A list of its own</p>\s*<div lang="fr">\s*<p>pour ouvrir</p>\s*'
-                       r'<ul>\s*<li>\s*(?:<p>)?un autre point(?:</p>)?\s*</li>\s*</ul>\s*'
-                       r'<p>pour fermer</p>\s*</div>', text) is not None
-         and re.search(r'<p>Its list in its own</p>\s*<div lang="fr">\s*<p>pour lancer</p>\s*'
-                       r'<ul>\s*<li>\s*(?:<p>)?un dernier point(?:</p>)?\s*</li>\s*</ul>\s*'
-                       r'<p>pour clore</p>\s*</div>', text) is not None
-         and re.search(r'<p>A remark</p>\s*<div lang="fr">\s*<p>avant</p>\s*<p><strong>Note'
-                       r'</strong> une remarque</p>\s*<p>puis</p>\s*</div>', text) is not None
-         and re.search(r'<p>A grey list</p>\s*<div lang="fr">\s*<p>pour</p>\s*<ul>\s*<li>\s*'
-                       r'(?:<p>)?gris(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*</div>', text)
-         is not None
-         and re.search(r'<p>A starred list</p>\s*<div lang="fr">\s*<p>pour <math .*?</math></p>'
-                       r'\s*<ul>\s*<li>\s*(?:<p>)?une(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*'
-                       r'</div>', text) is not None
-         and re.search(r'<p>A priced list</p>\s*<div lang="fr">\s*<p>pour \$</p>\s*<ul>\s*<li>'
-                       r'\s*(?:<p>)?cher(?:</p>)?\s*</li>\s*</ul>\s*<p>fin</p>\s*</div>', text)
-         is not None),
+        ("words holding a list are a passage before it, ending its paragraph, the list in a "
+         "division in their language, and a passage after it, beginning the next, as LaTeX "
+         "sets them, and so are words holding a list environment the book defines, one "
+         "defined with it, one whose code ends a paragraph, one copied from itemize over the "
+         "book's own, or one of the book's around it, whose code holds a formula it closes, "
+         "or a dollar sign, whole",
+         lambda: all(re.search(r"<p>\s*%s <span lang=\"fr\">%s</span>\s*</p>\s*<div lang=\"fr\">"
+                               r"\s*%s\s*</div>\s*<p>\s*<span lang=\"fr\">%s</span> last\.</p>"
+                               % (before, opening, inside, closing), text) is not None
+                     for before, opening, inside, closing in (
+            ("A list", "pour commencer", r"<ul>\s*<li>\s*(?:<p>)?un point(?:</p>)?\s*</li>\s*</ul>",
+             "pour finir"),
+            ("A list of its own", "pour ouvrir",
+             r"<ul>\s*<li>\s*(?:<p>)?un autre point(?:</p>)?\s*</li>\s*</ul>", "pour fermer"),
+            ("Its list in its own", "pour lancer",
+             r"<ul>\s*<li>\s*(?:<p>)?un dernier point(?:</p>)?\s*</li>\s*</ul>", "pour clore"),
+            ("A remark", "avant", r"<p><strong>Note</strong> une remarque</p>", "puis"),
+            ("A grey list", "pour", r"<ul>\s*<li>\s*(?:<p>)?gris(?:</p>)?\s*</li>\s*</ul>", "fin"),
+            ("A starred list", "pour",
+             r"<p><math .*?</math></p>\s*<ul>\s*<li>\s*(?:<p>)?une(?:</p>)?\s*</li>\s*</ul>",
+             "fin"),
+            ("A priced list", "pour",
+             r"<p>\$</p>\s*<ul>\s*<li>\s*(?:<p>)?cher(?:</p>)?\s*</li>\s*</ul>", "fin")))),
         ("babeltags' \\textfr, declared in the master, is a passage in French, where the "
          "reader dropped it with its words",
          lambda: paragraph("A tag:", '<span lang="fr">court</span>', "and",
@@ -1364,8 +1364,9 @@ def case_babel_reading(work):
          lambda: "3 babeltags' command(s) (\\textfr) read as \\foreignlanguage" in said
          and "1 \\foreignlanguage's option(s) ([date]) left out" in said
          and "4 \\foreignlanguage's words holding a paragraph break read" in said
-         and "7 \\foreignlanguage's words holding a list or another environment read as "
-             "otherlanguage" in said),
+         and "7 \\foreignlanguage's words holding a list or another environment read with "
+             "the environment in otherlanguage between a \\foreignlanguage of the words "
+             "before and after it, as LaTeX sets a list" in said),
         ("and the author's files are as they were",
          lambda: all(read(work, name) == text for name, text in files.items())),
         ("and a \\captionof's paragraph is found as before, its blank line its start",
@@ -1528,6 +1529,181 @@ def case_inline_breaks(work):
         ("and the author's files are as they were",
          lambda: all(read(work, name) == text for name, text in files.items())),
     ]
+
+
+def case_inline_blocks(work):
+    """A list or another environment the reader doesn't take inside a
+    paragraph, in the words of a command it reads as inlines, which
+    stopped it, read between the command around the words before it and
+    around those after, as LaTeX sets a list: \\textbf's, \\emph's, \\href's,
+    \\enquote's, and \\mbox's, without the command's formatting, which the
+    pages can't give a block, but a \\foreignlanguage's and a
+    \\foreignquote's language, inside another command's words too, and a
+    command's words whose environment is a formula's, or that is in one,
+    as the reader read them; a call of one of the book's commands that
+    makes a block, through another too, set apart as the environment it
+    makes, but not one whose block is in a note's text, which the reader
+    reads inline, or a margin note's, which it drops, nor an environment
+    of the book's whose code holds such a note; a comment that ends the
+    words before the environment, or a quotation's last paragraph, after
+    the brace that closes them, which it would take; the run naming each
+    place, by the author's line, its words before the environment as the
+    author wrote them, up to a command, and the author's files as they
+    were."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    os.makedirs(work)
+    files = {
+        "book.tex": "\\documentclass{book}\n\\usepackage{amsmath,csquotes,hyperref}\n"
+                    "\\usepackage[english,french]{babel}\n"
+                    "\\newcommand{\\vocab}[1]{\\begin{tabular}{ll}#1\\end{tabular}}\n"
+                    "\\newcommand{\\lexique}[1]{\\vocab{#1}}\n"
+                    "\\newcommand{\\fn}[1]{\\footnote{#1\\par Voir le site.}}\n"
+                    "\\newcommand{\\mn}[1]{\\marginpar{#1\\par Voir.}}\n"
+                    "\\newcommand{\\sn}[1]{\\sidenote[][2mm]{#1\\par Voir.}}\n"
+                    "\\newenvironment{remarque}{\\footnote{Voir.\\par Aussi.}}{}\n"
+                    "\\newenvironment{liste}{\\footnote{Voir :\\begin{itemize}\\item a"
+                    "\\end{itemize}}}{}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\n"
+                   "A \\textbf{bold start\n\\begin{itemize}\n\\item x\n\\end{itemize}\n"
+                   "bold end} c.\n\n"
+                   "B \\emph{x \\begin{center}c\\end{center} y} z.\n\n"
+                   "C \\href{https://example.org}{x \\begin{itemize}\\item i\\end{itemize} y} z.\n\n"
+                   "D \\enquote{x \\begin{itemize}\\item i\\end{itemize} y} z.\n\n"
+                   "E \\mbox{x \\begin{tabular}{c}a\\\\b\\end{tabular} y} z.\n\n"
+                   "G \\textbf{\\foreignlanguage{french}{a \\begin{itemize}\\item b\\end{itemize} "
+                   "c}} d.\n\n"
+                   "H \\foreignquote{english}{one \\begin{itemize}\\item two\\end{itemize} three} "
+                   "end.\n\n"
+                   "I $\\underline{\\begin{aligned}a&=b\\end{aligned}}$ done.\n\n"
+                   "J \\textbf{\\begin{itemize}\\item only\\end{itemize}} after.\n\n"
+                   "K \\textbf{a $\\begin{pmatrix}1\\end{pmatrix}$ b} kept.\n\n"
+                   "L \\textbf{a % une note\n\\begin{itemize}\\item x\\end{itemize}\nb} fin.\n\n"
+                   "M \\enquote{un\n\ndeux%\n} fin.\n\n"
+                   "N \\foreignlanguage{french}{Mots : \\lexique{chat & cat}} fin.\n\n"
+                   "O \\textbf{gras \\vocab{a & b} fin} last.\n\n"
+                   "Q \\textbf{mot\\fn{note} ici} fin.\n\n"
+                   "R \\enquote{bonjour \\begin{remarque}\\end{remarque} toi} fin.\n\n"
+                   "U \\textbf{mot\\begin{liste}\\end{liste} ici} fin.\n\n"
+                   "X \\foreignlanguage{french}{bonjour\\mn{note} toi} fin.\n\n"
+                   "Y \\foreignlanguage{french}{bonjour\\sn{note} toi} fin.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.blocks\n  title: Blocks\n"
+                 "  language: fr\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    page = read(work, "html", "one.html") if os.path.exists(
+        os.path.join(work, "html", "one.html")) else ""
+    text = re.sub(r"\s+", " ", page)
+
+    def around(before, opening, block, closing, after):
+        """Whether the page has a paragraph ending in opening, block, and
+        one beginning with closing (patterns), in order."""
+        return re.search(r"<p>\s*%s\s*%s\s*</p>\s*%s\s*<p>\s*%s\s*%s\s*</p>" % (
+            before, opening, block, closing, after), text) is not None
+
+    def mark(c):
+        """A quotation mark as the page may write it."""
+        return "(?:%s|&#x%X;)" % (c, ord(c))
+
+    item = r"<ul>\s*<li>\s*(?:<p>)?%s(?:</p>)?\s*</li>\s*</ul>"
+    table = r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?"
+    noteref = r'<a href="#fn\d+"[^>]*>(?:<sup>)?\d+(?:</sup>)?</a>'
+    return [
+        ("a LaTeX book is read whose inline command's words hold a list or another "
+         "environment, which stopped the reader",
+         lambda: result.returncode == 0 and bool(page)),
+        ("the environment is between the command around the words before it and around "
+         "those after it, without the command's formatting",
+         lambda: around("A", "<strong>bold start</strong>", item % "x",
+                        "<strong>bold end</strong>", "c\\.")
+         and around("B", "<em>x</em>", r'<div class="center">\s*<p>c</p>\s*</div>', "<em>y</em>",
+                    "z\\.")
+         and around("C", '<a href="https://example\\.org">x</a>', item % "i",
+                    '<a href="https://example\\.org">y</a>', "z\\.")
+         and around("D", mark("\u201c") + "x" + mark("\u201d"), item % "i",
+                    mark("\u201c") + "y" + mark("\u201d"), "z\\.")
+         and around("E", "x(?:\u00a0|&#xA0;)?",
+                    r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?",
+                    "(?:\u00a0|&#xA0;)?y",
+                    "z\\.")
+         and re.search(r"<p>\s*J\s*</p>\s*" + item % "only" + r"\s*<p>\s*after\.\s*</p>", text)
+         is not None),
+        ("but a passage's language, and a quotation's in another, is the environment's, in "
+         "another command's words too",
+         lambda: around("G", '<strong><span lang="fr">a</span></strong>',
+                        r'<div lang="fr">\s*' + item % "b" + r"\s*</div>",
+                        '<strong><span lang="fr">c</span></strong>', "d\\.")
+         and around("H", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"),
+                    r'<div lang="en">\s*' + item % "two" + r"\s*</div>",
+                    mark("\u201c") + '<span lang="en">three</span>' + mark("\u201d"), "end\\.")),
+        ("a formula's environment in the words, and a command in a formula, are as the reader "
+         "read them",
+         lambda: re.search(r"<p>\s*I <math .*?<munder><mtable>.*?</math> done\.</p>", text)
+         is not None
+         and re.search(r"<p>\s*K <strong>a <math .*?</math> b</strong> kept\.</p>", text)
+         is not None),
+        ("a comment ending the words before the environment, or a quotation's last "
+         "paragraph, is after the brace the copy closes them with, which it would take, and "
+         "so are comments on the lines before it",
+         lambda: around("L", "<strong>a</strong>", item % "x", "<strong>b</strong>", "fin\\.")
+         and latexsource.passage_pieces("un % a\n% b\n", [], latexsource.skip_spans(
+             "un % a\n% b\n"), lambda piece: "{%s}" % piece) == "{un} % a\n% b\n"
+         and re.search(r"<p>\s*M " + mark("“") + "un" + mark("”") + r"\s*</p>\s*<p>\s*"
+                       + mark("“") + "deux" + mark("”") + r"\s*fin\.\s*</p>", text)
+         is not None),
+        ("one of the book's commands that makes a block, through another of its commands "
+         "too, is set apart as the environment it makes",
+         lambda: around("N", '<span lang="fr">Mots :</span>', r'<div lang="fr">\s*' + table
+                        + r"\s*</div>", "", "fin\\.")
+         and around("O", "<strong>gras</strong>", table, "<strong>fin</strong>", "last\\.")),
+        ("but not one whose block is in a note's text, which the reader reads inline, or a "
+         "margin note's, which it drops, nor an environment of the book's whose code holds "
+         "such a note",
+         lambda: re.search(r"<p>\s*Q <strong>mot" + noteref + r" ici</strong> fin\.\s*</p>",
+                           text) is not None
+         and re.search(r"<p>\s*R " + mark("\u201c") + r"bonjour\s*" + noteref + r"\s*toi"
+                       + mark("\u201d") + r" fin\.\s*</p>", text) is not None
+         and re.search(r"<p>\s*U <strong>mot" + noteref + r"\s*ici</strong> fin\.\s*</p>",
+                       text) is not None
+         and re.search(r'<p>\s*X <span lang="fr">bonjour\s*toi</span> fin\.\s*</p>', text)
+         is not None
+         and re.search(r'<p>\s*Y <span lang="fr">bonjour\s*toi</span> fin\.\s*</p>', text)
+         is not None
+         and latexsource.note_spans("a \\footnote[2]{b\n\nc} d \\thanks{e} "
+                                    "\\footnotetext{f\\footnote{g}}", [])
+         == [(14, 20), (30, 33), (47, 62)]),
+        ("the run says what it read so, and names each place by the author's line, quoting "
+         "the words before the environment as the author wrote them, up to a command",
+         lambda: "10 list or another environment in an inline command's words (\\textbf, "
+                 "\\enquote, \\mbox) read between the command around the words before and "
+                 "after it" in said
+         and "2 \\foreignlanguage's words holding a list or another environment" in said
+         and "WARNING: 10 list(s) or other environment(s) in an inline command's words read "
+             "without the command's formatting, which the pages can't give a block, the words "
+             "before and after it keeping it: \\textbf in one.tex, line 2 (\"bold start\"); "
+             "\\emph in one.tex, line 8 (\"x\"); \\href in one.tex, line 10 (\"x\"); \\enquote "
+             "in one.tex, line 12 (\"x\"); \\mbox in one.tex, line 14 (\"x\"); \\textbf in "
+             "one.tex, line 16; \\foreignquote in one.tex, line 18 (\"one\"); \\textbf in "
+             "one.tex, line 22; ..." in said),
+        ("a place's line is the author's, the nearest where the command's words are, as "
+         "rewrites before may move lines, or the one read where none are",
+         lambda: latexsource.author_line("a\nb\n\\textbf{x}\nc\n\\textbf{bold start}\n", 3,
+                                         "textbf", "bold start") == 5
+         and latexsource.author_line("\\emph{a}\n\\emph{a}\n\n\n\\emph{a}\n", 4, "emph", "a") == 5
+         and latexsource.author_line("x\n", 7, "textbf", "y") == 7
+         and latexsource.author_line("\\href{u}{x}\n\\href{v}{y}\n", 1, "href", "y") == 2),
+        ("and the author's files are as they were",
+         lambda: all(read(work, name) == text for name, text in files.items())),
+    ]
+
 
 def case_page_languages(work):
     """A LaTeX book's pages in another language than the book's, in its copy
@@ -8865,6 +9041,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("a paragraph break in a box's or a quotation's words", case_inline_breaks),
+         ("a list or another environment in an inline command's words", case_inline_blocks),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

@@ -1365,12 +1365,16 @@ LATEX_READ_CHANGES = (
      "reader"),
     ("babel_paragraphs", "\\foreignlanguage's words holding a paragraph break read as a "
      "\\foreignlanguage in each paragraph, which stopped the reader"),
-    ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read as "
-     "otherlanguage, which stopped the reader"),
+    ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read "
+     "with the environment in otherlanguage between a \\foreignlanguage of the words before "
+     "and after it, as LaTeX sets a list, which stopped the reader"),
     ("quotation_paragraphs", "quotation's words holding a paragraph break (\\enquote) read as "
      "a quotation in each paragraph, which stopped the reader"),
     ("box_breaks", "paragraph break in a box's words (\\mbox, \\underline) read as LaTeX sets "
      "it, on one line, which stopped the reader"),
+    ("inline_blocks", "list or another environment in an inline command's words (\\textbf, "
+     "\\enquote, \\mbox) read between the command around the words before and after it, "
+     "which stopped the reader"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),
@@ -1713,6 +1717,15 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                        "preamble")
     if changed:
         say("Read from a copy of the LaTeX: " + "; ".join(changed) + ".")
+    dropped = [d for prep in preps for d in prep["dropped"]]
+    if dropped:
+        say(f"WARNING: {len(dropped)} list(s) or other environment(s) in an inline command's "
+            "words read without the command's formatting, which the pages can't give a block, "
+            "the words before and after it keeping it: "
+            + "; ".join(f"\\{command} in {name}, line {line}"
+                        + (f" (\"{words}\")" if words else "")
+                        for name, line, command, words in dropped[:8])
+            + ("; ..." if len(dropped) > 8 else "") + ".")
     if counts.get("graphics_unembedded"):
         say(f"WARNING: {counts['graphics_unembedded']} PDF image(s) draw text with fonts "
             "they don't embed, which PDF/UA requires, and couldn't be written with them "

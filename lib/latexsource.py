@@ -2198,6 +2198,15 @@ QUOTATION = re.compile(r"\\(enquote|foreignquote|hyphenquote)(?![A-Za-z@])[ \t]*
 # a blank line as the space its line's end is, and \par as nothing, the
 # spaces after it TeX's to skip (measured, TeX Live 2026).
 LINE_BOX = re.compile(r"\\(mbox|hbox|underline|uline|sout)(?![A-Za-z@])")
+# The rest of the commands whose words the reader reads as inlines
+# (Readers/LaTeX.hs, each with tok), where an environment it doesn't take
+# inside a paragraph stopped it, a list in \textbf's words, which LaTeX
+# builds, among them: the font commands, soul's, hyphenat's, and \href,
+# whose address comes first. Not \textcolor and \colorbox, which the
+# reader reads around blocks as a colored division (coloredBlock).
+FORMATTING = re.compile(r"\\(emph|textit|textsl|textsc|textsf|textmd|textrm|textup|texttt"
+                        r"|textsuperscript|textsubscript|textbf|textnormal|NoCaseChange"
+                        r"|nohyphens|textnhtt|nhttfamily|st|ul|hl|href)(?![A-Za-z@])")
 # A paragraph break in a passage's words: a blank line, or \par. (A blank
 # line alone is PARAGRAPH_BREAK, captionof_floats'.)
 PASSAGE_BREAK = re.compile(r"\n[ \t]*\n\s*|\\par(?![A-Za-z@])\s*")
@@ -2295,8 +2304,9 @@ def book_environments(texts):
     or copies (ENVIRONMENT_COPY), in code, that the reader takes inside a
     paragraph, as it expands them: "formula" for a copy of a formula's
     environment (INLINE_ENVIRONMENTS), which it expands to the formula;
-    "text" for the rest, but not one whose code holds a paragraph break or
-    an environment the reader doesn't take there, a list's or another of
+    "text" for the rest, but not one whose code holds a paragraph break, a
+    command the reader reads only as a block (BLOCK_COMMAND), \\section,
+    say, or an environment it doesn't take there, a list's or another of
     the book's that does, nor a copy of one the book doesn't define, such
     as itemize. Definitions and copies are read in order, each replacing
     what came before it."""
@@ -2320,13 +2330,19 @@ def book_environments(texts):
     blocks = set()
 
     def block(part):
-        """Whether code holds what the reader doesn't take in a paragraph."""
+        """Whether code holds what the reader doesn't take in a paragraph,
+        a command it reads only as a block among it (BLOCK_COMMAND), but in
+        a note's text, which it reads inline (note_spans)."""
         spans = skip_spans(part)
-        inner = [b.group(1).strip() for b in code_matches(BEGIN_ENVIRONMENT, part, spans)]
+        notes = note_spans(part, spans)
+        inner = [b.group(1).strip() for b in code_matches(BEGIN_ENVIRONMENT, part, spans)
+                 if not in_spans(b.start(), notes)]
         return any(passage_break(part, b, spans)
-                   for b in code_matches(PASSAGE_BREAK, part, spans)) or any(
+                   for b in code_matches(PASSAGE_BREAK, part, spans)
+                   if not in_spans(b.start(), notes)) or any(
             name not in INLINE_ENVIRONMENTS and name not in formulas
-            and (name not in codes or name in blocks) for name in inner)
+            and (name not in codes or name in blocks) for name in inner) or any(
+            not in_spans(m.start(), notes) for m in code_matches(BLOCK_COMMAND, part, spans))
 
     # Until no more are found, since one of the book's may hold another.
     while True:
@@ -2435,11 +2451,11 @@ def top_level(pattern, text):
 
 def command_words(text, m):
     """(head, language, start, close) for a FOREIGN_LANGUAGE, QUOTATION,
-    or LINE_BOX match in text: the command as it's written again around a piece
-    of its words, without its options, which the reader skips or stops
-    on; the language it names, or None; and its words, text[start:close -
-    1], close past their brace. None where they aren't braced, or a brace
-    isn't matched."""
+    LINE_BOX, or FORMATTING match in text: the command as it's written again
+    around a piece of its words, \\href's address with it, without its
+    options, which the reader skips or stops on; the language it names, or
+    None; and its words, text[start:close - 1], close past their brace.
+    None where they aren't braced, or a brace isn't matched."""
     if m.re is FOREIGN_LANGUAGE:
         named = matching_brace(text, m.end() - 1)
         opening = re.compile(r"\s*\{").match(text, named) if named >= 0 else None
@@ -2449,6 +2465,13 @@ def command_words(text, m):
         head, start = "\\foreignlanguage%s{%s}" % (m.group(1), language), opening.end()
     else:
         head, language, pos = "\\" + m.group(1), None, m.end()
+        if m.group(1) == "href":
+            at = argument_space(text, pos)
+            address = matching_brace(text, at) if text.startswith("{", at) else -1
+            if address < 0:
+                return None
+            head += text[at:address]
+            pos = address
         if m.re is QUOTATION:
             head += m.group(2)
             if m.group(1) != "enquote":
@@ -2473,28 +2496,198 @@ def command_words(text, m):
     return None if close < 0 else (head, language, start, close)
 
 
-def passage_pieces(words, breaks, skipped, wrap):
-    """words, cut at breaks (PASSAGE_BREAK matches, in order), each piece
-    between them wrap(piece), but one of nothing but space, which is left
-    as it is, the breaks between them as they were: a comment on a
-    piece's last line after its brace, which it would take, and a piece
-    ending in a backslash of its own, a control space with the line's end,
-    keeping its line end, or the backslash would take the brace. skipped:
+def comment_tail(words, last, stop, skipped):
+    """Where the comments that end words[last:stop] begin, with the spaces
+    and line ends between them, past the piece's last words; stop where
+    none do. skipped: skip_spans(words)."""
+    tail = end = stop
+    while True:
+        end = last + len(words[last:end].rstrip())
+        start = next((s for s, e in skipped
+                      if s < end <= e and words.startswith("%", s)), None)
+        if start is None or start < last:
+            return tail
+        tail = end = start
+
+
+def passage_pieces(words, cuts, skipped, wrap, box=False):
+    """words, cut at cuts, (start, end, what goes there) in order, each
+    piece between them, but one of nothing but space, wrap(piece), the
+    spaces at its ends outside, or for a box (box_line) inside, as they're
+    the box's: the comments that end a piece after its brace
+    (comment_tail), which the last would take, and a piece ending in a
+    backslash of its own, a control space with the line's end, keeping its
+    line end, or the backslash would take the brace. skipped:
     skip_spans(words)."""
     pieces, last = [], 0
-    for b in breaks + [None]:
-        stop = b.start() if b else len(words)
-        line = max(last, words.rfind("\n", last, stop) + 1)
-        cut = next((start for start, _ in skipped
-                    if line <= start < stop and words.startswith("%", start)), stop)
-        piece, tail = words[last:cut], words[cut:stop]
-        if (len(piece) - len(piece.rstrip("\\"))) % 2:
-            piece += "\n"
-        pieces.append((wrap(piece) if piece.strip() else piece) + tail)
-        if b:
-            pieces.append(b.group(0))
-            last = b.end()
+    for cut in cuts + [None]:
+        stop = cut[0] if cut else len(words)
+        comment = comment_tail(words, last, stop, skipped)
+        piece, tail = words[last:comment], words[comment:stop]
+        if box:
+            piece = box_line(piece)
+        core = piece if box else piece.strip()
+        if piece.strip():
+            if (len(core) - len(core.rstrip("\\"))) % 2:
+                core += "\n"
+            piece = (wrap(core) if box else piece[:len(piece) - len(piece.lstrip())]
+                     + wrap(core) + piece[len(piece.rstrip()):])
+        pieces.append(piece + tail)
+        if cut:
+            pieces.append(cut[2])
+            last = cut[1]
     return "".join(pieces)
+
+
+def environment_close(text, name, start, spans):
+    """The index just past the \\end{name} that closes the environment
+    whose \\begin{name} is at start, counting nested ones, in code (spans:
+    skip_spans(text)); -1 where none does."""
+    pattern = re.compile(r"\\(begin|end)\s*\{\s*" + re.escape(name) + r"\s*\}")
+    depth = 0
+    for m in pattern.finditer(text, start):
+        if in_spans(m.start(), spans):
+            continue
+        depth += 1 if m.group(1) == "begin" else -1
+        if depth == 0:
+            return m.end()
+    return -1
+
+
+# The commands the reader reads only as blocks (3.12.1, Readers/LaTeX.hs's
+# blockCommands and treatAsBlock, but those it reads inline too), which
+# stop it in a paragraph's words: \section, \caption, \rule, \parbox,
+# \raggedright, and \addtocounter among them, measured in \foreignlanguage's;
+# and \input, which it reads inline too, but where the file's last line's
+# end and the one after the command are a blank line to it, a paragraph
+# break, which stopped it there (measured). Not \par, a paragraph break
+# inline_passages cuts a passage at.
+BLOCK_ONLY = frozenset("""
+    AddToNoCaseChangeList DeclareCaseChangeEquivalent DeclareKeys
+    DeclareLowercaseExclusions DeclareLowercaseMapping DeclareTitlecaseExclusions
+    DeclareTitlecaseMapping DeclareUnknownKeyHandler DeclareUppercaseExclusions
+    DeclareUppercaseMapping ExplSyntaxOff ExplSyntaxOn PackageError ProcessKeyOptions
+    SetKeys ShowCommand ShowEnvironment addbibresource addcontentsline address
+    addtocontents addtocounter author bibliography bibliographystyle blockcquote
+    blockquote caption centerline chapter closing date dedication documentclass
+    endinput epigraph extratitle fancybreak foreignblockcquote foreignblockquote
+    framesubtitle frametitle frontispiece graphicspath hrule hyperdef
+    hyphenblockcquote hyphenblockquote ignore include input expandableinput
+    inputminted item listoffigures listoftables lowertitleback lstinputlisting
+    makeglossary makeindex maketitle markboth markleft markright minisec newtheorem
+    opening paragraph parbox part pdfannot pdfstringdef pfbreak plainbreak
+    plainfancybreak publishers raggedright rule section setdefaultlanguage
+    setmainlanguage signature special strut subfile subject subparagraph subsection
+    subsubsection subtitle theoremstyle title titleformat titlehead uppertitleback
+    usepackage write""".split())
+BLOCK_COMMAND = re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(
+    re.escape(n) for n in sorted(BLOCK_ONLY, key=len, reverse=True)))
+# The commands the reader reads inline whose text doesn't stop it there, a
+# paragraph break, a list, or a heading in it: a note's, which it reads as
+# blocks (3.12.1, Readers/LaTeX.hs: \footnote, \footnotetext, and \thanks,
+# each "grouped block"), and a margin note's or a to-do's, which it doesn't
+# know and drops, its text read raw (inlineCommand', getRawCommand): \marginpar,
+# marginnote's \marginnote, sidenotes' \sidenote, todonotes' \todo, and
+# endnotes' \endnote; each's options before its text, two of sidenotes'.
+NOTE_COMMAND = re.compile(r"\\(?:footnote|footnotetext|thanks|marginpar|marginnote|sidenote"
+                          r"|todo|endnote)(?![A-Za-z@])\s*(?:\[[^]]*\]\s*){0,2}\{")
+
+
+def note_spans(text, skipped):
+    """The (start, end) of the text of each note in text's code
+    (NOTE_COMMAND), a margin note's and a to-do's among them, its braces
+    with it, one inside another's in it, in order. skipped:
+    skip_spans(text)."""
+    spans = []
+    for m in NOTE_COMMAND.finditer(text):
+        if in_spans(m.start(), skipped) or (spans and m.start() < spans[-1][1]):
+            continue
+        close = code_brace(text, m.end() - 1)
+        if close > 0:
+            spans.append((m.end() - 1, close))
+    return spans
+
+
+def macro_pattern(macros):
+    """A call of one of macros (their names): the command's name whole."""
+    return re.compile(r"\\(%s)(?![A-Za-z@])" % "|".join(
+        re.escape(n) for n in sorted(macros, key=len, reverse=True)))
+
+
+def holds_block(words, environments=(), macros=()):
+    """Whether words hold, in code outside formulas and a note's text
+    (note_spans), which the reader reads inline, what it reads only as a
+    block: a command it reads only so (BLOCK_COMMAND), a paragraph break
+    (passage_break), verbatim, an environment it doesn't take in a
+    paragraph (not a formula's, nor one of environments, {name: kind}, the
+    book's own it takes), or a call of one of macros."""
+    skipped = skip_spans(words)
+    formulas = formula_spans(words, [n for n, k in dict(environments).items()
+                                     if k == "formula"])
+    notes = note_spans(words, skipped)
+
+    def code(pos):
+        return (not in_spans(pos, skipped) and not in_spans(pos, formulas)
+                and not in_spans(pos, notes))
+    return (any(code(m.start()) for m in BLOCK_COMMAND.finditer(words))
+            or any(code(b.start()) and passage_break(words, b, skipped)
+                   for b in PASSAGE_BREAK.finditer(words))
+            or any(words.startswith("\\begin", start) for start, _ in skipped)
+            or any(code(b.start()) and b.group(1).strip() not in INLINE_ENVIRONMENTS
+                   and b.group(1).strip() not in dict(environments)
+                   for b in BEGIN_ENVIRONMENT.finditer(words))
+            or bool(macros) and any(code(m.start())
+                                    for m in macro_pattern(macros).finditer(words)))
+
+
+def block_macros(texts, environments=()):
+    """{name: {"arguments": n, "default": d}}, as macro_calls takes them:
+    the macros the book defines, with \\newcommand and its kin or \\def
+    with plain arguments, read as LaTeX reads them (macro_walk), whose body
+    holds what the reader reads only as a block (holds_block), a call of
+    another such macro among it, so a call of one in an inline command's
+    words is set between them as the environment it makes is. texts:
+    [(name, text)], the master first; environments: book_environments'."""
+    defined = macro_walk(texts, lambda body, arguments, default: {
+        "arguments": arguments, "default": default, "body": body})[0]
+    found = {}
+    while True:
+        more = {name: {"arguments": m["arguments"], "default": m["default"]}
+                for name, m in defined.items()
+                if name not in found and holds_block(m["body"], environments, found)}
+        if not more:
+            return found
+        found.update(more)
+
+
+def inline_blocks(words, skipped, formulas, environments, macros=()):
+    """The (start, end) of each outermost environment in words' code,
+    outside every group in them, that the reader doesn't take inside a
+    paragraph: one not a formula's or in one (formulas: formula_spans) and
+    not one of environments, the book's own it takes, or one of those
+    holding such an environment; and of each call there of one of macros,
+    the book's that make one (block_macros), its arguments with it. None
+    where an environment isn't closed."""
+    found, past = [], 0
+    for b in top_level(BEGIN_ENVIRONMENT, words):
+        if b.start() < past or in_spans(b.start(), formulas):
+            continue
+        name = b.group(1).strip()
+        end = environment_close(words, name, b.start(), skipped)
+        if end < 0:
+            return None
+        if name not in environments or any(
+                i.group(1).strip() not in environments
+                for i in BEGIN_ENVIRONMENT.finditer(words, b.start() + 1, end)
+                if not in_spans(i.start(), skipped) and not in_spans(i.start(), formulas)):
+            found.append((b.start(), end))
+        past = end
+    if macros:
+        tops = {m.start() for m in top_level(macro_pattern(macros), words)}
+        found += [(start, end) for start, end, _, _ in macro_calls(words, macros, skipped)
+                  if start in tops and not in_spans(start, formulas)
+                  and not any(s <= start < e for s, e in found)]
+    return sorted(found)
 
 
 def box_line(words):
@@ -2510,7 +2703,7 @@ def box_line(words):
     return "".join(out) + words[last:]
 
 
-def inline_passages(text, counter, tags=None, environments=()):
+def inline_passages(text, counter, tags=None, environments=(), places=None, macros=()):
     """The commands whose words the reader reads as inlines, in code, as
     it can read them, where they hold what it stops on, or are dropped.
     babel's for a passage in another language (FOREIGN_LANGUAGE):
@@ -2520,27 +2713,38 @@ def inline_passages(text, counter, tags=None, environments=()):
     paragraph, so the paragraph keeps the words before and after them, as
     LaTeX sets it, but for a blank line after \\\\, which the reader reads
     as a line break, and \\\\par, a line break and a word (passage_break),
-    or where they hold an environment the reader doesn't take inside a
-    paragraph, not a formula's or in one (formula_spans, a copy of one
-    among them) and not one of environments, the book's own it takes
-    ({name: kind}, book_environments), in otherlanguage, which holds
-    paragraphs, lists, and the rest. csquotes' quotations (QUOTATION),
-    likewise a quotation of each paragraph, where LaTeX sets the one over
-    both. And the boxes (LINE_BOX), whose words LaTeX sets on one line, a
-    paragraph break as LaTeX takes it there (box_line): a blank line a
-    line's end, and \\par nothing, a passage's or a quotation's in their
-    words too, as the box's. A piece of nothing the reader reads
-    (NOTHING_READ) is left as it is. From the last, so one inside
-    another's words is read first, and the places before it stay where
-    they are."""
+    and where they hold an environment the reader doesn't take inside a
+    paragraph (inline_blocks: not a formula's or in one, formula_spans, a
+    copy of one among them, and not one of environments, the book's own
+    it takes, {name: kind}, book_environments, or a call of one of macros,
+    the book's that make one, block_macros), it in otherlanguage, which
+    holds paragraphs, lists, and the rest, between a \\foreignlanguage of
+    the words before it, ending their paragraph, and of those after,
+    beginning the next, as LaTeX sets a list. csquotes' quotations
+    (QUOTATION) likewise, a quotation of each paragraph, where LaTeX sets
+    the one over both. The boxes (LINE_BOX), whose words LaTeX sets on one
+    line, a paragraph break as LaTeX takes it there (box_line), a
+    passage's or a quotation's in their words too, as the box's. A piece
+    of nothing the reader reads (NOTHING_READ) is left as it is. And for
+    them and the rest (FORMATTING), an environment the reader doesn't take
+    there between the command around the words before it and after it,
+    without the command's formatting, which the reader can't give a block,
+    but a quotation's language, as for \\foreignlanguage, each such
+    command a (line, command, its words before the environment up to a
+    command) in places, its line the text's. Not in a formula, but
+    \\foreignlanguage. From the last, so one inside another's words is
+    read first, and the places before it stay where they are."""
     if tags:
         command = re.compile(r"\\text(%s)(?![A-Za-z@])(?=\s*\{)" % "|".join(
             re.escape(t) for t in sorted(tags, key=len, reverse=True)))
         text = substitute(command, text, lambda m: "\\foreignlanguage{%s}" % tags[m.group(1)],
                           counter, "babel_tags")
     spans = skip_spans(text)
-    found = sorted((m for pattern in (FOREIGN_LANGUAGE, QUOTATION, LINE_BOX)
-                    for m in pattern.finditer(text) if not in_spans(m.start(), spans)),
+    formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
+    math = formula_spans(text, formula_names)
+    found = sorted((m for pattern in (FOREIGN_LANGUAGE, QUOTATION, LINE_BOX, FORMATTING)
+                    for m in pattern.finditer(text) if not in_spans(m.start(), spans)
+                    and (pattern is FOREIGN_LANGUAGE or not in_spans(m.start(), math))),
                    key=lambda m: m.start())
     for m in reversed(found):
         parsed = command_words(text, m)
@@ -2549,46 +2753,74 @@ def inline_passages(text, counter, tags=None, environments=()):
         head, language, start, close = parsed
         words = text[start:close - 1]
         skipped = skip_spans(words)
-        breaks = [b for b in top_level(PASSAGE_BREAK, words)
-                  if passage_break(words, b, skipped)]
+        keys = []
+        # In a box's words, a paragraph break in a passage's or a
+        # quotation's is the box's, on its one line.
+        if m.re in (FOREIGN_LANGUAGE, QUOTATION) and box_line(words) != words and any(
+                b.re is LINE_BOX and b.start() < m.start()
+                and m.start() < (command_words(text, b) or (0, 0, 0, -1))[3] for b in found):
+            words, keys = box_line(words), ["box_breaks"]
+            skipped = skip_spans(words)
+        blocks = inline_blocks(words, skipped, formula_spans(words, formula_names),
+                               environments, macros)
+        if blocks is None:
+            continue
+        breaks = [(b.start(), b.end(), b.group(0)) for b in top_level(PASSAGE_BREAK, words)
+                  if passage_break(words, b, skipped)
+                  and not any(s <= b.start() < e for s, e in blocks)]
+        if language is not None:
+            def block(code, language=language):
+                return "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, code)
+        else:
+            def block(code):
+                return code
+        cuts = [(s, e, block(words[s:e])) for s, e in blocks]
 
         def wrap(piece, head=head):
             # What the reader reads as nothing, alone between paragraph
             # breaks, is left there, not made an empty passage or quotation.
             return piece if NOTHING_READ.fullmatch(piece) else "%s{%s}" % (head, piece)
-        # A box's words on one line, and in a box's words, a passage's or a
-        # quotation's paragraph break the box's, on its one line.
-        if m.re is LINE_BOX or breaks and any(
-                b.re is LINE_BOX and b.start() < m.start()
-                and m.start() < (command_words(text, b) or (0, 0, 0, -1))[3] for b in found):
-            if not breaks:
-                continue
-            new, key = "%s{%s}" % (head, box_line(words)), "box_breaks"
-        elif m.re is QUOTATION:
-            if not breaks:
-                continue
-            new = passage_pieces(words, breaks, skipped, wrap)
-            key = "quotation_paragraphs"
+        if m.re is LINE_BOX:
+            if breaks:
+                keys.append("box_breaks")
         else:
-            formulas = formula_spans(words, [name for name, kind in dict(environments).items()
-                                             if kind == "formula"])
-            blocks = [b for b in top_level(BEGIN_ENVIRONMENT, words)
-                      if b.group(1).strip() not in environments
-                      and not in_spans(b.start(), formulas)]
-            if blocks:
-                new = "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, words)
-                key = "babel_blocks"
-            elif breaks:
-                new = passage_pieces(words, breaks, skipped, wrap)
-                key = "babel_paragraphs"
-            elif m.group(2):
-                new = "%s{%s}" % (head, words)
-                key = "babel_options"
-            else:
-                continue
+            if m.re is not FORMATTING:
+                cuts = sorted(cuts + breaks)
+                if breaks:
+                    keys.append("babel_paragraphs" if m.re is FOREIGN_LANGUAGE
+                                else "quotation_paragraphs")
+        if blocks:
+            keys.append("babel_blocks" if m.re is FOREIGN_LANGUAGE else "inline_blocks")
+            if m.re is not FOREIGN_LANGUAGE and places is not None:
+                # The words before the environment up to a command, which
+                # a rewrite inside them may have made.
+                places.append((text.count("\n", 0, m.start()) + 1, m.group(1), " ".join(
+                    re.split(r"[\\{}$%]", words[:blocks[0][0]])[0].split())[:40]))
+        if keys:
+            new = passage_pieces(words, cuts, skipped, wrap, m.re is LINE_BOX)
+        elif m.re is FOREIGN_LANGUAGE and m.group(2):
+            new, keys = "%s{%s}" % (head, words), ["babel_options"]
+        else:
+            continue
         text = text[:m.start()] + new + text[close:]
-        counter[key] = counter.get(key, 0) + 1
+        for key in keys:
+            counter[key] = counter.get(key, 0) + 1
     return text
+
+
+def author_line(text, line, command, words):
+    """The line of the author's file, text, that a command inline_passages
+    named at line of the text it read starts on: the nearest one where the
+    command's words, read as it reads them (command_words), begin with
+    words (whitespace run together), as the rewrites before it may have
+    moved lines; line where none does."""
+    found = []
+    for pattern in (QUOTATION, LINE_BOX, FORMATTING):
+        for m in pattern.finditer(text):
+            parsed = command_words(text, m) if m.group(1) == command else None
+            if parsed and " ".join(text[parsed[2]:parsed[2] + 400].split()).startswith(words):
+                found.append(text.count("\n", 0, m.start()) + 1)
+    return min(found, key=lambda n: abs(n - line)) if found else line
 
 
 # The PDF target's group around a table or a formula for latexbuild's
@@ -2838,12 +3070,15 @@ def highlighted_code(text, counter):
     return HIGHLIGHTED_INLINE.sub(inline, text)
 
 
-def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=()):
+def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
+                places=None, block_macros=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
     counters' names (book_counters); tags, its babeltags (babel_tags);
-    environments, the ones it defines (book_environments)."""
+    environments, the ones it defines (book_environments); places, a list
+    for inline_passages' places; block_macros, its macros that make a
+    block (block_macros)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -2870,7 +3105,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
-    text = inline_passages(text, counter, tags, environments)
+    text = inline_passages(text, counter, tags, environments, places, macros=block_macros)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -7282,9 +7517,14 @@ def prepare(base, work, master, say, macros=""):
     counting = book_counters(originals, originals[0][1] if originals else "")
     tags = babel_tags([t for _, t in originals])
     environments = book_environments([t for _, t in originals])
+    macros_blocks = block_macros(originals, environments)
+    dropped = []
     for name, text in originals:
+        places = []
         texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
-                                  environments)
+                                  environments, places, block_macros=macros_blocks)
+        dropped += sorted((name, author_line(text, line, command, words), command, words)
+                          for line, command, words in places)
     # A chapter \include-d by the book's own macro, written out, so the
     # pages are cut where it begins; the book's environments as the
     # commands LaTeX makes of them, which Pandoc's reader can balance; its
@@ -7406,7 +7646,8 @@ def prepare(base, work, master, say, macros=""):
     return {"master": os.path.join(copy, master), "order": order,
             "front_role": front_role, "files": files, "missing": missing,
             "counts": counts, "preamble": preamble, "copy": copy, "colors": colors,
-            "counters": counting, "citations": citations, "layout": layout}
+            "counters": counting, "citations": citations, "layout": layout,
+            "dropped": dropped}
 
 
 def book_page(base, master, originals=None):

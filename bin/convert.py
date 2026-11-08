@@ -1367,6 +1367,10 @@ LATEX_READ_CHANGES = (
      "\\foreignlanguage in each paragraph, which stopped the reader"),
     ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read as "
      "otherlanguage, which stopped the reader"),
+    ("quotation_paragraphs", "quotation's words holding a paragraph break (\\enquote) read as "
+     "a quotation in each paragraph, which stopped the reader"),
+    ("box_breaks", "paragraph break in a box's words (\\mbox, \\underline) read as LaTeX sets "
+     "it, on one line, which stopped the reader"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),

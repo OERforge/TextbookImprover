@@ -299,6 +299,48 @@ def matching_brace(text, start):
     return -1
 
 
+VERBATIM_BEGIN = re.compile(r"\\begin\s*\{(" + "|".join(re.escape(v) for v in VERBATIM) + r")\}")
+VERB = re.compile(r"\\verb\*?([^a-zA-Z\s*])")
+
+
+def code_brace(text, start):
+    """matching_brace in code: the index just past the group that opens
+    at text[start] == '{', a brace in a comment, \\verb, verbatim, or
+    inline code not counted, as skip_spans takes them; -1 where none
+    closes it."""
+    depth, i, n = 0, start, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            m = VERBATIM_BEGIN.match(text, i)
+            if m:
+                end = text.find("\\end{" + m.group(1) + "}", m.end())
+                i = n if end < 0 else end + len("\\end{" + m.group(1) + "}")
+                continue
+            m = VERB.match(text, i)
+            end = closing_on_line(text, m.end(), m.group(1)) if m else -1
+            if end < 0:
+                m = INLINE_CODE.match(text, i)
+                end = inline_code_end(text, m) if m else -1
+            if end > 0:
+                i = end
+                continue
+            i += 2
+            continue
+        if c == "%":
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
 # --------------------------------------------------------------------------
 # the master and the files it reaches
 # --------------------------------------------------------------------------
@@ -2145,9 +2187,29 @@ def language_marks(text, counter):
 # words with it.
 FOREIGN_LANGUAGE = re.compile(r"\\foreignlanguage(?![A-Za-z@])(\*?)\s*(\[[^][{}]*\])?\s*\{")
 BABEL_TAGS = re.compile(r"\\babeltags\s*\{([^{}]*)\}")
+# csquotes' quotations, whose words the reader reads as inlines too
+# (Readers/LaTeX/Lang.hs, enquote), so a paragraph break in them stopped
+# it, where LaTeX sets the quotation over both paragraphs: \enquote, and
+# \foreignquote and \hyphenquote, which name a language first, each
+# starred too, for the inner marks.
+QUOTATION = re.compile(r"\\(enquote|foreignquote|hyphenquote)(?![A-Za-z@])[ \t]*(\*?)")
+# The boxes whose words the reader reads as inlines (Readers/LaTeX.hs),
+# where a paragraph break stopped it: LaTeX sets their words on one line,
+# a blank line as the space its line's end is, and \par as nothing, the
+# spaces after it TeX's to skip (measured, TeX Live 2026).
+LINE_BOX = re.compile(r"\\(mbox|hbox|underline|uline|sout)(?![A-Za-z@])")
 # A paragraph break in a passage's words: a blank line, or \par. (A blank
 # line alone is PARAGRAPH_BREAK, captionof_floats'.)
 PASSAGE_BREAK = re.compile(r"\n[ \t]*\n\s*|\\par(?![A-Za-z@])\s*")
+# What the reader reads as nothing in a paragraph's words, so a paragraph
+# of it alone: a vertical space or a page break, \noindent (Readers/LaTeX.hs,
+# treatAsInline), \bigskip and its kin, \medbreak and its, \nopagebreak,
+# and \addvspace, which it doesn't know (each measured), with blanks and
+# comments.
+NOTHING_READ = re.compile(
+    r"(?:\s|%[^\n]*|\\(?:(?:add)?vspace\*?\s*\{[^{}]*\}|(?:no)?pagebreak\s*(?:\[[^]]*\])?"
+    r"|(?:big|med|small)(?:skip|break)(?![A-Za-z@])"
+    r"|(?:noindent|newpage|clearpage)(?![A-Za-z@])))*")
 BEGIN_ENVIRONMENT = re.compile(r"\\begin\s*\{([^{}]*)\}")
 # The environments the reader takes inside a paragraph, a formula's
 # (Readers/LaTeX/Math.hs's inlineEnvironments): any other stops it there,
@@ -2371,74 +2433,159 @@ def top_level(pattern, text):
             if not in_spans(m.start(), spans) and not in_spans(m.start(), groups)]
 
 
-def babel_passages(text, counter, tags=None, environments=()):
-    """babel's commands for a passage in another language, in code, as the
-    reader can read them (FOREIGN_LANGUAGE): babeltags' \\textfr{X} as
-    \\foreignlanguage{french}{X}, by tags (babel_tags); \\foreignlanguage
-    without its options; and its words, where they hold a paragraph
-    break, a \\foreignlanguage of each paragraph, so the paragraph keeps
-    the words before and after them, as LaTeX sets it, a comment that ends
-    a paragraph after the paragraph's brace, but for a blank line after
-    \\\\, which the reader reads as a line break, and \\\\par, a line break
-    and a word (passage_break), or where they hold an environment the
-    reader doesn't take inside a paragraph, not a formula's or in one
-    (formula_spans, a copy of one among them) and not one of environments,
-    the book's own it takes ({name: kind}, book_environments), in
-    otherlanguage, which holds paragraphs, lists, and the rest."""
+def command_words(text, m):
+    """(head, language, start, close) for a FOREIGN_LANGUAGE, QUOTATION,
+    or LINE_BOX match in text: the command as it's written again around a piece
+    of its words, without its options, which the reader skips or stops
+    on; the language it names, or None; and its words, text[start:close -
+    1], close past their brace. None where they aren't braced, or a brace
+    isn't matched."""
+    if m.re is FOREIGN_LANGUAGE:
+        named = matching_brace(text, m.end() - 1)
+        opening = re.compile(r"\s*\{").match(text, named) if named >= 0 else None
+        if not opening:
+            return None
+        language = text[m.end():named - 1]
+        head, start = "\\foreignlanguage%s{%s}" % (m.group(1), language), opening.end()
+    else:
+        head, language, pos = "\\" + m.group(1), None, m.end()
+        if m.re is QUOTATION:
+            head += m.group(2)
+            if m.group(1) != "enquote":
+                at = argument_space(text, pos)
+                named = matching_brace(text, at) if text.startswith("{", at) else -1
+                if named < 0:
+                    return None
+                language = text[at + 1:named - 1]
+                head += "{%s}" % language
+                pos = named
+            at = argument_space(text, pos)
+            if text.startswith("[", at):        # skipped by the reader
+                bracket = closing_bracket(text, at)
+                if bracket < 0:
+                    return None
+                pos = bracket + 1
+        at = argument_space(text, pos)
+        if not text.startswith("{", at):
+            return None
+        start = at + 1
+    close = code_brace(text, start - 1)
+    return None if close < 0 else (head, language, start, close)
+
+
+def passage_pieces(words, breaks, skipped, wrap):
+    """words, cut at breaks (PASSAGE_BREAK matches, in order), each piece
+    between them wrap(piece), but one of nothing but space, which is left
+    as it is, the breaks between them as they were: a comment on a
+    piece's last line after its brace, which it would take, and a piece
+    ending in a backslash of its own, a control space with the line's end,
+    keeping its line end, or the backslash would take the brace. skipped:
+    skip_spans(words)."""
+    pieces, last = [], 0
+    for b in breaks + [None]:
+        stop = b.start() if b else len(words)
+        line = max(last, words.rfind("\n", last, stop) + 1)
+        cut = next((start for start, _ in skipped
+                    if line <= start < stop and words.startswith("%", start)), stop)
+        piece, tail = words[last:cut], words[cut:stop]
+        if (len(piece) - len(piece.rstrip("\\"))) % 2:
+            piece += "\n"
+        pieces.append((wrap(piece) if piece.strip() else piece) + tail)
+        if b:
+            pieces.append(b.group(0))
+            last = b.end()
+    return "".join(pieces)
+
+
+def box_line(words):
+    """A box's words as LaTeX sets them, on one line: each paragraph break
+    the reader would stop on outside every group in them (passage_break)
+    a line's end, a space, for a blank line, and nothing for \\par, the
+    spaces after it TeX's to skip."""
+    skipped, out, last = skip_spans(words), [], 0
+    for b in top_level(PASSAGE_BREAK, words):
+        if passage_break(words, b, skipped):
+            out.append(words[last:b.start()] + ("" if b.group(0).startswith("\\") else "\n"))
+            last = b.end()
+    return "".join(out) + words[last:]
+
+
+def inline_passages(text, counter, tags=None, environments=()):
+    """The commands whose words the reader reads as inlines, in code, as
+    it can read them, where they hold what it stops on, or are dropped.
+    babel's for a passage in another language (FOREIGN_LANGUAGE):
+    babeltags' \\textfr{X} as \\foreignlanguage{french}{X}, by tags
+    (babel_tags); \\foreignlanguage without its options; and its words,
+    where they hold a paragraph break, a \\foreignlanguage of each
+    paragraph, so the paragraph keeps the words before and after them, as
+    LaTeX sets it, but for a blank line after \\\\, which the reader reads
+    as a line break, and \\\\par, a line break and a word (passage_break),
+    or where they hold an environment the reader doesn't take inside a
+    paragraph, not a formula's or in one (formula_spans, a copy of one
+    among them) and not one of environments, the book's own it takes
+    ({name: kind}, book_environments), in otherlanguage, which holds
+    paragraphs, lists, and the rest. csquotes' quotations (QUOTATION),
+    likewise a quotation of each paragraph, where LaTeX sets the one over
+    both. And the boxes (LINE_BOX), whose words LaTeX sets on one line, a
+    paragraph break as LaTeX takes it there (box_line): a blank line a
+    line's end, and \\par nothing, a passage's or a quotation's in their
+    words too, as the box's. A piece of nothing the reader reads
+    (NOTHING_READ) is left as it is. From the last, so one inside
+    another's words is read first, and the places before it stay where
+    they are."""
     if tags:
         command = re.compile(r"\\text(%s)(?![A-Za-z@])(?=\s*\{)" % "|".join(
             re.escape(t) for t in sorted(tags, key=len, reverse=True)))
         text = substitute(command, text, lambda m: "\\foreignlanguage{%s}" % tags[m.group(1)],
                           counter, "babel_tags")
     spans = skip_spans(text)
-    found = [m for m in FOREIGN_LANGUAGE.finditer(text) if not in_spans(m.start(), spans)]
-    # From the last, so one inside another's words is read first and the
-    # places before it stay where they are.
+    found = sorted((m for pattern in (FOREIGN_LANGUAGE, QUOTATION, LINE_BOX)
+                    for m in pattern.finditer(text) if not in_spans(m.start(), spans)),
+                   key=lambda m: m.start())
     for m in reversed(found):
-        named = matching_brace(text, m.end() - 1)
-        opening = re.compile(r"\s*\{").match(text, named) if named >= 0 else None
-        close = matching_brace(text, opening.end() - 1) if opening else -1
-        if close < 0:
+        parsed = command_words(text, m)
+        if not parsed:
             continue
-        language, words = text[m.end():named - 1], text[opening.end():close - 1]
-        formulas = formula_spans(words, [name for name, kind in dict(environments).items()
-                                         if kind == "formula"])
-        blocks = [b for b in top_level(BEGIN_ENVIRONMENT, words)
-                  if b.group(1).strip() not in environments
-                  and not in_spans(b.start(), formulas)]
+        head, language, start, close = parsed
+        words = text[start:close - 1]
         skipped = skip_spans(words)
         breaks = [b for b in top_level(PASSAGE_BREAK, words)
                   if passage_break(words, b, skipped)]
-        if blocks:
-            new = "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, words)
-            key = "babel_blocks"
-        elif breaks:
-            pieces, last = [], 0
-            for b in breaks + [None]:
-                stop = b.start() if b else len(words)
-                # A comment on the piece's last line goes after its brace,
-                # which it would take.
-                line = max(last, words.rfind("\n", last, stop) + 1)
-                cut = next((start for start, _ in skipped
-                            if line <= start < stop and words.startswith("%", start)), stop)
-                piece, tail = words[last:cut], words[cut:stop]
-                # A piece ending in a backslash of its own, a control
-                # space with the line's end, keeps its line end, or the
-                # backslash would take the brace.
-                if (len(piece) - len(piece.rstrip("\\"))) % 2:
-                    piece += "\n"
-                pieces.append(("\\foreignlanguage%s{%s}{%s}" % (m.group(1), language, piece)
-                               if piece.strip() else piece) + tail)
-                if b:
-                    pieces.append(b.group(0))
-                    last = b.end()
-            new = "".join(pieces)
-            key = "babel_paragraphs"
-        elif m.group(2):
-            new = "\\foreignlanguage%s{%s}{%s}" % (m.group(1), language, words)
-            key = "babel_options"
+
+        def wrap(piece, head=head):
+            # What the reader reads as nothing, alone between paragraph
+            # breaks, is left there, not made an empty passage or quotation.
+            return piece if NOTHING_READ.fullmatch(piece) else "%s{%s}" % (head, piece)
+        # A box's words on one line, and in a box's words, a passage's or a
+        # quotation's paragraph break the box's, on its one line.
+        if m.re is LINE_BOX or breaks and any(
+                b.re is LINE_BOX and b.start() < m.start()
+                and m.start() < (command_words(text, b) or (0, 0, 0, -1))[3] for b in found):
+            if not breaks:
+                continue
+            new, key = "%s{%s}" % (head, box_line(words)), "box_breaks"
+        elif m.re is QUOTATION:
+            if not breaks:
+                continue
+            new = passage_pieces(words, breaks, skipped, wrap)
+            key = "quotation_paragraphs"
         else:
-            continue
+            formulas = formula_spans(words, [name for name, kind in dict(environments).items()
+                                             if kind == "formula"])
+            blocks = [b for b in top_level(BEGIN_ENVIRONMENT, words)
+                      if b.group(1).strip() not in environments
+                      and not in_spans(b.start(), formulas)]
+            if blocks:
+                new = "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, words)
+                key = "babel_blocks"
+            elif breaks:
+                new = passage_pieces(words, breaks, skipped, wrap)
+                key = "babel_paragraphs"
+            elif m.group(2):
+                new = "%s{%s}" % (head, words)
+                key = "babel_options"
+            else:
+                continue
         text = text[:m.start()] + new + text[close:]
         counter[key] = counter.get(key, 0) + 1
     return text
@@ -2723,7 +2870,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
-    text = babel_passages(text, counter, tags, environments)
+    text = inline_passages(text, counter, tags, environments)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the

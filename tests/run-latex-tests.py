@@ -1409,6 +1409,126 @@ LANGUAGES_FILES = {
 }
 
 
+
+def case_inline_breaks(work):
+    """A paragraph break in the words of a command the reader reads as
+    inlines, which stopped it, read as LaTeX sets it: in a box's (\\mbox,
+    \\hbox, \\underline, ulem's \\uline and \\sout), on one line, a blank
+    line as a space and \\par as nothing; in a quotation's (\\enquote,
+    starred, \\foreignquote, \\hyphenquote), a quotation in each paragraph,
+    one inside another's too, but in a box's words as the box's, one
+    quotation on its line, and a paragraph of what the reader reads as
+    nothing, a vertical space or a page break, no quotation of its own, a
+    brace in a comment, \\verb, verbatim, or inline code none of the
+    words'; a blank
+    line after \\\\ left to the reader, which reads a line break; the run
+    saying what it read so, and the author's files as they were."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    os.makedirs(work)
+    files = {
+        "book.tex": "\\documentclass{book}\n\\usepackage[normalem]{ulem}\n"
+                    "\\usepackage[english,french]{babel}\n\\usepackage{csquotes}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\n"
+                   "One \\mbox{un.\\par deux.} end.\n\n"
+                   "Two \\mbox{un. \\par deux.} end.\n\n"
+                   "Three \\hbox{un.\n\ndeux.} end.\n\n"
+                   "Four \\underline{un.\\par deux.} end.\n\n"
+                   "Five \\uline{un.\n\ndeux.} end.\n\n"
+                   "Six \\sout{un.\\par deux.} end.\n\n"
+                   "Seven \\enquote{un.\\par deux.} end.\n\n"
+                   "Eight \\enquote*{un.\n\ndeux.} end.\n\n"
+                   "Nine \\foreignquote{english}{one\n\ntwo} end.\n\n"
+                   "Ten \\hyphenquote*{english}{one\n\ntwo} end.\n\n"
+                   "Eleven \\enquote{a \\enquote{b\n\nc} d} end.\n\n"
+                   "Twelve \\enquote{vers\\\\\n\nun} end.\n\n"
+                   "Thirteen \\mbox{\\enquote{un\n\ndeux}} end.\n\n"
+                   "Fourteen \\enquote{un.\n\n\\vspace{1ex}\n\ndeux.} end.\n\n"
+                   "Fifteen \\enquote{un % }\n\ndeux} end.\n\n"
+                   "Sixteen \\enquote{un.\n\n\\pagebreak[4]\n\n\\medbreak\n\ndeux.} end.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.breaks\n  title: Breaks\n"
+                 "  language: fr\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    page = read(work, "html", "one.html") if os.path.exists(
+        os.path.join(work, "html", "one.html")) else ""
+    text = re.sub(r"\s+", " ", page)
+
+    def paragraph(*parts):
+        """Whether the page has a paragraph of parts (patterns), in order,
+        nothing else."""
+        return re.search(r"<p>\s*" + r"\s*".join(parts) + r"\s*</p>", text) is not None
+
+    def mark(c):
+        """A quotation mark as the page may write it."""
+        return "(?:%s|&#x%X;)" % (c, ord(c))
+
+    underline = (r"(?:<u>|<span class=\"underline\">)", r"(?:</u>|</span>)")
+    return [
+        ("a LaTeX book is read whose box or quotation holds a paragraph break, which "
+         "stopped the reader",
+         lambda: result.returncode == 0 and bool(page)),
+        ("a box's words are on one line, a blank line in them a space and \\par nothing, "
+         "the spaces after it TeX's",
+         lambda: paragraph("One un\\.deux\\. end\\.")
+         and paragraph("Two un\\.(?:\u00a0|&#xA0;)deux\\. end\\.")
+         and paragraph("Three un\\.(?:\u00a0|&#xA0;)deux\\. end\\.")
+         and paragraph("Four", underline[0] + "un\\.deux\\." + underline[1], "end\\.")
+         and paragraph("Five", underline[0] + "un\\. deux\\." + underline[1], "end\\.")
+         and paragraph("Six <del>un\\.deux\\.</del> end\\.")),
+        ("a quotation's words holding a paragraph break are a quotation in each paragraph, "
+         "starred, in another language, and inside another quotation too",
+         lambda: paragraph("Seven", mark("\u201c") + "un\\." + mark("\u201d"))
+         and paragraph(mark("\u201c") + "deux\\." + mark("\u201d"), "end\\.")
+         and paragraph("Eight", mark("\u2018") + "un\\." + mark("\u2019"))
+         and paragraph(mark("\u2018") + "deux\\." + mark("\u2019"), "end\\.")
+         and paragraph("Nine", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"))
+         and paragraph(mark("\u201c") + '<span lang="en">two</span>' + mark("\u201d"),
+                       "end\\.")
+         and paragraph("Ten", mark("\u2018") + '<span lang="en">one</span>' + mark("\u2019"))
+         and paragraph("Eleven", mark("\u201c") + "a", mark("\u2018") + "b" + mark("\u2019")
+                       + mark("\u201d"))
+         and paragraph(mark("\u201c") + mark("\u2018") + "c" + mark("\u2019"), "d"
+                       + mark("\u201d"), "end\\.")),
+        ("a blank line after \\\\ in a quotation is the reader's line break",
+         lambda: paragraph("Twelve", mark("\u201c") + "vers<br />", "un" + mark("\u201d"),
+                           "end\\.")),
+        ("a quotation's in a box is the box's, one quotation on its line, and a paragraph of "
+         "what the reader reads as nothing no quotation",
+         lambda: paragraph("Thirteen", mark("\u201c") + "un(?:\u00a0|&#xA0;)deux"
+                           + mark("\u201d"), "end\\.")
+         and paragraph("Fourteen", mark("\u201c") + "un\\." + mark("\u201d"))
+         and re.search(r"</p>\s*<p>\s*" + mark("\u201c") + "deux\\." + mark("\u201d")
+                       + r"\s*end\.\s*</p>", text) is not None
+         and paragraph("Sixteen", mark("\u201c") + "un\\." + mark("\u201d"))
+         and paragraph(mark("\u201c") + "deux\\." + mark("\u201d"), "end\\.")
+         and not re.search("<p>" + mark("\u201c") + mark("\u201d") + "</p>", text)),
+        ("a brace in a comment in the words isn't one of theirs, nor one in \\verb, verbatim, "
+         "or inline code",
+         lambda: paragraph("Fifteen", mark("\u201c") + "un ?" + mark("\u201d"))
+         and paragraph(mark("\u201c") + "deux" + mark("\u201d"), "end\\.")
+         and latexsource.code_brace("{a % }\nb} c", 0) == 9
+         and latexsource.code_brace("{a \\verb|}| b} c", 0) == 14
+         and latexsource.code_brace("{\\begin{verbatim}}\\end{verbatim}} c", 0) == 33
+         and latexsource.code_brace("{a \\lstinline|}| b} c", 0) == 19
+         and latexsource.code_brace("{a \\verb|x\n} b", 0) == 12),
+        ("the run says what it read so",
+         lambda: "7 paragraph break in a box's words (\\mbox, \\underline) read as LaTeX "
+                 "sets it" in said
+         and "9 quotation's words holding a paragraph break (\\enquote) read as a "
+             "quotation in each paragraph" in said),
+        ("and the author's files are as they were",
+         lambda: all(read(work, name) == text for name, text in files.items())),
+    ]
+
 def case_page_languages(work):
     """A LaTeX book's pages in another language than the book's, in its copy
     and in its PDF built from its own files: each \\include-d file's page
@@ -8744,6 +8864,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
+         ("a paragraph break in a box's or a quotation's words", case_inline_breaks),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

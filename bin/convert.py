@@ -4106,6 +4106,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                + ("fancyvrb's lists told to keep a list's item's label beside the code "
                   "that opens the item, which LaTeX's tagging set over the next item's, "
                   if counts.get("tag_code_label") else "")
+               + ("a heading's or a caption's \\foreignlanguage titled by its words in the "
+                  "PDF's structure and its contents entry's, where LaTeX's tagging put the "
+                  "language's name before them (\"Le frenchtitre\"), "
+                  if counts.get("tag_foreign_titles") else "")
                + ("its line breaks (\\\\, \\newline, \\linebreak, and \\break) told to leave "
                   "a space between their lines in the text a screen reader gets, where "
                   "LaTeX's tagging ran the words on either side together, "
@@ -4749,6 +4753,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                "glyphs (picture_paths), " if counts.get("tag_picture") else "")
             + ("a list's item's label kept beside the code that opens the item, "
                if counts.get("tag_code_label") else "")
+            + ("a heading's \\foreignlanguage titled by its words alone, "
+               if counts.get("tag_foreign_titles") else "")
             + ("a space between a line break's two lines in the text a screen reader "
                "gets, " if counts.get("tag_line_breaks") else "")
             + ("a space between a part's or a chapter's number and its title in the text "

@@ -3026,6 +3026,34 @@ def case_babel_languages(work):
          and texremediate.babel_tag("klingon") is None),
     ]
 
+def structure_titles(path):
+    """[(role, /T)] of the structure elements of the tagged PDF at path that
+    have a title, in order; None where pikepdf isn't installed."""
+    try:
+        import pikepdf
+    except ImportError:
+        return None
+    found = []
+    if not os.path.exists(path):
+        return found
+    with pikepdf.open(path) as done:
+        root = done.Root.get("/StructTreeRoot")
+        roles = {str(k): str(v) for k, v in dict(root.get("/RoleMap", {})).items()} \
+            if root is not None else {}
+
+        def walk(node):
+            kids = node.get("/K")
+            for kid in (kids if isinstance(kids, pikepdf.Array) else
+                        [] if kids is None else [kids]):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    if "/T" in kid:
+                        found.append((roles.get(str(kid.S), str(kid.S)), str(kid.T)))
+                    walk(kid)
+        if root is not None:
+            walk(root)
+    return found
+
+
 # babel's declarations of its hooks: from 26.11 the babel/*/ hooks too
 # (its commit 68dedcd), which babel 26.9 and 26.10 run without declaring.
 BABEL_DECLARES = "\\NewHook{babel/#1}\\NewHook{babel/*/#1}"
@@ -3036,7 +3064,12 @@ def case_babel_hooks(work):
     hooks without declaring them, as babel before 26.11 does (LATEX-NOTES):
     the installed babel.sty with its declarations as 26.9 writes them, in
     the copy's folder, the copy's passages tagged in their language all the
-    same, as with the installed babel."""
+    same, as with the installed babel. And a heading holding
+    \\foreignlanguage titled by its words alone in the PDF's structure and
+    its contents entry's, where the language's name came first ("Le
+    frenchtitre"), with either babel."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import texremediate
     why = why_no_tex("no lualatex or latexmk to build the copy", "lualatex", "latexmk")
     book = os.path.join(work, "book")
     os.makedirs(book)
@@ -3045,6 +3078,8 @@ def case_babel_hooks(work):
                  "\\begin{document}\n\\tableofcontents\n"
                  "\\section{Le \\foreignlanguage{french}{titre}}\n"
                  "Some English with a \\foreignlanguage{french}{mot} in it.\n\n"
+                 "\\subsection{Un \\foreignlanguage[date]{french}{autre titre}}\n"
+                 "More English.\n\n"
                  "\\begin{otherlanguage}{french}\nUn paragraphe en fran\\c{c}ais.\n"
                  "\\end{otherlanguage}\n\nBack in English.\n\\end{document}\n")
     with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
@@ -3052,6 +3087,7 @@ def case_babel_hooks(work):
     with open(os.path.join(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  copy:\n    format: source\n    tagging: \"on\"\n")
     done = convert(book)
+    said = done.stdout + done.stderr
     copy = read(book, "copy", "book.tex") if done.returncode == 0 \
         and os.path.exists(os.path.join(book, "copy", "book.tex")) else ""
     installed = subprocess.run(["kpsewhich", "babel.sty"], capture_output=True, text=True,
@@ -3100,14 +3136,35 @@ def case_babel_hooks(work):
             and ("fr", "mot") in [(lang, text) for role, own, lang, text, around in structure
                                   if role == "Span" and own and own != around]
 
+    def titled(name):
+        """Whether every structure title holding a heading's words is the
+        heading's words, "Le titre" and "Un autre titre", each heading's and
+        its contents entry's at least."""
+        pdf, reason = build(name)
+        if reason:
+            return skip(reason)
+        titles = structure_titles(pdf)
+        if titles is None:
+            return skip("no pikepdf to read the PDF's structure")
+        named = [title for _, title in titles if "titre" in title]
+        return bool(pdf) and named.count("Le titre") >= 2 and named.count("Un autre titre") >= 2 \
+            and set(named) == {"Le titre", "Un autre titre"}
+
     return [
-        ("a tagged copy declares babel's two hooks before it adds to them, where LaTeX can",
+        ("a tagged copy declares babel's two hooks before it adds to them, where LaTeX can, "
+         "and titles a heading's \\foreignlanguage by its words, once",
          lambda: "\\ActivateGenericHook { babel / * / afterextras }" in copy
+         and copy.count(texremediate.FOREIGN_TITLES) == 1
+         and "\\foreignlanguage titled by its words in the PDF's structure" in said
          and copy.index("\\ActivateGenericHook { babel / * / foreign }")
          < copy.index("\\AddToHook { babel / * / foreign }")),
         ("built with the installed babel, its passages are in French", lambda: tagged("new")),
         ("and with babel's declarations as babel 26.9 writes them, which leave the hooks the "
          "copy adds to undeclared, in French too", lambda: tagged("old")),
+        ("a heading holding \\foreignlanguage is titled by its words alone in the PDF's "
+         "structure and in its contents entry's, an option before its language too, with "
+         "either babel",
+         lambda: titled("new") and titled("old")),
     ]
 
 
@@ -9500,7 +9557,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
-         ("a LaTeX book's babel hooks under babel before 26.11", case_babel_hooks),
+         ("a LaTeX book's babel hooks under babel before 26.11, and a title's "
+          "\\foreignlanguage", case_babel_hooks),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("otherlanguage* and babeltags' environment", case_babel_environments),
          ("the line a stop on a book is at", case_stop_line),

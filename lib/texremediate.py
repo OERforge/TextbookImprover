@@ -2203,6 +2203,21 @@ FANCYVRB_LOADERS = {"fancyvrb", "fvextra", "minted"}
 # A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
 # (tag), counted to say so.
 PICTURE = re.compile(r"\\begin\s*\{picture\}")
+# babel's \foreignlanguage, and polyglossia's, in a heading or a caption,
+# whose title in the PDF's structure, and its contents entry's, LaTeX's
+# tagging makes plain (\pdf_purify:nN), which keeps the arguments of a
+# command it has no equivalent for: "Le \foreignlanguage{french}{titre}"
+# was titled "Le frenchtitre", where its bookmark, hyperref's, had "Le
+# titre" (CNX-NOTES, item 185). Its words alone are, an option before its
+# language taken with it, as latexbuild's \href is.
+FOREIGNLANGUAGE = re.compile(r"\\foreignlanguage(?![A-Za-z@])")
+FOREIGN_TITLES = r"""% In a title LaTeX's tagging makes plain, \foreignlanguage's words alone.
+\ExplSyntaxOn
+\cs_if_exist:NF \__tiq_purify_foreign:w
+  { \cs_new:Npn \__tiq_purify_foreign:w #1 # { \use_ii:nn } }
+\text_declare_purify_equivalent:Nn \foreignlanguage { \__tiq_purify_foreign:w }
+\ExplSyntaxOff
+"""
 # A line break in a paragraph: \\, \newline, \linebreak, or \break (and
 # so \hfill\break), which leaves no space between its lines in a tagged
 # PDF's text without latexbuild.LINE_BREAK_SPACE.
@@ -2452,6 +2467,13 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             "cmd / FV@ListVSpace / before" in piece for piece in pieces):
         block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"
         counts["code_label"] = 1
+    # A title that holds \foreignlanguage titled by its words alone
+    # (FOREIGN_TITLES), where the book has one; not again in a copy made
+    # from a copy.
+    if any(latexsource.code_matches(FOREIGNLANGUAGE, t) for t in texts.values()) \
+            and not any("__tiq_purify_foreign:w" in piece for piece in pieces):
+        block += FOREIGN_TITLES
+        counts["foreign_titles"] = 1
     # A line break's two lines with a space between them in the text a
     # screen reader gets, and a heading's number and title, as a book's
     # PDF from its pages has them (latexbuild.LINE_BREAK_SPACE), where the

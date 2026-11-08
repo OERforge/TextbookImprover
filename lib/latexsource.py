@@ -687,13 +687,37 @@ def book_outline(body):
     return order, front_role or role
 
 
+# babel's \\babelprovide: its options and the language's name. main among
+# the options makes the language babel's main one as it's read, in place
+# of the one babel's options gave (\\main@language, read in babel.sty
+# 26.13); import= gives its locale's tag.
+BABEL_PROVIDE = re.compile(r"\\babelprovide\s*\[([^]]*)\]\s*\{\s*([^{}\s]+)\s*\}")
+LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*")
+
+
+def provided_main(preamble):
+    """(name, tag) of the language the last \\babelprovide in the
+    preamble's code with main among its options makes babel's main one,
+    tag the locale's import= gives, or ""; None where none does."""
+    found = None
+    for m in code_matches(BABEL_PROVIDE, preamble):
+        options = dict((key.strip(), value.strip()) for key, _, value in
+                       (o.partition("=") for o in option_list(COMMENT.sub("", m.group(1)))))
+        if "main" in options:
+            tag = options.get("import", "")
+            found = (m.group(2), tag if LANGUAGE_TAG.fullmatch(tag) else "")
+    return found
+
+
 def preamble_language(preamble):
     """The book's language, as the preamble declares it: \\DocumentMetadata's
-    lang, polyglossia's main language, or babel's main language, the one
-    main= names (none where the table doesn't know it, a name with a
-    modifier among them: babel keeps main='s value whole, finds no such
-    language, and sets the last it loaded, as measured with babel 26.13),
-    else the last, its modifiers taken off, as babel takes them off."""
+    lang, polyglossia's main language, or babel's main language: the one
+    a \\babelprovide with main makes it (provided_main), its import='s tag
+    or its name's; else the one main= names (none where the table doesn't
+    know it, a name with a modifier among them: babel keeps main='s value
+    whole, finds no such language, and sets the last it loaded, as
+    measured with babel 26.13), else the last, its modifiers taken off,
+    as babel takes them off."""
     m = re.search(r"\\DocumentMetadata\s*\{[^}]*?\blang\s*=\s*([A-Za-z-]+)",
                   preamble)
     if m:
@@ -702,6 +726,9 @@ def preamble_language(preamble):
                   preamble)
     if m and m.group(1) in BABEL:
         return BABEL[m.group(1)]
+    provided = provided_main(preamble)
+    if provided:
+        return provided[1] or BABEL.get(provided[0], "")
     for m in re.finditer(r"\\usepackage\s*\[([^]]*)\]\s*\{babel\}", preamble):
         options = [o.strip() for o in m.group(1).split(",") if o.strip()]
         main = [o.partition("=")[2].strip() for o in options
@@ -3616,7 +3643,9 @@ def quote_style(preamble):
     "main", the main language's name, each quotation in the language
     around it (measured, LuaLaTeX, csquotes 5.2p: \\foreignquote's in its
     own, \\hyphenquote's in the one around it); and "variants", the
-    options' variant for a language (german=guillemets).
+    options' variant for a language (german=guillemets). The main
+    language is polyglossia's, or babel's, a \\babelprovide's with main
+    (provided_main) or its options'.
 
     Read as csquotes.sty (5.2p) reads it: its options in order, from
     autostyle=tryonce and English's style the default, style= turning
@@ -3648,8 +3677,11 @@ def quote_style(preamble):
         if "babel" in package_names(m.group(2) if loads else m.group(4)):
             babel_loaded = babel_loaded or loads
             babel += option_list(COMMENT.sub("", (m.group(1) if loads else m.group(3)) or ""))
+    provided = provided_main(preamble)
     if found:
         main = quote_name(found[-1].group(2), found[-1].group(1))
+    elif provided:
+        main = quote_name(provided[0])
     else:
         cls = re.search(r"\\documentclass\s*\[([^]]*)\]", preamble)
         name = babel_main(babel, option_list(COMMENT.sub("", cls.group(1))) if cls else [])

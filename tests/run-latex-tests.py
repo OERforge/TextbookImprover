@@ -1045,7 +1045,9 @@ def case_babel_main(work):
     options don't say. And a book whose main= names French is in French,
     and the run warning of one whose main= has a modifier, the first
     main= babel is given before it's loaded, by \\usepackage,
-    \\RequirePackage, or \\PassOptionsToPackage, where it's loaded."""
+    \\RequirePackage, or \\PassOptionsToPackage, where it's loaded; and
+    a book whose main language the last \\babelprovide with main makes
+    is in that language, its quotations' marks too."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
     import texremediate
@@ -1081,6 +1083,21 @@ def case_babel_main(work):
     _, modifier_said = book_at(
         "modifier", "\\documentclass{article}\n\\usepackage[main=ngerman.foo,english]{babel}\n"
         + body, targets=tagged + "  html:\n    format: html\n")
+    # A book whose main language \babelprovide[main] makes, built; and one
+    # with csquotes too, only read, since a TeX without csquotes, as
+    # TinyTeX-1 is, can't build it.
+    provide = "\\documentclass{article}\n\\usepackage[english]{babel}\n" \
+        "\\babelprovide[import,main]{french}\n"
+    provided, _ = book_at("provided", provide + "\\begin{document}\nIl dit bonjour ici.\n"
+                          "\\end{document}\n", targets=tagged + "  html:\n    format: html\n")
+    book_at("provided-quotes", provide + "\\usepackage{csquotes}\n\\begin{document}\n"
+            "Il dit \\enquote{bonjour} ici.\n\\end{document}\n",
+            targets="  html:\n    format: html\n")
+
+    def page_of(name):
+        """The book's page, its spaces one, or "" where it has none."""
+        page = os.path.join(work, name, "html", "book.html")
+        return re.sub(r"\s+", " ", read(page)) if os.path.exists(page) else ""
     again = ""
     if german:
         again, _ = book_at("again", german)
@@ -1111,15 +1128,17 @@ def case_babel_main(work):
         """The copy built with LuaLaTeX, as a person builds it, with lines
         that have LaTeX's log name babel's language and hyphenate the words:
         wanted, babel's main language and the words' hyphens (None for any);
-        languages, those whose packages TeX needs for it (why_no_language)."""
+        languages, those whose packages TeX needs for it (why_no_language).
+        Each build in a folder of its own, so none reads another's files,
+        and where one fails, LaTeX's error said under the check
+        (built_or_why)."""
         why = why_no_tex("no lualatex to build the copy", "lualatex") \
             or why_no_language(*languages)
         if why:
             return skip(why)
         if not text:
             return False
-        tree = os.path.join(work, "build-" + wanted[0])
-        os.makedirs(tree, exist_ok=True)
+        tree = tempfile.mkdtemp(prefix="build-" + wanted[0] + "-", dir=work)
         with open(os.path.join(tree, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write(text.replace("\\begin{document}\n", "\\begin{document}\n"
                                   "\\typeout{MAIN=\\languagename}\n"
@@ -1128,9 +1147,10 @@ def case_babel_main(work):
                                "book.tex"], cwd=tree, capture_output=True, text=True,
                               timeout=300, stdin=subprocess.DEVNULL)
         log = read(tree, "book.log") if os.path.exists(os.path.join(tree, "book.log")) else ""
-        return done.returncode == 0 and "MAIN=%s\n" % wanted[0] in log \
-            and (wanted[1] is None
-                 or re.search(r"\\TU/\S+ %s\b" % re.escape(wanted[1]), log) is not None)
+        return built_or_why(done.returncode == 0 and "MAIN=%s\n" % wanted[0] in log
+                            and (wanted[1] is None or re.search(
+                                r"\\TU/\S+ %s\b" % re.escape(wanted[1]), log) is not None),
+                            log)
 
     page = os.path.join(work, "french", "html", "book.html")
     return [
@@ -1182,6 +1202,25 @@ def case_babel_main(work):
          and "\\DocumentMetadata{lang=fr," in french and os.path.exists(page)
          and re.search(r'<html\b[^>]*\slang="fr"', read(work, "french", "html", "book.html"))
          and built(french, ("french", None))),
+        ("a book whose main language the last \\babelprovide with main makes is in that "
+         "language, by its import= tag or its name, its copy's lang too, and builds",
+         lambda: "\\DocumentMetadata{lang=fr," in provided
+         and "PassOptionsToPackage" not in provided
+         and re.search(r'<html\b[^>]*\slang="fr"', page_of("provided")) is not None
+         and latexsource.preamble_language("\\usepackage[english]{babel}"
+                                           "\\babelprovide[import=es-MX, main]{mexican}") == "es-MX"
+         and latexsource.preamble_language("\\usepackage[english]{babel}"
+                                           "\\babelprovide[import]{french}") == "en"
+         and latexsource.preamble_language("\\usepackage[english]{babel}\n"
+                                           "% \\babelprovide[import,main]{french}\n") == "en"
+         and built(provided, ("french", None))),
+        ("and its quotations have that language's marks",
+         lambda: re.search("Il dit (?:\u00ab|&#xAB;)(?:\u00a0|&#xA0;|&nbsp;)bonjour"
+                           "(?:\u00a0|&#xA0;|&nbsp;)(?:\u00bb|&#xBB;) ici",
+                           page_of("provided-quotes")) is not None
+         and latexsource.quote_style("\\usepackage[english,provide=*]{babel}"
+                                     "\\babelprovide[import,main]{ngerman}\\usepackage{csquotes}"
+                                     )["marks"] == tuple("\u201e\u201c\u201a\u2018")),
         ("where the class's language can't be told, one the reading doesn't know after it, "
          "nothing is passed, and the run says the lang sets babel's main language; nor where "
          "babel's is a macro, which isn't defined before the class",

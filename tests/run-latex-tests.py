@@ -1002,7 +1002,10 @@ def case_babel_main(work):
     itself, with main= or \\babelprovide[main], or its own
     \\DocumentMetadata names the lang, nor once again in a copy made from
     the copy; the run saying so, and naming a book whose main language its
-    options don't say. And a book whose main= names French is in French."""
+    options don't say. And a book whose main= names French is in French,
+    and the run warning of one whose main= has a modifier, the first
+    main= babel is given before it's loaded, by \\usepackage,
+    \\RequirePackage, or \\PassOptionsToPackage, where it's loaded."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
     import texremediate
@@ -1035,6 +1038,9 @@ def case_babel_main(work):
     unknown, unknown_said = book_at(
         "unknown", "\\documentclass[ngerman,latin]{article}\n\\usepackage{babel}\n" + body,
         language="de")
+    _, modifier_said = book_at(
+        "modifier", "\\documentclass{article}\n\\usepackage[main=ngerman.foo,english]{babel}\n"
+        + body, targets=tagged + "  html:\n    format: html\n")
     again = ""
     if german:
         again, _ = book_at("again", german)
@@ -1144,6 +1150,43 @@ def case_babel_main(work):
                   "\\usepackage[english,\\mainlang]{babel}\n" + body, "de", unknown=True)),
         ("a copy made from the copy has main= once",
          lambda: again and again.count("\\PassOptionsToPackage{main=ngerman}{babel}") == 1),
+        ("the run warns of a main= with a modifier, which babel loads no language for, "
+         "saying nothing, but not of one without, nor of a modifier on a language's own "
+         "option, nor in a comment",
+         lambda: "WARNING: babel's main= in book.tex names ngerman.foo, which babel takes "
+                 "whole, its modifier with it, for a language it hasn't" in modifier_said
+         and "Leave out main= and give ngerman.foo last among babel's options" in modifier_said
+         and "names ngerman.foo" not in german_said
+         and latexsource.babel_main_unloaded("\\usepackage[main=french,english]{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\usepackage[english,ngerman.foo]{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\usepackage[% main=ngerman.foo,\n english]{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\usepackage[english,%\n main = spanish.mexico]{babel}") == "spanish.mexico"
+         and latexsource.babel_main_unloaded(
+             "% \\usepackage[main=ngerman.foo]{babel}\n\\usepackage[english]{babel}") == ""),
+        ("whether \\RequirePackage or \\PassOptionsToPackage gives it, or babel is one of the "
+         "packages loaded, babel's first main= being the one it takes, and none after babel "
+         "is loaded, nor where it isn't",
+         lambda: latexsource.babel_main_unloaded(
+             "\\RequirePackage[main=ngerman.foo,english]{babel}") == "ngerman.foo"
+         and latexsource.babel_main_unloaded(
+             "\\PassOptionsToPackage{main=spanish.mexico}{babel}\n"
+             "\\usepackage[english,spanish]{babel}") == "spanish.mexico"
+         and latexsource.babel_main_unloaded(
+             "\\usepackage[main=ngerman.foo,english]{csquotes,babel}") == "ngerman.foo"
+         and latexsource.babel_main_unloaded(
+             "\\PassOptionsToPackage{main=french}{babel}\n"
+             "\\usepackage[main=ngerman.foo,french]{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\usepackage[english,ngerman]{babel}\n"
+             "\\PassOptionsToPackage{main=ngerman.foo}{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\PassOptionsToPackage{main=ngerman.foo}{csquotes}\n"
+             "\\usepackage[english]{babel}") == ""
+         and latexsource.babel_main_unloaded(
+             "\\PassOptionsToPackage{main=ngerman.foo}{babel}\n") == ""),
     ]
 
 

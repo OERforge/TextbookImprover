@@ -664,6 +664,38 @@ def preamble_language(preamble):
     return ""
 
 
+# babel's options as a preamble gives them: \usepackage's or
+# \RequirePackage's, the packages the second group, and
+# \PassOptionsToPackage's, its packages the fourth.
+BABEL_GIVEN = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[([^]]*)\])?\s*\{([^{}]*)\}"
+                         r"|\\PassOptionsToPackage\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+
+
+def babel_main_unloaded(preamble):
+    """main='s value where it names a language with a modifier
+    (\\usepackage[main=ngerman.foo,english]{babel}), which babel loads
+    none for: it keeps the value whole, finds no such language, and sets
+    the last it loaded as its main one, saying nothing (pdfLaTeX, babel
+    26.13, measured); "" otherwise, and where the preamble doesn't load
+    babel. The main= babel takes: the first the preamble's code gives it
+    (BABEL_GIVEN), \\PassOptionsToPackage's before the package's own, and
+    none after it's loaded; a second is an error babel reports ("Bad
+    option 'main=…'", a previous setting), past which it keeps the first
+    (measured)."""
+    main = None
+    for m in code_matches(BABEL_GIVEN, preamble):
+        loads = m.group(2) is not None
+        if "babel" not in package_names(m.group(2) if loads else m.group(4)):
+            continue
+        for option in option_list(COMMENT.sub("", (m.group(1) if loads else m.group(3)) or "")):
+            key, _, value = option.partition("=")
+            if key.strip() == "main" and main is None:
+                main = value.strip()
+        if loads:
+            return main if main and "." in main else ""
+    return ""
+
+
 def babel_main(options, class_options=()):
     """babel's main language as the book's build sets it, by its name
     (ngerman), from the options babel is loaded with, in order, and the

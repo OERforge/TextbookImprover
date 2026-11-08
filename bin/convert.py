@@ -1684,6 +1684,13 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                                  for name in latexsource.author_names(a.get("c", []))]
         language = latexsource.preamble_language(prep["preamble"])
         LATEX_LANGUAGES[master] = language
+        unloaded = latexsource.babel_main_unloaded(prep["preamble"])
+        if unloaded:
+            say(f"WARNING: babel's main= in {master} names {unloaded}, which babel takes "
+                "whole, its modifier with it, for a language it hasn't: it loads none for it, "
+                "saying nothing, and sets the last it loaded as its main language. Leave out "
+                f"main= and give {unloaded} last among babel's options, which babel takes for "
+                "its main one, its modifier taken off.")
         if language and "language" not in header:
             header["language"] = language
         if len(masters) == 1:

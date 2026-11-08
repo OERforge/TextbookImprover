@@ -1506,12 +1506,25 @@ def read_latex_to_json(base, masters, env, work, titles=None):
         out = os.path.join(work, f"latex-book-{index}.json")
         done = run(["pandoc", "-f", "latex", "-t", "json",
                     os.path.relpath(prep["master"], prep["copy"]), "-o", out,
-                    "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"], check=False)
+                    "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"], check=False,
+                   capture=True)
+        # What Pandoc says, as it says it: its warnings, and where it stops.
+        sys.stdout.write(done.stdout)
+        sys.stderr.write(done.stderr)
         if done.returncode:
             # A brace the book never closes reads to the end of the book:
             # Pandoc says only "unexpected end of input".
             braces = latexsource.brace_problems(base, prep["files"])
+            # The line Pandoc names is the copy's, which the reading may
+            # have moved: in a master, its definition of \centerline.
+            place = latexsource.stop_place(base, prep["copy"], done.stderr)
             die(f"pandoc failed with exit code {done.returncode}, reading {master}."
+                + (f" Its error is at line {place[1]} of {place[0]} (line "
+                   f"{latexsource.READER_ERROR.search(done.stderr).group(2)} of the copy "
+                   "Pandoc read)." if place else "")
+                + (" Pandoc names that line for a stop in the first paragraphs of a file "
+                   "the master \\include-s or \\input-s too, so it may be in one of them."
+                   if place and latexsource.reads_files(base, *place) else "")
                 + (" A brace isn't matched in the book's files, which Pandoc reads "
                    "to the end of the book: " + "; ".join(braces[:5])
                    + ". LaTeX can't build it as it is either, if it's in the preamble "

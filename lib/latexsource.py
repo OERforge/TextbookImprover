@@ -57,6 +57,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import difflib
 import glob
 import hashlib
 import json
@@ -258,6 +259,54 @@ def unbalanced_braces(text):
                 closed.append(i)
         i += 1
     return opened, closed
+
+
+# Where Pandoc's reader says it stopped: the file, as it was given it,
+# and the line.
+READER_ERROR = re.compile(r'Error at "([^"]+)" \(line (\d+), column \d+\)')
+
+
+def stop_place(base, copy, said):
+    """(name, line) of the author's file and line that the reader's error
+    in said names a line of the reading's copy for, where the two differ:
+    the copy's line matched to the author's by the lines they have in
+    common (difflib), one the copy changed or added the author's line it
+    stands for, or the next. None where they're the same, or the error
+    names no file of the book's."""
+    m = READER_ERROR.search(said)
+    if not m:
+        return None
+    name, line = os.path.normpath(m.group(1)), int(m.group(2))
+    try:
+        ours = read_text(os.path.join(copy, name)).splitlines()
+        theirs = read_text(os.path.join(base, name)).splitlines()
+    except OSError:
+        return None
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+            None, theirs, ours, autojunk=False).get_opcodes():
+        if j1 <= line - 1 < j2:
+            found = (i1 + line - 1 - j1 if tag == "equal"
+                     else min(i1 + line - 1 - j1, max(i1, i2 - 1))) + 1
+            return None if found == line else (name, found)
+    return None
+
+
+# A line that begins the document or reads a file, which Pandoc's reader
+# names for a stop in the first paragraphs of a file the master reads
+# (3.12.1, measured): \begin{document}'s, for one after the heading a file
+# begins with, and the \include's or the \input's, for one in its first.
+READS_FILES = re.compile(r"\\(?:begin\s*\{document\}|include(?![A-Za-z@])|input(?![A-Za-z@]))")
+
+
+def reads_files(base, name, line):
+    """Whether line of the author's file name, in base, begins the
+    document or reads a file in its code (READS_FILES)."""
+    try:
+        lines = read_text(os.path.join(base, name)).split("\n")
+    except OSError:
+        return False
+    text = lines[line - 1] if 0 < line <= len(lines) else ""
+    return bool(code_matches(READS_FILES, text))
 
 
 def brace_problems(base, files):

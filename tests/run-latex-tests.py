@@ -1411,6 +1411,94 @@ LANGUAGES_FILES = {
 
 
 
+def case_stop_line(work):
+    """Where the reader stops on a book, the run names the author's line
+    for the line of the reading's copy Pandoc names, where the two
+    differ: in a one-file book, whose copy has \\centerline's definition
+    before \\begin{document}, with a file of definitions for reading too,
+    which goes there as well; in a chapter's file whose lines the reading
+    moved, as setting a box's words on one line does; nothing more for a
+    chapter's file whose lines it kept; and where Pandoc names the line
+    of \\begin{document} or of an \\include, as it does for a stop in the
+    first paragraphs of a file the master reads, that the stop may be in
+    one."""
+    stops = {"one-file": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
+                                      "\\chapter{One}\nA first paragraph.\n\n"
+                                      "A \\emph{un\n\ndeux} fin.\n\\end{document}\n",
+                          "latex-conversion-macros.tex": "\\newcommand{\\x}{x}\n"
+                                                         "\\newcommand{\\y}{y}\n"},
+             "chapter": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
+                                     "\\include{one}\n\\end{document}\n",
+                         "one.tex": "\\chapter{One}\nA first paragraph.\n\n"
+                                    "A \\emph{un\n\ndeux} fin.\n"},
+             "moved": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
+                                   "\\include{one}\n\\end{document}\n",
+                       "one.tex": "\\chapter{One}\nA first paragraph.\n\n"
+                                  "B \\mbox{un\n\ndeux} fin.\n\nC \\emph{un\n\ndeux} fin.\n"},
+             "first": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
+                                   "\\include{one}\n\\end{document}\n",
+                       "one.tex": "\\chapter{One}\nA \\MakeUppercase{a\n\\begin{itemize}\n"
+                                  "\\item x\n\\end{itemize}\nb} fin.\n"}}
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    # A line the copy changed into two: the author's line it stands for.
+    for folder, text in (("base", "a\nb\nc\nd\n"), ("copy", "a\nX\nY\nc\nd\n")):
+        os.makedirs(os.path.join(work, "lines", folder))
+        with open(os.path.join(work, "lines", folder, "book.tex"), "w") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "lines", "base", "reads.tex"), "w") as fh:
+        fh.write("% \\include{x}\n\\input{y} % z\n")
+    lines = [latexsource.stop_place(os.path.join(work, "lines", "base"),
+                                    os.path.join(work, "lines", "copy"),
+                                    'Error at "%s" (line %d, column 1):' % (name, line))
+             for name, line in (("book.tex", 3), ("book.tex", 4), ("book.tex", 1),
+                                ("other.tex", 2))]
+    told = {}
+    for label, files in stops.items():
+        folder = os.path.join(work, label)
+        os.makedirs(folder)
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        result = convert(folder)
+        told[label] = (result.returncode, result.stdout + result.stderr)
+    return [
+        ("where the reader stops on a one-file book, the run names the line of the author's "
+         "file for the copy's line Pandoc names, past \\centerline's definition and the "
+         "file of definitions",
+         lambda: told["one-file"][0] != 0
+         and 'Error at "book.tex" (line 12, column 1)' in told["one-file"][1]
+         and "Its error is at line 8 of book.tex (line 12 of the copy Pandoc read)."
+             in told["one-file"][1]),
+        ("a line the copy changed or added is the author's line it stands for, one it kept "
+         "the author's, and none for the same line, or a file not the book's",
+         lambda: lines == [("book.tex", 2), ("book.tex", 3), None, None]),
+        ("and the author's line in a chapter's file whose lines the reading moved, a box's "
+         "blank line set on one line",
+         lambda: told["moved"][0] != 0
+         and "Its error is at line 10 of one.tex (line 9 of the copy Pandoc read)."
+             in told["moved"][1]),
+        ("and only Pandoc's error for a chapter's file whose lines the reading kept",
+         lambda: told["chapter"][0] != 0
+         and 'Error at "one.tex" (line 6, column 1)' in told["chapter"][1]
+         and "Its error is at" not in told["chapter"][1]
+         and "may be in one of them" not in told["chapter"][1]),
+        ("but where Pandoc names \\begin{document} for a stop in a chapter's first paragraph, "
+         "the run says it may be in a file the master reads",
+         lambda: told["first"][0] != 0
+         and "Its error is at line 2 of book.tex" in told["first"][1]
+         and "Pandoc names that line for a stop in the first paragraphs of a file the master "
+             "\\include-s or \\input-s too, so it may be in one of them." in told["first"][1]
+         and latexsource.reads_files(os.path.join(work, "first"), "book.tex", 3)
+         and not latexsource.reads_files(os.path.join(work, "first"), "book.tex", 1)
+         and not latexsource.reads_files(os.path.join(work, "lines", "base"), "book.tex", 9)
+         and not latexsource.reads_files(os.path.join(work, "lines", "base"), "reads.tex", 1)
+         and latexsource.reads_files(os.path.join(work, "lines", "base"), "reads.tex", 2)),
+    ]
+
+
 def case_babel_environments(work):
     """babel's otherlanguage*, which the reader read as a division classed
     with its name, printing its language's name and giving it none, and
@@ -9240,6 +9328,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("otherlanguage* and babeltags' environment", case_babel_environments),
+         ("the line a stop on a book is at", case_stop_line),
          ("a paragraph break in a box's or a quotation's words", case_inline_breaks),
          ("a list or another environment in an inline command's words", case_inline_blocks),
          ("a LaTeX book's pages in another language, in its copy and its PDF",

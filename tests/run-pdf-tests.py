@@ -790,6 +790,16 @@ def resolve(obj):
     return obj.get_object() if hasattr(obj, "get_object") else obj
 
 
+def xmp_page_count(reader):
+    """The page count the PDF's XMP gives (prism:pageCount), or None."""
+    root = reader.trailer["/Root"] if reader is not None else {}
+    if "/Metadata" not in root:
+        return None
+    xmp = resolve(root["/Metadata"]).get_data().decode("utf-8", "replace")
+    found = re.search(r"<prism:pageCount>(\d+)</prism:pageCount>", xmp)
+    return int(found.group(1)) if found else None
+
+
 def elements(node, found=None):
     """Every structure element under node, in order."""
     found = [] if found is None else found
@@ -6030,6 +6040,17 @@ def preamble_checks(preamble_path, preamble_source, preamble_said):
          lambda: reader is not None
          and not any("Contents" in (page.extract_text() or "") for page in reader.pages)
          and outline_titles(reader) == ["One", "Two", "Its section"]),
+        # The XMP's page count is the one LaTeX's run before left (pdfmanagement's
+        # \PreviousTotalPages), 0 on a first run, and a book without contents
+        # has no .toc for Pandoc to run LaTeX again for. Its second run comes
+        # from tagpdf's label at the last page, which holds the page's number
+        # (@tag@LastPage): new on the first run, and changed on any run whose
+        # count did, LaTeX says its labels may have changed, and Pandoc runs it
+        # again (CNX-NOTES, item 216).
+        ("and its XMP gives its page count, LaTeX run again for the label LaTeX's "
+         "tagging puts at its last page",
+         lambda: reader is not None and len(reader.pages) > 1
+         and xmp_page_count(reader) == len(reader.pages)),
         ("build-pdf.py run on its own, given the book's folder as a relative path, finds "
          "the metadata file",
          lambda: "\\usepackage[margin=1.5in]{geometry}" in preamble_source
@@ -7554,6 +7575,8 @@ def checks(work, jobs=1):
          lambda: re.search(r"pdfuaid:part[^0-9]{1,5}2",
                            resolve(root["/Metadata"]).get_data().decode(
                                "utf-8", "replace")) is not None),
+        ("and gives its page count, as the book without contents does",
+         lambda: xmp_page_count(reader) == len(reader.pages)),
         # The matrix marker declares a header column; latex-lab tags the
         # first cell of each body row TH-row only if pdf-target.lua set
         # table/header-columns around it.

@@ -57,10 +57,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import bisect
 import difflib
 import functools
 import glob
 import hashlib
+import heapq
 import json
 import os
 import re
@@ -228,6 +230,13 @@ def in_spans(pos, spans):
         if start > pos:
             return False
     return False
+
+
+def in_sorted_spans(pos, spans, starts):
+    """in_spans by bisection, for many positions: spans as skip_spans gives
+    them, in order and apart, and starts their starts."""
+    k = bisect.bisect(starts, pos) - 1
+    return k >= 0 and pos < spans[k][1]
 
 
 def code_matches(pattern, text, spans=None):
@@ -2379,9 +2388,10 @@ LINE_BOX = re.compile(r"\\(mbox|hbox|underline|uline|sout)(?![A-Za-z@])")
 # The rest of the commands whose words the reader reads as inlines
 # (Readers/LaTeX.hs, each with tok), where an environment it doesn't take
 # inside a paragraph stopped it, a list in \textbf's words, which LaTeX
-# builds, among them: the font commands, soul's, hyphenat's, and \href,
-# whose address comes first. Not \textcolor and \colorbox, which the
-# reader reads around blocks as a colored division (coloredBlock).
+# builds, among them: the font commands, hyphenat's, and \href, whose
+# address comes first. Not \textcolor and \colorbox, which the reader
+# reads around blocks as a colored division (coloredBlock), \textcolor
+# below.
 FORMATTING = re.compile(r"\\(emph|textit|textsl|textsc|textsf|textmd|textrm|textup|texttt"
                         r"|textsuperscript|textsubscript|textbf|textnormal|NoCaseChange"
                         r"|nohyphens|textnhtt|nhttfamily|href)(?![A-Za-z@])")
@@ -2416,6 +2426,14 @@ POLYGLOSSIA_LANGUAGES ="""afrikaans albanian amharic arabic armenian assamese as
 POLYGLOSSIA_TEXT = re.compile(r"\\text(%s)(?![A-Za-z@])[ \t]*(\[[^][{}]*\])?" % "|".join(
     sorted(POLYGLOSSIA_LANGUAGES, key=len, reverse=True)))
 TEXTLANG = re.compile(r"\\textlang(?![A-Za-z@])[ \t]*(\[[^][{}]*\])?\s*\{\s*([A-Za-z]+)\s*\}")
+# xcolor's \textcolor[model]{color}{...}, which the reader reads around a
+# list or another block as a colored division, the words before it made a
+# paragraph of their own (coloredBlock, 3.12.1, measured), where LaTeX
+# colors the words before the list, in the paragraph they're in, the list,
+# and the words after it, beginning the next. A paragraph break in its
+# words LaTeX stops on ("Paragraph ended before \@textcolor was
+# complete"), and \colorbox, a box, can't hold a list.
+TEXTCOLOR = re.compile(r"\\(textcolor)(?![A-Za-z@])")
 # A paragraph break in a passage's words: a blank line, or \par. (A blank
 # line alone is PARAGRAPH_BREAK, captionof_floats'.)
 PASSAGE_BREAK = re.compile(r"\n[ \t]*\n\s*|\\par(?![A-Za-z@])\s*")
@@ -2715,16 +2733,29 @@ def top_level(pattern, text):
 
 def command_words(text, m):
     """(head, language, start, close) for a FOREIGN_LANGUAGE,
-    POLYGLOSSIA_TEXT, TEXTLANG, QUOTATION, SOUL, LINE_BOX, or FORMATTING
-    match in text: the command as it's written again around a piece of its
-    words, \\href's address with it, without its options, which the reader
+    POLYGLOSSIA_TEXT, TEXTLANG, QUOTATION, SOUL, LINE_BOX, FORMATTING, or
+    TEXTCOLOR match in text: the command as it's written again around a
+    piece of its words, \\href's address and \\textcolor's color with it,
+    without its options, which the reader
     skips or stops on, but polyglossia's, which it reads; soul's as the
     reader reads it (SOUL_READ), and \\textlang as polyglossia's command
     for its language, which the reader knows, or \\foreignlanguage, for
     one it doesn't; the language it names, or None; and its words,
     text[start:close - 1], close past their brace. None where they aren't
     braced, or a brace isn't matched."""
-    if m.re in (POLYGLOSSIA_TEXT, TEXTLANG):
+    if m.re is TEXTCOLOR:
+        at = argument_space(text, m.end())
+        if text.startswith("[", at):
+            bracket = closing_bracket(text, at)
+            if bracket < 0:
+                return None
+            at = argument_space(text, bracket + 1)
+        named = matching_brace(text, at) if text.startswith("{", at) else -1
+        start = argument_space(text, named) if named > 0 else -1
+        if start < 0 or not text.startswith("{", start):
+            return None
+        head, language, start = text[m.start():named], None, start + 1
+    elif m.re in (POLYGLOSSIA_TEXT, TEXTLANG):
         at = argument_space(text, m.end())
         if not text.startswith("{", at):
             return None
@@ -2970,9 +3001,10 @@ def inline_blocks(words, skipped, formulas, environments, macros=()):
     outside every group in them, that the reader doesn't take inside a
     paragraph: one not a formula's or in one (formulas: formula_spans) and
     not one of environments, the book's own it takes, or one of those
-    holding such an environment; and of each call there of one of macros,
-    the book's that make one (block_macros), its arguments with it. None
-    where an environment isn't closed."""
+    holding such an environment; of each call there of one of macros,
+    the book's that make one (block_macros), its arguments with it; and
+    of each \\textcolor there whose words hold one (TEXTCOLOR). None where
+    an environment isn't closed."""
     found, past = [], 0
     for b in top_level(BEGIN_ENVIRONMENT, words):
         if b.start() < past or in_spans(b.start(), formulas):
@@ -2992,6 +3024,19 @@ def inline_blocks(words, skipped, formulas, environments, macros=()):
         found += [(start, end) for start, end, _, _ in macro_calls(words, macros, skipped)
                   if start in tops and not in_spans(start, formulas)
                   and not any(s <= start < e for s, e in found)]
+    # \textcolor around such a block, which the reader reads as a colored
+    # division, in another command's words (\textbf{a \textcolor{red}{b
+    # \begin{itemize}...}}), where it stopped it: whole, its words cut at
+    # the block already (inline_passages, the inner command first).
+    names = [n for n, kind in dict(environments).items() if kind == "formula"]
+    for m in top_level(TEXTCOLOR, words):
+        if in_spans(m.start(), formulas) or any(s <= m.start() < e for s, e in found):
+            continue
+        parsed = command_words(words, m)
+        inner = words[parsed[2]:parsed[3] - 1] if parsed else ""
+        if inner and inline_blocks(inner, skip_spans(inner), formula_spans(inner, names),
+                                   environments, macros):
+            found.append((m.start(), parsed[3]))
     return sorted(found)
 
 
@@ -3290,7 +3335,10 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
     without the command's formatting, which the reader can't give a block,
     but a quotation's language, as for \\foreignlanguage, each such
     command a (line, command, its words before the environment up to a
-    command) in places, its line the text's. Not in a formula, but
+    command) in places, its line the text's; and for \\textcolor
+    (TEXTCOLOR), \\textcolor around the environment too, which the reader
+    reads as a colored division, where it made the words before it a
+    paragraph of their own. Not in a formula, but
     \\foreignlanguage. From the last, so one inside another's words is
     read first, and the places before it stay where they are."""
     if tags:
@@ -3304,7 +3352,7 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
     formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
     math = formula_spans(text, formula_names)
     found = sorted((m for pattern in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, TEXTLANG, QUOTATION,
-                                      SOUL, LINE_BOX, FORMATTING)
+                                      SOUL, LINE_BOX, FORMATTING, TEXTCOLOR)
                     for m in pattern.finditer(text) if not in_spans(m.start(), spans)
                     and (pattern is FOREIGN_LANGUAGE or not in_spans(m.start(), math))),
                    key=lambda m: m.start())
@@ -3334,6 +3382,10 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
         if language is not None:
             def block(code, language=language):
                 return "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, code)
+        elif m.re is TEXTCOLOR:
+            def block(code, head=head):
+                # Colored too, as the reader colors a division.
+                return "%s{%s}" % (head, code)
         else:
             def block(code):
                 return code
@@ -3343,13 +3395,14 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
             # What the reader reads as nothing, alone between paragraph
             # breaks, is left there, not made an empty passage or quotation.
             return piece if NOTHING_READ.fullmatch(piece) else "%s{%s}" % (head, piece)
-        # A paragraph break in a font command's or \textfrench's words
-        # LaTeX stops on too (\text@command and \textfrench aren't \long),
-        # so it's left to the reader, which does.
+        # A paragraph break in a font command's, \textfrench's, or
+        # \textcolor's words LaTeX stops on too (\text@command, \textfrench,
+        # and \@textcolor aren't \long), so it's left to the reader, which
+        # does.
         if m.re is LINE_BOX:
             if breaks:
                 keys.append("box_breaks")
-        elif m.re not in (FORMATTING, POLYGLOSSIA_TEXT):
+        elif m.re not in (FORMATTING, POLYGLOSSIA_TEXT, TEXTCOLOR):
             cuts = sorted(cuts + breaks)
             if breaks:
                 keys.append({FOREIGN_LANGUAGE: "babel_paragraphs", SOUL: "soul_paragraphs",
@@ -3357,8 +3410,9 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
                                  m.re, "quotation_paragraphs"))
         if blocks:
             keys.append({FOREIGN_LANGUAGE: "babel_blocks", POLYGLOSSIA_TEXT: "polyglossia_blocks",
-                         TEXTLANG: "polyglossia_blocks"}.get(m.re, "inline_blocks"))
-            if m.re not in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, TEXTLANG) \
+                         TEXTLANG: "polyglossia_blocks", TEXTCOLOR: "color_blocks"}.get(
+                             m.re, "inline_blocks"))
+            if m.re not in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, TEXTLANG, TEXTCOLOR) \
                     and places is not None:
                 # The words before the environment up to a command, which
                 # a rewrite inside them may have made.
@@ -3379,6 +3433,374 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
         for key in keys:
             counter[key] = counter.get(key, 0) + 1
     return text
+
+
+# csquotes' quotation marks, as csquotes.def (v5.2p, TeX Live 2026)
+# defines each language's style and its variants: (style, variant) to the
+# outer quotation's opening and closing marks, then an inner one's; French's
+# with the no-break space babel's \mkfrenchopenquote sets inside them, 0.8
+# of a word space (measured, 2.65 points beside 3.32 at 10pt), which
+# babel-french's own Lua code writes as U+00A0.
+QUOTE_STYLES = {
+    ('austrian', 'guillemets'): ('»', '«', '›', '‹'),
+    ('austrian', 'quotes'): ('„', '“', '‚', '‘'),
+    ('croatian', 'guillemets'): ('»', '«', '‘', '’'),
+    ('croatian', 'quotes'): ('„', '”', '‘', '’'),
+    ('czech', 'guillemets'): ('»', '«', '›', '‹'),
+    ('czech', 'quotes'): ('„', '“', '‚', '‘'),
+    ('danish', 'guillemets'): ('»', '«', '‘', '’'),
+    ('danish', 'quotes'): ('„', '“', '’', '’'),
+    ('danish', 'topquotes'): ('“', '”', '‘', '’'),
+    ('dutch', ''): ('“', '”', '‘', '’'),
+    ('english', 'american'): ('“', '”', '‘', '’'),
+    ('english', 'british'): ('‘', '’', '“', '”'),
+    ('estonian', ''): ('„', '“', '„', '“'),
+    ('finnish', ''): ('”', '”', '’', '’'),
+    ('french', 'guillemets'): ('«\xa0', '\xa0»', '«\xa0', '\xa0»'),
+    ('french', 'guillemets*'): ('«\xa0', '\xa0»', '«\xa0', '\xa0»'),
+    ('french', 'quotes'): ('«\xa0', '\xa0»', '“', '”'),
+    ('french', 'quotes*'): ('«\xa0', '\xa0»', '“\xa0', '\xa0”'),
+    ('galician', 'guillemets'): ('«', '»', '“', '”'),
+    ('galician', 'quotes'): ('“', '”', '‘', '’'),
+    ('german', 'guillemets'): ('»', '«', '›', '‹'),
+    ('german', 'quotes'): ('„', '“', '‚', '‘'),
+    ('german', 'swiss'): ('«', '»', '‹', '›'),
+    ('greek', ''): ('«', '»', '“', '”'),
+    ('hungarian', ''): ('„', '”', '»', '«'),
+    ('icelandic', ''): ('„', '“', '‚', '‘'),
+    ('italian', 'guillemets'): ('«', '»', '“', '”'),
+    ('italian', 'quotes'): ('“', '”', '‘', '’'),
+    ('japanese', ''): ('「', '」', '『', '』'),
+    ('latvian', ''): ('„', '”', '‚', '’'),
+    ('lithuanian', ''): ('„', '“', '’', '’'),
+    ('norwegian', 'guillemets'): ('«', '»', '‹', '›'),
+    ('norwegian', 'quotes'): ('„', '”', '‚', '’'),
+    ('polish', 'guillemets'): ('„', '”', '«', '»'),
+    ('polish', 'guillemets*'): ('„', '”', '»', '«'),
+    ('polish', 'quotes'): ('„', '”', '‚', '’'),
+    ('portuguese', 'brazilian'): ('“', '”', '‘', '’'),
+    ('portuguese', 'portuguese'): ('«', '»', '“', '”'),
+    ('romanian', ''): ('„', '”', '«', '»'),
+    ('russian', ''): ('«', '»', '„', '“'),
+    ('serbian', 'german'): ('„', '“', '’', '’'),
+    ('serbian', 'guillemets'): ('»', '«', '’', '’'),
+    ('serbian', 'quotes'): ('„', '”', '’', '’'),
+    ('slovak', ''): ('„', '“', '‚', '‘'),
+    ('slovenian', 'guillemets'): ('»', '«', '›', '‹'),
+    ('slovenian', 'quotes'): ('„', '“', '‚', '‘'),
+    ('spanish', 'mexican'): ('“', '”', '‘', '’'),
+    ('spanish', 'spanish'): ('«', '»', '“', '”'),
+    ('swedish', 'guillemets'): ('»', '»', '›', '›'),
+    ('swedish', 'guillemets*'): ('»', '«', '›', '‹'),
+    ('swedish', 'quotes'): ('”', '”', '’', '’'),
+    ('turkish', 'guillemets'): ('«', '»', '‹', '›'),
+    ('turkish', 'quotes'): ('“', '”', '‘', '’'),
+    ('ukrainian', ''): ('«', '»', '„', '“'),
+    ('welsh', 'british'): ('‘', '’', '“', '”'),
+}
+QUOTE_ALIASES = {
+    'UKenglish': ('british', None),
+    'USenglish': ('american', None),
+    'american': ('english', 'american'),
+    'australian': ('english', 'british'),
+    'austrian': ('austrian', 'quotes'),
+    'brazil': ('brazilian', None),
+    'brazilian': ('portuguese', 'brazilian'),
+    'british': ('english', 'british'),
+    'canadian': ('english', 'american'),
+    'croatian': ('croatian', 'quotes'),
+    'czech': ('czech', 'quotes'),
+    'danish': ('danish', 'quotes'),
+    'english': ('english', 'american'),
+    'french': ('french', 'quotes'),
+    'galician': ('galician', 'quotes'),
+    'german': ('german', 'quotes'),
+    'italian': ('italian', 'guillemets'),
+    'latin': ('latin', 'italianguillemets'),
+    'latin/americanquotes': ('american', None),
+    'latin/britishquotes': ('british', None),
+    'latin/germanguillemets': ('german', 'guillemets'),
+    'latin/germanquotes': ('german', None),
+    'latin/italianguillemets': ('italian', None),
+    'magyar': ('hungarian', None),
+    'mexican': ('spanish', 'mexican'),
+    'naustrian': ('austrian', None),
+    'newzealand': ('english', 'british'),
+    'ngerman': ('german', None),
+    'norsk': ('norwegian', None),
+    'norwegian': ('norwegian', 'guillemets'),
+    'nswissgerman': ('swissgerman', None),
+    'nynorsk': ('norwegian', None),
+    'polish': ('polish', 'guillemets'),
+    'portuges': ('portuguese', None),
+    'portuguese': ('portuguese', 'portuguese'),
+    'serbian': ('serbian', 'quotes'),
+    'serbianc': ('serbian', None),
+    'slovene': ('slovenian', None),
+    'slovenian': ('slovenian', 'guillemets'),
+    'spanish': ('spanish', 'spanish'),
+    'swedish': ('swedish', 'quotes'),
+    'swiss': ('german', 'swiss'),
+    'swissgerman': ('german', 'swiss'),
+    'ukenglish': ('british', None),
+    'usenglish': ('american', None),
+    'welsh': ('welsh', 'british'),
+}
+# The languages csquotes.def declares an option for, which gives the
+# language's alias another of its style's variants (german=guillemets).
+QUOTE_OPTIONS = ('austrian', 'croatian', 'czech', 'danish', 'english', 'french', 'galician',
+                 'german', 'icelandic', 'italian', 'japanese', 'latin', 'latvian',
+                 'lithuanian', 'norwegian', 'polish', 'portuguese', 'slovenian', 'spanish',
+                 'swedish', 'welsh')
+# babel's other names for a language csquotes has a style for, and
+# polyglossia's variants that are another of csquotes' names.
+QUOTE_NAMES = {"francais": "french", "acadian": "french", "canadien": "french",
+               "frenchb": "french", "germanb": "german",
+               "english/british": "british", "english/uk": "british",
+               "english/australian": "australian", "english/newzealand": "newzealand",
+               "german/swiss": "swiss", "german/austrian": "austrian",
+               "portuguese/brazilian": "brazilian", "spanish/mexican": "mexican"}
+# Pandoc's writers' marks, which a quotation csquotes sets so keeps.
+PANDOC_QUOTES = QUOTE_STYLES[("english", "american")]
+CSQUOTES_OPTIONS = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[([^]]*)\])?\s*"
+                              r"\{([^{}]*)\}|\\PassOptionsToPackage\s*\{([^{}]*)\}\s*"
+                              r"\{\s*csquotes\s*\}")
+SET_QUOTE_STYLE = re.compile(r"\\setquotestyle\s*(?:(\*)|(?:\[([^]]*)\])?\s*"
+                             r"\{\s*([A-Za-z]+)\s*\})")
+SET_MAIN_LANGUAGE = re.compile(r"\\set(?:main|default)language\s*(?:\[([^]]*)\])?\s*"
+                               r"\{\s*([A-Za-z]+)\s*\}")
+
+
+def quote_name(language, options=""):
+    """The name csquotes takes a language's quotations' style by, a babel
+    or polyglossia name and polyglossia's options (variant=british), or
+    None for one it has no style for (quote_marks)."""
+    variant = re.search(r"variant\s*=\s*([A-Za-z]+)", options or "")
+    name = QUOTE_NAMES.get("%s/%s" % (language, variant.group(1)) if variant else "",
+                           QUOTE_NAMES.get(language, language))
+    return name if quote_marks(name) else None
+
+
+def quote_marks(name, variants=None, variant=None):
+    """The marks csquotes sets a quotation with in a style, by a name it
+    knows, a style's, its variant after a slash (german/guillemets), or an
+    alias's (QUOTE_ALIASES, each to another name or to a style's variant),
+    and variant, \\setquotestyle's; None for a name it has no style for.
+    Each name is looked up as csquotes looks it up at a quotation, so a
+    language's alias takes the variant csquotes' options give the language
+    (variants: {name: variant}, german=guillemets), and an alias of it
+    does too (latin/germanquotes, german's)."""
+    variants = variants or {}
+    if variant:
+        name = "%s/%s" % (name, variant)
+    seen = set()
+    while name in QUOTE_ALIASES and name not in seen:
+        seen.add(name)
+        style, given = QUOTE_ALIASES[name]
+        name = style if given is None else "%s/%s" % (style, variants.get(name, given))
+    style, _, given = name.partition("/")
+    return QUOTE_STYLES.get((style, given))
+
+
+# csquotes' autostyle= values, as csquotes.sty (5.2p) counts them: off, on,
+# on where babel or polyglossia is loaded, the main language's style taken
+# once, and that where babel or polyglossia is loaded.
+AUTOSTYLE = {"false": 0, "true": 1, "try": 2, "once": 3, "tryonce": 4}
+
+
+def quote_style(preamble):
+    """How csquotes sets the book's quotations, as the preamble's code
+    (preamble_pieces' texts) loads it: None where it isn't loaded, or
+    every quotation is set as Pandoc's writers write one (English's); else
+    a dict: "marks", one style's for every quotation; or with autostyle,
+    "main", the main language's name, each quotation in the language
+    around it (measured, LuaLaTeX, csquotes 5.2p: \\foreignquote's in its
+    own, \\hyphenquote's in the one around it); and "variants", the
+    options' variant for a language (german=guillemets).
+
+    Read as csquotes.sty (5.2p) reads it: its options in order, from
+    autostyle=tryonce and English's style the default, style= turning
+    autostyle off and making its style the default, autostyle= setting
+    it, and a language's option giving its variant; then each
+    \\setquotestyle in the preamble, which turns autostyle off and makes
+    its style the default, or with a star turns autostyle on; and at the
+    preamble's end, where babel or polyglossia is loaded, autostyle=try
+    on, and once and tryonce the main language's style made the default,
+    and where neither is, autostyle off. A main language csquotes has no
+    style for is read as English's, where LaTeX sets csquotes' fallback,
+    a bold question mark, and warns."""
+    options, loaded = [], None
+    for m in code_matches(CSQUOTES_OPTIONS, preamble):
+        if m.group(3) is not None:
+            options += option_list(COMMENT.sub("", m.group(3)))
+        elif "csquotes" in package_names(m.group(2)):
+            loaded = m.end()
+            options += option_list(COMMENT.sub("", m.group(1) or ""))
+            break               # options given after it's loaded change nothing
+    if loaded is None:
+        return None
+    polyglossia = any("polyglossia" in package_names(m.group(1))
+                      for m in code_matches(PACKAGE_LOAD, preamble))
+    found = code_matches(SET_MAIN_LANGUAGE, preamble)
+    babel, babel_loaded = [], False
+    for m in code_matches(BABEL_GIVEN, preamble):
+        loads = m.group(2) is not None
+        if "babel" in package_names(m.group(2) if loads else m.group(4)):
+            babel_loaded = babel_loaded or loads
+            babel += option_list(COMMENT.sub("", (m.group(1) if loads else m.group(3)) or ""))
+    if found:
+        main = quote_name(found[-1].group(2), found[-1].group(1))
+    else:
+        cls = re.search(r"\\documentclass\s*\[([^]]*)\]", preamble)
+        name = babel_main(babel, option_list(COMMENT.sub("", cls.group(1))) if cls else [])
+        main = quote_name(name) if name else None
+    reset, default, variants = AUTOSTYLE["tryonce"], "english/american", {}
+    for option in options:
+        key, _, value = (part.strip() for part in option.partition("="))
+        if key == "style":
+            reset = AUTOSTYLE["false"]
+            default = value if quote_marks(value) else default
+        elif key in ("autostyle", "babel"):
+            reset = AUTOSTYLE.get(value or "true", reset)
+        elif key in QUOTE_OPTIONS and value and quote_marks("%s/%s" % (key, value)):
+            variants[key] = value
+    for m in code_matches(SET_QUOTE_STYLE, preamble):
+        if m.start() < loaded:
+            continue            # before csquotes defines it
+        if m.group(1):
+            reset = AUTOSTYLE["true"]
+            continue
+        reset = AUTOSTYLE["false"]
+        name = m.group(3) + ("/" + m.group(2).strip() if (m.group(2) or "").strip() else "")
+        default = name if quote_marks(name) else default
+    if not (babel_loaded or polyglossia or found):
+        reset = AUTOSTYLE["false"]
+    elif reset == AUTOSTYLE["try"]:
+        reset = AUTOSTYLE["true"]
+    elif reset >= AUTOSTYLE["once"]:
+        default = main or "english/american"
+    if reset == AUTOSTYLE["true"]:
+        return {"main": main or "american", "variants": variants}
+    marks = quote_marks(default, variants) or PANDOC_QUOTES
+    return None if marks == PANDOC_QUOTES else {"marks": marks, "variants": variants}
+
+
+SELECT_LANGUAGE = re.compile(r"\\selectlanguage\s*\{\s*([A-Za-z]+)\s*\}")
+# A brace, or a character a backslash escapes, as a group's end is found.
+BRACE_TOKEN = re.compile(r"\\.|[{}]", re.S)
+OTHERLANGUAGE = re.compile(r"\\begin\s*\{\s*otherlanguage\s*\}\s*(?:\[[^]]*\])?\s*"
+                           r"\{\s*([A-Za-z]+)\s*\}")
+
+
+def language_regions(text, spans):
+    """(start, end, name) of each stretch of text csquotes takes for a
+    language's (quote_name's), by name: \\foreignlanguage's and
+    polyglossia's \\textfrench's words, \\foreignquote's, otherlanguage and
+    polyglossia's environment for a language, and what a \\selectlanguage
+    begins, to the end of the group it's in."""
+    regions, starts = [], [start for start, _ in spans]
+    for pattern in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, QUOTATION):
+        for m in pattern.finditer(text):
+            if in_sorted_spans(m.start(), spans, starts) or (pattern is QUOTATION
+                                              and m.group(1) != "foreignquote"):
+                continue
+            parsed = command_words(text, m)
+            if parsed and parsed[1]:
+                options = m.group(2) if pattern is POLYGLOSSIA_TEXT else ""
+                regions.append((parsed[2], parsed[3], quote_name(parsed[1], options)))
+    names = "|".join(sorted(POLYGLOSSIA_LANGUAGES, key=len, reverse=True))
+    for m in list(OTHERLANGUAGE.finditer(text)) + list(re.finditer(
+            r"\\begin\s*\{\s*(%s)\s*\}" % names, text)):
+        if in_sorted_spans(m.start(), spans, starts):
+            continue
+        name = "otherlanguage" if m.re is OTHERLANGUAGE else m.group(1)
+        end = environment_close(text, name, m.start(), spans)
+        if end > 0:
+            regions.append((m.end(), end, quote_name(m.group(1))))
+    selects = [m for m in SELECT_LANGUAGE.finditer(text)
+               if not in_sorted_spans(m.start(), spans, starts)]
+    ends = [len(text)] * len(selects)
+    # Each one's group's end, found in one pass over the text's braces in
+    # code: the first closing brace that takes the depth below the one it
+    # began at, an escaped character none.
+    pending, depth, at, past = [], 0, 0, 0          # pending: (depth, index)
+    for t in (BRACE_TOKEN.finditer(text, selects[0].end()) if selects else ()):
+        while at < len(selects) and selects[at].end() <= t.start():
+            pending.append((depth, at))
+            at += 1
+        if t.group(0)[0] == "\\":
+            continue
+        while past < len(spans) and spans[past][1] <= t.start():
+            past += 1
+        if past < len(spans) and spans[past][0] <= t.start():
+            continue
+        depth += 1 if t.group(0) == "{" else -1
+        while pending and pending[-1][0] > depth:
+            ends[pending.pop()[1]] = t.start()
+    regions += [(m.end(), ends[k], quote_name(m.group(1))) for k, m in enumerate(selects)]
+    return regions
+
+
+def quotation_marks(text, counter, style):
+    """csquotes' quotations (QUOTATION) with the marks csquotes sets them
+    with, by quote_style's style, where they aren't Pandoc's: an outer
+    quotation's, or an inner one's, inside an outer one or starred, as the
+    reader takes them (enquote, Readers/LaTeX/Lang.hs), the marks written
+    in, and \\foreignquote's and \\hyphenquote's words a \\foreignlanguage,
+    as the reader gives them their language. The HTML writer writes a
+    quotation's marks as “ ” whatever the page's language, where LaTeX sets
+    « » in French. With autostyle, each in its language (language_regions),
+    the innermost around it, or the main language's."""
+    if not style:
+        return text
+    spans = skip_spans(text)
+    starts = [start for start, _ in spans]
+    found = [m for m in QUOTATION.finditer(text) if not in_sorted_spans(m.start(), spans, starts)]
+    auto = "main" in style
+    regions = language_regions(text, spans) if auto else []
+    # The regions begun at a quotation, latest first, and the next one to
+    # begin, as the quotations come in order: the innermost around one is
+    # the latest begun that hasn't ended, the first of them by
+    # language_regions' order where two begin together.
+    order = sorted(range(len(regions)), key=lambda k: regions[k][0])
+    begun, waiting = [], 0
+    edits, open_quotes = [], []          # open_quotes: (close, inner)
+    for m in found:
+        parsed = command_words(text, m)
+        if not parsed:
+            continue
+        head, language, start, close = parsed
+        while open_quotes and open_quotes[-1][0] <= m.start():
+            open_quotes.pop()
+        inner = bool(m.group(2)) or bool(open_quotes and not open_quotes[-1][1])
+        open_quotes.append((close, inner))
+        if auto:
+            name = style["main"]
+            while waiting < len(order) and regions[order[waiting]][0] <= m.start():
+                heapq.heappush(begun, (-regions[order[waiting]][0], order[waiting]))
+                waiting += 1
+            while begun and regions[begun[0][1]][1] <= m.start():
+                heapq.heappop(begun)
+            if begun:
+                name = regions[begun[0][1]][2]
+            if m.group(1) == "foreignquote":
+                name = quote_name(language) or name
+            styled = quote_marks(name or "american", style["variants"]) or PANDOC_QUOTES
+        else:
+            styled = style["marks"]
+        marks = styled[2:] if inner else styled[:2]
+        if marks == (PANDOC_QUOTES[2:] if inner else PANDOC_QUOTES[:2]):
+            continue
+        opening = marks[0] + ("\\foreignlanguage{%s}{" % language if language else "")
+        closing = ("}" if language else "") + marks[1]
+        edits += [(m.start(), start, opening), (close - 1, close, closing)]
+    pieces, last = [], 0
+    for begin, end, new in sorted(edits):
+        pieces += [text[last:begin], new]
+        last = end
+    if edits:
+        counter["quotation_marks"] = counter.get("quotation_marks", 0) + len(edits) // 2
+    return "".join(pieces) + text[last:]
 
 
 def author_line(text, line, command, words):
@@ -3811,7 +4233,8 @@ def substitute_in_code(pattern, text, spans, make, counter, key):
 
 
 def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
-                places=None, tag_environments=None, block_macros=(), language_aliases=()):
+                places=None, tag_environments=None, block_macros=(), language_aliases=(),
+                quotes=None):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
@@ -3820,7 +4243,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     for inline_passages' places; tag_environments, its babeltags whose
     environments are babel's (babel_tags); block_macros, its macros that
     make a block (block_macros); language_aliases, its environments for
-    otherlanguage* (language_aliases)."""
+    otherlanguage* (language_aliases); quotes, how csquotes sets its
+    quotations (quote_style)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -3852,6 +4276,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     text = vbox_paragraphs(text, counter, environments, block_macros)
     text = inline_passages(text, counter, tags, environments, places, tag_environments,
                            macros=block_macros, aliases=language_aliases)
+    text = quotation_marks(text, counter, quotes)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -8409,6 +8834,7 @@ def prepare(base, work, master, say, macros=""):
     tags = babel_tags([t for _, t in originals])
     tag_environments = babel_tags([t for _, t in originals], environments=True)
     aliases = language_aliases([t for _, t in originals])
+    quotes = quote_style("".join(t for _, t in preamble_parts)) if begin else None
     environments = book_environments([t for _, t in originals])
     macros_blocks = block_macros(originals, environments)
     # An environment whose code calls one of the book's commands that
@@ -8425,7 +8851,8 @@ def prepare(base, work, master, say, macros=""):
         places = []
         texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
                                   environments, places, tag_environments,
-                                  block_macros=macros_blocks, language_aliases=aliases)
+                                  block_macros=macros_blocks, language_aliases=aliases,
+                                  quotes=quotes)
         dropped += sorted((name, author_line(text, line, command, words), command, words)
                           for line, command, words in places)
     # A chapter \include-d by the book's own macro, written out, so the

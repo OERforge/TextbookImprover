@@ -1505,8 +1505,8 @@ def case_stop_line(work):
     moved, as setting a box's words on one line does; nothing more for a
     chapter's file whose lines it kept; and where Pandoc names the line
     of \\begin{document} or of an \\include, as it does for a stop in the
-    first paragraphs of a file the master reads, that the stop may be in
-    one."""
+    first paragraphs of a file the master reads, the file that stops read
+    alone, and its line."""
     stops = {"one-file": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
                                       "\\chapter{One}\nA first paragraph.\n\n"
                                       "A \\emph{un\n\ndeux} fin.\n\\end{document}\n",
@@ -1520,8 +1520,12 @@ def case_stop_line(work):
                                    "\\include{one}\n\\end{document}\n",
                        "one.tex": "\\chapter{One}\nA first paragraph.\n\n"
                                   "B \\mbox{un\n\ndeux} fin.\n\nC \\emph{un\n\ndeux} fin.\n"},
-             "first": {"book.tex": "\\documentclass{book}\n\\begin{document}\n"
+             "first": {"book.tex": "\\documentclass{book}\n\\input{defs}\n\\begin{document}\n"
                                    "\\include{one}\n\\end{document}\n",
+                       # Its preamble's file, which the reader reads as
+                       # definitions, would stop it in the document.
+                       "defs.tex": "\\newcommand{\\x}{x}\nA \\MakeUppercase{un "
+                                   "\\begin{itemize}\\item y\\end{itemize} b} c.\n",
                        "one.tex": "\\chapter{One}\nA \\MakeUppercase{a\n\\begin{itemize}\n"
                                   "\\item x\n\\end{itemize}\nb} fin.\n"}}
     sys.path.insert(0, os.path.join(ROOT, "lib"))
@@ -1571,11 +1575,14 @@ def case_stop_line(work):
          and "Its error is at" not in told["chapter"][1]
          and "may be in one of them" not in told["chapter"][1]),
         ("but where Pandoc names \\begin{document} for a stop in a chapter's first paragraph, "
-         "the run says it may be in a file the master reads",
+         "the run reads each file the document reads alone, not its preamble's, and names the "
+         "one that stops there and its line",
          lambda: told["first"][0] != 0
-         and "Its error is at line 2 of book.tex" in told["first"][1]
+         and "Its error is at line 3 of book.tex" in told["first"][1]
          and "Pandoc names that line for a stop in the first paragraphs of a file the master "
-             "\\include-s or \\input-s too, so it may be in one of them." in told["first"][1]
+             "\\include-s or \\input-s, and read alone, one.tex stops at its line 3."
+             in told["first"][1]
+         and "may be in one of them" not in told["first"][1]
          and latexsource.reads_files(os.path.join(work, "first"), "book.tex", 3)
          and not latexsource.reads_files(os.path.join(work, "first"), "book.tex", 1)
          and not latexsource.reads_files(os.path.join(work, "lines", "base"), "book.tex", 9)
@@ -1844,6 +1851,9 @@ def case_inline_breaks(work):
         """A quotation mark as the page may write it."""
         return "(?:%s|&#x%X;)" % (c, ord(c))
 
+    # The book's French: csquotes' marks for it (Pandoc's are “ ” ‘ ’).
+    opening, closing = mark("\u00ab") + mark("\u00a0"), mark("\u00a0") + mark("\u00bb")
+
     underline = (r"(?:<u>|<span class=\"underline\">)", r"(?:</u>|</span>)")
     return [
         ("a LaTeX book is read whose box or quotation holds a paragraph break, which "
@@ -1859,35 +1869,35 @@ def case_inline_breaks(work):
          and paragraph("Six <del>un\\.deux\\.</del> end\\.")),
         ("a quotation's words holding a paragraph break are a quotation in each paragraph, "
          "starred, in another language, and inside another quotation too",
-         lambda: paragraph("Seven", mark("\u201c") + "un\\." + mark("\u201d"))
+         lambda: paragraph("Seven", opening + "un\\." + closing)
+         and paragraph(opening + "deux\\." + closing, "end\\.")
+         and paragraph("Eight", mark("\u201c") + "un\\." + mark("\u201d"))
          and paragraph(mark("\u201c") + "deux\\." + mark("\u201d"), "end\\.")
-         and paragraph("Eight", mark("\u2018") + "un\\." + mark("\u2019"))
-         and paragraph(mark("\u2018") + "deux\\." + mark("\u2019"), "end\\.")
-         and paragraph("Nine", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"))
-         and paragraph(mark("\u201c") + '<span lang="en">two</span>' + mark("\u201d"),
+         and paragraph("Nine", opening + '<span lang="en">one</span>' + closing)
+         and paragraph(opening + '<span lang="en">two</span>' + closing,
                        "end\\.")
-         and paragraph("Ten", mark("\u2018") + '<span lang="en">one</span>' + mark("\u2019"))
-         and paragraph("Eleven", mark("\u201c") + "a", mark("\u2018") + "b" + mark("\u2019")
-                       + mark("\u201d"))
-         and paragraph(mark("\u201c") + mark("\u2018") + "c" + mark("\u2019"), "d"
-                       + mark("\u201d"), "end\\.")),
+         and paragraph("Ten", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"))
+         and paragraph("Eleven", opening + "a", mark("\u201c") + "b" + mark("\u201d")
+                       + closing)
+         and paragraph(opening + mark("\u201c") + "c" + mark("\u201d"), "d"
+                       + closing, "end\\.")),
         ("a blank line after \\\\ in a quotation is the reader's line break",
-         lambda: paragraph("Twelve", mark("\u201c") + "vers<br />", "un" + mark("\u201d"),
+         lambda: paragraph("Twelve", opening + "vers<br />", "un" + closing,
                            "end\\.")),
         ("a quotation's in a box is the box's, one quotation on its line, and a paragraph of "
          "what the reader reads as nothing no quotation",
-         lambda: paragraph("Thirteen", mark("\u201c") + "un(?:\u00a0|&#xA0;)deux"
-                           + mark("\u201d"), "end\\.")
-         and paragraph("Fourteen", mark("\u201c") + "un\\." + mark("\u201d"))
-         and re.search(r"</p>\s*<p>\s*" + mark("\u201c") + "deux\\." + mark("\u201d")
+         lambda: paragraph("Thirteen", opening + "un(?:\u00a0|&#xA0;)deux"
+                           + closing, "end\\.")
+         and paragraph("Fourteen", opening + "un\\." + closing)
+         and re.search(r"</p>\s*<p>\s*" + opening + "deux\\." + closing
                        + r"\s*end\.\s*</p>", text) is not None
-         and paragraph("Sixteen", mark("\u201c") + "un\\." + mark("\u201d"))
-         and paragraph(mark("\u201c") + "deux\\." + mark("\u201d"), "end\\.")
-         and not re.search("<p>" + mark("\u201c") + mark("\u201d") + "</p>", text)),
+         and paragraph("Sixteen", opening + "un\\." + closing)
+         and paragraph(opening + "deux\\." + closing, "end\\.")
+         and not re.search("<p>" + opening + closing + "</p>", text)),
         ("a brace in a comment in the words isn't one of theirs, nor one in \\verb, verbatim, "
          "or inline code",
-         lambda: paragraph("Fifteen", mark("\u201c") + "un ?" + mark("\u201d"))
-         and paragraph(mark("\u201c") + "deux" + mark("\u201d"), "end\\.")
+         lambda: paragraph("Fifteen", opening + "un ?" + closing)
+         and paragraph(opening + "deux" + closing, "end\\.")
          and latexsource.code_brace("{a % }\nb} c", 0) == 9
          and latexsource.code_brace("{a \\verb|}| b} c", 0) == 14
          and latexsource.code_brace("{\\begin{verbatim}}\\end{verbatim}} c", 0) == 33
@@ -1985,6 +1995,9 @@ def case_inline_blocks(work):
         """A quotation mark as the page may write it."""
         return "(?:%s|&#x%X;)" % (c, ord(c))
 
+    # The book's French: csquotes' marks for it (Pandoc's are “ ” ‘ ’).
+    opening, closing = mark("\u00ab") + mark("\u00a0"), mark("\u00a0") + mark("\u00bb")
+
     item = r"<ul>\s*<li>\s*(?:<p>)?%s(?:</p>)?\s*</li>\s*</ul>"
     table = r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?"
     noteref = r'<a href="#fn\d+"[^>]*>(?:<sup>)?\d+(?:</sup>)?</a>'
@@ -2000,8 +2013,8 @@ def case_inline_blocks(work):
                     "z\\.")
          and around("C", '<a href="https://example\\.org">x</a>', item % "i",
                     '<a href="https://example\\.org">y</a>', "z\\.")
-         and around("D", mark("\u201c") + "x" + mark("\u201d"), item % "i",
-                    mark("\u201c") + "y" + mark("\u201d"), "z\\.")
+         and around("D", opening + "x" + closing, item % "i",
+                    opening + "y" + closing, "z\\.")
          and around("E", "x(?:\u00a0|&#xA0;)?",
                     r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?",
                     "(?:\u00a0|&#xA0;)?y",
@@ -2013,9 +2026,9 @@ def case_inline_blocks(work):
          lambda: around("G", '<strong><span lang="fr">a</span></strong>',
                         r'<div lang="fr">\s*' + item % "b" + r"\s*</div>",
                         '<strong><span lang="fr">c</span></strong>', "d\\.")
-         and around("H", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"),
+         and around("H", opening + '<span lang="en">one</span>' + closing,
                     r'<div lang="en">\s*' + item % "two" + r"\s*</div>",
-                    mark("\u201c") + '<span lang="en">three</span>' + mark("\u201d"), "end\\.")),
+                    opening + '<span lang="en">three</span>' + closing, "end\\.")),
         ("a formula's environment in the words, and a command in a formula, are as the reader "
          "read them",
          lambda: re.search(r"<p>\s*I <math .*?<munder><mtable>.*?</math> done\.</p>", text)
@@ -2028,8 +2041,8 @@ def case_inline_blocks(work):
          lambda: around("L", "<strong>a</strong>", item % "x", "<strong>b</strong>", "fin\\.")
          and latexsource.passage_pieces("un % a\n% b\n", [], latexsource.skip_spans(
              "un % a\n% b\n"), lambda piece: "{%s}" % piece) == "{un} % a\n% b\n"
-         and re.search(r"<p>\s*M " + mark("“") + "un" + mark("”") + r"\s*</p>\s*<p>\s*"
-                       + mark("“") + "deux" + mark("”") + r"\s*fin\.\s*</p>", text)
+         and re.search(r"<p>\s*M " + opening + "un" + closing + r"\s*</p>\s*<p>\s*"
+                       + opening + "deux" + closing + r"\s*fin\.\s*</p>", text)
          is not None),
         ("one of the book's commands that makes a block, through another of its commands "
          "too, is set apart as the environment it makes",
@@ -2041,8 +2054,8 @@ def case_inline_blocks(work):
          "such a note",
          lambda: re.search(r"<p>\s*Q <strong>mot" + noteref + r" ici</strong> fin\.\s*</p>",
                            text) is not None
-         and re.search(r"<p>\s*R " + mark("\u201c") + r"bonjour\s*" + noteref + r"\s*toi"
-                       + mark("\u201d") + r" fin\.\s*</p>", text) is not None
+         and re.search(r"<p>\s*R " + opening + r"bonjour\s*" + noteref + r"\s*toi"
+                       + closing + r" fin\.\s*</p>", text) is not None
          and re.search(r"<p>\s*U <strong>mot" + noteref + r"\s*ici</strong> fin\.\s*</p>",
                        text) is not None
          and re.search(r'<p>\s*X <span lang="fr">bonjour\s*toi</span> fin\.\s*</p>', text)
@@ -2468,6 +2481,199 @@ def case_reading_macros(work):
         ("a file the book writes with filecontents is there to read, as the reader reads "
          "it, \\input by the book's own xparse command too",
          lambda: latexsource.reached(filed, "book.tex") == (["book.tex"], [])),
+        ("and the author's files are as they were",
+         lambda: all(read(folder, name) == text for folder, files in books.items()
+                     for name, text in files.items())),
+    ]
+
+
+def case_reading_limits(work):
+    """What Pandoc's writers and reader do otherwise than LaTeX, put
+    right: a quotation csquotes sets, given the marks LaTeX sets it with,
+    by default its main language's, « » in French, an inner one's “ ”, a
+    starred one's too, and \\foreignquote's, its words in their language;
+    with autostyle, the language around each, \\foreignlanguage's,
+    otherlanguage's, \\selectlanguage's, and \\foreignquote's own, but not
+    \\hyphenquote's, and Pandoc's own “ ” where English's are; csquotes'
+    options read in order, as csquotes reads them, Latin's marks its
+    variant's, and each quotation in the innermost language around it; and
+    \\textcolor around a list, which the reader made a colored division,
+    the words before it a paragraph of their own, as LaTeX colors it; the
+    run saying what it read so."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    french, english = os.path.join(work, "french"), os.path.join(work, "english")
+    books = {
+        french: {
+            "book.tex": "\\documentclass{book}\n\\usepackage[english,french]{babel}\n"
+                        "\\usepackage{csquotes}\n"
+                        "\\begin{document}\n\\include{one}\n\\end{document}\n",
+            "one.tex": "\\chapter{Un}\n"
+                       "A \\enquote{un \\enquote{deux} trois} et \\enquote*{x} et "
+                       "\\foreignquote{english}{y} fin.\n",
+        },
+        english: {
+            "book.tex": "\\documentclass{book}\n\\usepackage{xcolor}\n"
+                        "\\usepackage[ngerman,french,english]{babel}\n"
+                        "\\usepackage[autostyle]{csquotes}\n"
+                        "\\begin{document}\n\\include{one}\n\\end{document}\n",
+            "one.tex": "\\chapter{One}\n"
+                       "B \\enquote{one} \\foreignlanguage{french}{\\enquote{un}} "
+                       "\\foreignquote{ngerman}{eins} \\hyphenquote{ngerman}{x} end.\n\n"
+                       "\\begin{otherlanguage}{ngerman}\nC \\enquote{zwei \\enquote{drei}}.\n"
+                       "\\end{otherlanguage}\n\n"
+                       "{\\selectlanguage{french}D \\enquote{trois}.}\n\n"
+                       "E \\enquote{four}.\n\n"
+                       "T \\textcolor{red}{red words \\begin{itemize}\\item one\\end{itemize} "
+                       "more} end.\n\n"
+                       "U \\textbf{gras \\textcolor{red}{a \\begin{itemize}\\item x"
+                       "\\end{itemize} b} fin} end.\n",
+        },
+    }
+    results, pages = {}, {}
+    for folder, files in books.items():
+        os.makedirs(folder)
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.limits\n  title: Limits\n"
+                     "  language: %s\n" % ("fr" if folder == french else "en"))
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        results[folder] = convert(folder)
+        page = os.path.join(folder, "html", "one.html")
+        pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
+            if os.path.exists(page) else ""
+    said = results[english].stdout + results[english].stderr
+    told = results[french].stdout + results[french].stderr
+
+    def mark(*cs):
+        """Quotation marks as the page may write them, in order."""
+        return "".join("(?:%s|&#x%X;)" % (c, ord(c)) for c in cs)
+
+    def paragraph(folder, *parts):
+        """Whether the page has a paragraph of parts (patterns), in order,
+        nothing else."""
+        return re.search(r"<p>\s*" + r"\s*".join(parts) + r"\s*</p>", pages[folder]) is not None
+
+    opening, closing = mark("\u00ab", "\u00a0"), mark("\u00a0", "\u00bb")
+    german = r'<span lang="de(?:-DE)?">%s</span>'
+    return [
+        ("LaTeX books are read whose quotations csquotes sets, and whose \\textcolor holds a "
+         "list",
+         lambda: results[french].returncode == 0 and bool(pages[french])
+         and results[english].returncode == 0 and bool(pages[english])),
+        ("a quotation in a French book has French marks, an inner one's “ ”, a starred one's "
+         "too, and \\foreignquote's",
+         lambda: paragraph(french, "A " + opening + "un " + mark("\u201c") + "deux"
+                           + mark("\u201d") + " trois" + closing + " et " + mark("\u201c")
+                           + "x" + mark("\u201d") + " et " + opening
+                           + '<span lang="en">y</span>' + closing + " fin\\.")),
+        ("with autostyle, each in the language around it, \\foreignquote's in its own, and "
+         "\\hyphenquote's in the one around it",
+         lambda: paragraph(english, "B " + mark("\u201c") + "one" + mark("\u201d")
+                           + ' <span lang="fr">' + opening + "un" + closing + "</span> "
+                           + mark("\u201e") + german % "eins" + mark("\u201c") + " "
+                           + mark("\u201c") + german % "x" + mark("\u201d") + " end\\.")
+         and paragraph(english, "C " + mark("\u201e") + "zwei " + mark("\u201a") + "drei"
+                       + mark("\u2018", "\u201c") + "\\.")
+         and paragraph(english, "(?:<span>)?D " + opening + "trois" + closing
+                       + "\\.(?:</span>)?")
+         and paragraph(english, "E " + mark("\u201c") + "four" + mark("\u201d") + "\\.")),
+        ("the style is the main language's, autostyle's, style='s, or \\setquotestyle's, a "
+         "variant the options give a language too, and none where csquotes isn't loaded or "
+         "the marks are Pandoc's",
+         lambda: latexsource.quote_style("\\usepackage{csquotes}\\usepackage[ngerman]{babel}")
+         == {"marks": tuple("\u201e\u201c\u201a\u2018"), "variants": {}}
+         and latexsource.quote_style("\\usepackage[french]{babel}"
+                                     "\\usepackage[autostyle=true]{csquotes}")
+         == {"main": "french", "variants": {}}
+         and latexsource.quote_style("\\usepackage[french]{babel}"
+                                     "\\usepackage[autostyle=false]{csquotes}") is None
+         and latexsource.quote_style("\\usepackage[french]{babel}") is None
+         and latexsource.quote_style("\\usepackage[style=german]{csquotes}")["marks"]
+         == tuple("\u201e\u201c\u201a\u2018")
+         and latexsource.quote_style("\\usepackage[french]{babel}\\usepackage{csquotes}"
+                                     "\\setquotestyle{english}") is None
+         and latexsource.quote_style("\\usepackage{polyglossia}\\setmainlanguage[variant="
+                                     "british]{english}\\usepackage{csquotes}")["marks"]
+         == tuple("\u2018\u2019\u201c\u201d")
+         and latexsource.quote_style("\\usepackage[ngerman]{babel}"
+                                     "\\usepackage[german=guillemets]{csquotes}")["marks"]
+         == tuple("\u00bb\u00ab\u203a\u2039")
+         and latexsource.quote_style("\\usepackage[english]{babel}"
+                                     "\\usepackage[english=british]{csquotes}")["marks"]
+         == tuple("\u2018\u2019\u201c\u201d")
+         and latexsource.quote_style("\\usepackage[french]{babel}"
+                                     "\\usepackage[french=guillemets*]{csquotes}")["marks"]
+         == ("\u00ab\u00a0", "\u00a0\u00bb", "\u00ab\u00a0", "\u00a0\u00bb")
+         and latexsource.quote_style("\\usepackage[french]{babel}\\usepackage{csquotes}"
+                                     "\\setquotestyle[guillemets]{german}")["marks"]
+         == tuple("\u00bb\u00ab\u203a\u2039")
+         and latexsource.quotation_marks(
+             "\\foreignlanguage{ngerman}{\\enquote{a \\enquote{b}}}", {},
+             {"main": "french", "variants": {"german": "guillemets"}})
+         == "\\foreignlanguage{ngerman}{\u00bba \u203ab\u2039\u00ab}"),
+        ("csquotes' options read in order, style= turning autostyle off and an autostyle= "
+         "after it setting it again, \\setquotestyle* turning it on, autostyle on only with "
+         "babel or polyglossia, and none passed after csquotes is loaded",
+         lambda: latexsource.quote_style("\\usepackage[english]{babel}"
+                                         "\\usepackage[style=german]{csquotes}")["marks"]
+         == tuple("\u201e\u201c\u201a\u2018")
+         and latexsource.quote_style("\\usepackage[english]{babel}\\usepackage[style=german,"
+                                     "autostyle=false]{csquotes}")["marks"]
+         == tuple("\u201e\u201c\u201a\u2018")
+         and latexsource.quote_style("\\usepackage[english]{babel}\\usepackage[style=german,"
+                                     "autostyle=once]{csquotes}") is None
+         and latexsource.quote_style("\\usepackage[french]{babel}"
+                                     "\\usepackage[autostyle=try]{csquotes}")
+         == {"main": "french", "variants": {}}
+         and latexsource.quote_style("\\usepackage[french,english]{babel}"
+                                     "\\usepackage{csquotes}\\setquotestyle*")
+         == {"main": "english", "variants": {}}
+         and latexsource.quote_style("\\usepackage[style=german,autostyle=true]{csquotes}")
+         == {"marks": tuple("\u201e\u201c\u201a\u2018"), "variants": {}}
+         and latexsource.quote_style("\\PassOptionsToPackage{style=german}{csquotes}"
+                                     "\\usepackage[english]{babel}\\usepackage{csquotes}")["marks"]
+         == tuple("\u201e\u201c\u201a\u2018")
+         and latexsource.quote_style("\\usepackage[english]{babel}\\usepackage{csquotes}"
+                                     "\\PassOptionsToPackage{style=german}{csquotes}") is None),
+        ("a quotation in Latin has its variant's marks, Italian's, and each the innermost "
+         "language's around it",
+         lambda: latexsource.quotation_marks(
+             "\\foreignlanguage{latin}{\\enquote{x}} and \\enquote{y}", {},
+             {"main": "american", "variants": {}})
+         == "\\foreignlanguage{latin}{\u00abx\u00bb} and \\enquote{y}"
+         and latexsource.quotation_marks(
+             "\\foreignlanguage{french}{a \\foreignlanguage{ngerman}{\\enquote{b}} \\enquote{c}} "
+             "{\\selectlanguage{french}\\enquote{d} {\\selectlanguage{ngerman}\\enquote{e}} "
+             "\\enquote{f}} \\enquote{g}", {}, {"main": "american", "variants": {}})
+         == "\\foreignlanguage{french}{a \\foreignlanguage{ngerman}{\u201eb\u201c} "
+            "\u00ab\u00a0c\u00a0\u00bb} {\\selectlanguage{french}\u00ab\u00a0d\u00a0\u00bb "
+            "{\\selectlanguage{ngerman}\u201ee\u201c} \u00ab\u00a0f\u00a0\u00bb} \\enquote{g}"
+         and latexsource.quotation_marks(
+             "{\\selectlanguage{french}% }\n\\{ \\enquote{h}} \\enquote{i}", {},
+             {"main": "american", "variants": {}})
+         == "{\\selectlanguage{french}% }\n\\{ \u00ab\u00a0h\u00a0\u00bb} \\enquote{i}"),
+        ("\\textcolor around a list is as LaTeX colors it, the words before it in their "
+         "paragraph",
+         lambda: re.search(r'<p>\s*T <span style="color: red">red words</span>\s*</p>\s*'
+                           r'<div style="color: red">\s*<ul>\s*<li>\s*(?:<p>)?one(?:</p>)?\s*'
+                           r'</li>\s*</ul>\s*</div>\s*<p>\s*<span style="color: red">more</span>'
+                           r" end\.\s*</p>", pages[english]) is not None),
+        ("and in another command's words, the list colored between the command around the "
+         "words before it and after it",
+         lambda: re.search(r'<p>\s*U <strong>gras <span style="color: red">a</span></strong>'
+                           r'\s*</p>\s*<div style="color: red">\s*<ul>\s*<li>\s*(?:<p>)?x'
+                           r'(?:</p>)?\s*</li>\s*</ul>\s*</div>\s*<p>\s*<strong><span style='
+                           r'"color: red">b</span> fin</strong> end\.\s*</p>', pages[english])
+         is not None),
+        ("the run says what it read so",
+         lambda: "4 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in told
+         and "5 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in said
+         and "2 list or another environment in \\textcolor's words read between "
+             "\\textcolor around the words before it and after it" in said),
         ("and the author's files are as they were",
          lambda: all(read(folder, name) == text for folder, files in books.items()
                      for name, text in files.items())),
@@ -9965,6 +10171,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
           "on, or dropped", case_reading_forms),
          ("the book's own commands and environments the reader stopped on, or read "
           "otherwise", case_reading_macros),
+         ("quotation marks and \\textcolor as LaTeX sets them", case_reading_limits),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

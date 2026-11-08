@@ -1391,6 +1391,11 @@ LATEX_READ_CHANGES = (
     ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read "
      "with the environment in otherlanguage between a \\foreignlanguage of the words before "
      "and after it, as LaTeX sets a list, which stopped the reader"),
+    ("quotation_marks", "csquotes' quotation (\\enquote) given the marks LaTeX sets it with "
+     "in the book's language (« » in French), where the pages had “ ”"),
+    ("color_blocks", "list or another environment in \\textcolor's words read between "
+     "\\textcolor around the words before it and after it, and colored too, as LaTeX colors "
+     "it, where the reader made the words before it a paragraph of their own"),
     ("quotation_paragraphs", "quotation's words holding a paragraph break (\\enquote) read as "
      "a quotation in each paragraph, which stopped the reader"),
     ("box_breaks", "paragraph break in a box's words (\\mbox, \\underline) read as LaTeX sets "
@@ -1493,6 +1498,57 @@ LATEX_READ_CHANGES = (
      "given its first heading as its H1 and title"))
 
 
+def stop_alone(base, prep, master, place, env):
+    """Where Pandoc stops reading a file the master reads, read alone after
+    the copy's preamble, where it names the master's line, place, for the
+    stop: (name, line) of the author's file, as stop_place maps the copy's
+    to it, or None, where none stops alone. The files the master's line
+    reads first, then the rest the document reads, in the order the master
+    reaches them, but those its preamble reads, which hold its definitions."""
+    import latexsource
+    name, line = place
+    lines = latexsource.read_text(os.path.join(base, name)).split("\n")
+    named = [latexsource.resolve(base, m.group(2) or m.group(3), os.path.dirname(master))
+             for m in latexsource.code_matches(latexsource.INPUT, lines[line - 1])] \
+        if 0 < line <= len(lines) else []
+    named = [n for n in named if n]
+    text = latexsource.read_text(os.path.join(base, master))
+    begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
+    preamble = {piece for piece, _ in latexsource.preamble_pieces(
+        base, master, text[:begin[0].start()])} if begin else set()
+    candidates = named + [n for n in prep["files"]
+                          if n != master and n not in named and n not in preamble]
+    head = latexsource.split_master(latexsource.read_text(prep["master"]))[0] + "\n"
+    probe = os.path.join(prep["copy"], "oer-stop-alone.tex")
+    try:
+        for candidate in candidates:
+            copied = os.path.join(prep["copy"], candidate)
+            if not os.path.isfile(copied):
+                continue
+            with open(probe, "w", encoding="utf-8") as fh:
+                fh.write(head + latexsource.read_text(copied) + "\n\\end{document}\n")
+            done = run(["pandoc", "-f", "latex", "-t", "json", os.path.basename(probe),
+                        "-o", os.devnull, "--lua-filter=" + LATEX_FILTER], env=env,
+                       cwd=prep["copy"], check=False, capture=True)
+            if not done.returncode:
+                continue
+            m = latexsource.READER_ERROR.search(done.stderr)
+            if not m:
+                return None
+            where, at = os.path.normpath(m.group(1)), int(m.group(2))
+            if where == os.path.basename(probe):
+                where, at = candidate, at - head.count("\n")
+                if at < 1:
+                    return None
+            return latexsource.stop_place(base, prep["copy"],
+                                          f'Error at "{where}" (line {at}, column 1)') \
+                or (where, at)
+    finally:
+        if os.path.exists(probe):
+            os.remove(probe)
+    return None
+
+
 def read_latex_to_json(base, masters, env, work, titles=None):
     """A LaTeX book, read whole through each of its masters by Pandoc,
     from a copy put right where Pandoc's reader can't take it
@@ -1550,11 +1606,18 @@ def read_latex_to_json(base, masters, env, work, titles=None):
             # The line Pandoc names is the copy's, which the reading may
             # have moved: in a master, its definition of \centerline.
             place = latexsource.stop_place(base, prep["copy"], done.stderr)
+            # Pandoc names the master's line for some stops in the first
+            # paragraphs of a file the master reads: each read alone says.
+            alone = stop_alone(base, prep, master, place, env) \
+                if place and latexsource.reads_files(base, *place) else None
             die(f"pandoc failed with exit code {done.returncode}, reading {master}."
                 + (f" Its error is at line {place[1]} of {place[0]} (line "
                    f"{latexsource.READER_ERROR.search(done.stderr).group(2)} of the copy "
                    "Pandoc read)." if place else "")
-                + (" Pandoc names that line for a stop in the first paragraphs of a file "
+                + (f" Pandoc names that line for a stop in the first paragraphs of a file "
+                   f"the master \\include-s or \\input-s, and read alone, {alone[0]} stops "
+                   f"at its line {alone[1]}." if alone else
+                   " Pandoc names that line for a stop in the first paragraphs of a file "
                    "the master \\include-s or \\input-s too, so it may be in one of them."
                    if place and latexsource.reads_files(base, *place) else "")
                 + (" A brace isn't matched in the book's files, which Pandoc reads "

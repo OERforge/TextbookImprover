@@ -982,6 +982,14 @@ BABEL_SETUP = r"""% another language is tagged in it, set as babel selects the l
           { \tl_if_empty:NF \l__tiq_babel_tl { \tl_set_eq:NN #1 \l__tiq_babel_tl } }
       }
   }
+% babel before 26.11 runs these two hooks without declaring them, and
+% LaTeX runs nothing in a hook that isn't declared; declared, they run,
+% and one babel declares is as it was.
+\cs_if_exist:NT \ActivateGenericHook
+  {
+    \ActivateGenericHook { babel / * / afterextras }
+    \ActivateGenericHook { babel / * / foreign }
+  }
 \AddToHook { babel / * / afterextras } [ TIQ / babel ] { \__tiq_babel_language: }
 \AddToHook { babel / * / foreign } [ TIQ / babel ] { \__tiq_babel_words: }
 \AddToHook { begindocument / end } [ TIQ / babel ]

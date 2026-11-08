@@ -3026,6 +3026,91 @@ def case_babel_languages(work):
          and texremediate.babel_tag("klingon") is None),
     ]
 
+# babel's declarations of its hooks: from 26.11 the babel/*/ hooks too
+# (its commit 68dedcd), which babel 26.9 and 26.10 run without declaring.
+BABEL_DECLARES = "\\NewHook{babel/#1}\\NewHook{babel/*/#1}"
+
+
+def case_babel_hooks(work):
+    """A LaTeX book's tagged copy built with a babel that runs its babel/*/
+    hooks without declaring them, as babel before 26.11 does (LATEX-NOTES):
+    the installed babel.sty with its declarations as 26.9 writes them, in
+    the copy's folder, the copy's passages tagged in their language all the
+    same, as with the installed babel."""
+    why = why_no_tex("no lualatex or latexmk to build the copy", "lualatex", "latexmk")
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage[french,english]{babel}\n"
+                 "\\begin{document}\n\\tableofcontents\n"
+                 "\\section{Le \\foreignlanguage{french}{titre}}\n"
+                 "Some English with a \\foreignlanguage{french}{mot} in it.\n\n"
+                 "\\begin{otherlanguage}{french}\nUn paragraphe en fran\\c{c}ais.\n"
+                 "\\end{otherlanguage}\n\nBack in English.\n\\end{document}\n")
+    with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.hooks\n  title: Hooks\n  language: en\n")
+    with open(os.path.join(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  copy:\n    format: source\n    tagging: \"on\"\n")
+    done = convert(book)
+    copy = read(book, "copy", "book.tex") if done.returncode == 0 \
+        and os.path.exists(os.path.join(book, "copy", "book.tex")) else ""
+    installed = subprocess.run(["kpsewhich", "babel.sty"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL).stdout.strip() \
+        if shutil.which("kpsewhich") else ""
+    original = open(installed, encoding="utf-8", errors="surrogateescape").read() \
+        if installed else ""
+    builds = {}
+
+    def build(name):
+        """The copy built with latexmk's LuaLaTeX in a folder of its own, with
+        babel's declarations as 26.9 writes them for "old": (the PDF, the
+        reason it wasn't built)."""
+        if name in builds:
+            return builds[name]
+        if why or not copy:
+            builds[name] = (None, why or "no copy")
+            return builds[name]
+        there = os.path.join(work, name)
+        shutil.copytree(os.path.join(book, "copy"), there)
+        if name == "old":
+            if BABEL_DECLARES not in original:
+                builds[name] = (None, "the installed babel.sty doesn't declare its hooks as "
+                                      "babel 26.11 to 26.14 do, so it can't be made 26.9's")
+                return builds[name]
+            with open(os.path.join(there, "babel.sty"), "w", encoding="utf-8",
+                      errors="surrogateescape") as fh:
+                fh.write(original.replace(BABEL_DECLARES, "\\NewHook{babel/#1}"))
+        subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode", "-halt-on-error",
+                        "book.tex"], cwd=there, capture_output=True, text=True, timeout=600,
+                       stdin=subprocess.DEVNULL)
+        pdf = os.path.join(there, "book.pdf")
+        builds[name] = (pdf if os.path.exists(pdf) else "", None)
+        return builds[name]
+
+    def tagged(name):
+        """Whether the build's French paragraph and words are in French."""
+        pdf, reason = build(name)
+        if reason:
+            return skip(reason)
+        structure = pdf_structure(pdf)
+        if structure is None:
+            return skip("no pikepdf or pdfinfo to read the PDF's structure")
+        return bool(pdf) and ("P", "fr") in [(role, lang) for role, _, lang, text, _
+                                             in structure if text.startswith("Un paragraphe")] \
+            and ("fr", "mot") in [(lang, text) for role, own, lang, text, around in structure
+                                  if role == "Span" and own and own != around]
+
+    return [
+        ("a tagged copy declares babel's two hooks before it adds to them, where LaTeX can",
+         lambda: "\\ActivateGenericHook { babel / * / afterextras }" in copy
+         and copy.index("\\ActivateGenericHook { babel / * / foreign }")
+         < copy.index("\\AddToHook { babel / * / foreign }")),
+        ("built with the installed babel, its passages are in French", lambda: tagged("new")),
+        ("and with babel's declarations as babel 26.9 writes them, which leave the hooks the "
+         "copy adds to undeclared, in French too", lambda: tagged("old")),
+    ]
+
+
 def case_unbuilt(work):
     """A file the book's own build makes, not made yet: the run stops."""
     os.makedirs(os.path.join(work, "figures"))
@@ -9415,6 +9500,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
+         ("a LaTeX book's babel hooks under babel before 26.11", case_babel_hooks),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
          ("otherlanguage* and babeltags' environment", case_babel_environments),
          ("the line a stop on a book is at", case_stop_line),

@@ -1387,6 +1387,27 @@ LATEX_READ_CHANGES = (
     ("inline_blocks", "list or another environment in an inline command's words (\\textbf, "
      "\\enquote, \\mbox) read between the command around the words before and after it, "
      "which stopped the reader"),
+    ("textlang_passages", "polyglossia's \\textlang read as its command for the language "
+     "(\\textfrench), where the reader dropped it with its words"),
+    ("polyglossia_paragraphs", "\\textlang's words holding a paragraph break read as a "
+     "passage in each paragraph, which stopped the reader"),
+    ("polyglossia_blocks", "polyglossia's passage's words (\\textfrench, \\textlang) holding a "
+     "list or another environment read with the environment in otherlanguage between a "
+     "passage of the words before and after it, as LaTeX sets a list, which stopped the "
+     "reader"),
+    ("soul_paragraphs", "soul's command's words (\\ul, \\st, \\hl, \\so, \\caps) holding a "
+     "paragraph break read as the command in each paragraph, as LaTeX sets them, which "
+     "stopped the reader"),
+    ("soul_words", "soul's \\so read as its words and \\caps as small capitals, where the "
+     "reader dropped them with their words"),
+    ("address_forms", "\\url or \\nolinkurl between two of a character (\\url|...|) braced, "
+     "which stopped the reader"),
+    ("path_addresses", "url's \\path read as \\nolinkurl, code, where the reader dropped it "
+     "with its words"),
+    ("box_specs", "\\hbox's or \\vbox's size (to 3cm, spread 1em) left out, which the reader "
+     "read as words"),
+    ("vbox_paragraphs", "\\vbox holding paragraphs or a list read as a minipage of the "
+     "line's width, which stopped the reader"),
     ("stacked_lines", "table cell's lines stacked in \\vtop read as lines"),
     ("minipage_breaks", "line break in a minipage read as \\newline"),
     ("multicolumn_edge", "\\multicolumn's edge spacing (@{...}) left out, so its table is read"),

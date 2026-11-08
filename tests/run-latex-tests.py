@@ -2077,6 +2077,164 @@ def case_inline_blocks(work):
     ]
 
 
+def case_reading_forms(work):
+    """What else stopped the reader, or lost words, read as LaTeX sets it:
+    an address between two of a character (\\url|...|, \\nolinkurl!...!)
+    braced, a % in one no comment, in a passage too, and url's \\path,
+    which the reader dropped, as \\nolinkurl, code; a box's size (\\hbox to
+    3cm), which it read as words, left out; a \\vbox holding paragraphs or
+    a list a minipage of the line's width; soul's commands holding a
+    paragraph break the command around each paragraph's words, and \\so
+    and \\caps, which it dropped, as words and small capitals; polyglossia's
+    \\textlang, which it dropped, as \\textfrench, its options kept, its
+    paragraph break and list read as \\foreignlanguage's, and
+    \\textfrench's list, but its paragraph break, which LaTeX stops on too,
+    left; the run saying what it read so, and the author's files as they
+    were."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    babel, poly = os.path.join(work, "babel"), os.path.join(work, "poly")
+    books = {
+        babel: {
+            "book.tex": "\\documentclass{book}\n\\usepackage{url,soul,xcolor,hyperref}\n"
+                        "\\usepackage[french,english]{babel}\n"
+                        "\\begin{document}\n\\include{one}\n\\end{document}\n",
+            "one.tex": "\\chapter{One}\n"
+                       "A \\url|https://example.org/a_b| and \\url+https://example.org/x+ and "
+                       "\\nolinkurl!a/b! end.\n\n"
+                       "B \\path|/usr/bin/x| and \\path{/usr/lib} end.\n\n"
+                       "C \\begin{otherlanguage*}{french}Voir \\url|https://example.org/| "
+                       "ici.\\end{otherlanguage*} fin.\n\n"
+                       "\\begin{otherlanguage*}{french}\nD voir "
+                       "\\url{https://example.org/a%20b} ici.\n\nDeux.\n"
+                       "\\end{otherlanguage*}\n\n"
+                       "E \\hbox to 3cm{boxed} and \\hbox spread 1em{spread} and "
+                       "\\vbox to 2cm{tall} end.\n\n"
+                       "F \\vbox{un.\n\ndeux.} end.\n\n"
+                       "G \\vbox{un. \\begin{itemize}\\item x\\end{itemize} deux.} end.\n\n"
+                       "H \\ul{un.\n\ndeux.} end.\n\n"
+                       "I \\st{un. \\par deux.} end.\n\n"
+                       "J \\hl{un.\n\ndeux.} end.\n\n"
+                       "K \\so{espace} and \\caps{petites} end.\n\n"
+                       "L \\so{un.\n\ndeux.} end.\n",
+        },
+        poly: {
+            "book.tex": "\\documentclass{book}\n\\usepackage{polyglossia}\n"
+                        "\\setmainlanguage{english}\n\\setotherlanguage{french}\n"
+                        "\\begin{document}\n\\include{one}\n\\end{document}\n",
+            "one.tex": "\\chapter{One}\n"
+                       "M \\textfrench{un \\begin{itemize}\\item mot\\end{itemize} deux} fin.\n\n"
+                       "N \\textlang{french}{un mot} and \\textlang[variant=british]{english}"
+                       "{lorry} end.\n\n"
+                       "O \\textlang{french}{un.\n\ndeux.} fin.\n\n"
+                       "P \\textlang{french}{un \\begin{itemize}\\item mot\\end{itemize} deux} "
+                       "fin.\n",
+        },
+    }
+    results, pages = {}, {}
+    for folder, files in books.items():
+        os.makedirs(folder)
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.forms\n  title: Forms\n"
+                     "  language: en\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        results[folder] = convert(folder)
+        page = os.path.join(folder, "html", "one.html")
+        pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
+            if os.path.exists(page) else ""
+    said = results[babel].stdout + results[babel].stderr
+    told = results[poly].stdout + results[poly].stderr
+
+    def paragraph(folder, *parts):
+        """Whether the page has a paragraph of parts (patterns), in order,
+        nothing else."""
+        return re.search(r"<p>\s*" + r"\s*".join(parts) + r"\s*</p>", pages[folder]) is not None
+
+    underline = r"(?:<u>|<span class=\"underline\">)", r"(?:</u>|</span>)"
+    item = r"<ul>\s*<li>\s*(?:<p>)?%s(?:</p>)?\s*</li>\s*</ul>"
+    french = r'<span lang="fr">%s</span>'
+    return [
+        ("LaTeX books are read whose addresses, boxes, soul's commands, and polyglossia's "
+         "passages stopped the reader",
+         lambda: results[babel].returncode == 0 and bool(pages[babel])
+         and results[poly].returncode == 0 and bool(pages[poly])),
+        ("an address between two of a character is braced, and \\path is code",
+         lambda: paragraph(babel, 'A <a href="https://example\\.org/a_b"[^>]*>'
+                           "https://example\\.org/a_b</a> and "
+                           '<a href="https://example\\.org/x"[^>]*>https://example\\.org/x</a> '
+                           "and <code>a/b</code> end\\.")
+         and paragraph(babel, "B <code>/usr/bin/x</code> and <code>/usr/lib</code> end\\.")),
+        ("in a passage too, and a % in an address is no comment, there or in the copy's "
+         "count of a group's braces",
+         lambda: paragraph(babel, "C", french % ('Voir <a href="https://example\\.org/"[^>]*>'
+                                                 "https://example\\.org/</a> ici\\."), "fin\\.")
+         and paragraph(babel, french % ('D voir <a href="https://example\\.org/a%20b"[^>]*>'
+                                        "https://example\\.org/a%20b</a> ici\\."))
+         and paragraph(babel, french % "Deux\\.")
+         and latexsource.skip_spans("\\url{a%b} c % d") == [(4, 9), (12, 15)]
+         and latexsource.skip_spans("\\href{a%b}{x%y}\nz") == [(5, 10), (12, 15)]
+         and latexsource.code_brace("{\\url{a%b} c} d", 0) == 13),
+        ("a box's size is left out, in TeX's units and a length's",
+         lambda: paragraph(babel, "E boxed and spread and tall end\\.")
+         and latexsource.box_specs("\\hbox to\\hsize{a} \\hbox to 0.5\\linewidth{b} "
+                                   "\\vbox spread -2pt{c} \\hbox to 3 cm{d}", {})
+         == "\\hbox{a} \\hbox{b} \\vbox{c} \\hbox{d}"),
+        ("a \\vbox holding paragraphs or a list is a division of them",
+         lambda: re.search(r'<p>\s*F\s*</p>\s*<div class="minipage">\s*<p>un\.</p>\s*'
+                           r"<p>deux\.</p>\s*</div>\s*<p>\s*end\.\s*</p>", pages[babel])
+         is not None
+         and re.search(r'<p>\s*G\s*</p>\s*<div class="minipage">\s*<p>un\.</p>\s*'
+                       + item % "x" + r"\s*<p>deux\.</p>\s*</div>\s*<p>\s*end\.\s*</p>",
+                       pages[babel]) is not None),
+        ("soul's command holding a paragraph break is around each paragraph's words",
+         lambda: paragraph(babel, "H", underline[0] + "un\\." + underline[1])
+         and paragraph(babel, underline[0] + "deux\\." + underline[1], "end\\.")
+         and paragraph(babel, "I <del>un\\.</del>")
+         and paragraph(babel, "<del>deux\\.</del> end\\.")
+         and paragraph(babel, "J <mark>un\\.</mark>")
+         and paragraph(babel, "<mark>deux\\.</mark> end\\.")),
+        ("\\so and \\caps are their words, in small capitals for \\caps",
+         lambda: paragraph(babel, "K (?:<span>)?espace(?:</span>)? and "
+                           '<span class="smallcaps">petites</span> end\\.')
+         and paragraph(babel, "L (?:<span>)?un\\.(?:</span>)?")
+         and paragraph(babel, "(?:<span>)?deux\\.(?:</span>)? end\\.")),
+        ("polyglossia's \\textlang is read in its language, its options kept, and its "
+         "paragraph break and list as \\foreignlanguage's",
+         lambda: paragraph(poly, "N", french % "un mot", 'and <span lang="en-GB">lorry</span>',
+                           "end\\.")
+         and paragraph(poly, "O", french % "un\\.")
+         and paragraph(poly, french % "deux\\.", "fin\\.")
+         and re.search(r"<p>\s*P\s*" + french % "un" + r"\s*</p>\s*<div lang=\"fr\">\s*"
+                       + item % "mot" + r"\s*</div>\s*<p>\s*" + french % "deux"
+                       + r"\s*fin\.\s*</p>", pages[poly]) is not None),
+        ("and \\textfrench's list, but not its paragraph break, which LaTeX stops on too",
+         lambda: re.search(r"<p>\s*M\s*" + french % "un" + r"\s*</p>\s*<div lang=\"fr\">\s*"
+                           + item % "mot" + r"\s*</div>\s*<p>\s*" + french % "deux"
+                           + r"\s*fin\.\s*</p>", pages[poly]) is not None
+         and latexsource.inline_passages("A \\textfrench{un.\n\ndeux.} b", {})
+         == "A \\textfrench{un.\n\ndeux.} b"),
+        ("the run says what it read so",
+         lambda: "4 \\url or \\nolinkurl between two of a character (\\url|...|) braced" in said
+         and "2 url's \\path read as \\nolinkurl, code" in said
+         and "3 \\hbox's or \\vbox's size (to 3cm, spread 1em) left out" in said
+         and "2 \\vbox holding paragraphs or a list read as a minipage" in said
+         and "4 soul's command's words (\\ul, \\st, \\hl, \\so, \\caps) holding a paragraph "
+             "break read as the command in each paragraph" in said
+         and "3 soul's \\so read as its words and \\caps as small capitals" in said
+         and "4 polyglossia's \\textlang read as its command for the language" in told
+         and "1 \\textlang's words holding a paragraph break read as a passage in each "
+             "paragraph" in told
+         and "2 polyglossia's passage's words (\\textfrench, \\textlang) holding a list" in told),
+        ("and the author's files are as they were",
+         lambda: all(read(folder, name) == text for folder, files in books.items()
+                     for name, text in files.items())),
+    ]
+
+
 def case_page_languages(work):
     """A LaTeX book's pages in another language than the book's, in its copy
     and in its PDF built from its own files: each \\include-d file's page
@@ -9564,6 +9722,8 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the line a stop on a book is at", case_stop_line),
          ("a paragraph break in a box's or a quotation's words", case_inline_breaks),
          ("a list or another environment in an inline command's words", case_inline_blocks),
+         ("an address, a box, soul's commands, and polyglossia's passages the reader stopped "
+          "on, or dropped", case_reading_forms),
          ("a LaTeX book's pages in another language, in its copy and its PDF",
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",

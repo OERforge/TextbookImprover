@@ -150,6 +150,25 @@ def closing_on_line(text, start, close):
     return -1 if end < 0 else end + 1
 
 
+# The url package's and hyperref's commands for an address, whose argument
+# LaTeX reads as it's written, a % in it no comment: braced, or for \url,
+# \nolinkurl, and \path between two of a character (\url|...|) on its
+# line; \href's first argument, braced, its address. Group 1: the
+# command but \href; 2, an opening brace; 3, the character.
+ADDRESS_ARGUMENT = re.compile(r"\\(?:(url|nolinkurl|path)|href)(?![A-Za-z@])\s*"
+                              r"(?:(\{)|([^\sA-Za-z0-9\\%{}#*]))")
+
+
+def address_end(text, m):
+    """The index just past the address ADDRESS_ARGUMENT matched at m, or
+    -1: a braced one's closing brace, another's character on its line."""
+    if m.group(2):
+        return matching_brace(text, m.end() - 1)
+    if m.group(1) and m.group(3):
+        return closing_on_line(text, m.end(), m.group(3))
+    return -1
+
+
 def inline_code_end(text, m):
     """The index just past the inline code INLINE_CODE matched at m, on its
     line (closing_on_line), or -1."""
@@ -159,7 +178,8 @@ def inline_code_end(text, m):
 def skip_spans(text):
     """Spans of text no rewrite may touch, as (start, end) pairs, in
     order: comments, verbatim environments, \\verb, and inline code
-    (INLINE_CODE), each on its line (closing_on_line)."""
+    (INLINE_CODE), each on its line (closing_on_line), and an address's
+    argument (ADDRESS_ARGUMENT), braced or on its line, a % in it none."""
     spans = []
     i, n = 0, len(text)
     verb_env = re.compile(r"\\begin\s*\{(" + "|".join(
@@ -181,6 +201,12 @@ def skip_spans(text):
                 end = inline_code_end(text, m) if m else -1
             if end > 0:
                 spans.append((i, end))
+                i = end
+                continue
+            m = ADDRESS_ARGUMENT.match(text, i)
+            end = address_end(text, m) if m else -1
+            if end > 0:
+                spans.append((m.end() - 1, end))
                 i = end
                 continue
             i += 2
@@ -355,8 +381,8 @@ VERB = re.compile(r"\\verb\*?([^a-zA-Z\s*])")
 def code_brace(text, start):
     """matching_brace in code: the index just past the group that opens
     at text[start] == '{', a brace in a comment, \\verb, verbatim, or
-    inline code not counted, as skip_spans takes them; -1 where none
-    closes it."""
+    inline code not counted, nor a % in an address's argument a comment,
+    as skip_spans takes them; -1 where none closes it."""
     depth, i, n = 0, start, len(text)
     while i < n:
         c = text[i]
@@ -371,6 +397,9 @@ def code_brace(text, start):
             if end < 0:
                 m = INLINE_CODE.match(text, i)
                 end = inline_code_end(text, m) if m else -1
+            if end < 0:
+                m = ADDRESS_ARGUMENT.match(text, i)
+                end = address_end(text, m) if m else -1
             if end > 0:
                 i = end
                 continue
@@ -2293,7 +2322,38 @@ LINE_BOX = re.compile(r"\\(mbox|hbox|underline|uline|sout)(?![A-Za-z@])")
 # reader reads around blocks as a colored division (coloredBlock).
 FORMATTING = re.compile(r"\\(emph|textit|textsl|textsc|textsf|textmd|textrm|textup|texttt"
                         r"|textsuperscript|textsubscript|textbf|textnormal|NoCaseChange"
-                        r"|nohyphens|textnhtt|nhttfamily|st|ul|hl|href)(?![A-Za-z@])")
+                        r"|nohyphens|textnhtt|nhttfamily|href)(?![A-Za-z@])")
+# soul's commands, whose words LaTeX sets over a paragraph break, the
+# command's look on each paragraph's (pdfLaTeX, TeX Live 2026, measured;
+# a \par right after a word, with no space, soul runs that word into the
+# next paragraph's first): \st, \ul, and \hl, which the reader reads as
+# inlines (Readers/LaTeX.hs), stopping on the break, and \so and \caps,
+# which it drops with their words, read in their place as their words and
+# as small capitals (SOUL_READ). LaTeX stops on an environment in them.
+SOUL = re.compile(r"\\(so|st|ul|hl|caps)(?![A-Za-z@])")
+SOUL_READ = {"so": "", "caps": "\\textsc"}
+# polyglossia's command for a passage in a language, \textfrench[options]
+# {...}, for each language the reader knows one of (polyglossiaLangToBCP47
+# in Readers/LaTeX/Lang.hs, 3.12.1 and 3.13): it reads its words as inlines
+# with their language, stopping on a paragraph break or an environment, as
+# it does \foreignlanguage's. LaTeX sets a list in them, but stops on a
+# paragraph break ("Paragraph ended before \textfrench was complete":
+# polyglossia defines it O{} m, measured with LuaLaTeX, TeX Live 2026).
+# polyglossia's \textlang[options]{french}{...}, whose words take a
+# paragraph break too (O{} m +m), the reader doesn't know, and drops with
+# its words; group 1 its options, 2 its language (TEXTLANG).
+POLYGLOSSIA_LANGUAGES ="""afrikaans albanian amharic arabic armenian assamese asturian basque
+    bengali breton bulgarian catalan coptic croatian czech danish divehi dutch english
+    esperanto estonian ethiopic farsi finnish french friulan galician german greek gujarati
+    hebrew hindi icelandic indonesian interlingua irish italian japanese kannada khmer korean
+    kurmanji lao latin latvian lithuanian lsorbian magyar malayalam marathi mongolian nko
+    norsk nynorsk occitan oriya piedmontese pinyin polish portuguese punjabi romanian romansh
+    russian samin sanskrit scottish serbian serbianc slovak slovenian spanish swedish syriac
+    tamil telugu thai tibetan turkish turkmen ukrainian urdu usorbian vietnamese
+    welsh""".split()
+POLYGLOSSIA_TEXT = re.compile(r"\\text(%s)(?![A-Za-z@])[ \t]*(\[[^][{}]*\])?" % "|".join(
+    sorted(POLYGLOSSIA_LANGUAGES, key=len, reverse=True)))
+TEXTLANG = re.compile(r"\\textlang(?![A-Za-z@])[ \t]*(\[[^][{}]*\])?\s*\{\s*([A-Za-z]+)\s*\}")
 # A paragraph break in a passage's words: a blank line, or \par. (A blank
 # line alone is PARAGRAPH_BREAK, captionof_floats'.)
 PASSAGE_BREAK = re.compile(r"\n[ \t]*\n\s*|\\par(?![A-Za-z@])\s*")
@@ -2544,13 +2604,29 @@ def top_level(pattern, text):
 
 
 def command_words(text, m):
-    """(head, language, start, close) for a FOREIGN_LANGUAGE, QUOTATION,
-    LINE_BOX, or FORMATTING match in text: the command as it's written again
-    around a piece of its words, \\href's address with it, without its
-    options, which the reader skips or stops on; the language it names, or
-    None; and its words, text[start:close - 1], close past their brace.
-    None where they aren't braced, or a brace isn't matched."""
-    if m.re is FOREIGN_LANGUAGE:
+    """(head, language, start, close) for a FOREIGN_LANGUAGE,
+    POLYGLOSSIA_TEXT, TEXTLANG, QUOTATION, SOUL, LINE_BOX, or FORMATTING
+    match in text: the command as it's written again around a piece of its
+    words, \\href's address with it, without its options, which the reader
+    skips or stops on, but polyglossia's, which it reads; soul's as the
+    reader reads it (SOUL_READ), and \\textlang as polyglossia's command
+    for its language, which the reader knows, or \\foreignlanguage, for
+    one it doesn't; the language it names, or None; and its words,
+    text[start:close - 1], close past their brace. None where they aren't
+    braced, or a brace isn't matched."""
+    if m.re in (POLYGLOSSIA_TEXT, TEXTLANG):
+        at = argument_space(text, m.end())
+        if not text.startswith("{", at):
+            return None
+        if m.re is TEXTLANG:
+            language, options = m.group(2), m.group(1)
+            head = ("\\text%s%s" % (language, options or "")
+                    if language in POLYGLOSSIA_LANGUAGES else "\\foreignlanguage{%s}" % language)
+        else:
+            language, options = m.group(1), m.group(2)
+            head = "\\text%s%s" % (language, options or "")
+        start = at + 1
+    elif m.re is FOREIGN_LANGUAGE:
         named = matching_brace(text, m.end() - 1)
         opening = re.compile(r"\s*\{").match(text, named) if named >= 0 else None
         if not opening:
@@ -2559,6 +2635,8 @@ def command_words(text, m):
         head, start = "\\foreignlanguage%s{%s}" % (m.group(1), language), opening.end()
     else:
         head, language, pos = "\\" + m.group(1), None, m.end()
+        if m.re is SOUL:
+            head = SOUL_READ.get(m.group(1), head)
         if m.group(1) == "href":
             at = argument_space(text, pos)
             address = matching_brace(text, at) if text.startswith("{", at) else -1
@@ -3011,11 +3089,18 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
     the book's that make one, block_macros), it in otherlanguage, which
     holds paragraphs, lists, and the rest, between a \\foreignlanguage of
     the words before it, ending their paragraph, and of those after,
-    beginning the next, as LaTeX sets a list. csquotes' quotations
+    beginning the next, as LaTeX sets a list. polyglossia's \\textlang
+    (TEXTLANG) likewise, as its \\textfrench for the language, which the
+    reader reads, where it dropped \\textlang with its words, and
+    \\textfrench (POLYGLOSSIA_TEXT) for an environment, its paragraph
+    break, which LaTeX stops on too, left. csquotes' quotations
     (QUOTATION) likewise, a quotation of each paragraph, where LaTeX sets
-    the one over both. The boxes (LINE_BOX), whose words LaTeX sets on one
-    line, a paragraph break as LaTeX takes it there (box_line), a
-    passage's or a quotation's in their words too, as the box's. A piece
+    the one over both, and soul's commands (SOUL), the command around each
+    paragraph's words, \\so and \\caps read (SOUL_READ), where the reader
+    dropped them with their words. The boxes (LINE_BOX), whose words
+    LaTeX sets on one line, a paragraph break as LaTeX takes it there
+    (box_line), a passage's or a quotation's in their words too, as the
+    box's. A piece
     of nothing the reader reads (NOTHING_READ) is left as it is. And for
     them and the rest (FORMATTING), an environment the reader doesn't take
     there between the command around the words before it and after it,
@@ -3034,7 +3119,8 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
     spans = skip_spans(text)
     formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
     math = formula_spans(text, formula_names)
-    found = sorted((m for pattern in (FOREIGN_LANGUAGE, QUOTATION, LINE_BOX, FORMATTING)
+    found = sorted((m for pattern in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, TEXTLANG, QUOTATION,
+                                      SOUL, LINE_BOX, FORMATTING)
                     for m in pattern.finditer(text) if not in_spans(m.start(), spans)
                     and (pattern is FOREIGN_LANGUAGE or not in_spans(m.start(), math))),
                    key=lambda m: m.start())
@@ -3048,7 +3134,8 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
         keys = []
         # In a box's words, a paragraph break in a passage's or a
         # quotation's is the box's, on its one line.
-        if m.re in (FOREIGN_LANGUAGE, QUOTATION) and box_line(words) != words and any(
+        if m.re in (FOREIGN_LANGUAGE, TEXTLANG, QUOTATION, SOUL) \
+                and box_line(words) != words and any(
                 b.re is LINE_BOX and b.start() < m.start()
                 and m.start() < (command_words(text, b) or (0, 0, 0, -1))[3] for b in found):
             words, keys = box_line(words), ["box_breaks"]
@@ -3072,26 +3159,36 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
             # What the reader reads as nothing, alone between paragraph
             # breaks, is left there, not made an empty passage or quotation.
             return piece if NOTHING_READ.fullmatch(piece) else "%s{%s}" % (head, piece)
+        # A paragraph break in a font command's or \textfrench's words
+        # LaTeX stops on too (\text@command and \textfrench aren't \long),
+        # so it's left to the reader, which does.
         if m.re is LINE_BOX:
             if breaks:
                 keys.append("box_breaks")
-        else:
-            if m.re is not FORMATTING:
-                cuts = sorted(cuts + breaks)
-                if breaks:
-                    keys.append("babel_paragraphs" if m.re is FOREIGN_LANGUAGE
-                                else "quotation_paragraphs")
+        elif m.re not in (FORMATTING, POLYGLOSSIA_TEXT):
+            cuts = sorted(cuts + breaks)
+            if breaks:
+                keys.append({FOREIGN_LANGUAGE: "babel_paragraphs", SOUL: "soul_paragraphs",
+                             TEXTLANG: "polyglossia_paragraphs"}.get(
+                                 m.re, "quotation_paragraphs"))
         if blocks:
-            keys.append("babel_blocks" if m.re is FOREIGN_LANGUAGE else "inline_blocks")
-            if m.re is not FOREIGN_LANGUAGE and places is not None:
+            keys.append({FOREIGN_LANGUAGE: "babel_blocks", POLYGLOSSIA_TEXT: "polyglossia_blocks",
+                         TEXTLANG: "polyglossia_blocks"}.get(m.re, "inline_blocks"))
+            if m.re not in (FOREIGN_LANGUAGE, POLYGLOSSIA_TEXT, TEXTLANG) \
+                    and places is not None:
                 # The words before the environment up to a command, which
                 # a rewrite inside them may have made.
                 places.append((text.count("\n", 0, m.start()) + 1, m.group(1), " ".join(
                     re.split(r"[\\{}$%]", words[:blocks[0][0]])[0].split())[:40]))
+        renamed = ("textlang_passages" if m.re is TEXTLANG
+                   else "soul_words" if m.re is SOUL and m.group(1) in SOUL_READ else None)
         if keys:
             new = passage_pieces(words, cuts, skipped, wrap, m.re is LINE_BOX)
+            keys += [renamed] if renamed else []
         elif m.re is FOREIGN_LANGUAGE and m.group(2):
             new, keys = "%s{%s}" % (head, words), ["babel_options"]
+        elif renamed:
+            new, keys = "%s{%s}" % (head, words), [renamed]
         else:
             continue
         text = text[:m.start()] + new + text[close:]
@@ -3107,7 +3204,7 @@ def author_line(text, line, command, words):
     words (whitespace run together), as the rewrites before it may have
     moved lines; line where none does."""
     found = []
-    for pattern in (QUOTATION, LINE_BOX, FORMATTING):
+    for pattern in (QUOTATION, SOUL, LINE_BOX, FORMATTING):
         for m in pattern.finditer(text):
             parsed = command_words(text, m) if m.group(1) == command else None
             if parsed and " ".join(text[parsed[2]:parsed[2] + 400].split()).startswith(words):
@@ -3362,6 +3459,85 @@ def highlighted_code(text, counter):
     return HIGHLIGHTED_INLINE.sub(inline, text)
 
 
+def address_forms(text, counter):
+    """An address as the reader reads one: \\url's and \\nolinkurl's
+    between two of a character (\\url|...|), which stopped the reader
+    ("unexpected |"), braced; and url's \\path, braced or not, which it
+    dropped with its words, as \\nolinkurl, which it reads as code, as
+    \\path sets one (3.12.1, measured). One whose braces don't pair is
+    left, which a brace can't hold."""
+    edits = []
+    spans = skip_spans(text)
+    for m in ADDRESS_ARGUMENT.finditer(text):
+        if not m.group(1) or in_spans(m.start(), spans) or escaped(text, m.start()):
+            continue
+        end = address_end(text, m)
+        if end < 0:
+            continue
+        name = "nolinkurl" if m.group(1) == "path" else m.group(1)
+        if m.group(2):
+            if m.group(1) == "path":
+                edits.append((m.start(), m.end() - 1, "\\nolinkurl", "path_addresses"))
+            continue
+        address = text[m.end():end - 1]
+        depth = 0
+        for c in address:
+            depth += {"{": 1, "}": -1}.get(c, 0)
+            if depth < 0:
+                break
+        if depth:
+            continue
+        edits.append((m.start(), end, "\\%s{%s}" % (name, address),
+                      "path_addresses" if m.group(1) == "path" else "address_forms"))
+    for start, end, new, key in reversed(edits):
+        text = text[:start] + new + text[end:]
+        counter[key] = counter.get(key, 0) + 1
+    return text
+
+
+# A box's size, \hbox to 3cm{...} or spread 1em{...}, which the reader
+# reads as words ("to 3cm"), as it does \vbox's (3.12.1, measured).
+BOX_SPEC = re.compile(r"\\(hbox|vbox)(?![A-Za-z@])\s*(?:to|spread)(?![A-Za-z@])\s*"
+                      r"(?:[-+]\s*)*(?:[0-9]*[.,]?[0-9]+\s*)?(?:true\s*)?"
+                      r"(?:[a-z]{2}(?![A-Za-z])|\\[A-Za-z@]+)\s*(?=\{)")
+
+
+def box_specs(text, counter):
+    """\\hbox's and \\vbox's size left out (BOX_SPEC), the box as the reader
+    reads it."""
+    return substitute(BOX_SPEC, text, lambda m: "\\" + m.group(1), counter, "box_specs")
+
+
+VBOX = re.compile(r"\\vbox(?![A-Za-z@])\s*\{")
+
+
+def vbox_paragraphs(text, counter, environments=(), macros=()):
+    """A \\vbox holding a paragraph break or an environment the reader
+    doesn't take in a paragraph, which LaTeX sets as a box of paragraphs
+    the line's width, and the reader stopped on, reading \\vbox's words
+    as inlines: a minipage of the line's width, which it reads as a
+    division of paragraphs (3.12.1, measured); the others as they are."""
+    spans = skip_spans(text)
+    found = [m for m in VBOX.finditer(text) if not in_spans(m.start(), spans)]
+    for m in reversed(found):
+        close = code_brace(text, m.end() - 1)
+        if close < 0:
+            continue
+        words = text[m.end():close - 1]
+        skipped = skip_spans(words)
+        names = [name for name, kind in dict(environments).items() if kind == "formula"]
+        blocks = inline_blocks(words, skipped, formula_spans(words, names), environments,
+                               macros)
+        breaks = [b for b in top_level(PASSAGE_BREAK, words)
+                  if passage_break(words, b, skipped)]
+        if not (blocks or breaks):
+            continue
+        text = (text[:m.start()] + "\\begin{minipage}{\\linewidth}" + words
+                + "\\end{minipage}" + text[close:])
+        counter["vbox_paragraphs"] = counter.get("vbox_paragraphs", 0) + 1
+    return text
+
+
 def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
                 places=None, tag_environments=None, block_macros=()):
     """The rewrites every file of the copy gets: booleans as toggles,
@@ -3377,6 +3553,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     text = inline_code_marks(text, counter)
     text = highlighted_code(text, counter)
     text = fit_marks(text, counter)
+    text = address_forms(text, counter)
+    text = box_specs(text, counter)
     text = substitute(BOOLEAN_IF, text, lambda m: "\\iftoggle{%s}" % m.group(1),
                       counter, "ifthenelse")
     text = substitute(BOOLEAN_NEW, text, lambda m: "\\newtoggle{%s}" % m.group(1),
@@ -3398,6 +3576,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
+    text = vbox_paragraphs(text, counter, environments, block_macros)
     text = inline_passages(text, counter, tags, environments, places, tag_environments,
                            macros=block_macros)
     text = drop(text, "OERLinkContents", counter, "link_contents")

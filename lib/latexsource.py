@@ -4202,6 +4202,11 @@ def macro_calls(text, macros, skip):
 
 NEWENVIRONMENT = re.compile(r"\\(re)?newenvironment\s*\{\s*([A-Za-z@]+)\s*\}")
 ENVIRONMENT_EDGE = re.compile(r"\\(begin|end)\s*\{\s*([A-Za-z@]+)\s*\}")
+# An environment's opening code ending in a command, which may take what
+# follows \begin{name} for an argument: a command's name, a control
+# symbol, or an environment's beginning (\begin{tabular}, whose columns
+# the book gives after \begin{name}).
+OPENING_COMMAND = re.compile(r"(?:\\begin\s*\{[^{}]*\}|\\[A-Za-z@]+\*?|\\[^A-Za-z@\s])\s*$")
 
 
 def environment_definitions_in(text, spans=None):
@@ -4239,7 +4244,7 @@ def environment_definitions_in(text, spans=None):
     return [d for d in found if not any(o[0] < d[0] < o[1] for o in found)]
 
 
-def environment_definitions(texts, files, counter):
+def environment_definitions(texts, files, counter, environments=()):
     """Each environment the book defines with \\newenvironment written, in
     the reading copy, as LaTeX defines it: a command \\name for its opening
     code and \\endname for its closing, each \\begin{name} and \\end{name}
@@ -4256,25 +4261,52 @@ def environment_definitions(texts, files, counter):
     in another's codes, and LaTeX's own that the book redefines with
     \\renewenvironment (enumerate), are left to the reader: the commands
     would hold from the start of the book, where LaTeX's definitions do
-    until the book's are made. texts: {name: text}, changed in place."""
-    defined = set()
+    until the book's are made. Each command's name ends as TeX ends it:
+    where a space follows, by an empty group, which the reader reads as
+    nothing (inlineGroup), so the space is a space, as LaTeX keeps it
+    after \\end{name}, or after \\begin{name} of one that takes no
+    arguments, where after a command's name the reader's tokenizer, as
+    TeX's, takes it (totoks, Readers/LaTeX/Parsing.hs). Elsewhere by a
+    space, which the tokenizer takes: where something else follows;
+    before the arguments of one that takes them, which LaTeX skips a space
+    before too, and before a group or an option that an opening code
+    ending in a command may take for an argument (OPENING_COMMAND:
+    \\begin{tabular} given its columns after \\begin{name}, \\textbf its
+    words); and in a formula, a book's environment for one among them
+    (environments, {name: kind}, book_environments), where TeX skips every
+    space and an empty group would be a subformula of its own, a
+    superscript's base. A definition's code is read as text, where such a
+    space is meant more often: one used in a formula with a space after
+    an edge gives the superscript after it an empty base. texts: {name:
+    text}, changed in place."""
+    defined, arguments, openings = set(), set(), {}
     for name in files:
         for d in environment_definitions_in(texts[name]):
             if not d[2]:
                 defined.add(d[3])
+            count = re.match(r"\[\s*(\d+)\s*\]", d[4])
+            if count and int(count.group(1)):
+                arguments.add(d[3])
+            openings[d[3]] = COMMENT.sub("", d[5][0][1:-1])
     if not defined:
         return
+    formula_names = [n for n, kind in dict(environments).items() if kind == "formula"]
     for name in files:
         text = texts[name]
         # \begin{name} and \end{name} first, in the definitions' codes too.
         spans = skip_spans(text)
+        math = formula_spans(text, formula_names)
         edges = []
         for m in ENVIRONMENT_EDGE.finditer(text):
             if m.group(2) in defined and not in_spans(m.start(), spans):
-                # A space ends the command's name, as TeX takes it, so the
-                # next letters aren't read as more of it.
-                edges.append((m.start(), m.end(), "\\%s%s " % (
-                    "" if m.group(1) == "begin" else "end", m.group(2))))
+                begin, env = m.group(1) == "begin", m.group(2)
+                taken = begin and (env in arguments or (
+                    OPENING_COMMAND.search(openings.get(env, ""))
+                    and text.startswith(("{", "["), argument_space(text, m.end()))))
+                spaced = text.startswith((" ", "\t"), m.end())
+                edges.append((m.start(), m.end(), "\\%s%s%s" % (
+                    "" if begin else "end", env,
+                    "{}" if spaced and not taken and not in_spans(m.start(), math) else " ")))
         for start, stop, replacement in reversed(edges):
             text = text[:start] + replacement + text[stop:]
         edits = []                      # (start, stop, replacement)
@@ -7112,7 +7144,7 @@ def prepare(base, work, master, say, macros=""):
     # colors as CSS.
     expand_include_macros(texts, files, counts)
     expand_cite_macros(texts, files, counts)
-    environment_definitions(texts, files, counts)
+    environment_definitions(texts, files, counts, environments)
     resolve_colors(texts, files, counts)
     write_out_columns(texts, counts)
     write_out_item_refs(texts, counts, counting["ref_names"])

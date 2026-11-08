@@ -5924,6 +5924,7 @@ def case_pieces(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import latexsource
+    import pandocversion
     import texremediate
     log = ("(./Topic 03 Financial Statements.tex\n"
            "./Topic 03 Financial Statements.tex:65: Package titlesec Error: No format for "
@@ -5980,6 +5981,34 @@ def case_pieces(work):
     envs = {"a.tex": "\\newenvironment{var}[1]{\\texttt{#1}}{}\n"
                      "\\begin{var}{x}\\end{var} and \\var{y}.\n"}
     latexsource.environment_definitions(envs, ["a.tex"], {})
+    # The spaces around them, as LaTeX sets them: "Un mot rouge ici. Un
+    # mot, ici. Avec T texte fin. Un gras et vu." (TeX Live 2026, measured);
+    # an opening code that takes what follows \begin for an argument, and
+    # formulas, a book's environment's and a definition's used in one.
+    spaced = {"a.tex": "\\newenvironment{rouge}{}{}\n"
+                       "\\newenvironment{titre}[1]{\\textbf{#1} }{}\n"
+                       "\\newenvironment{amat}{\\left(}{\\right)}\n"
+                       "\\newenvironment{grasb}{\\textbf}{}\n"
+                       "\\newenvironment{mytab}{\\begin{tabular}}{\\end{tabular}}\n"
+                       "\\newenvironment{coltab}{\\begin{tabular}% its columns\n}"
+                       "{\\end{tabular}}\n"
+                       "\\newenvironment{myeq}{\\begin{equation}}{\\end{equation}}\n"
+                       "\\newcommand{\\foo}{\\begin{rouge}z\\end{rouge}}\n"
+                       "Un \\begin{rouge}mot\\end{rouge} rouge ici. Un\\begin{rouge} "
+                       "mot\\end{rouge}, ici. Avec \\begin{titre} {T} texte\\end{titre} fin. "
+                       "Un \\begin{grasb}{gras}\\end{grasb} et \\begin{rouge} {vu}\\end{rouge}.\n"
+                       "$\\begin{amat}x\\end{amat}^2$ $\\foo^2$\n\n"
+                       "\\begin{mytab} {ll}a & b\\end{mytab}\n\n"
+                       "\\begin{coltab} {l}c\\end{coltab}\n\n"
+                       "\\begin{myeq} a\\begin{rouge} y\\end{rouge} ^2\\end{myeq}\n"}
+    latexsource.environment_definitions(spaced, ["a.tex"], {},
+                                        latexsource.book_environments([spaced["a.tex"]]))
+    # MathML, as the run asks for it, so a formula's base shows (pandocversion).
+    spaced_read = subprocess.run(
+        ["pandoc", "-f", "latex", "-t", "html", "--wrap=none"] + pandocversion.mathml(),
+        capture_output=True, text=True,
+        input="\\documentclass{book}\n\\begin{document}\n" + spaced["a.tex"]
+        + "\\end{document}\n").stdout
     grouped = latexsource.group_commands(
         "{\\Large \\begingroup A\\par \\endgroup}\n"
         "\\newcommand{\\s}{\\begingroup}\\newcommand{\\e}{\\endgroup}\n"
@@ -6707,7 +6736,32 @@ def case_pieces(work):
         ("an environment the book defines is the commands LaTeX makes of it, called "
          "alone as LaTeX allows", lambda: envs["a.tex"].startswith(
              "\\newcommand{\\var}[1]{\\texttt{#1}}\\newcommand{\\endvar}{}")
-         and "\\var {x}\\endvar  and \\var{y}." in envs["a.tex"]),
+         and "\\var {x}\\endvar{} and \\var{y}." in envs["a.tex"]),
+        ("a space after an environment the book defines, or after its beginning where it "
+         "takes no arguments, is a space, as LaTeX keeps it, where the command's name took "
+         "it, and one before its arguments is passed over, as LaTeX passes it",
+         lambda: "Un \\rouge mot\\endrouge{} rouge ici. Un\\rouge{} mot\\endrouge , ici. "
+         "Avec \\titre  {T} texte\\endtitre{} fin." in spaced["a.tex"]
+         and re.search(r"<p>Un mot rouge ici\. Un mot, ici\. Avec <strong>T</strong> texte "
+                       r"fin\. Un <strong>gras</strong> et (?:<span>)?vu(?:</span>)?\. <math ",
+                       spaced_read) is not None),
+        ("and a group or an option after its beginning, which an opening code ending in a "
+         "command may take for an argument, follows a space, as it did, where one the code "
+         "can't take follows an empty group",
+         lambda: "Un \\grasb {gras}\\endgrasb{} et \\rouge{} {vu}\\endrouge ." in spaced["a.tex"]
+         and "\\mytab  {ll}a & b\\endmytab \n" in spaced["a.tex"]
+         and "\\coltab  {l}c\\endcoltab \n" in spaced["a.tex"]
+         and re.search(r"<table>.*?<td[^>]*>a</td>\s*<td[^>]*>b</td>", spaced_read, re.S)
+         is not None),
+        ("but in a formula, where TeX skips spaces, a space, so no empty group is a "
+         "superscript's base, in a book's environment for a formula, and in a definition's "
+         "code where no space follows",
+         lambda: "$\\amat x\\endamat ^2$" in spaced["a.tex"]
+         and "\\myeq  a\\rouge  y\\endrouge  ^2\\endmyeq " in spaced["a.tex"]
+         and "\\newcommand{\\foo}{\\rouge z\\endrouge }" in spaced["a.tex"]
+         and "<msup><mi>y</mi><mn>2</mn></msup>" in spaced_read
+         and "<msup><mi>z</mi><mn>2</mn></msup>" in spaced_read
+         and "<mrow></mrow>" not in spaced_read),
         ("\\begingroup and the \\endgroup at its depth are braces, after an italic "
          "correction; a pair macros split, one in a formula, and one after \\\\ are left",
          lambda: grouped.startswith("{\\Large \\/{ A\\par }}")

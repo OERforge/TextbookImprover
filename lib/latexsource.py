@@ -2253,14 +2253,16 @@ ENVIRONMENT_COPY = re.compile(
 FORMULA_OPENING = re.compile(r"\$|\\\(|\\\[|\\begin\s*\{([^{}]*)\}")
 
 
-def babel_tags(texts):
+def babel_tags(texts, environments=False):
     """{tag: language}, the tags the book's \\babeltags declares
     (\\babeltags{fr = french}), each of which babel makes a command
     (\\textfr{...}), a declaration (\\fr), and an environment; not one
     whose command the book defines again itself, in any form the reader
     reads (COMMAND_DEFINITION: \\renewcommand{\\textfr}, \\def\\textfr,
     \\RenewDocumentCommand), which the reader reads as the book defines
-    it."""
+    it. With environments, the tags whose environment is babel's: not one
+    whose declaration, which opens it, or environment the book defines
+    again (BOOK_ENVIRONMENT, ENVIRONMENT_COPY)."""
     tags = {}
     for text in texts:
         for m in code_matches(BABEL_TAGS, text):
@@ -2270,6 +2272,11 @@ def babel_tags(texts):
                     tags[tag] = language
     defined = {m.group(1) or m.group(2) or m.group(3) for text in texts
                for m in code_matches(COMMAND_DEFINITION, text)} if tags else set()
+    if environments:
+        defined |= {m.group(1) for text in texts
+                    for m in code_matches(BOOK_ENVIRONMENT, text)
+                    + code_matches(ENVIRONMENT_COPY, text)} if tags else set()
+        return {tag: language for tag, language in tags.items() if tag not in defined}
     return {tag: language for tag, language in tags.items() if "text" + tag not in defined}
 
 
@@ -2703,12 +2710,209 @@ def box_line(words):
     return "".join(out) + words[last:]
 
 
-def inline_passages(text, counter, tags=None, environments=(), places=None, macros=()):
+# babel's otherlanguage*, \foreignlanguage as an environment, which the
+# reader reads as a division classed with its name, its language's name
+# printed and given none, and babeltags' environment (\begin{fr}), which
+# babel opens with otherlanguage*'s opening (\fr is \otherlanguage*{french},
+# read in babel.sty 26.13), and the reader reads as a division classed fr.
+OTHERLANGUAGE_STAR = re.compile(r"\\begin\s*\{\s*otherlanguage\*\s*\}\s*(\[[^][{}]*\])?\s*\{")
+
+
+def balanced(text, start, end, spans):
+    """Whether text[start:end] closes every group it opens, in code
+    (spans: skip_spans(text)), and no other."""
+    depth, i = 0, start
+    while i < end:
+        if in_spans(i, spans):
+            i = next(stop for begin, stop in spans if begin <= i < stop)
+            continue
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        depth += 1 if c == "{" else -1 if c == "}" else 0
+        if depth < 0:
+            return False
+        i += 1
+    return depth == 0
+
+
+ITEM = re.compile(r"\\item(?![A-Za-z@])")
+# A macro's parameter in code (#1, and ##1 in a definition inside
+# another's), group 1, which only a definition's code holds, of whatever
+# kind, \newcommand, \DeclareRobustCommand, xparse's, or \def, LaTeX taking
+# a # in running text for an error; and a control symbol, so an escaped #
+# (\#1) isn't one.
+PARAMETER = re.compile(r"\\.|(#+[1-9])", re.S)
+# A command whose argument is an address, where a # is a character.
+ADDRESS = re.compile(r"\\(?:url|nolinkurl|path|href)(?![A-Za-z@])\s*\{")
+
+
+def holds_parameter(words):
+    """Whether words hold a macro's parameter (PARAMETER) in code, outside
+    an address (ADDRESS)."""
+    skipped = skip_spans(words)
+    addresses = []
+    for m in ADDRESS.finditer(words):
+        close = code_brace(words, m.end() - 1) if not in_spans(m.start(), skipped) else -1
+        if close > 0:
+            addresses.append((m.end() - 1, close))
+    return any(m.group(1) and not in_spans(m.start(), skipped)
+               and not any(s <= m.start() < e for s, e in addresses)
+               for m in PARAMETER.finditer(words))
+
+
+def outermost_environments(words, skipped):
+    """The (start, end) of each outermost environment in words' code,
+    outside every group in them; None where one isn't closed. skipped:
+    skip_spans(words)."""
+    found, past = [], 0
+    for b in top_level(BEGIN_ENVIRONMENT, words):
+        if b.start() < past:
+            continue
+        past = environment_close(words, b.group(1).strip(), b.start(), skipped)
+        if past < 0:
+            return None
+        found.append((b.start(), past))
+    return found
+
+
+def block_content(words, formula_names=(), environments=(), macros=()):
+    """Whether words hold, in code, what the reader reads only as a block,
+    outside formulas (formula_spans, by formula_names), a note's text
+    (note_spans), which it reads inline, and what inline_passages sets
+    between the words around it (inline_blocks, by environments and
+    macros): a command it reads only so (BLOCK_COMMAND),
+    verbatim, or a call of one of macros, the book's that make a block
+    (block_macros), in a group, say. None where an environment in them
+    isn't closed."""
+    skipped = skip_spans(words)
+    formulas = formula_spans(words, formula_names)
+    blocks = inline_blocks(words, skipped, formulas, environments, macros)
+    if blocks is None:
+        return None
+    notes = note_spans(words, skipped)
+
+    def outside(pos):
+        return (not in_spans(pos, formulas) and not in_spans(pos, notes)
+                and not any(s <= pos < e for s, e in blocks))
+    return any(outside(m.start()) for m in BLOCK_COMMAND.finditer(words)
+               if not in_spans(m.start(), skipped)) or any(
+        outside(start) for start, _ in skipped if words.startswith("\\begin", start)) or (
+        bool(macros) and any(outside(m.start()) for m in macro_pattern(macros).finditer(words)
+                             if not in_spans(m.start(), skipped)))
+
+
+def language_environments(text, counter, tags=None, environments=(), macros=()):
+    """otherlanguage* (OTHERLANGUAGE_STAR), and babeltags' environment, by
+    tags ({tag: language}, babel_tags' environments), in code, each read
+    in its language as the reader can read what it holds: cut at each
+    \\item outside its groups, its formulas, and the environments in it,
+    as a passage in a list holds them, the \\item and its label between
+    the pieces, which the reader reads as the list's, where it read their
+    words out of the list, a description's term, the label, in the
+    language too; each piece a \\foreignlanguage, read in its language, a
+    paragraph break or an environment in it read as in \\foreignlanguage's
+    words (inline_passages), its options left out, or where it holds what
+    the reader reads only as a block (block_content: a heading, code,
+    \\input, or a call of one of macros, the book's that make a block,
+    block_macros, that inline_passages can't set apart), where a
+    \\foreignlanguage stopped it, an otherlanguage, which holds blocks, and
+    so one in a definition's code holding the macro's argument
+    (holds_parameter), which may be a list the reader would stop on once
+    it expands the call;
+    the spaces and comments at a piece's ends outside (passage_pieces).
+    Not one whose end isn't in its group, as in a definition, nor one
+    holding an environment it doesn't close. environments: {name: kind},
+    book_environments. Each found in the text as it was, one inside
+    another's read first."""
+    spans = skip_spans(text)
+    found = [m for m in OTHERLANGUAGE_STAR.finditer(text) if not in_spans(m.start(), spans)]
+    if tags:
+        tag = re.compile(r"\\begin\s*\{\s*(%s)\s*\}" % "|".join(
+            re.escape(t) for t in sorted(tags, key=len, reverse=True)))
+        found += [m for m in tag.finditer(text) if not in_spans(m.start(), spans)]
+    formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
+    passages = []                       # (start, opened, closing, end, language)
+    for m in found:
+        if m.re is OTHERLANGUAGE_STAR:
+            named = matching_brace(text, m.end() - 1)
+            if named < 0:
+                continue
+            language, name, opened = text[m.end():named - 1], "otherlanguage*", named
+        else:
+            language, name, opened = tags[m.group(1)], m.group(1), m.end()
+        end = environment_close(text, name, m.start(), spans)
+        close = re.compile(r"\\end\s*\{\s*%s\s*\}$" % re.escape(name)).search(
+            text, m.start(), end) if end >= 0 else None
+        if close and balanced(text, opened, close.start(), spans):
+            passages.append((m.start(), opened, close.start(), end, language))
+    passages.sort()
+
+    def region(start, stop, inside):
+        """text[start:stop], each passage of inside within it rewritten,
+        one inside another's first."""
+        out, pos, i = [], start, 0
+        while i < len(inside):
+            p, j = inside[i], i + 1
+            while j < len(inside) and inside[j][0] < p[3]:
+                j += 1
+            if p[0] >= pos and p[3] <= stop:
+                out += [text[pos:p[0]], passage(p, [q for q in inside[i + 1:j]
+                                                    if p[1] <= q[0] and q[3] <= p[2]])]
+                pos = p[3]
+            i = j
+        return "".join(out + [text[pos:stop]])
+
+    def passage(p, inside):
+        start, opened, closing, end, language = p
+        body = region(opened, closing, inside)
+        skipped = skip_spans(body)
+        formulas = formula_spans(body, formula_names)
+        nested = outermost_environments(body, skipped)
+        if nested is None:
+            return text[start:opened] + body + text[closing:end]
+        cuts = []
+        for i in top_level(ITEM, body):
+            if in_spans(i.start(), formulas) or any(s <= i.start() < e for s, e in nested):
+                continue
+            past, label, item = i.end(), argument_space(body, i.end()), body[i.start():i.end()]
+            if body.startswith("[", label) and closing_bracket(body, label) >= 0:
+                past = closing_bracket(body, label) + 1
+                words = body[label + 1:past - 1]
+                # A description's term is in the language too.
+                item += "[\\foreignlanguage{%s}{%s}]" % (language, words) if words.strip() \
+                    else body[label:past]
+            cuts.append((i.start(), past, item))
+        kinds = set()
+
+        def wrap(piece):
+            if block_content(piece, formula_names, environments, macros):
+                kinds.add("babel_environment_blocks")
+                return "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, piece)
+            if holds_parameter(piece):
+                # A macro's argument, which may be a list, comes at the call.
+                kinds.add("babel_environment_arguments")
+                return "\\begin{otherlanguage}{%s}%s\\end{otherlanguage}" % (language, piece)
+            kinds.add("babel_environments")
+            return "\\foreignlanguage{%s}{%s}" % (language, piece)
+        new = passage_pieces(body, cuts, skipped, wrap)
+        for key in kinds:
+            counter[key] = counter.get(key, 0) + 1
+        if cuts:
+            counter["babel_environment_items"] = counter.get("babel_environment_items", 0) + 1
+        return new
+    return region(0, len(text), passages)
+
+def inline_passages(text, counter, tags=None, environments=(), places=None,
+                    tag_environments=None, macros=()):
     """The commands whose words the reader reads as inlines, in code, as
     it can read them, where they hold what it stops on, or are dropped.
     babel's for a passage in another language (FOREIGN_LANGUAGE):
     babeltags' \\textfr{X} as \\foreignlanguage{french}{X}, by tags
-    (babel_tags); \\foreignlanguage without its options; and its words,
+    (babel_tags); otherlanguage* and babeltags' environment, by
+    tag_environments, in their languages (language_environments);
+    \\foreignlanguage without its options; and its words,
     where they hold a paragraph break, a \\foreignlanguage of each
     paragraph, so the paragraph keeps the words before and after them, as
     LaTeX sets it, but for a blank line after \\\\, which the reader reads
@@ -2739,6 +2943,7 @@ def inline_passages(text, counter, tags=None, environments=(), places=None, macr
             re.escape(t) for t in sorted(tags, key=len, reverse=True)))
         text = substitute(command, text, lambda m: "\\foreignlanguage{%s}" % tags[m.group(1)],
                           counter, "babel_tags")
+    text = language_environments(text, counter, tag_environments, environments, macros)
     spans = skip_spans(text)
     formula_names = [name for name, kind in dict(environments).items() if kind == "formula"]
     math = formula_spans(text, formula_names)
@@ -3071,14 +3276,15 @@ def highlighted_code(text, counter):
 
 
 def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
-                places=None, block_macros=()):
+                places=None, tag_environments=None, block_macros=()):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
     counters' names (book_counters); tags, its babeltags (babel_tags);
     environments, the ones it defines (book_environments); places, a list
-    for inline_passages' places; block_macros, its macros that make a
-    block (block_macros)."""
+    for inline_passages' places; tag_environments, its babeltags whose
+    environments are babel's (babel_tags); block_macros, its macros that
+    make a block (block_macros)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -3105,7 +3311,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",
                       counter, "multicolumn_edge")
     text = language_marks(text, counter)
-    text = inline_passages(text, counter, tags, environments, places, macros=block_macros)
+    text = inline_passages(text, counter, tags, environments, places, tag_environments,
+                           macros=block_macros)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -7516,13 +7723,15 @@ def prepare(base, work, master, say, macros=""):
     in_math = math_macros([t for _, t in originals])
     counting = book_counters(originals, originals[0][1] if originals else "")
     tags = babel_tags([t for _, t in originals])
+    tag_environments = babel_tags([t for _, t in originals], environments=True)
     environments = book_environments([t for _, t in originals])
     macros_blocks = block_macros(originals, environments)
     dropped = []
     for name, text in originals:
         places = []
         texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
-                                  environments, places, block_macros=macros_blocks)
+                                  environments, places, tag_environments,
+                                  block_macros=macros_blocks)
         dropped += sorted((name, author_line(text, line, command, words), command, words)
                           for line, command, words in places)
     # A chapter \include-d by the book's own macro, written out, so the

@@ -1411,6 +1411,205 @@ LANGUAGES_FILES = {
 
 
 
+def case_babel_environments(work):
+    """babel's otherlanguage*, which the reader read as a division classed
+    with its name, printing its language's name and giving it none, and
+    babeltags' environment, which it read as a division classed with the
+    tag, read in their languages as \\foreignlanguage, a paragraph break
+    and a list in them as for it, a comment that ends one outside its
+    brace, one holding a brace in \\verb, and inline code in one as
+    written; as otherlanguage where it holds
+    a heading or code, which stopped the reader in \\foreignlanguage's
+    words; and in a list, each item's words, which the reader read out of
+    the list, a description's term too; one holding the book's own command
+    or environment that makes a block, as for the block, but in a note's
+    text, which the reader reads inline; one in a macro's code holding its
+    argument as otherlanguage, since it may be a list, but not one outside
+    a definition, where # is a character; but not a tag's
+    environment the book defines again, or whose declaration it does, nor
+    a declaration; the run saying what it read so."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    os.makedirs(work)
+    files = {
+        "book.tex": "\\documentclass{book}\n\\usepackage[ngerman,french,english]{babel}\n"
+                    "\\usepackage{listings}\n"
+                    "\\babeltags{fr = french, de = ngerman}\n\\renewenvironment{de}{}{}\n"
+                    "\\newcommand{\\vocab}[1]{\\begin{tabular}{ll}#1\\end{tabular}}\n"
+                    "\\newenvironment{titre}{\\section*}{}\n"
+                    "\\newcommand{\\frm}[1]{\\begin{otherlanguage*}{french}#1"
+                    "\\end{otherlanguage*}}\n"
+                    "\\DeclareRobustCommand{\\frr}[1]{\\begin{otherlanguage*}{french}#1"
+                    "\\end{otherlanguage*}}\n"
+                    "\\NewDocumentCommand{\\frx}{m}{\\begin{otherlanguage*}{french}#1"
+                    "\\end{otherlanguage*}}\n"
+                    "\\begin{document}\n\\include{one}\n\\end{document}\n",
+        "one.tex": "\\chapter{One}\n"
+                   "A \\begin{otherlanguage*}{ngerman}ein Wort\\end{otherlanguage*} here.\n\n"
+                   "B \\begin{otherlanguage*}[date]{french}la fin.\n\nLe d\\'ebut"
+                   "\\end{otherlanguage*} after.\n\n"
+                   "C \\begin{fr}un mot\\end{fr} and \\begin{de}ein Wort\\end{de} there.\n\n"
+                   "D \\begin{fr}pour\n\\begin{itemize}\n\\item un\n\\end{itemize}\nfin\\end{fr} "
+                   "last.\n\n"
+                   "E {\\fr un mot} kept.\n\n"
+                   "F \\begin{otherlanguage*}{french}\n\\section{Titre}\nTexte.\n"
+                   "\\end{otherlanguage*}\n\n"
+                   "I \\begin{otherlanguage*}{french}\nCode :\n\\begin{verbatim}\nx = 1\n"
+                   "\\end{verbatim}\n\\end{otherlanguage*}\n\n"
+                   "J \\begin{fr}\nun mot\n\\end{fr} fin.\n\n"
+                   "\\begin{itemize}\n\\begin{otherlanguage*}{french}\n\\item un\n"
+                   "\\item[b)] deux\n\\end{otherlanguage*}\n\\end{itemize}\n\n"
+                   "\\begin{enumerate}\n\\begin{fr}\n\\item trois\n\\end{fr}\n\\end{enumerate}\n\n"
+                   "H \\begin{otherlanguage*}{french}Un.\n\nDeux.%\n\\end{otherlanguage*} "
+                   "after.\n\n"
+                   "K \\begin{otherlanguage*}{french}Un. % voir \\textbf{\n\nDeux."
+                   "\\end{otherlanguage*} fin.\n\n"
+                   "L \\begin{otherlanguage*}{french}Mots : \\vocab{chat & cat} fin"
+                   "\\end{otherlanguage*} apr\\`es.\n\n"
+                   "\\begin{fr}{\\small \\vocab{a & b}}\\end{fr}\n\n"
+                   "\\begin{otherlanguage*}{french}\n\\begin{titre}{Mon titre}\\end{titre}\n"
+                   "Suite.\n\\end{otherlanguage*}\n\n"
+                   "\\begin{description}\n\\begin{otherlanguage*}{french}\n"
+                   "\\item[Chat] un animal\n\\end{otherlanguage*}\n\\end{description}\n\n"
+                   "P \\begin{otherlanguage*}{french}code \\verb|}| ici.\n\nDeux."
+                   "\\end{otherlanguage*} fin.\n\n"
+                   "S \\begin{otherlanguage*}{french}tapez \\lstinline|\\begin{center}x"
+                   "\\end{center}| ici\\end{otherlanguage*} fin.\n\n"
+                   "T \\begin{otherlanguage*}{french}mot\\footnote{\\vocab{a & b}} fin"
+                   "\\end{otherlanguage*} apr\\`es.\n\n"
+                   "V \\frm{\\begin{itemize}\\item un\\end{itemize}} fin.\n\n"
+                   "W \\frm{mot} fin.\n\n"
+                   "AA \\frr{\\begin{itemize}\\item deux\\end{itemize}} fin.\n\n"
+                   "AB \\frx{\\begin{itemize}\\item trois\\end{itemize}} fin.\n\n"
+                   "Y \\begin{otherlanguage*}{french}le \\#1 mondial\\end{otherlanguage*} fin.\n\n"
+                   "Z \\begin{otherlanguage*}{french}voir \\url{http://a.fr/p#1}"
+                   "\\end{otherlanguage*} fin.\n",
+    }
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.envs\n  title: Environments\n"
+                 "  language: en\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    page = read(work, "html", "one.html") if os.path.exists(
+        os.path.join(work, "html", "one.html")) else ""
+    text = re.sub(r"\s+", " ", page)
+
+    def paragraph(*parts):
+        """Whether the page has a paragraph of parts (patterns), in order,
+        nothing else."""
+        return re.search(r"<p>\s*" + r"\s*".join(parts) + r"\s*</p>", text) is not None
+
+    table = r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?"
+    in_definition = ("\\newenvironment{allemand}{\\begin{otherlanguage*}{ngerman}}"
+                     "{\\end{otherlanguage*}}\n")
+    defined_again = latexsource.babel_tags(
+        ["\\babeltags{fr = french, de = ngerman, en = english}\n\\renewenvironment{de}{}{}\n"
+         "\\renewcommand{\\en}{\\itshape}\n"], environments=True)
+    return [
+        ("otherlanguage* is a passage in its language, its options left out, and a paragraph "
+         "break in it as \\foreignlanguage's, where the reader printed its language's name",
+         lambda: result.returncode == 0
+         and paragraph("A", '<span lang="de-DE">ein Wort</span>', "here.")
+         and paragraph("B", '<span lang="fr">la fin.</span>')
+         and paragraph('<span lang="fr">Le d(?:\u00e9|&#xE9;)but</span>', "after.")
+         and "ngerman" not in text),
+        ("babeltags' environment is a passage in the tag's language, a list in it as in "
+         "\\foreignlanguage's words, but not one the book defines again, nor a declaration",
+         lambda: paragraph("C", '<span lang="fr">un mot</span>', "and",
+                           "(?:<span>)?ein Wort(?:</span>)?", "there.")
+         and re.search(r'<p>\s*D <span lang="fr">pour</span>\s*</p>\s*<div lang="fr">\s*<ul>\s*'
+                       r'<li>\s*(?:<p>)?un(?:</p>)?\s*</li>\s*</ul>\s*</div>\s*<p>\s*'
+                       r'<span lang="fr">fin</span> last\.</p>', text) is not None
+         and paragraph("E", "(?:<span>)?un mot(?:</span>)?", "kept.")),
+        ("one holding a heading or code, which the reader read as \\foreignlanguage's words "
+         "only to stop, is otherlanguage, which holds blocks, in its language",
+         lambda: re.search(r'<p>\s*F\s*</p>\s*(?:<div lang="fr">\s*<h\d[^>]*>|<h\d[^>]*\slang="fr"'
+                           r'[^>]*>)\s*Titre\s*</h\d>\s*(?:<div lang="fr">\s*)?<p>\s*Texte\.\s*'
+                           r'</p>\s*</div>', text) is not None
+         and re.search(r'<p>\s*I\s*</p>\s*<div lang="fr">\s*<p>\s*Code :\s*</p>\s*<pre[^>]*>\s*'
+                       r'<code[^>]*>x = 1</code>\s*</pre>\s*</div>', text) is not None),
+        ("one holding a list's items, which the reader read as paragraphs, out of the list, "
+         "is each item's words in its language, the items the list's, babeltags' environment "
+         "too",
+         lambda: re.search(r'<ul>\s*<li>\s*(?:<p>)?<span lang="fr">un</span>(?:</p>)?\s*</li>'
+                           r'\s*<li>\s*(?:<p>)?<span lang="fr">deux</span>(?:</p>)?\s*</li>'
+                           r'\s*</ul>', text) is not None
+         and re.search(r'<ol[^>]*>\s*<li>\s*(?:<p>)?<span lang="fr">trois</span>(?:</p>)?\s*'
+                       r'</li>\s*</ol>', text) is not None),
+        ("a comment that ends one is after the brace that closes its words, which it would "
+         "take, a brace in a comment none of theirs, and the line ends at its edges outside "
+         "them",
+         lambda: paragraph("H", '<span lang="fr">Un\\.</span>')
+         and paragraph('<span lang="fr">Deux\\.</span>', "after\\.")
+         and paragraph("K", '<span lang="fr">Un\\.</span>')
+         and paragraph('<span lang="fr">Deux\\.</span>', "fin\\.")
+         and paragraph("P", '<span lang="fr">code <code>}</code> ici\\.</span>')
+         and paragraph('<span lang="fr">Deux\\.</span>', "fin\\.")
+         and paragraph("J", '<span lang="fr">un mot</span>', "fin\\.")
+         and latexsource.language_environments("J \\begin{fr}\nun mot\n\\end{fr} fin.", {},
+                                               {"fr": "french"})
+         == "J \n\\foreignlanguage{french}{un mot}\n fin."),
+        ("one holding the book's own command or environment that makes a block is read as "
+         "for one holding the block, set apart in its language or in otherlanguage",
+         lambda: re.search(r'<p>\s*L <span lang="fr">Mots :</span>\s*</p>\s*<div lang="fr">\s*'
+                           + table + r'\s*</div>\s*<p>\s*<span lang="fr">fin</span> apr'
+                           r'(?:\u00e8|&#xE8;)s\.\s*</p>', text) is not None
+         and re.search(r'<div lang="fr">\s*' + table + r'\s*</div>\s*'
+                       r'(?:<div lang="fr">\s*<h\d[^>]*>|<h\d[^>]*\slang="fr"[^>]*>)\s*'
+                       r'Mon titre\s*</h\d>\s*(?:</div>\s*)?<p>\s*<span lang="fr">Suite\.</span>'
+                       r'\s*</p>', text)
+         is not None),
+        ("inline code in one is as written, though it holds an environment",
+         lambda: paragraph("S", '<span lang="fr">tapez <code>'
+                           + re.escape("\\begin{center}x\\end{center}") + "</code> ici</span>",
+                           "fin\\.")),
+        ("and a block of the book's in a note's text in one, which the reader reads inline, is "
+         "in the passage's words",
+         lambda: paragraph("T", '<span lang="fr">mot<a href="#fn\\d+"[^>]*>(?:<sup>)?\\d+'
+                           "(?:</sup>)?</a> fin</span>", "apr(?:\u00e8|&#xE8;)s\\.")),
+        ("one in a macro's code holding its argument is otherlanguage, in its language, "
+         "since the argument may be a list, as LaTeX sets one, which stopped the reader, "
+         "\\DeclareRobustCommand's and xparse's too",
+         lambda: re.search(r'<p>\s*V\s*</p>\s*<div lang="fr">\s*<ul>\s*<li>\s*(?:<p>)?un'
+                           r'(?:</p>)?\s*</li>\s*</ul>\s*</div>\s*<p>\s*fin\.\s*</p>', text)
+         is not None
+         and re.search(r'<p>\s*W\s*</p>\s*<div lang="fr">\s*<p>\s*mot\s*</p>\s*</div>\s*'
+                       r'<p>\s*fin\.\s*</p>', text) is not None
+         and all(re.search(r'<p>\s*%s\s*</p>\s*<div lang="fr">\s*<ul>\s*<li>\s*(?:<p>)?%s'
+                           r'(?:</p>)?\s*</li>\s*</ul>\s*</div>\s*<p>\s*fin\.\s*</p>'
+                           % (letters, word), text) for letters, word in (("AA", "deux"),
+                                                                       ("AB", "trois")))
+         and "french" not in re.sub(r"<[^>]*>", "", text)),
+        ("but not one outside a definition, where # is a character, escaped or in an address",
+         lambda: paragraph("Y", '<span lang="fr">le #1 mondial</span>', "fin\\.")
+         and paragraph("Z", '<span lang="fr">voir <a href="http://a\\.fr/p#1"[^>]*>[^<]*</a>'
+                       "</span>", "fin\\.")),
+        ("and a description's term is in its language too",
+         lambda: re.search(r'<dl>\s*<dt>\s*<span lang="fr">Chat</span>\s*</dt>\s*<dd>\s*(?:<p>)?'
+                           r'<span lang="fr">un animal</span>(?:</p>)?\s*</dd>\s*</dl>', text)
+         is not None),
+        ("a tag whose environment or declaration the book defines again isn't babel's",
+         lambda: defined_again == {"fr": "french"}),
+        ("an otherlanguage* whose end isn't in its group, as in a definition, is left as it is",
+         lambda: latexsource.language_environments(in_definition, {}) == in_definition),
+        ("the run says what it read so",
+         lambda: "17 otherlanguage* or babeltags' environment read as \\foreignlanguage" in said
+         and "3 otherlanguage* or babeltags' environment in a macro's code holding its "
+             "argument read as otherlanguage" in said
+         and "3 otherlanguage* or babeltags' environment holding a heading, code, or another "
+             "block the reader reads only as one read as otherlanguage" in said
+         and "3 otherlanguage* or babeltags' environment holding a list's items read as a "
+             "\\foreignlanguage of each item's words" in said),
+        ("and the author's files are as they were",
+         lambda: all(read(work, name) == text for name, text in files.items())),
+    ]
+
+
 def case_inline_breaks(work):
     """A paragraph break in the words of a command the reader reads as
     inlines, which stopped it, read as LaTeX sets it: in a box's (\\mbox,
@@ -9040,6 +9239,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),
          ("babel's commands the reader stopped on, or dropped", case_babel_reading),
+         ("otherlanguage* and babeltags' environment", case_babel_environments),
          ("a paragraph break in a box's or a quotation's words", case_inline_breaks),
          ("a list or another environment in an inline command's words", case_inline_blocks),
          ("a LaTeX book's pages in another language, in its copy and its PDF",

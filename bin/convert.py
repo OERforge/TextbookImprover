@@ -1363,6 +1363,18 @@ LATEX_READ_CHANGES = (
      "reader dropped with its words"),
     ("babel_options", "\\foreignlanguage's option(s) ([date]) left out, which stopped the "
      "reader"),
+    ("babel_environments", "otherlanguage* or babeltags' environment read as "
+     "\\foreignlanguage, which the reader gave no language, printing otherlanguage*'s "
+     "language's name"),
+    ("babel_environment_blocks", "otherlanguage* or babeltags' environment holding a heading, "
+     "code, or another block the reader reads only as one read as otherlanguage, which holds "
+     "blocks, where \\foreignlanguage stopped the reader"),
+    ("babel_environment_arguments", "otherlanguage* or babeltags' environment in a macro's "
+     "code holding its argument read as otherlanguage, which holds blocks, as the argument may "
+     "be one"),
+    ("babel_environment_items", "otherlanguage* or babeltags' environment holding a list's "
+     "items read as a \\foreignlanguage of each item's words, which the reader read out of "
+     "the list"),
     ("babel_paragraphs", "\\foreignlanguage's words holding a paragraph break read as a "
      "\\foreignlanguage in each paragraph, which stopped the reader"),
     ("babel_blocks", "\\foreignlanguage's words holding a list or another environment read "

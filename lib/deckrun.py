@@ -385,6 +385,160 @@ def equation_tex(path):
     return {omml: read[1] for omml, read in zip(named, tex) if read}
 
 
+# The filter that makes a page's minus signs, which the copies are given
+# (minus_signs).
+MATH_FILTER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "bin", "math-repair.lua")
+EN_DASH, MINUS_SIGN = "\u2013", "\u2212"
+# The inlines whose text a run of the deck holds, as pptxsource writes them.
+INLINE_CONTAINERS = ("Emph", "Strong", "Underline", "Strikeout", "Superscript", "Subscript",
+                     "SmallCaps")
+
+
+def has_en_dash(deck, alts):
+    """Whether a deck's shown slides hold an en dash, in a shape's text,
+    their notes, or a picture's description, or any alt text the sidecar
+    decides does: only then can its copy be given a minus sign."""
+    if any(EN_DASH in (alt or "") for alt in alts.values()):
+        return True
+    for slide in deck.slides:
+        if slide.hidden:
+            continue
+        if EN_DASH in (slide.notes or ""):
+            return True
+        for shape in slide.all_shapes():
+            if EN_DASH in (shape.text or "") or EN_DASH in (shape.descr or ""):
+                return True
+    return False
+
+
+def _marked(node, found):
+    """{key: inlines} of the paragraphs and pictures a deck's intermediate
+    marks (pptxsource.MINUS_MARK): a paragraph's words, a picture's alt text."""
+    import pptxsource
+    if isinstance(node, list):
+        for item in node:
+            _marked(item, found)
+    elif isinstance(node, dict):
+        if "t" not in node:         # the document
+            _marked(node.get("blocks"), found)
+            return
+        if node["t"] in ("Span", "Image"):
+            key = next((v for k, v in node["c"][0][2] if k == pptxsource.MINUS_MARK), None)
+            if key is not None:
+                found[key] = node["c"][1]
+        _marked(node.get("c"), found)
+
+
+def _run_text(inlines, out):
+    """The text of inlines that the deck's runs hold, in order: its words,
+    but not an equation's, as characters Pandoc couldn't read it as TeX
+    (pptxsource.EQUATION_CLASS)."""
+    import pptxsource
+    for inline in inlines:
+        kind = inline.get("t")
+        if kind == "Str":
+            out.append(inline["c"])
+        elif kind == "Span":
+            if pptxsource.EQUATION_CLASS not in inline["c"][0][1]:
+                _run_text(inline["c"][1], out)
+        elif kind in INLINE_CONTAINERS:
+            _run_text(inline["c"], out)
+        elif kind in ("Link", "Quoted", "Cite"):
+            _run_text(inline["c"][1], out)
+    return out
+
+
+def changed_dashes(before, after, marks):
+    """The en dashes the filter made minus signs, by where the reading
+    marked them (marks): {"paragraphs": {part: {n: (the en dashes,
+    counted from 1, how many the paragraph has)}}, "pictures": {part:
+    {shape id: (...)}}}. A paragraph whose text changed otherwise is left
+    out."""
+    old, new = {}, {}
+    _marked(before, old)
+    _marked(after, new)
+    edits = {"paragraphs": {}, "pictures": {}}
+    for key, inlines in old.items():
+        if key not in new or key not in marks:
+            continue
+        a, b = "".join(_run_text(inlines, [])), "".join(_run_text(new[key], []))
+        if len(a) != len(b):
+            continue
+        ordinals, n, other = [], 0, False
+        for x, y in zip(a, b):
+            if x == EN_DASH:
+                n += 1
+                if y == MINUS_SIGN:
+                    ordinals.append(n)
+                    continue
+            other = other or x != y
+        if ordinals and not other:
+            kind, part, where = marks[key]
+            edits["paragraphs" if kind == "paragraph" else "pictures"].setdefault(
+                part, {})[where] = (ordinals, n)
+    return edits
+
+
+def minus_signs(path, alts, tables, titles, orders, keep, dname, api, repair=True):
+    """The minus signs a deck's page has in its text and its pictures'
+    descriptions (math.minus_in_text), for its copy: the deck read as its
+    conversion reads it (pptxsource.read), each paragraph and picture
+    marked, and math-repair.lua run over it as over a page, its equations
+    repaired first where repair says, as the copy's are, so that a row
+    names a stretch holding one as a page's row does, the keep sidecar's
+    rows for it keeping theirs, but making no equation of text, which a
+    copy doesn't, so each stretch the copy keeps as text gets the signs a
+    page's text would. (edits, rows, kept): edits as
+    pptxremediate.remediate takes them; rows, (before, after) for each
+    stretch, as math-repaired.csv has them; kept, the keep rows that kept
+    one. None when Pandoc couldn't run the filter."""
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    import pptxsource
+    folder = tempfile.mkdtemp(prefix="deck-minus-")
+    try:
+        marks = {}
+        doc, _record = pptxsource.read(path, folder, folder, alts, tables, titles, orders,
+                                       api_version=api, marks=marks)
+        source = os.path.join(folder, "deck.json")    # the filter's page: "deck"
+        with open(source, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        files = {name: os.path.join(folder, name + ".csv") for name in ("keep", "kept", "rows")}
+        with open(files["keep"], "w", encoding="utf-8", newline="") as fh:
+            csv.writer(fh, lineterminator="\n").writerows(
+                [kind, "deck" if page else "", before] for kind, page, before in keep
+                if kind == "minus" and page in ("", dname))
+        env = dict(os.environ, MATH_REPAIR_EQUATIONS="true" if repair else "false",
+                   MATH_FROM_TEXT="false",
+                   MATH_MINUS_IN_TEXT="true", MATH_DISPLAY_STYLE_IN_TEXT="false",
+                   MATH_KEEP=files["keep"], MATH_KEPT=files["kept"], MATH_REPAIRED=files["rows"],
+                   MATH_PLACES="", MATH_MINUS_PLACES="")
+        try:
+            result = subprocess.run(["pandoc", "-f", "json", "-t", "json", source,
+                                     "--lua-filter=" + MATH_FILTER],
+                                    capture_output=True, text=True, env=env)
+            filtered = json.loads(result.stdout) if result.returncode == 0 else None
+        except (OSError, ValueError):
+            filtered = None
+        if filtered is None:
+            return None
+
+        def rows_of(name):
+            if not os.path.exists(files[name]):
+                return []
+            with open(files[name], encoding="utf-8", newline="") as fh:
+                return list(csv.reader(fh))
+        rows = [(r[2], r[3]) for r in rows_of("rows") if len(r) >= 4 and r[0] == "minus"]
+        kept = [(r[0], dname if r[1] else "", r[2]) for r in rows_of("kept")
+                if len(r) >= 3 and r[0] == "minus"]
+        return changed_dashes(doc, filtered, marks), rows, kept
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         alt_placeholders=(), check_only=False, say=print, copy_language=None,
         math=None):
@@ -637,9 +791,12 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         return 1 if failed else 0
     copies = []
     math_rows = OrderedDict()   # (kind, deck, before, after), each repair once
-    kept, repairing = set(), False  # the keep rows that kept an equation
+    kept, repairing = set(), False  # the keep rows that kept an equation, or a dash
     tex = {}                    # each deck's {OMML: TeX}, once
     in_one_line = False         # a row's equation written out, not TeX
+    signs = {}                  # each deck's minus_signs(), once
+    signing, unsigned = False, []   # a copy given a page's minus signs; decks that couldn't be
+    api = []                    # the version of Pandoc's types, asked once
     for target in targets:
         if target.format != "source":
             continue                # a conversion's, after this (convert.py)
@@ -664,6 +821,28 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                 tex[path] = equation_tex(path)
             known = tex.get(path, {})
             own, replacing = spoken[name]
+            minus = None
+            if setting(target, "math.minus_in_text"):
+                key = (path, equations)
+                if key not in signs:
+                    signs[key] = None
+                    if not has_en_dash(deck, alts):
+                        pass
+                    elif tex_pandoc_problem():
+                        unsigned.append(name)
+                    else:
+                        import pptxsource
+                        api = api or [pptxsource.api_version()]
+                        signs[key] = minus_signs(path, alts, tables, titles, orders, keep,
+                                                 dname, api[0], equations)
+                        if signs[key] is None:
+                            unsigned.append(name)
+                signing = signing or not tex_pandoc_problem()
+                if signs[key]:
+                    minus, rows, minus_kept = signs[key]
+                    for before, after in rows:
+                        math_rows.setdefault(("minus", dname, before, after), None)
+                    kept.update(minus_kept)
             counts = pptxremediate.remediate(path, destination, alts, tables, titles,
                                              own, deck=dname, orders=orders,
                                              problems=problems, links=links,
@@ -671,7 +850,8 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                                              keep_equations={row[2] for row in named},
                                              repairs=repairs, replace_language=replacing,
                                              describe=lambda omml, known=known: known.get(
-                                                 omml, pptxremediate.equation_text(omml)))
+                                                 omml, pptxremediate.equation_text(omml)),
+                                             minus=minus)
             texts = set(known.values())
             for before, after, written_out in repairs:
                 if after is None:
@@ -726,6 +906,15 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
                         totals["equations_kept"],
                         os.path.basename(paths.get("math_keep") or "math-keep.csv"))
                     if totals["equations_kept"] else ""))
+        if totals["text_minus"]:
+            say("%s: %d en dash(es) in text and pictures' descriptions made a minus sign, as a "
+                "deck's page has them (math.minus_in_text)." % (target.name, totals["text_minus"]))
+        if totals["text_minus_left"]:
+            say("WARNING: %s: %d minus sign(s) a deck's page makes of an en dash not written into "
+                "its copy: the paragraph or the picture's description there isn't what the reading "
+                "read, or the picture's id is another shape's too. They're in %s." % (
+                    target.name, totals["text_minus_left"],
+                    os.path.basename(reports.get("math_repaired") or "math-repaired.csv")))
         if totals["retitled"]:
             say("%s: %d slide(s) given the title %s gives in place of one another slide has." % (
                 target.name, totals["retitled"],
@@ -753,7 +942,15 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
             "deck's page's are: Pandoc %s or later reads them so." % (
                 problem, os.path.basename(reports.get("math_repaired") or "math-repaired.csv"),
                 ".".join(map(str, TEX_PANDOC))))
-    off = () if repairing else ("math.repair_equations",)
+    if unsigned:
+        problem = tex_pandoc_problem()
+        say("NOTE: %s, so the copies of %d deck(s) keep the en dashes a deck's page makes minus "
+            "signs (math.minus_in_text): %s." % (
+                problem or "Pandoc couldn't run the math filter over their text", len(unsigned),
+                "Pandoc %s or later makes them" % ".".join(map(str, TEX_PANDOC)) if problem
+                else ", ".join(unsigned[:3]) + (", ..." if len(unsigned) > 3 else "")))
+    off = (() if repairing else ("math.repair_equations",)) + ("math.from_text",) + (
+        () if signing else ("math.minus_in_text",))
     if math is not None:
         math.update(rows=math_rows, kept=kept, repairing=repairing, in_one_line=in_one_line)
         # What the keep sidecar's rows kept in the copies alone, for a run
@@ -761,24 +958,25 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
         # both (convert.py, die).
         math["copies_warnings"] = sidecars.keep_warning(
             os.path.basename(paths["math_keep"]), [row for row in keep if row not in kept],
-            "these decks' copies", off + ("math.from_text", "math.minus_in_text")) \
-            if paths.get("math_keep") else []
+            "these decks' copies", off) if paths.get("math_keep") else []
         # The conversion after writes the report, the pages' repairs with
         # these, and says so (convert.py); it's written here too, unsaid, so
         # that the copies' repairs are on record if the run stops first.
         if reports.get("math_repaired"):
             write_rows(reports["math_repaired"], MATH_COLUMNS, list(math_rows))
     elif reports.get("math_repaired"):
+        dashes = any(row[0] == "minus" for row in math_rows)
         report(reports["math_repaired"], MATH_COLUMNS, list(math_rows), "math repair(s)", None,
                say, "Each is an equation's characters repaired, Before and After in Pandoc's "
-               "TeX, as a book's are%s; math.repair_equations turns them off."
-               % (IN_ONE_LINE if in_one_line else ""))
+               "TeX, as a book's are%s%s; math.repair_equations%s turn%s them off."
+               % (IN_ONE_LINE if in_one_line else "",
+                  ", or an en dash in text made a minus sign" if dashes else "",
+                  " and math.minus_in_text" if dashes else "", "" if dashes else "s"))
     if paths.get("math_keep") and math is None:
-        # Only a run that repairs equations can keep one.
+        # Only a run that repairs equations, or makes minus signs, can keep one.
         for line in sidecars.keep_warning(os.path.basename(paths["math_keep"]),
                                           [row for row in keep if row not in kept],
-                                          "these decks",
-                                          off + ("math.from_text", "math.minus_in_text")):
+                                          "these decks", off):
             say(line)
     if copies and reports.get("output_check"):
         failed += check_copies(copies, reports["output_check"], tables, alt_max_chars,

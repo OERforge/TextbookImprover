@@ -356,6 +356,96 @@ def set_alt(xml, shape_id, alt, decorative):
     return xml, len(spans)
 
 
+# A tag of a part's XML: a comment, a processing instruction, or CDATA
+# (group 2 None), or an element's start or end tag (group 1 "/"), empty
+# when group 3 is "/".
+XML_TAG = re.compile(r"<!--.*?-->|<\?.*?\?>|<!\[CDATA\[.*?\]\]>|<(/?)([\w.-]+(?::[\w.-]+)?)"
+                     + ATTRS + r"(/?)>", re.S)
+# A character of an element's text or an attribute's value as the XML has
+# it: a reference, or one character.
+CHARACTER = re.compile(r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z]+);|[^&]", re.S)
+DESCR = re.compile(r"""\sdescr\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+EN_DASH, MINUS_SIGN = "\u2013", "\u2212"
+
+
+def paragraph_texts(xml):
+    """For each a:p of a part, in document order, the spans (start, end)
+    of its runs' and fields' text, each a:t of an a:r or an a:fld that's
+    the paragraph's own child, which is what the reading reads as its
+    words (pptxsource.Reader.pieces); an equation's text, a fallback's,
+    isn't among them. None where the part's tags don't nest."""
+    out, stack = [], []
+    for match in XML_TAG.finditer(xml):
+        name = match.group(2)
+        if name is None:
+            continue
+        if match.group(1):
+            if not stack or stack[-1][0] != name:
+                return None
+            _name, start = stack.pop()
+            if start is not None:
+                out[-1].append((start, match.start()))
+            continue
+        if name == "a:p":
+            out.append([])
+        own = (name == "a:t" and len(stack) >= 2 and stack[-1][0] in ("a:r", "a:fld")
+               and stack[-2][0] == "a:p")
+        if not match.group(4):
+            stack.append((name, match.end() if own else None))
+    return None if stack else out
+
+
+def _dashes(xml, start, end):
+    """The spans of the en dashes between start and end of xml, written as
+    a character or as a reference."""
+    return [m.span() for m in CHARACTER.finditer(xml, start, end)
+            if html.unescape(m.group(0)) == EN_DASH]
+
+
+def set_minus_signs(xml, wanted, expected):
+    """xml with en dashes made minus signs in its paragraphs: wanted,
+    {n: (the en dashes to make signs, counted from 1, how many the
+    paragraph has)} for the part's n-th a:p in document order, which is
+    where the reading found them; expected, how many a:p the part's parse
+    has, which the text's must match, and each paragraph's en dashes the
+    reading's, else that paragraph is left as it is. (xml, made, left)."""
+    asked = sum(len(ordinals) for ordinals, _total in wanted.values())
+    texts = paragraph_texts(xml)
+    if texts is None or len(texts) != expected:
+        return xml, 0, asked
+    spans = []
+    for n, (ordinals, total) in wanted.items():
+        if n >= len(texts):
+            continue
+        found = [span for start, end in texts[n] for span in _dashes(xml, start, end)]
+        if len(found) == total:
+            spans += [found[k - 1] for k in ordinals if 1 <= k <= total]
+    for start, end in sorted(spans, reverse=True):
+        xml = xml[:start] + MINUS_SIGN + xml[end:]
+    return xml, len(spans), asked - len(spans)
+
+
+def set_description_minus(xml, shape_id, ordinals, total):
+    """xml with en dashes made minus signs in a shape's description, in its
+    Choice and its Fallback alike, where it has total of them, counted
+    from 1 as the reading has its alt text; (xml, how many made in one)."""
+    made = 0
+    for start, end, _attrs, _closing in reversed(_cnvpr_spans(xml, shape_id)):
+        tag = CNVPR.match(xml, start)
+        value = DESCR.search(xml, tag.start(1), tag.end(1)) if tag else None
+        if value is None:
+            continue
+        group = 1 if value.group(1) is not None else 2
+        found = _dashes(xml, value.start(group), value.end(group))
+        if len(found) != total:
+            continue
+        chosen = [found[k - 1] for k in ordinals if 1 <= k <= total]
+        for a, b in reversed(chosen):
+            xml = xml[:a] + MINUS_SIGN + xml[b:]
+        made = max(made, len(chosen))
+    return xml, made
+
+
 def _frame_of(xml, start):
     """(start, end) of the p:graphicFrame whose cNvPr starts at start, or
     None when that cNvPr is another kind of shape's, as a Fallback's
@@ -1102,7 +1192,7 @@ def repair_part(xml):
 def remediate(source, destination, alts=None, tables=None, titles=None, language=None,
               core_title=True, deck=None, orders=None, problems=None, links=None,
               equations=False, fonts=None, replaced=None, keep_equations=(),
-              repairs=None, replace_language=None, describe=None):
+              repairs=None, replace_language=None, describe=None, minus=None):
     """Write source's decisions into destination; counts of what was
     written. alts, tables, titles, orders, links as alt_rows(),
     header_rows(), title_rows(), order_rows(), and link_rows() read them;
@@ -1129,7 +1219,11 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
     language: the
     deck's, written where it declares none; replace_language, the language
     its own runs say ("" for none), when language replaces it
-    (languages.for_copy)."""
+    (languages.for_copy). minus: the minus signs the deck's page has in
+    its text and its pictures' descriptions, as deckrun.minus_signs finds
+    them, {"paragraphs": {part: {n: (en dashes, total)}}, "pictures":
+    {part: {shape id: (en dashes, total)}}}, each made where its text is
+    the reading's (set_minus_signs, set_description_minus)."""
     alts, tables, titles, orders = alts or {}, tables or {}, titles or {}, orders or {}
     links = links or {}
     describe = describe or equation_text
@@ -1143,7 +1237,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
               "skipped": 0, "orders": 0, "orders_refused": 0, "retitled": 0, "titles_kept": 0,
               "links": 0, "replaced": 0, "equations_repaired": 0, "equation_characters": 0,
               "equations_kept": 0, "relanguaged": 0, "blank_rows": 0, "blank_tables": 0,
-              "blank_refused": 0,
+              "blank_refused": 0, "text_minus": 0, "text_minus_left": 0,
               "fonts_replaced": 0, "fonts_unembedded": 0}
     # A titled slide's row replaces its title only when another slide in
     # the deck has it too: a title the author gave since stands.
@@ -1167,6 +1261,21 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             texts[part], encodings[part] = pptxparse.part_text(parts[part])
         return texts[part]
 
+    # A page's minus signs in the deck's text, first, in the paragraphs
+    # as the deck has them, which is where the reading numbered them.
+    minus = minus or {}
+    for part, wanted in sorted((minus.get("paragraphs") or {}).items()):
+        if part not in parts:
+            counts["text_minus_left"] += sum(len(o) for o, _total in wanted.values())
+            continue
+        try:
+            expected = sum(1 for _p in pptxparse.parse_xml(parts[part]).iter(pptxparse.q("a:p")))
+        except ET.ParseError:
+            expected = -1
+        xml, made, left = set_minus_signs(text_of(part), wanted, expected)
+        texts[part] = xml
+        counts["text_minus"] += made
+        counts["text_minus_left"] += left
     # What PowerPoint can't read as written is put right first, so the
     # decisions go into XML it reads.
     for part in sorted({part for part, _problem in parsed.malformed}):
@@ -1320,6 +1429,18 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                     texts[part] = xml
                     counts["titles"] += 1
                     written[part] = title
+    # A page's minus signs in pictures' descriptions, in the description
+    # each now has, the sidecar's or its own, as the page's alt text.
+    for part, wanted in sorted((minus.get("pictures") or {}).items()):
+        shapes = next((found for p, _slide, found in shapes_by_part if p == part), [])
+        repeated = {i for i, n in Counter(s.id for s in shapes if s.id).items() if n > 1}
+        for shape_id, (ordinals, total) in sorted(wanted.items()):
+            made = 0
+            if part in parts and shape_id not in repeated:
+                xml, made = set_description_minus(text_of(part), shape_id, ordinals, total)
+                texts[part] = xml
+            counts["text_minus"] += made
+            counts["text_minus_left"] += len(ordinals) - made
     # The language goes where PowerPoint declares a deck's, its default
     # text style and its masters' text styles, which every run that says
     # nothing of its own inherits, and only when the deck has no default:

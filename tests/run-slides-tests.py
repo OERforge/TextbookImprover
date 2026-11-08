@@ -5621,6 +5621,264 @@ def case_first_column(work):
         left == ["slide 1", "slide 2", "slide 3"], left
 
 
+def minus_deck(path):
+    """A deck whose text, notes, table, and pictures' descriptions write
+    minus signs as en dashes, beside a range, a title, an equation, and a
+    hidden slide, which keep theirs; one picture on two slides."""
+    eq = math("<m:r><m:t>x\u2013\u00b5</m:t></m:r>")
+    return deck(path, [
+        {"shapes": [title(2, "Demand \u2013 supply"),
+                    textbox(5, "TextBox 5", [
+                        "Qd = 16 \u2013 2P, and at P = 10 the change is \u20134 units.",
+                        "The same: \u20132 here.", "Pages 4\u20136 are a range."], WIDE),
+                    shape(6, "TextBox 6", [
+                        p(r("A slope of ", b="1"), r("\u20131.5", b="1"), r(" here.")),
+                        '<a:p><a:r><a:rPr lang="en-US"/><a:t>Level &#8211;0.5 and 3 &#x2013; 1 = '
+                        '2 here.</a:t></a:r></a:p>',
+                        p(r("The same: \u20132 here."))], box=LOW),
+                    pic(7, "rId2", (457200, 4200000, 900000, 900000),
+                        "A line falling from 16 to \u20134 as P rises"),
+                    pic(8, "rId3", (1500000, 4200000, 900000, 900000), "A placeholder")],
+         "images": {"rId2": RED, "rId3": GREEN}, "notes": "Say \u20135 here."},
+        {"shapes": [title(2, "A table"),
+                    table(4, [["Change", "Years"], ["\u20133", "1990\u20132000"]],
+                          (457200, 1600200, 6000000, 800000), first_row=True),
+                    pic(5, "rId2", (457200, 4200000, 900000, 900000), "A placeholder"),
+                    in_a14(shape(9, "TextBox 9", [p(r("Then \u20132 and "), eq, r(" = \u20133."))],
+                                 box=LOW), 9),
+                    group(10, [textbox(11, "TextBox 11", ["\u20138 grouped"],
+                                       (0, 0, 2000000, 400000))], (6000000, 4200000, 2000000, 400000))],
+         "images": {"rId2": GREEN}},
+        {"shapes": [title(2, "Hidden"),
+                    textbox(4, "TextBox 4", ["\u20137 hidden"], WIDE)], "hidden": True}])
+
+
+def case_minus_signs(work):
+    """A deck's copy gets the minus signs its page makes of en dashes
+    (math.minus_in_text): in its text, its runs' formatting kept, its
+    notes, a table's cells, and its pictures' descriptions, its own and
+    the image-alt sidecar's, on every slide a picture is on; a range, a
+    title, an equation's own text, and a hidden slide as they were; the
+    keep sidecar's row keeping one in both; a copy with no page beside it
+    given them too; and none with the setting off."""
+    if not pandoc_ok():
+        return
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    minus_deck(os.path.join(folder, "Minus.pptx"))
+    green = rem.image_key(hashlib.sha256(GREEN).hexdigest()) + ".png"
+    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\n%s,Falls to \u20135 by 2030 from 1990\u20132000 levels\n" % green)
+    copy = os.path.join(folder, "copy", "Minus.pptx")
+    report = os.path.join(folder, "math-repaired.csv")
+
+    def build(pages="", copy_setting="", keep=None):
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n" + ("  pages:\n    format: html\n" + pages if pages is not None
+                                     else "") + "  copy:\n    format: source\n" + copy_setting)
+        keep_path = os.path.join(folder, "math-keep.csv")
+        if keep:
+            with open(keep_path, "w", encoding="utf-8", newline="") as fh:
+                csv.writer(fh).writerows([["Kind", "Page", "Before"]] + keep)
+        elif os.path.exists(keep_path):
+            os.remove(keep_path)
+        for old in (report, copy):
+            if os.path.exists(old):
+                os.remove(old)
+        result = convert(folder, "--quick")
+        parts = {}
+        if os.path.exists(copy):
+            with zipfile.ZipFile(copy) as z:
+                parts = {n: z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".xml")}
+        page_path = os.path.join(folder, "pages", "Minus.html")
+        page = html.unescape(open(page_path, encoding="utf-8").read()) \
+            if pages is not None and os.path.exists(page_path) else ""
+        if os.path.exists(page_path):
+            os.remove(page_path)
+        return result, parts, page, rows_of(report)
+
+    def texts(xml):
+        return [html.unescape(t) for t in re.findall(r"<a:t>([^<]*)</a:t>", xml)]
+
+    def descriptions(xml):
+        return [html.unescape(d) for d in re.findall(r'descr="([^"]*)"', xml)]
+
+    said, parts, page, rows = build()
+    one, two = parts.get("ppt/slides/slide1.xml", ""), parts.get("ppt/slides/slide2.xml", "")
+    words = " ".join(re.sub(r"<[^>]+>", " ", page.split("<body")[-1]).split())
+    yield "the copy's text has the page's minus signs, a range and the title as written", \
+        said.returncode == 0 and texts(one)[:4] == [
+            "Demand \u2013 supply", "Qd = 16 \u2212 2P, and at P = 10 the change is \u22124 units.",
+            "The same: \u22122 here.", "Pages 4\u20136 are a range."] \
+        and "Qd = 16 \u2212 2P, and at P = 10 the change is \u22124 units." in words \
+        and "Demand \u2013 supply" in words, (texts(one), said.stderr[-500:])
+    yield "two paragraphs of one text each get theirs, and a bold run's sign is made in it, " \
+        "its formatting kept", \
+        texts(one).count("The same: \u22122 here.") == 2 \
+        and '<a:rPr lang="en-US" b="1"></a:rPr><a:t>\u22121.5</a:t>' in one, texts(one)
+    yield "an en dash written as a character reference is made one too", \
+        "<a:t>Level \u22120.5 and 3 \u2212 1 = 2 here.</a:t>" in one, texts(one)
+    yield "a picture's description gets its signs, its own and the image-alt sidecar's, on " \
+        "each slide the picture is on, a range in it as written, as the page's alt text has them", \
+        descriptions(one) == ["A line falling from 16 to \u22124 as P rises",
+                              "Falls to \u22125 by 2030 from 1990\u20132000 levels"] \
+        and descriptions(two) == ["Falls to \u22125 by 2030 from 1990\u20132000 levels"] \
+        and 'alt="A line falling from 16 to \u22124 as P rises"' in page, \
+        (descriptions(one), descriptions(two))
+    yield "the notes and a table's cell get theirs, a range in the table as written", \
+        texts(parts.get("ppt/notesSlides/notesSlide1.xml", "")) == ["Say \u22125 here."] \
+        and "\u22123" in texts(two) and "1990\u20132000" in texts(two), texts(two)
+    yield "a paragraph holding an equation gets the signs in its text, the equation's own " \
+        "text not counted among its en dashes, and a group's text box its sign", \
+        "Then \u22122 and " in texts(two) and " = \u22123." in texts(two) \
+        and "\u22128 grouped" in texts(two), texts(two)
+    yield "a hidden slide is left as it is", \
+        texts(parts.get("ppt/slides/slide3.xml", ""))[-1:] == ["\u20137 hidden"], \
+        texts(parts.get("ppt/slides/slide3.xml", ""))
+    told = said.stdout + said.stderr
+    yield "the run says how many it made, and that none was left", \
+        "copy: 15 en dash(es) in text and pictures' descriptions made a minus sign" in told \
+        and "not written into its copy" not in told, told[-800:]
+
+    def minus_rows(found):
+        return sorted(tuple(r) for r in found if r[0] == "minus")
+    _, alone_parts, _, page_rows = build(copy_setting="    math:\n      minus_in_text: false\n")
+    extra = sorted(set(minus_rows(rows)) - set(minus_rows(page_rows)))
+    yield "math-repaired.csv has a row of kind minus for each stretch, once, the page's and " \
+        "the copy's alike", \
+        minus_rows(page_rows) and set(minus_rows(page_rows)) <= set(minus_rows(rows)) \
+        and len(rows) == len({tuple(r[:3]) for r in rows}) \
+        and not [t for t in texts(alone_parts.get("ppt/slides/slide1.xml", "")) if "\u2212" in t], \
+        (rows, page_rows)
+    yield "where the page makes an equation of the text around a sign, the copy, which makes " \
+        "none, gives the text its sign, and its row", \
+        extra == [("minus", "Minus", "$x-\u03bc$ = \u20133.", "$x-\u03bc$ = \u22123.")], extra
+    only, only_parts, _, only_rows = build(pages=None)
+    yield "a copy with no page beside it gets them too, and math-repaired.csv its rows", \
+        only.returncode == 0 and texts(only_parts.get("ppt/slides/slide1.xml", "")) == texts(one) \
+        and minus_rows(only_rows) == minus_rows(rows) \
+        and "or an en dash in text made a minus sign; math.repair_equations and " \
+        "math.minus_in_text turn them off" in only.stdout + only.stderr, \
+        (only_rows, only.stderr[-600:])
+    alone_said, alone_kept, _, _ = build(pages=None, keep=[["minus", "Minus", "\u20131.5"],
+                                                           ["minus", "Minus", "\u201399"]])
+    alone_told = alone_said.stdout + alone_said.stderr
+    yield "a copy with no page beside it keeps a row's stretch too, and a row that keeps " \
+        "nothing is warned about", \
+        '<a:rPr lang="en-US" b="1"></a:rPr><a:t>\u20131.5</a:t>' \
+        in alone_kept.get("ppt/slides/slide1.xml", "") \
+        and "1 row(s) of math-keep.csv kept nothing" in alone_told \
+        and "  minus,Minus,\u201399" in alone_told and "  minus,Minus,\u20131.5" not in alone_told, \
+        alone_told[-800:]
+    kept_said, kept_parts, kept_page, _ = build(keep=[["minus", "Minus", "\u20131.5"]])
+    kept_one = kept_parts.get("ppt/slides/slide1.xml", "")
+    yield "a row of math-keep.csv keeps its stretch as written in the copy and on the page, " \
+        "and only that", \
+        '<a:rPr lang="en-US" b="1"></a:rPr><a:t>\u20131.5</a:t>' in kept_one \
+        and "A slope of \u20131.5 here." in " ".join(re.sub(r"<[^>]+>", " ", kept_page).split()) \
+        and texts(kept_one).count("The same: \u22122 here.") == 2 \
+        and "kept nothing" not in kept_said.stdout + kept_said.stderr, \
+        (texts(kept_one), kept_said.stderr[-400:])
+    off_said, off_parts, off_page, _ = build(
+        pages="    math:\n      minus_in_text: false\n",
+        copy_setting="    math:\n      minus_in_text: false\n")
+    yield "with math.minus_in_text off, the copy and the page keep their en dashes", \
+        off_said.returncode == 0 and off_parts \
+        and not any("\u2212" in t for xml in off_parts.values()
+                    for t in texts(xml) + descriptions(xml)) \
+        and "\u2212" not in re.sub(r"<math.*?</math>", "", off_page.split("<body")[-1],
+                                   flags=re.S), off_said.stderr[-400:]
+    # A deck whose only en dash is in the alt text the sidecar gives it.
+    given = os.path.join(work, "given")
+    os.makedirs(given)
+    deck(os.path.join(given, "Given.pptx"), [
+        {"shapes": [title(2, "Given"), pic(5, "rId2", (457200, 4200000, 900000, 900000),
+                                            "A placeholder")], "images": {"rId2": BLUE}}])
+    blue = rem.image_key(hashlib.sha256(BLUE).hexdigest()) + ".png"
+    with open(os.path.join(given, "image-alt.csv"), "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\n%s,A dip to \u20132 percent\n" % blue)
+    with open(os.path.join(given, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  copy:\n    format: source\n")
+    gave = convert(given, "--quick")
+    given_slide = read_part(os.path.join(given, "copy", "Given.pptx"), "ppt/slides/slide1.xml") \
+        if gave.returncode == 0 else ""
+    yield "a deck whose only en dash is in the alt text the sidecar gives it gets its sign", \
+        descriptions(given_slide) == ["A dip to \u22122 percent"], gave.stderr[-400:]
+    # The copy's edits, each on its own.
+    part = ('<p:sld><a:p><a:r><a:t>a \u2013 b &#8211;2</a:t></a:r><mc:AlternateContent><a:r>'
+            '<a:t>\u20131</a:t></a:r></mc:AlternateContent><a:fld id="f"><a:t>\u20135</a:t>'
+            '</a:fld></a:p><a:p/><a:p><a:r><a:rPr/><a:t>x\u2013y</a:t></a:r></a:p></p:sld>')
+    edited, made, left = rem.set_minus_signs(part, {0: ([2, 3], 3), 2: ([1], 2)}, 3)
+    yield "a paragraph's en dashes are its runs' and its fields', not a fallback's, written as " \
+        "a character or a reference, and one whose count isn't the reading's is left", \
+        [len(t) for t in rem.paragraph_texts(part)] == [2, 0, 1] and (made, left) == (2, 1) \
+        and "<a:t>a \u2013 b \u22122</a:t>" in edited and "<a:t>\u22125</a:t>" in edited \
+        and "<a:t>\u20131</a:t>" in edited and "<a:t>x\u2013y</a:t>" in edited, (edited, made, left)
+    yield "and a part with another count of paragraphs than its parse has is left whole", \
+        rem.set_minus_signs(part, {0: ([1], 3)}, 2) == (part, 0, 1), ""
+    both = ('<mc:AlternateContent><mc:Choice><p:sp><p:nvSpPr><p:cNvPr id="4" name="A" '
+            'descr="to \u20134"/></p:nvSpPr></p:sp></mc:Choice><mc:Fallback><p:sp><p:nvSpPr>'
+            '<p:cNvPr id="4" name="A" descr="to &#x2013;4"/></p:nvSpPr></p:sp></mc:Fallback>'
+            '</mc:AlternateContent><p:pic><p:nvPicPr><p:cNvPr id="5" name="B" descr="\u20131 to '
+            '\u20132"/></p:nvPicPr></p:pic>')
+    signed_both, made_both = rem.set_description_minus(both, "4", [1], 1)
+    yield "a description gets its signs in a shape's Choice and its Fallback, counted once, and " \
+        "one whose count isn't the reading's is left", \
+        made_both == 1 and signed_both.count('descr="to \u22124"') == 2 \
+        and rem.set_description_minus(both, "5", [1], 1) == (both, 0), signed_both
+
+    def marked(key, *inlines):
+        return {"blocks": [{"t": "Para", "c": [{"t": "Span", "c": [
+            ["", [], [["data-oer-minus", key]]], list(inlines)]}]}]}
+    hidden = {"t": "Span", "c": [["", ["oer-equation"], []], [{"t": "Str", "c": "x\u2013y"}]]}
+    found = deckrun.changed_dashes(
+        marked("p0", {"t": "Str", "c": "a \u20131"}, hidden, {"t": "Str", "c": " \u20132"}),
+        marked("p0", {"t": "Str", "c": "a \u22121"}, hidden, {"t": "Str", "c": " \u22122"}),
+        {"p0": ("paragraph", "ppt/slides/slide1.xml", 3)})
+    changed = deckrun.changed_dashes(marked("p0", {"t": "Str", "c": "\u20131 a"}),
+                                     marked("p0", {"t": "Str", "c": "\u22121 b"}),
+                                     {"p0": ("paragraph", "ppt/slides/slide1.xml", 3)})
+    yield "the filter's signs are counted among the runs' en dashes, an equation's characters " \
+        "not among them, and a paragraph whose text changed otherwise is left", \
+        found == {"paragraphs": {"ppt/slides/slide1.xml": {3: ([1, 2], 2)}}, "pictures": {}} \
+        and changed == {"paragraphs": {}, "pictures": {}}, (found, changed)
+    # A picture whose id another shape on its slide has, which no decision
+    # is written for, and a run with no Pandoc, which can't make them.
+    clash = os.path.join(work, "clash")
+    os.makedirs(clash)
+    deck(os.path.join(clash, "Clash.pptx"), [
+        {"shapes": [title(2, "Clash"), pic(5, "rId2", (457200, 4200000, 900000, 900000),
+                                            "Down to \u20139 here"),
+                    textbox(5, "TextBox 5", ["Up \u20131 and down."], WIDE)],
+         "images": {"rId2": RED}}])
+    with open(os.path.join(clash, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  copy:\n    format: source\n")
+    clashed = convert(clash, "--quick")
+    with zipfile.ZipFile(os.path.join(clash, "copy", "Clash.pptx")) as z:
+        slide = z.read("ppt/slides/slide1.xml").decode("utf-8")
+    yield "a picture whose id another shape has keeps its en dash, and the run says how many " \
+        "it couldn't write, the text beside it given its sign", \
+        descriptions(slide) == ["Down to \u20139 here"] and "Up \u22121 and down." in texts(slide) \
+        and "WARNING: copy: 1 minus sign(s) a deck's page makes of an en dash not written into " \
+        "its copy" in clashed.stdout + clashed.stderr, (texts(slide), clashed.stderr[-600:])
+    tools = os.path.join(work, "bin")
+    os.makedirs(tools)
+    os.symlink(sys.executable, os.path.join(tools, "python3"))
+    bare = os.path.join(work, "bare")
+    os.makedirs(bare)
+    minus_deck(os.path.join(bare, "Minus.pptx"))
+    run_bare = subprocess.run([os.path.join(tools, "python3"), os.path.join(BIN, "convert.py"),
+                               "--quiet"], cwd=bare, env=dict(os.environ, PATH=tools),
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    bare_copy = os.path.join(bare, "remediated", "Minus.pptx")
+    bare_slide = read_part(bare_copy, "ppt/slides/slide1.xml") if os.path.exists(bare_copy) else ""
+    yield "with no Pandoc, the copy keeps its en dashes, and the run says why", \
+        run_bare.returncode == 0 and "\u20134 units." in bare_slide \
+        and "NOTE: Pandoc isn't on the PATH, so the copies of 1 deck(s) keep the en dashes a " \
+        "deck's page makes minus signs (math.minus_in_text): Pandoc 3.9 or later makes them." \
+        in run_bare.stdout + run_bare.stderr, run_bare.stderr[-600:]
+
+
 CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("captions on video and audio", case_captions),
          ("the copy", case_remediate), ("the copy, more", case_remediate_more),
@@ -5654,7 +5912,8 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("decks in other formats", case_other_formats),
          ("a deck in ODP, saved by LibreOffice", case_other_formats_libreoffice),
          ("a table's blank rows at the top", case_blank_rows),
-         ("a table decided to have its headers in its first column", case_first_column)]
+         ("a table decided to have its headers in its first column", case_first_column),
+         ("a deck's minus signs in its copy", case_minus_signs)]
 
 
 def main():

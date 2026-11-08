@@ -330,10 +330,12 @@ class Shape:
 
 class Slide:
     __slots__ = ("number", "part", "slide_id", "hidden", "layout", "layout_part", "shapes",
-                 "notes", "notes_part", "section")
+                 "notes", "notes_part", "section", "root")
 
     def __init__(self, number, part, slide_id):
         self.number, self.part, self.slide_id = number, part, slide_id
+        # The slide's XML as parsed, which its shapes' elements are in.
+        self.root = None
         self.hidden = False
         self.layout = self.layout_part = None
         self.shapes = []
@@ -998,6 +1000,7 @@ def read(path):
             slide = Slide(number, part, entry.get("id"))
             slide.section = section_of.get(slide.slide_id)
             root = part_xml(part)
+            slide.root = root
             slide.hidden = root.get("show") in ("0", "false")
             rels = relationships(zf, part)
             layout = rel_target(rels, "slideLayout")

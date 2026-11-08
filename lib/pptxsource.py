@@ -132,6 +132,14 @@ WHITESPACE = re.compile(r"[ \t\r\n\x0b\x0c]+")
 # deck's: ppaction://hlinkshowjump?jump=...
 JUMPS = ("firstslide", "lastslide", "nextslide", "previousslide")
 TRUE = ("1", "true", "on")
+# Marking, for the copy's minus signs (deckrun.minus_signs): each
+# paragraph's words in a span, and each picture, with this attribute, its
+# value a key of read()'s marks; an equation Pandoc couldn't read, its
+# characters in its place, in a span of this class, since the copy has the
+# equation there, not those characters. Neither changes what the filter's
+# rules make of the text, which a span leaves as it is.
+MINUS_MARK = "data-oer-minus"
+EQUATION_CLASS = "oer-equation"
 
 
 # --------------------------------------------------------------------------
@@ -385,7 +393,7 @@ class Reader:
     """One deck, read slide by slide into Pandoc's blocks."""
 
     def __init__(self, path, base, alts=None, tables=None, titles=None, orders=None,
-                 media=MEDIA):
+                 media=MEDIA, marks=None):
         self.path, self.base, self.media_dir = path, base, media
         self.alts, self.tables = alts or {}, tables or {}
         self.titles, self.orders = titles or {}, orders or {}
@@ -404,6 +412,12 @@ class Reader:
         self.order = {}             # slide part: the slide shown before and after it
         self.dry = False            # reading what's left out, with nothing written
         self.repeated = set()       # the ids the slide gives more than one shape
+        # With marks, a dict: {key: ("paragraph", part, n), the part's n-th
+        # a:p in document order, or ("picture", part, shape id)}.
+        self.marks = marks
+        self.part = None            # the part whose text is being read
+        self.roots = {}             # part: its parsed XML, which its a:p are in
+        self.paragraph_numbers = {}  # part: {id(a:p): its place among the part's a:p}
 
     # ---- parts ----------------------------------------------------------
 
@@ -671,6 +685,22 @@ class Reader:
             items.append((fmt, inlines))
         return tidied(nested(items, FORMATS))
 
+    def marked(self, paragraph, inlines):
+        """A paragraph's inlines, in a span marking it when marking: the
+        n-th a:p of the part it's in, in document order, which the copy
+        finds it by."""
+        if self.marks is None or self.dry or not inlines or self.part not in self.roots:
+            return inlines
+        numbers = self.paragraph_numbers.get(self.part)
+        if numbers is None:
+            numbers = self.paragraph_numbers[self.part] = {
+                id(p): n for n, p in enumerate(self.roots[self.part].iter(q("a:p")))}
+        if id(paragraph) not in numbers:
+            return inlines
+        key = "p%d" % len(self.marks)
+        self.marks[key] = ("paragraph", self.part, numbers[id(paragraph)])
+        return [{"t": "Span", "c": [attr(pairs=[[MINUS_MARK, key]]), inlines]}]
+
     def paragraphs(self, body, inherited):
         """A text body's paragraphs as (level, bullet, inlines)."""
         own = own_levels(body)
@@ -686,7 +716,7 @@ class Reader:
                 own.get(level + 1) or inherited.get(level + 1))
             if bullet and bullet[0] == "none":
                 bullet = None
-            out.append((level, bullet, trimmed(self.inlines(paragraph))))
+            out.append((level, bullet, self.marked(paragraph, trimmed(self.inlines(paragraph)))))
         return out
 
     def list_attributes(self, bullet):
@@ -797,7 +827,12 @@ class Reader:
         if shape.crop and shape.crop != (0, 0, pptxparse.FULL, pptxparse.FULL):
             self.record.lose("crop", self.where() + ": a picture shown whole, which the slide "
                              "shows cropped")
-        image = {"t": "Image", "c": [attr("", ["decorative"] if decorative else []),
+        pairs = []
+        if self.marks is not None and not self.dry and not decorative:
+            key = "i%d" % len(self.marks)
+            self.marks[key] = ("picture", slide.part, shape.id)
+            pairs.append([MINUS_MARK, key])
+        image = {"t": "Image", "c": [attr("", ["decorative"] if decorative else [], pairs),
                                      [] if decorative else words(" ".join((text or "").split())),
                                      [src, ""]]}
         # A picture that is a link, as its own non-visual properties say.
@@ -933,8 +968,10 @@ class Reader:
             root = pptxparse.parse_xml(self.zip.read(slide.notes_part))
         except KeyError:
             return []
-        saved = self.rels
+        saved, saved_part = self.rels, self.part
         self.rels = pptxparse.relationships(self.zip, slide.notes_part)
+        self.part = slide.notes_part
+        self.roots.setdefault(slide.notes_part, root)
         inherited = self.notes_inherited(slide.notes_part)
         blocks = []
         for sp in root.iter(q("p:sp")):
@@ -944,7 +981,7 @@ class Reader:
             body = sp.find(q("p:txBody"))
             if body is not None:
                 blocks += self.blocks(self.paragraphs(body, inherited))
-        self.rels = saved
+        self.rels, self.part = saved, saved_part
         if not blocks:
             return []
         return [{"t": "Div", "c": [attr("", ["notes"]), blocks]}]
@@ -1014,6 +1051,9 @@ class Reader:
             title_slide = shown[0]
         for slide in shown:
             self.slide = slide
+            self.part = slide.part
+            if slide.root is not None:
+                self.roots[slide.part] = slide.root
             self.rels = pptxparse.relationships(self.zip, slide.part)
             # A decision for a shape whose id the slide repeats is skipped,
             # as the copy skips it (pptxremediate.remediate).
@@ -1054,7 +1094,7 @@ class Reader:
             blocks += self.content(slide, skip={id(shape)} if shape else ())
             blocks += self.notes(slide)
             self.record.counts["slides"] += 1
-        self.slide = None
+        self.slide = self.part = None
         if title_slide is None and deck.core_title:
             meta["title-meta"] = {"t": "MetaString", "c": deck.core_title}
         if deck.language:
@@ -1172,10 +1212,11 @@ def read_tex(equations, work, pandoc="pandoc", env=None):
     return [found.get(n) for n in range(len(equations))]
 
 
-def place_equations(blocks, tex, equations, record):
+def place_equations(blocks, tex, equations, record, mark=False):
     """Each equation's placeholder given its TeX, display math where the
     deck's is a display; one Pandoc didn't read is its characters, as
-    PowerPoint's linear format writes them."""
+    PowerPoint's linear format writes them, in a span of EQUATION_CLASS
+    when mark says."""
     def walk(node):
         if isinstance(node, list):
             return [walk(item) for item in node]
@@ -1188,7 +1229,9 @@ def place_equations(blocks, tex, equations, record):
                     if found is None:
                         record.lose("equation", "%s: an equation Pandoc's Word reader couldn't "
                                     "read, kept as its characters" % equations[n][2])
-                        return Str(pptxremediate.equation_text(omml_text(equations[n][0])))
+                        text = Str(pptxremediate.equation_text(omml_text(equations[n][0])))
+                        return {"t": "Span", "c": [attr("", [EQUATION_CLASS]), [text]]} \
+                            if mark else text
                     display = equations[n][1]
                     return {"t": "Math", "c": [{"t": "DisplayMath" if display else "InlineMath"},
                                                found[1]]}
@@ -1222,18 +1265,21 @@ def split_displays(node):
 # --------------------------------------------------------------------------
 
 def read(path, base, work, alts=None, tables=None, titles=None, orders=None, pandoc="pandoc",
-         api_version=None, env=None):
+         api_version=None, env=None, marks=None):
     """(Pandoc's JSON document, Record) for a deck: its pictures written to
-    base's media/, its equations read through Pandoc."""
-    reader = Reader(path, base, alts, tables, titles, orders)
+    base's media/, its equations read through Pandoc. marks, a dict, is
+    given each paragraph and picture the document marks (MINUS_MARK), for the
+    copy to find it by (deckrun.minus_signs)."""
+    reader = Reader(path, base, alts, tables, titles, orders, marks=marks)
     try:
         doc = reader.read()
     finally:
         reader.close()
     tex = read_tex(reader.equations, work, pandoc, env)
+    mark = marks is not None
     doc["blocks"] = split_displays(place_equations(doc["blocks"], tex, reader.equations,
-                                                   reader.record))
-    doc["meta"] = place_equations(doc["meta"], tex, reader.equations, reader.record)
+                                                   reader.record, mark))
+    doc["meta"] = place_equations(doc["meta"], tex, reader.equations, reader.record, mark)
     if api_version:
         doc["pandoc-api-version"] = list(api_version)
     tally(doc, reader.record)

@@ -572,6 +572,46 @@ PDF_TEX = [("latex-lab", "documentmetadata-support.ltx"), ("tagpdf", "tagpdf.sty
            ("luamml", "luamml.sty"), ("luatexbase", "luatexbase.sty"),
            ("selnolig", "selnolig.sty")]
 TEX_UNREADY = []
+# The languages the suite sets books in whose TeX packages a TeX Live of
+# fewer languages, or a distribution's, may lack, by a file each holds:
+# babel's German and its 1996 spelling's hyphenation, and British
+# English's hyphenation, without which babel sets british with the
+# American patterns ("Hyphen rules for 'british' set to \l@english").
+# The CNX session's TeX Lives lacked them (CNX-NOTES, item 185 and What
+# Round 53 left open): Ubuntu 26.10's without its German packages, which
+# stopped on a book in ngerman ("Unknown option 'ngerman'"), and TinyTeX.
+LANGUAGE_TEX = {"ngerman": [("babel-german", "ngerman.ldf"),
+                            ("hyphen-german", "hyph-de-1996.pat.txt")],
+                "british": [("hyphen-english", "hyph-en-gb.pat.txt")]}
+LANGUAGE_UNREADY = {}
+
+
+def why_no_language(*languages):
+    """Why a check whose book babel sets in languages skips here, or None:
+    TeX lacks a package LANGUAGE_TEX names for one, on which LaTeX stops or
+    hyphenates otherwise, named with the command that installs it, as
+    testing.md has a TeX package a check needs that TeX lacks. None where
+    there's no kpsewhich to ask, which the checks that build skip for."""
+    if not shutil.which("kpsewhich"):
+        return None
+    missing = []
+    for language in languages:
+        if language not in LANGUAGE_UNREADY:
+            LANGUAGE_UNREADY[language] = [
+                package for package, name in LANGUAGE_TEX[language]
+                if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+                                      stdin=subprocess.DEVNULL).stdout.strip()]
+        missing += [p for p in LANGUAGE_UNREADY[language] if p not in missing]
+    if not missing:
+        return None
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    return ("a book in " + " or ".join(language for language in languages
+                                       if LANGUAGE_UNREADY[language])
+            + " needs " + (" and ".join(missing) if len(missing) < 3 else
+                           ", ".join(missing[:-1]) + ", and " + missing[-1])
+            + ", which TeX lacks ("
+            + latexbuild.tlmgr_command("install " + " ".join(missing)) + ")")
 
 
 def tex_unready():
@@ -1067,11 +1107,13 @@ def case_babel_main(work):
             and [key for key in said if key.startswith("babel_main")] \
             == (["babel_main_unknown"] if unknown else [])
 
-    def built(text, wanted):
+    def built(text, wanted, *languages):
         """The copy built with LuaLaTeX, as a person builds it, with lines
         that have LaTeX's log name babel's language and hyphenate the words:
-        wanted, babel's main language and the words' hyphens (None for any)."""
-        why = why_no_tex("no lualatex to build the copy", "lualatex")
+        wanted, babel's main language and the words' hyphens (None for any);
+        languages, those whose packages TeX needs for it (why_no_language)."""
+        why = why_no_tex("no lualatex to build the copy", "lualatex") \
+            or why_no_language(*languages)
         if why:
             return skip(why)
         if not text:
@@ -1101,11 +1143,11 @@ def case_babel_main(work):
          lambda: "babel given main=ngerman, so its main language is the book's" in german_said),
         ("built with LuaLaTeX, it's set as the author's build sets it: in ngerman, "
          "\"Zucker\" hyphenated Zu-cker, where german, by the 1901 rules, leaves it whole",
-         lambda: built(german, ("ngerman", "Zu-cker"))),
+         lambda: built(german, ("ngerman", "Zu-cker"), "ngerman")),
         ("a book in British English, in a project in en-US, keeps british, not an option of "
          "babel's own after it, and is hyphenated the British way",
          lambda: head(british).endswith("\\PassOptionsToPackage{main=british}{babel}\n")
-         and built(british, ("british", "Zucker or-gan-iz-a-tion"))),
+         and built(british, ("british", "Zucker or-gan-iz-a-tion"), "british")),
         ("a book whose class names its language, a size, a paper, and an AMS class's option "
          "beside it, gets the class's; one whose language has a modifier, the language; one "
          "whose own \\DocumentMetadata names no language, main= after it",
@@ -2545,6 +2587,8 @@ def case_babel_languages(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import texremediate
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    # The book and the inline one are in ngerman too, which TeX may lack.
+    german = why or why_no_language("ngerman")
 
     def book_at(path, files, rows, targets, exists_ok=False, language=None):
         os.makedirs(path, exist_ok=exists_ok)
@@ -2567,7 +2611,7 @@ def case_babel_languages(work):
     files = dict(BABEL_FILES, **{"book.tex": BABEL_MASTER})
     book = os.path.join(work, "book")
     status, said = book_at(book, files, "ch03,es,,,\n",
-                           copies + ("" if why else "  pdf:\n    format: pdf\n"))
+                           copies + ("" if german else "  pdf:\n    format: pdf\n"))
     master = read(book, "copy", "book.tex") if status == 0 else ""
     plain = read(book, "plain", "book.tex") if status == 0 else ""
     counted = ("15 of babel's commands for a passage's language (french 6, english 5, "
@@ -2650,7 +2694,7 @@ def case_babel_languages(work):
     # a structure LaTeX's tagging ends before the group, the last by its
     # name, which tagpdf's debug code checks.
     inline = os.path.join(work, "inline")
-    inline_status, _ = (1, "") if why else book_at(inline, {
+    inline_status, _ = (1, "") if german else book_at(inline, {
         "book.tex": "\\documentclass{book}\n\\usepackage[french,ngerman,english]{babel}\n"
                     "\\babeltags{fr = french, de = ngerman}\n\\begin{document}\n"
                     "\\include{one}\n\\end{document}\n",
@@ -2703,8 +2747,8 @@ def case_babel_languages(work):
 
     def found():
         """The PDF's structure (pdf_structure), or a reason to skip."""
-        if why:
-            return why
+        if german:
+            return german
         structure = pdf_structure(pdf)
         if structure is None:
             return "no pikepdf or pdfinfo to read the PDF's structure"
@@ -2746,9 +2790,10 @@ def case_babel_languages(work):
         it, its structure that one's but for the Spans (structure_tree), to
         the paragraph each element is in, and no more of tagpdf's warnings,
         which name content left outside its structure ("Relation is not
-        allowed"), or in debug a structure ended by another's name."""
-        if why:
-            return skip(why)
+        allowed"), or in debug a structure ended by another's name. Each
+        book it's given is in ngerman too."""
+        if german:
+            return skip(german)
         if not shutil.which("pdftotext"):
             return skip("no pdftotext to place the PDF's words")
         if done != 0 or not os.path.exists(os.path.join(folder, "copy", "book.tex")):
@@ -2801,12 +2846,13 @@ def case_babel_languages(work):
                 return False
         return True
 
-    def page_check(path, expected, done, words=None):
+    def page_check(path, expected, done, words=None, reason=None):
         """Whether a PDF's headings and paragraphs, from its first heading
         on, are in the languages expected, [(role, language)], and its
-        Spans in another language than what's around them, words."""
-        if why:
-            return skip(why)
+        Spans in another language than what's around them, words; skipped
+        for reason, where it's given, or why."""
+        if reason or why:
+            return skip(reason or why)
         structure = pdf_structure(path)
         if structure is None:
             return skip("no pikepdf or pdfinfo to read the PDF's structure")
@@ -2842,8 +2888,8 @@ def case_babel_languages(work):
     def item_body():
         """Whether the inline book's list item's body, after a declaration
         in its label, is in the language around the label, as babel has it."""
-        if why:
-            return skip(why)
+        if german:
+            return skip(german)
         structure = pdf_structure(os.path.join(inline, "pdf", "org.example.babel.pdf"))
         if structure is None:
             return skip("no pikepdf or pdfinfo to read the PDF's structure")
@@ -2852,9 +2898,9 @@ def case_babel_languages(work):
 
     def builds(folder):
         """Whether the copy without tagging builds, as the author's own
-        does, with pdfLaTeX."""
-        if why:
-            return skip(why)
+        does, with pdfLaTeX; the book's is in ngerman too."""
+        if german:
+            return skip(german)
         if not os.path.exists(os.path.join(folder, "book.tex")):
             return False
         done = subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode",
@@ -2898,7 +2944,7 @@ def case_babel_languages(work):
          "French for before its \\include and a chapter the master sets after it",
          paragraphs),
         ("the run names the language babel has no tag for",
-         lambda: skip(why) if why else
+         lambda: skip(german) if german else
          "WARNING: pdf: babel has no language tag for klingon, so the PDF has the passages "
          "the book's babel commands put in it in the language around them" in said
          and "Wrote " + pdf + ": " in said
@@ -2955,7 +3001,7 @@ def case_babel_languages(work):
              ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en"),
              ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"),
              ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en")],
-             inline_status, INLINE_SPANS) and item_body()),
+             inline_status, INLINE_SPANS, german) and item_body()),
         ("and that book's copy, built with LuaLaTeX and with pdfLaTeX's tagging, has every "
          "word and its structure as without them, but for the Spans, and tagpdf warns of "
          "nothing more, in its debug code too",
@@ -9489,6 +9535,10 @@ def main():
     os.environ["LATEX_TESTS_TEX"] = json.dumps(unready)
     if unready:
         print(f"  skip  the checks that build with TeX: {unready}")
+    else:
+        languages = why_no_language(*LANGUAGE_TEX)
+        if languages:
+            print(f"  skip  the checks that build it: {languages}")
     if why_no_svg():
         print(f"  skip  {why_no_svg()}")
     if arguments.jobs > 1 and len(cases) > 1:

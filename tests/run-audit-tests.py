@@ -339,6 +339,79 @@ def case_own_reports():
     ]
 
 
+def case_renamed():
+    """The cache keeps a file's findings by where it is: one renamed is
+    read again and named by its new name, and the audit doesn't take the
+    report for current; a copy is read as a file of its own; one made
+    again replaces its entry; and an entry as audits kept them before, by
+    a SHA-256 alone, is dropped, as one that isn't what an audit wrote is
+    passed over."""
+    audit = os.path.join(BIN, "audit.py")
+    d = os.path.join(WORK, "renamed")
+    os.makedirs(d)
+    with open(os.path.join(d, "draft.html"), "w", encoding="utf-8") as fh:
+        fh.write(HTML)
+
+    def files():
+        return sorted(f.file for f in fl.read_csv(os.path.join(d, "audit.csv")))
+
+    def cache():
+        with open(os.path.join(d, "audit-cache.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def save(data):
+        with open(os.path.join(d, "audit-cache.json"), "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+    run([audit, d, "--quick"], d)
+    os.rename(os.path.join(d, "draft.html"), os.path.join(d, "final.html"))
+    renamed = run([audit, d, "--quick"], d)
+    renamed_files = files()
+    with open(os.path.join(d, "audit.md"), encoding="utf-8") as fh:
+        report = fh.read()
+    shutil.copy(os.path.join(d, "final.html"), os.path.join(d, "copy.html"))
+    copied = run([audit, d, "--quick"], d)
+    copied_files = files()
+
+    def entries():
+        return sorted(key for key in cache() if not key.startswith("__"))
+    before = entries()
+    with open(os.path.join(d, "final.html"), "w", encoding="utf-8") as fh:
+        fh.write(HTML.replace("</body>", '<img src="q.png"></body>'))
+    rebuilt = run([audit, d, "--quick"], d)
+    after = entries()
+    data = cache()
+    sha = fl.digest(os.path.join(d, "copy.html"))
+    data[sha] = {"findings": [["copy.html", "image-without-alt", "p.png", "copy.html", "html"]],
+                 "options": {"quick": True}, "when": "2026-01-01T00:00:00+00:00"}
+    save(data)
+    old = run([audit, d, "--quick", "--force"], d)
+    dropped = sha not in cache()
+    data = cache()
+    data[os.path.realpath(os.path.join(d, "copy.html"))]["findings"] = "not findings"
+    data[os.path.realpath(os.path.join(d, "final.html"))] = "not an entry"
+    save(data)
+    broken = run([audit, d, "--quick"], d)
+    return [
+        ("a file renamed is read again, named by its new name, and the report isn't taken for "
+         "current",
+         lambda: "unchanged" not in renamed.stderr and "is current" not in renamed.stderr
+         and renamed_files == ["final.html"] and "draft.html" not in report
+         or fail("got: " + renamed.stderr)),
+        ("a copy is read as a file of its own, each finding filed under its own file",
+         lambda: "copy.html: 1 finding(s)" in copied.stderr
+         and copied_files == ["copy.html", "final.html"] or fail("got: " + copied.stderr)),
+        ("a file made again replaces its entry, by where it is",
+         lambda: "final.html: 2 finding(s)" in rebuilt.stderr and after == before
+         and os.path.realpath(os.path.join(d, "final.html")) in after
+         or fail(repr(after))),
+        ("an entry by a SHA-256 alone, as audits kept them before, is dropped",
+         lambda: dropped and old.returncode == 1 or fail("got: " + old.stderr)),
+        ("and an entry that isn't what an audit wrote has its file read again",
+         lambda: "Traceback" not in broken.stderr and "copy.html: 1 finding(s)" in broken.stderr
+         and "final.html: 2 finding(s)" in broken.stderr or fail("got: " + broken.stderr)),
+    ]
+
+
 def case_wcag():
     """--wcag, with a stand-in for veraPDF: a note for each rule of the
     WCAG profile a PDF fails, counting its failed checks, and with
@@ -953,8 +1026,7 @@ def case_ace():
         ("an EPUB renamed isn't checked again, and its findings have its new name",
          lambda: renamed[3] == 0 and [f[2] for f in renamed[1]] == [
              "renamed.epub", "two.epub", "renamed.epub", "two.epub"]
-         and "one.epub" not in renamed[2].split("## EPUBs: DAISY's Ace")[1]
-         or fail("got: " + renamed[0])),
+         and "one.epub" not in renamed[2] or fail("got: " + renamed[0])),
         ("another Ace checks every EPUB again, and keeps what it found",
          lambda: [u[3] for u in upgraded] == [2, 0]
          and "Ace by DAISY 1.4.7 checked 2 EPUB(s)" in upgraded[0][0]
@@ -1073,6 +1145,7 @@ def main():
                        ("the front door", case_front_door),
                        ("the audit's own reports, in the folder it writes to",
                         case_own_reports),
+                       ("a file renamed, copied, or made again", case_renamed),
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("veraPDF's WCAG findings, cached", case_verapdf_cache),

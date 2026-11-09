@@ -13,8 +13,9 @@ against each row ignores what it doesn't know, which is the rule the
 sidecars established.
 
 The report's header lists every input with its SHA-256, size, tool
-version, and the date, so a stale report says so; the same hashes key a
-small cache that lets an unchanged input be skipped.
+version, and the date, so a stale report says so; a small cache keeps
+each input's findings by where it is and that hash, so an unchanged
+input can be skipped.
 
 Copyright 2026 Robert Szarka
 
@@ -423,9 +424,29 @@ def describe_input(path):
             "bytes": os.path.getsize(path)}
 
 
+def from_row(row):
+    """A Finding from its row, as row() writes it, or a shorter one."""
+    r = list(row) + [""] * (len(COLUMNS) - len(row))
+    return Finding(r[0], r[1], r[2], file=r[3], kind=r[4], severity=r[5] or None,
+                   standard=r[6], tool=r[7] or "oer", fix=r[8] or None)
+
+
+def rows_of(value):
+    """Whether a cache's findings are rows, as row() writes them: one
+    edited by hand may not be."""
+    return isinstance(value, list) and all(isinstance(row, list) for row in value)
+
+
+# A part of the cache's own, for a check that keeps more than a file's
+# findings (Cache.part), by its name in the cache: __axe__, say.
+PART = re.compile(r"__[\w-]+__\Z")
+
+
 class Cache:
-    """audit-cache.json: input hash -> the findings last written for it,
-    so an unchanged input is not checked again unless asked."""
+    """audit-cache.json: the findings last written for each input, by
+    where it is (its real path), with its SHA-256, so an unchanged input
+    is not checked again unless asked; and the parts of checks that keep
+    more (part), and what the last report covered."""
 
     def __init__(self, path):
         self.path = path
@@ -434,27 +455,35 @@ class Cache:
                 self.data = json.load(fh)
         except (OSError, ValueError):
             self.data = {}
+        if not isinstance(self.data, dict):
+            self.data = {}
+        # An entry by an input's SHA-256 alone, as earlier audits kept
+        # them, named a file renamed since by its old name, gave a copy
+        # the original's, and was never replaced, so the cache grew with
+        # each build: none is read now, nor kept.
+        for key in [key for key in self.data
+                    if not (PART.match(key) or os.path.isabs(key))]:
+            del self.data[key]
 
-    def lookup(self, sha256, options=None):
-        """The findings last written for an input, or None when there are
-        none, or they were found with other options: a page read without
-        the validators (--quick) isn't the page read with them."""
-        entry = self.data.get(sha256)
-        if not entry or sha256 == "__report__":
+    def lookup(self, path, sha256, options=None):
+        """The findings last written for the input at path, or None when
+        there are none for it as it is now (sha256), or they were found
+        with other options: a page read without the validators (--quick)
+        isn't the page read with them. An entry that isn't what an audit
+        wrote is none."""
+        entry = self.data.get(os.path.realpath(path))
+        if not isinstance(entry, dict) or entry.get("sha") != sha256 \
+                or entry.get("options", {}) != (options or {}) \
+                or not rows_of(entry.get("findings")):
             return None
-        if entry.get("options", {}) != (options or {}):
-            return None
-        out = []
-        for r in entry.get("findings", []):
-            r = list(r) + [""] * (len(COLUMNS) - len(r))
-            out.append(Finding(r[0], r[1], r[2], file=r[3], kind=r[4],
-                               severity=r[5] or None, standard=r[6],
-                               tool=r[7] or "oer", fix=r[8] or None))
-        return out
+        return [from_row(row) for row in entry["findings"]]
 
-    def store(self, sha256, findings, options=None):
-        self.data[sha256] = {"findings": [f.row() for f in findings],
-                             "options": options or {}, "when": now()}
+    def store(self, path, sha256, findings, options=None):
+        """The findings on the input at path, as it was (sha256), in
+        place of what was kept for it before."""
+        self.data[os.path.realpath(path)] = {"sha": sha256,
+                                             "findings": [f.row() for f in findings],
+                                             "options": options or {}, "when": now()}
 
     def note_inputs(self, hashes, options=None):
         """Which inputs the last report covered, with which options

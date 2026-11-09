@@ -9,8 +9,8 @@ and PDFs, in any mix, and writes two things to the output directory (the first
 directory given, or -o): audit.csv, one finding per row in the format
 every check here shares, and audit.md, the same findings as a report a
 person reads, with each PDF's metadata and claims. A file already
-audited and unchanged since (by SHA-256) is not read again unless
---force says so. The reports aren't among what it reads, nor is a
+audited where it is, and unchanged since (by SHA-256), is not read again
+unless --force says so. The reports aren't among what it reads, nor is a
 report an audit wrote found in a directory given, and it writes over
 nothing in the output directory that an audit didn't write: a file
 there by the name of one it writes stops it, unless an audit wrote it.
@@ -342,18 +342,20 @@ def main():
     # made before the modules were set up isn't current once they are.
     if cache is not None and not args.force and not args.wcag \
             and os.path.exists(report_md) \
-            and all(cache.lookup(i["sha256"], per_file) is not None for i in inputs) \
+            and all(cache.lookup(path, i["sha256"], per_file) is not None
+                    for (path, _), i in zip(files, inputs)) \
             and cache.same_inputs((i["sha256"] for i in inputs), options):
         when = cache.audited_at()
         print(f"Nothing has changed since the audit of {when}; "
               f"{report_md} is current. --force audits again.",
               file=sys.stderr)
-        found = [f for i in inputs for f in cache.lookup(i["sha256"], per_file)]
+        found = [f for (path, _), i in zip(files, inputs)
+                 for f in cache.lookup(path, i["sha256"], per_file)]
         return 1 if any(f.severity == "error" for f in found) else 0
     all_found, sections = [], []
     for (path, kind), item in zip(files, inputs):
         cached = None if (args.force or cache is None) else cache.lookup(
-            item["sha256"], per_file)
+            path, item["sha256"], per_file)
         if cached is not None and kind != "pdf":
             print(f"  {os.path.basename(path)}: unchanged, {len(cached)} "
                   "finding(s) from the last audit", file=sys.stderr)
@@ -369,7 +371,7 @@ def main():
         all_found += found
         sections += extra
         if cache is not None:
-            cache.store(item["sha256"], found, per_file)
+            cache.store(path, item["sha256"], found, per_file)
     if args.wcag:
         # After the cache has each file's own findings: axe-core's turn on
         # what's installed too, and on every file a page loads, so they're

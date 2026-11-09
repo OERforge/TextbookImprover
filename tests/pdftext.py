@@ -375,6 +375,34 @@ def glyph_boxes(path, artifacts=True, faces=False):
     return boxes
 
 
+def term_mark_gaps(path, term, first):
+    """(how far a term's note marks begin past the term's last glyph, how far
+    the definition's first word, first, begins past their last, the widest
+    gap between two of them), in points, on the first line holding term
+    and, after it, first (glyph_boxes): the marks are the glyphs between the
+    two drawn raised, a superscript's baseline above the line's. None where
+    there's no such line or no mark on it."""
+    rows = {}
+    for page, baseline, left, right, char in glyph_boxes(path):
+        if char.strip():
+            rows.setdefault((page, baseline), []).append((left, right, char))
+    for (page, baseline), shown in rows.items():
+        text = "".join(g[2] for g in shown)
+        at = text.find(term)
+        start = text.find(first, at + len(term)) if at >= 0 else -1
+        if start < 0:
+            continue
+        term_right, first_left = shown[at + len(term) - 1][1], shown[start][0]
+        marks = sorted(g for (p, b), glyphs in rows.items() if p == page
+                       and baseline + 0.5 < b < baseline + 8 for g in glyphs
+                       if term_right - 2 <= g[0] < first_left)
+        if marks:
+            return (round(marks[0][0] - term_right, 2),
+                    round(first_left - max(g[1] for g in marks), 2),
+                    round(max([b[0] - a[1] for a, b in zip(marks, marks[1:])] or [0]), 2))
+    return None
+
+
 def own_text(element, texts, pages):
     """A structure element's own text: its marked content's characters,
     texts from marked_text, pages {page's objgen: its index}."""

@@ -644,6 +644,25 @@ Where it falls.[^f]
     ```
 """
 
+# Notes in a definition list's terms, which pdf-target.lua moves to the
+# head of the definition, their marks drawn against the term.
+TERM_NOTES = r"""---
+title: Term Notes
+---
+
+# Terms
+
+Elasticity[^a]
+:   How much the quantity demanded changes.
+
+Markup[^b][^c]
+:   The price less the cost.
+
+[^a]: A note on the term.
+[^b]: A first note on markup.
+[^c]: A second note on markup.
+"""
+
 # A list whose first item opens with highlighted code, whose number
 # LaTeX's tagging had set over the next item's (latexbuild.PDF_MACROS).
 ITEM_CODE = r"""---
@@ -2276,6 +2295,7 @@ def case_pdf(work):
         "nested.md": NESTED, "more.md": MORE, "subsections.md": SUBSECTIONS,
         "headings.md": HEADINGS, "langs.md": LANGS, "code-notes.md": CODE_NOTES,
         "shaded-notes.md": SHADED_NOTES, "item-code.md": ITEM_CODE,
+        "term-notes.md": TERM_NOTES,
         "sectioned.md": SECTIONED.replace("Right.", "![A dark bar](<img/a bar.svg>)" if svg
                                           else "Right.")})
     write(os.path.join(work, "img", "a bar.svg"), SVG)
@@ -2295,6 +2315,7 @@ def case_pdf(work):
     code_notes = os.path.join(work, "pdf", "code-notes.pdf")
     shaded_notes = os.path.join(work, "pdf", "shaded-notes.pdf")
     item_code = os.path.join(work, "pdf", "item-code.pdf")
+    term_notes = os.path.join(work, "pdf", "term-notes.pdf")
     built = lambda: [os.path.join(work, "pdf", name)  # noqa: E731
                      for name in sorted(os.listdir(os.path.join(work, "pdf")))]
     check = rows_of(os.path.join(work, "output-check.csv"))
@@ -2314,8 +2335,8 @@ def case_pdf(work):
          lambda: result.returncode == 0 and sorted(os.listdir(os.path.join(work, "pdf"))) == [
              "Flat-Deck.pdf", "agenda.pdf", "code-notes.pdf", "headings.pdf", "item-code.pdf",
              "langs.pdf", "more.pdf", "nested.pdf", "odd.pdf", "sectioned.pdf",
-             "shaded-notes.pdf", "subsections.pdf", "untitled.pdf"]
-         and "Wrote 13 PDF(s)" in out and "still changing" not in out),
+             "shaded-notes.pdf", "subsections.pdf", "term-notes.pdf", "untitled.pdf"]
+         and "Wrote 14 PDF(s)" in out and "still changing" not in out),
         ("a slide's title is an H1, or an H2 in a section, and a section's an H1",
          lambda: levels(flat) == [1, 1, 1, 1] and levels(sectioned) == [1, 2, 2, 1, 2]),
         ("a slide before the first section is an H1, as a section is, and bookmarked"
@@ -2536,6 +2557,15 @@ def case_pdf(work):
          "first line, and the next item its own",
          lambda: item_rows(item_code)[0] == ["1.Deckopens=1", "2.Theitemafterthecode."]
          and len(set(item_rows(item_code)[1])) == 1),
+        # Moved to the head of the definition, since LaTeX's tagging stops on a
+        # note in a list's label, the marks had been drawn after the space
+        # ltx-talk sets after a term and against the definition's first word
+        # (5.45 and 0.0 points on main): pdf-target.lua's against_term.
+        ("a term's note marks are drawn against the term, a comma between two and the "
+         "term's space after them",
+         lambda: all(gaps is not None and abs(gaps[0]) < 1 and gaps[1] > 3 and gaps[2] < 1
+                     for gaps in (pdftext.term_mark_gaps(term_notes, "Elasticity", "How"),
+                                  pdftext.term_mark_gaps(term_notes, "Markup", "The")))),
         # In the theme every writer is given (lib/highlighting.py): in the
         # writer's macros for a slide's code, and in those deck-pdf.lua
         # writes for inline code in a section's footnote, the deck's only.

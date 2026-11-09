@@ -579,9 +579,11 @@ equal widths; and a table of numbers too wide for a line:
 # which heading_levels would lift.
 # Two notes in a row in a heading, a caption, and a term: the term's go to
 # the head of its definition (pdf-target.lua's term_notes), a comma between
-# them; the heading's and the caption's are left without one, which would
-# have stayed behind in the contents, the bookmarks, and the list of
-# figures, where the notes are left out.
+# them, drawn against the term; the heading's and the caption's are left
+# without one, which would have stayed behind in the contents, the
+# bookmarks, and the list of figures, where the notes are left out. And a
+# term whose definition opens with a note, the two marks together, a comma
+# between, the space after the definition's taken for the term's.
 NOTES_PAIRS = r"""# Pairs
 
 ## Sets[^j][^k]
@@ -607,6 +609,9 @@ Term[^n][^o]
 
 After the tables, a note.[^r]
 
+Both[^s]
+:   [^t] Its definition opens with a note of its own.
+
 [^j]: Note j, in a heading.
 [^k]: Note k, in a heading too.
 [^l]: Note l, in a caption.
@@ -616,6 +621,8 @@ After the tables, a note.[^r]
 [^p]: Note p, in a table's caption.
 [^q]: Note q, in a long table caption.
 [^r]: Note r, after the tables.
+[^s]: Note s, in a term whose definition opens with a note.
+[^t]: Note t, at the head of that definition.
 """
 NOTES_HEADINGS = r"""# Headings
 
@@ -7608,10 +7615,16 @@ def checks(work, jobs=1):
          lambda: not quoted_cells(pdf_path)),
         # The writer gives a term's footnote as a mark in the term and its
         # text after the list, a pair LaTeX's tagging stops on in a list's
-        # label; pdf-target.lua puts it at the head of the definition.
-        ("a footnote in a definition list's term is set, at the head of its definition",
-         lambda: re.search(r"Elasticity\s*\d+How much", text) is not None
-         and "A term" in text),
+        # label; pdf-target.lua puts it at the head of the definition, its
+        # mark drawn against the term and the term's label space after it
+        # (pdftext.term_mark_gaps), where it had been after that space and
+        # against the definition's first word (5.98 and 0.5 points on main).
+        ("a footnote in a definition list's term is set, at the head of its definition, "
+         "its mark against the term and a space after it",
+         lambda: re.search(r"Elasticity\s*\d+\s+How much", text) is not None
+         and "A term" in text
+         and (lambda gaps: gaps is not None and abs(gaps[0]) < 1 and gaps[1] > 3)(
+             pdftext.term_mark_gaps(pdf_path, "Elasticity", "How"))),
         # Pandoc's writer before 3.13 leaves a term with an = in it bare in
         # \item's optional argument, where LaTeX's tagging reads it as keys
         # and stops; pdf-target.lua braces it, as 3.13's writer does. Any
@@ -7863,16 +7876,31 @@ def checks(work, jobs=1):
         # behind in the contents, the bookmarks, or the list of figures,
         # where the notes are left out (a review).
         ("two notes in a term are set at the head of its definition, a comma between their "
-         "marks, tagged and untagged; two in a heading and two in a caption get none, and "
-         "the contents, the bookmarks, and the list of figures have their words alone",
+         "marks, against the term, tagged and untagged; two in a heading and two in a "
+         "caption get none, and the contents, the bookmarks, and the list of figures have "
+         "their words alone",
          lambda: re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_text)
          and re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_plain_text)
+         and all(gaps is not None and abs(gaps[0]) < 1 and gaps[1] > 3 and gaps[2] < 1
+                 for gaps in (pdftext.term_mark_gaps(notes_path, "Term", "Its"),
+                              pdftext.term_mark_gaps(notes_plain, "Term", "Its")))
          and re.search(r"Sets\s*1011\s", notes_text)
          and re.search(r"A\s+gray\s+circle\s*1213", notes_text)
          and not re.search(r"Sets\s*,|circle\s*,", notes_text + notes_plain_text)
          and notes_reader is not None and "Sets" in outline_titles(notes_reader)
          and {"Sets", "A gray circle"} <= {str(e.get("/T")) for e in elements(
              notes_reader.trailer["/Root"]["/StructTreeRoot"]) if kind(e) == "/TOCI"}),
+        # Its term whose definition opens with a note of its own and a space:
+        # the two marks against the term, a comma between them and no space,
+        # and one space after them, the term's, not the term's and the
+        # definition's too (about 6.5 points, where the two would be near 10).
+        ("a term's note and the note its definition opens with are marked together against "
+         "the term, a comma between, the term's space alone after them, tagged and untagged",
+         lambda: all(re.search(r"Both\s*\d+\s*,\s*\d+\s+Its\s+definition\s+opens", words)
+                     for words in (notes_text, notes_plain_text))
+         and all(gaps is not None and abs(gaps[0]) < 1 and 3 < gaps[1] < 8 and gaps[2] < 1
+                 for gaps in (pdftext.term_mark_gaps(notes_path, "Both", "Its"),
+                              pdftext.term_mark_gaps(notes_plain, "Both", "Its")))),
         # The caption package's longtable caption, which latexbuild's
         # LINE_BREAK_SPACE wraps as it does longtable's own (a review).
         ("a note in a table's caption, short or too long for its line, takes one number, "

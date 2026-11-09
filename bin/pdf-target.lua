@@ -2943,6 +2943,45 @@ local function comma()
   return pandoc.Superscript({ pandoc.Str(',') })
 end
 
+-- The marks are set against the term, as the author wrote them on it:
+-- LaTeX sets a term's label with its label space (\labelsep) after it, so
+-- a kern back over that space goes before them and the space after them,
+-- unbroken, where they had sat after the term's space and against the
+-- definition's first word ("6,7A term's", What Round 39 left open). The
+-- kern begins the paragraph (\leavevmode), which sets the label first; in
+-- the vertical mode an \item leaves LaTeX in, it would have been a kern
+-- between lines. The marks of notes the definition opens with go with
+-- them, the comma between (target-blocks.lua's separate_notes put the
+-- definition's own between theirs), and a space after those is the label
+-- space's.
+local function is_comma(inline)
+  return inline.t == 'Superscript' and #inline.content == 1
+    and inline.content[1].t == 'Str' and inline.content[1].text == ','
+end
+
+local function against_term(moved, content)
+  local out = pandoc.Inlines({ pandoc.RawInline('latex', '\\leavevmode\\kern-\\labelsep') })
+  out:extend(moved)
+  local i = 1
+  if content[1] and content[1].t == 'Note' then
+    out:insert(comma())
+    while content[i] and (content[i].t == 'Note'
+                          or (is_comma(content[i]) and content[i + 1]
+                              and content[i + 1].t == 'Note')) do
+      out:insert(content[i])
+      i = i + 1
+    end
+  end
+  if content[i] and (content[i].t == 'Space' or content[i].t == 'SoftBreak') then
+    i = i + 1
+  end
+  if content[i] then
+    out:insert(pandoc.RawInline('latex', '\\nobreak\\hspace{\\labelsep}'))
+  end
+  for j = i, #content do out:insert(content[j]) end
+  return out
+end
+
 local function term_notes(list)
   local items, moved_any = pandoc.List({}), false
   for _, item in ipairs(list.content) do
@@ -2960,16 +2999,10 @@ local function term_notes(list)
       local blocks = pandoc.Blocks(definitions[1] or {})
       local first = blocks[1]
       if first and (first.t == 'Para' or first.t == 'Plain') then
-        local content = pandoc.Inlines({})
-        content:extend(moved)
-        if first.content[1] and first.content[1].t == 'Note' then
-          content:insert(comma())
-        end
-        content:extend(first.content)
-        first.content = content
+        first.content = against_term(moved, first.content)
         blocks[1] = first
       else
-        blocks:insert(1, pandoc.Plain(moved))
+        blocks:insert(1, pandoc.Plain(against_term(moved, pandoc.Inlines({}))))
       end
       definitions[1] = blocks
     end

@@ -732,6 +732,235 @@ def case_verapdf_cache():
     ]
 
 
+# The audit, with pdfcheck.inspect counting the PDFs it reads, each
+# name a line of COUNT_LOG; and pypdf saying it's FAKE_PYPDF_VERSION when
+# that's set, as another pypdf would.
+COUNTING = """
+import os, runpy, sys
+sys.path.insert(0, os.path.join(os.environ["AUDIT_ROOT"], "lib"))
+import pdfcheck
+if os.environ.get("FAKE_PYPDF_VERSION") and pdfcheck.pypdf:
+    pdfcheck.pypdf.__version__ = os.environ["FAKE_PYPDF_VERSION"]
+inspect = pdfcheck.inspect
+def counted(path):
+    with open(os.environ["COUNT_LOG"], "a", encoding="utf-8") as fh:
+        fh.write(os.path.basename(path) + "\\n")
+    return inspect(path)
+pdfcheck.inspect = counted
+audit = os.path.join(os.environ["AUDIT_ROOT"], "bin", "audit.py")
+sys.argv[0] = audit
+runpy.run_path(audit, run_name="__main__")
+"""
+
+
+def case_pdf_cache():
+    """A PDF's own checks kept in the cache, its metadata read with pypdf
+    and veraPDF's PDF/UA run (the stand-in): the next audit reads an
+    unchanged PDF neither way, has the first's findings and metadata,
+    and says so; a PDF changed is read again, and only it, its entry
+    replacing its last; one renamed isn't, and has its new name; --quick,
+    another veraPDF, another pypdf, the code edited, and --force read
+    every PDF again; a part or an entry that isn't what the audit wrote
+    is started again or read again; a run veraPDF didn't finish, and a
+    PDF written again as it was read, keep nothing; a veraPDF that
+    doesn't say which it is has nothing kept or read; and --no-cache
+    leaves the cache as it was."""
+    sys.path.insert(0, HERE)
+    import fakeverapdf
+    import pdfcheck
+    try:
+        import pypdf
+    except ImportError:
+        print("  skip  pypdf not installed; no PDF to keep the checks of")
+        return []
+    folder = os.path.join(WORK, "pcache")
+    out = os.path.join(WORK, "pcache-out")
+    os.makedirs(folder)
+    probe = os.path.join(WORK, "pcache-probe.pdf")
+    with open(probe, "wb") as fh:
+        fh.write(pdfcheck.wcag_probe())
+
+    def pdf(name, title):
+        writer = pypdf.PdfWriter(clone_from=probe)
+        writer.add_metadata({"/Title": title})
+        with open(os.path.join(folder, name), "wb") as fh:
+            writer.write(fh)
+    pdf("book.pdf", "A Book")
+    pdf("other.pdf", "Another")
+    log, counted = os.path.join(WORK, "pcache-log.jsonl"), os.path.join(WORK, "pcache-read.txt")
+    program = os.path.join(WORK, "counting-audit.py")
+    with open(program, "w", encoding="utf-8") as fh:
+        fh.write(COUNTING)
+    env = dict(os.environ, VERAPDF=fakeverapdf.install(os.path.join(WORK, "pcache-fake")),
+               FAKE_VERAPDF_LOG=log, FAKE_VERAPDF_UA="1", COUNT_LOG=counted, AUDIT_ROOT=ROOT)
+    for name in ("VERAPDF_WCAG", "CLASSPATH_PREFIX"):
+        env.pop(name, None)
+    # Each audit after a page more in the folder, so that it doesn't
+    # find the report current (an audit without --wcag), and reads the
+    # PDFs or not as its cache says.
+    pages, stopped = [], []
+
+    def audit(*flags, root=ROOT, **more):
+        pages.append(f"p{len(pages)}.md")
+        with open(os.path.join(folder, pages[-1]), "w", encoding="utf-8") as fh:
+            fh.write("---\ntitle: P\nlang: en\n---\n\n# P\n\nText.\n")
+        for name in (log, counted):
+            open(name, "w").close()
+        result = subprocess.run([sys.executable, program, folder, "-o", out, *flags], cwd=WORK,
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                env=dict(env, AUDIT_ROOT=root, **more))
+        if "Traceback" in result.stderr or "Written to" not in result.stderr:
+            stopped.append(result.stderr)
+        with open(log, encoding="utf-8") as fh:
+            runs = [json.loads(line)["args"] for line in fh if line.strip()]
+        with open(counted, encoding="utf-8") as fh:
+            read = sorted(line.strip() for line in fh if line.strip())
+        checked = sorted(os.path.basename(arg) for args in runs
+                         if "-p" not in args and "--version" not in args
+                         for arg in args if arg.endswith(".pdf"))
+        found = sorted((f.where, f.check, f.file) for f in fl.read_csv(
+            os.path.join(out, "audit.csv")) if f.kind == "pdf")
+        with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
+            report = fh.read()
+        return {"result": result, "read": read, "checked": checked, "found": found,
+                "report": report, "asked": sum("--version" in args for args in runs)}
+
+    def part():
+        with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+            return json.load(fh)["__pdf__"]
+
+    def metadata(report):
+        return sorted(re.findall(r"^## (\S+): metadata and claims\n\n((?:- .*\n)+)", report,
+                                 re.M))
+
+    def facts(report):
+        return [(name, re.sub(r"- \*\*Not read again:\*\*.*\n", "", lines))
+                for name, lines in metadata(report)]
+    first = audit()
+    second = audit()
+    forced = audit("--force")
+    pdf("other.pdf", "Another, changed")
+    changed = audit()
+    entries = sorted(os.path.basename(key) for key in part()["pdfs"])
+    os.rename(os.path.join(folder, "book.pdf"), os.path.join(folder, "renamed.pdf"))
+    renamed = audit()
+    quick = [audit("--quick") for _ in range(2)]
+    # Each in turn, those before it kept: every PDF read again shows that
+    # one is in the key.
+    settings, steps = {}, []
+    for name, value in (("FAKE_VERAPDF_VERSION", "1.30.4"), ("FAKE_PYPDF_VERSION", "0.0.1")):
+        settings[name] = value
+        steps.append((name, [audit(**settings) for _ in range(2)]))
+    code = os.path.join(WORK, "pcache-code")
+    for name in ("bin", "lib"):
+        shutil.copytree(os.path.join(ROOT, name), os.path.join(code, name))
+    for name in ("pdfcheck.py", "alttext.py", "findings.py"):
+        with open(os.path.join(code, "lib", name), "a", encoding="utf-8") as fh:
+            fh.write("# edited\n")
+        steps.append((name, [audit(root=code, **settings) for _ in range(2)]))
+    plain = audit()
+    with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+        data = json.load(fh)
+    data["__pdf__"]["pdfs"] = None
+    with open(os.path.join(out, "audit-cache.json"), "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    no_pdfs = audit()
+
+    def broken(change):
+        """An audit after the first entry of the cache's part is changed so."""
+        with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+        change(data["__pdf__"]["pdfs"][sorted(data["__pdf__"]["pdfs"])[0]])
+        with open(os.path.join(out, "audit-cache.json"), "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return audit()
+    entries_broken = [broken(lambda entry: entry.update(facts="not facts")),
+                      broken(lambda entry: entry.pop("name")),
+                      broken(lambda entry: entry.update(findings=[["a row"], "not a row"]))]
+    # A PDF pypdf can't read: no metadata, kept as that.
+    with open(os.path.join(folder, "broken.pdf"), "wb") as fh:
+        fh.write(b"not a PDF\n")
+    unreadable = [audit("--quick") for _ in range(2)]
+    os.remove(os.path.join(folder, "broken.pdf"))
+    # Each of these after a veraPDF of another version, so the cache has
+    # nothing for the setup, and what the run keeps is all there is.
+    garbled = audit(FAKE_VERAPDF_VERSION="1.30.5", FAKE_VERAPDF_UA_GARBLED="1")
+    after_garbled = audit(FAKE_VERAPDF_VERSION="1.30.5")
+    saved = {name: open(os.path.join(folder, name), "rb").read()
+             for name in ("other.pdf", "renamed.pdf")}
+    rewritten = audit(FAKE_VERAPDF_VERSION="1.30.6", FAKE_VERAPDF_UA_REWRITE="1")
+    for name, data in saved.items():
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(data)
+    after_rewritten = audit(FAKE_VERAPDF_VERSION="1.30.6")
+    unsaid = [audit(FAKE_VERAPDF_NO_VERSION="1")["read"] for _ in range(2)]
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        kept = fh.read()
+    uncached = audit("--no-cache")
+    with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
+        kept_after = fh.read()
+    both = ["book.pdf", "other.pdf"]
+    now = ["other.pdf", "renamed.pdf"]
+    ua = "verapdf:8.2.5.2-2"
+    held = "- **Not read again:** the PDF is unchanged since the audit that read it ("
+    return [
+        ("each audit finishes, its report written",
+         lambda: not stopped or fail(stopped[0][-1500:])),
+        ("the first audit reads each PDF and runs veraPDF's PDF/UA checks on it, its finding "
+         "among the PDF's",
+         lambda: first["read"] == both and first["checked"] == both
+         and ("book.pdf", ua, "book.pdf") in first["found"] or fail(first["result"].stderr)),
+        ("the next reads neither, and has the first's findings and metadata, saying in each "
+         "PDF's section that it wasn't read again, and at the prompt that it's unchanged",
+         lambda: second["read"] == [] and second["checked"] == []
+         and second["found"] == first["found"] and facts(second["report"]) == facts(
+             first["report"]) and second["report"].count(held) == 2 and held not in first[
+                 "report"] and "book.pdf: unchanged, " in second["result"].stderr
+         and second["asked"] == 1 or fail(second["result"].stderr + repr(second["read"]))),
+        ("a PDF changed is read again, and only it, its entry in the cache replacing its last",
+         lambda: changed["read"] == ["other.pdf"] and changed["checked"] == ["other.pdf"]
+         and entries == both and "Another, changed" in changed["report"]
+         or fail(repr(entries) + changed["result"].stderr)),
+        ("one renamed isn't read again, and its findings and metadata have its new name",
+         lambda: renamed["read"] == [] and ("renamed.pdf", ua, "renamed.pdf") in renamed["found"]
+         and "## renamed.pdf: metadata and claims" in renamed["report"]
+         and "**File:** `renamed.pdf`" in renamed["report"]
+         and "book.pdf" not in renamed["report"] or fail(renamed["report"][-3000:])),
+        ("--quick reads every PDF again, with no veraPDF, and keeps what it read",
+         lambda: [q["read"] for q in quick] == [now, []]
+         and [q["checked"] for q in quick] == [[], []]
+         and not any(f[1] == ua for f in quick[0]["found"]) or fail(quick[0]["result"].stderr)),
+        ("--force reads every PDF again",
+         lambda: forced["read"] == both and forced["checked"] == both),
+        ("and so do another veraPDF, which checks them again, another pypdf, and pdfcheck.py, "
+         "alttext.py, and findings.py edited, each in turn, each read kept",
+         lambda: [(name, [r["read"] for r in runs]) for name, runs in steps]
+         == [(name, [now, []]) for name, _ in steps] and len(steps) == 5
+         and [r["checked"] for r in steps[0][1]] == [now, []]
+         and plain["read"] == now or fail(repr([(n, [r["read"] for r in rs]) for n, rs in steps]))),
+        ("a part of the cache that isn't what the audit wrote is started again, and an entry "
+         "that isn't one, its facts, its name, or its findings, has its PDF read again",
+         lambda: "Traceback" not in no_pdfs["result"].stderr + "".join(
+             b["result"].stderr for b in entries_broken)
+         and no_pdfs["read"] == now and [b["read"] for b in entries_broken] == [["other.pdf"]] * 3
+         or fail(no_pdfs["result"].stderr + "".join(b["result"].stderr for b in entries_broken))),
+        ("a PDF pypdf can't read is kept as one, its section saying it wasn't read",
+         lambda: [u["read"] for u in unreadable] == [["broken.pdf"] + now, []]
+         and "## broken.pdf: metadata and claims\n\n(not read)\n" in unreadable[1]["report"]
+         and ("broken.pdf", "pdf-unreadable", "broken.pdf") in [f[:3] for f in unreadable[1][
+             "found"]] or fail(unreadable[1]["result"].stderr)),
+        ("a run veraPDF didn't finish keeps nothing, so the next reads every PDF again",
+         lambda: any(f[1] == "verapdf:failed" for f in garbled["found"])
+         and after_garbled["read"] == now or fail(repr(garbled["found"]))),
+        ("nor is a PDF written again as it was read kept for the bytes it had",
+         lambda: rewritten["read"] == now and after_rewritten["read"] == now),
+        ("a veraPDF that doesn't say which it is has nothing kept, nor read from the cache",
+         lambda: unsaid == [now, now]),
+        ("--no-cache reads every PDF and leaves the cache as it was",
+         lambda: uncached["read"] == now and kept_after == kept),
+    ]
+
+
 def fail(message):
     print("        " + message[:2000])
     return False
@@ -1149,6 +1378,7 @@ def main():
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
                        ("veraPDF's WCAG findings, cached", case_verapdf_cache),
+                       ("a PDF's own checks, cached", case_pdf_cache),
                        ("axe-core's results, cached", case_axe_cache),
                        ("DAISY's Ace, asked for", case_ace),
                        ("convert.py --check-only", case_check_only)]:

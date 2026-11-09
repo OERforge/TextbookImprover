@@ -32,7 +32,9 @@ a page are kept in the cache too, and a page isn't checked again while
 it and every file it loads are unchanged and so are axe-core,
 Playwright, and the rules, nor an EPUB by Ace while it and Ace are, nor
 a PDF by veraPDF's WCAG profile while it, veraPDF, and the folder of its
-WCAG modules are; a PDF's other checks run every time.
+WCAG modules are. A PDF's own checks are kept too, its metadata and
+claims and veraPDF's PDF/UA run, and an unchanged PDF isn't read again
+while pypdf and veraPDF are the same.
 
 Copyright 2026 Robert Szarka
 
@@ -141,22 +143,26 @@ def gather(paths):
 
 def audit_one(path, kind, validators, wcag=False, verbose=False,
               version=wcag_lib.DEFAULT_VERSION, level=wcag_lib.DEFAULT_LEVEL,
-              wcag_cache=None, reuse=True):
-    """(findings, sections) for one file. wcag: a PDF is checked against
-    veraPDF's WCAG 2.2 machine profile too, for the criteria of WCAG
-    version at level, its own section saying whether the checks ran;
-    verbose: each of its failed checks a finding, and an item in the
-    section, where each rule's are counted in one. wcag_cache: the audit
-    cache's part for those checks, a PDF's kept there and, with reuse,
-    read again while it, veraPDF, and its WCAG modules are the same
-    (pdfcheck.wcag_setup). A page's and an EPUB's WCAG checks are
-    audit_pages'."""
+              wcag_cache=None, reuse=True, pdf_cache=None):
+    """(findings, sections, kept) for one file; kept: when the audit that
+    read it did, for a PDF the cache kept its own checks for, else "".
+    wcag: a PDF is checked against veraPDF's WCAG 2.2 machine profile
+    too, for the criteria of WCAG version at level, its own section
+    saying whether the checks ran; verbose: each of its failed checks a
+    finding, and an item in the section, where each rule's are counted
+    in one. wcag_cache: the audit cache's part for those checks, a PDF's
+    kept there and, with reuse, read again while it, veraPDF, and its
+    WCAG modules are the same (pdfcheck.wcag_setup); pdf_cache: its part
+    for a PDF's own checks, its metadata and claims, read with pypdf,
+    and veraPDF's PDF/UA run, kept there and, with reuse, read again
+    while it, pypdf, and veraPDF are the same (pdfcheck.own_checks). A
+    page's and an EPUB's WCAG checks are audit_pages'."""
     name = os.path.basename(path)
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
         if kind == "source-docx":
             found += sourcecheck.census_findings(path, tablecensus)
-        return found, []
+        return found, [], ""
     if kind == "source-pptx":
         # What PowerPoint's own checker reports, and more (pptxcheck.py),
         # with the defaults for alt text's length and placeholders: a
@@ -165,8 +171,8 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
             deck = pptxparse.read(path)
         except Exception as exc:       # a deck with a password, or no deck at all
             return [fl.Finding(name, "source-unreadable", str(exc)[:200], file=name,
-                               kind="source-pptx")], []
-        return pptxcheck.check(deck, name), []
+                               kind="source-pptx")], [], ""
+        return pptxcheck.check(deck, name), [], ""
     if kind == "html":
         pages = outputcheck.check_html_files([path])
         found = [fl.Finding(f.where, f.check, f.detail, file=name, kind="html")
@@ -177,7 +183,7 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                                  kind="html", tool="vnu") for f in more]
             for note in notes:
                 print(f"  {note}", file=sys.stderr)
-        return found, []
+        return found, [], ""
     if kind == "epub":
         found = [fl.Finding(f.where, f.check, f.detail, file=name, kind="epub")
                  for f in outputcheck.check_epub(path)]
@@ -187,14 +193,17 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                                  kind="epub", tool="epubcheck") for f in more]
             for note in notes:
                 print(f"  {note}", file=sys.stderr)
-        return found, []
+        return found, [], ""
     if kind == "pdf":
-        facts, found = pdfcheck.inspect(path)
-        sections = [(f"{name}: metadata and claims", pdfcheck.facts_lines(facts))]
         command = outputcheck.find_validator("verapdf") if validators else None
-        if command:
-            found = pdfcheck.settle_claims(
-                found, pdfcheck.run_verapdf(command, path))
+        facts, found, kept = pdfcheck.own_checks(path, command, pdf_cache, reuse)
+        lines = pdfcheck.facts_lines(facts)
+        if kept:
+            lines.append(f"- **Not read again:** the PDF is unchanged since the audit that read "
+                         f"it ({fl.md_text(kept)}), as pypdf is"
+                         + (" and veraPDF" if command else "")
+                         + ", so this section and the PDF's own findings are that audit's.")
+        sections = [(f"{name}: metadata and claims", lines)]
         if wcag:
             if not validators:
                 lines = ["veraPDF's WCAG checks not run (--quick)."]
@@ -214,8 +223,8 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
             sections.append((f"{name}: veraPDF's WCAG 2.2 checks",
                              [f"  - {fl.md_text(line.strip())}" if line.startswith("  ")
                               else f"- {fl.md_text(line)}" for line in lines]))
-        return found, sections
-    return [], []
+        return found, sections, kept
+    return [], [], ""
 
 
 def audit_ace(files, validators, cache=None, reuse=True):
@@ -325,8 +334,8 @@ def main():
     inputs = [fl.describe_input(path) for path, _ in files]
     report_md = os.path.join(out_dir, "audit.md")
     # What changes what a report says, besides its inputs, and what a
-    # file's findings are; --wcag changes only a PDF's, which is always
-    # read again.
+    # file's findings are; --wcag changes only a PDF's, which its own
+    # parts of the cache keep with what they turn on.
     if args.verbose and not args.wcag:
         print(pdfcheck.WCAG_ALONE, file=sys.stderr)
     if wcag_lib.choices_given(args) and not args.wcag:
@@ -361,13 +370,15 @@ def main():
                   "finding(s) from the last audit", file=sys.stderr)
             all_found += cached
             continue
-        found, extra = audit_one(path, kind, not args.quick, args.wcag, args.verbose,
-                                 version, level,
-                                 cache.part("verapdf-wcag")
-                                 if cache is not None and kind == "pdf" and args.wcag
-                                 else None, not args.force)
-        print(f"  {os.path.basename(path)}: {len(found)} finding(s)",
-              file=sys.stderr)
+        pdf = cache is not None and kind == "pdf"
+        found, extra, kept = audit_one(path, kind, not args.quick, args.wcag, args.verbose,
+                                       version, level,
+                                       cache.part("verapdf-wcag") if pdf and args.wcag else None,
+                                       not args.force, cache.part("pdf") if pdf else None)
+        print(f"  {os.path.basename(path)}: "
+              + ("unchanged, " if kept and not args.wcag else "")
+              + f"{len(found)} finding(s)"
+              + (" from the last audit" if kept and not args.wcag else ""), file=sys.stderr)
         all_found += found
         sections += extra
         if cache is not None:

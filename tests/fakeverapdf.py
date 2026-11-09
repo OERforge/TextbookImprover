@@ -30,7 +30,11 @@ does, then a build's date and a line of its own; FAKE_VERAPDF_NO_VERSION,
 set, has --version print its usage and end with 2, as a launcher that
 doesn't take it might; and FAKE_VERAPDF_REWRITE, set, has a run with a
 profile add a line to each PDF it's given but the probe, as a build
-writing a PDF again while veraPDF reads it would change it.
+writing a PDF again while veraPDF reads it would change it. A run
+without a profile, veraPDF's PDF/UA checks, fails each PDF on a PDF/UA
+rule with FAKE_VERAPDF_UA set; prints what isn't JSON with
+FAKE_VERAPDF_UA_GARBLED; and adds a line to each PDF with
+FAKE_VERAPDF_UA_REWRITE.
 
 Copyright 2026 Robert Szarka
 
@@ -90,6 +94,13 @@ if profile and os.environ.get("FAKE_VERAPDF_GARBLED"):
     sys.exit(2)
 skip = os.environ.get("FAKE_VERAPDF_SKIP")
 files = [name for name in files if os.path.basename(name) != skip]
+if not profile and os.environ.get("FAKE_VERAPDF_UA_GARBLED"):
+    print("Usage: veraPDF [options] FILES")
+    sys.exit(2)
+if not profile and os.environ.get("FAKE_VERAPDF_UA_REWRITE"):
+    for name in files:
+        with open(name, "ab") as fh:
+            fh.write(b"%rewritten as veraPDF read it\n")
 if profile and os.environ.get("FAKE_VERAPDF_REWRITE"):
     for name in files:
         if os.path.basename(name) != "wcag-probe.pdf":
@@ -121,7 +132,7 @@ link = rule("WCAG2.2", "2.4.9", 1, "SALinkAnnotation", "Links shall contain an a
 jobs = []
 for name in files:
     if not profile:
-        rules = []
+        rules = [ua] if os.environ.get("FAKE_VERAPDF_UA") else []
     elif not loads:
         rules = [ua]
     elif os.path.basename(name) == "wcag-probe.pdf":

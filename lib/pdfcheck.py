@@ -38,8 +38,9 @@ from collections import Counter
 from xml.etree import ElementTree
 
 import alttext
+import findings as findings_lib
 import wcag
-from findings import Finding, describe_input, digest, md_code, md_text, now
+from findings import Finding, describe_input, digest, from_row, md_code, md_text, now, rows_of
 
 try:
     import pypdf
@@ -786,17 +787,25 @@ def verapdf_said(command, timeout=60):
 JAVA_SETTINGS = ("JAVACMD", "JAVA_HOME", "JAVA_OPTS", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS")
 
 
+def verapdf_parts(command, said):
+    """Which veraPDF runs, and how, for a key: its launcher, by where it
+    really is and its SHA-256, and what its --version says; the Java it
+    runs (JAVA_SETTINGS, and the java on the path, by where it really
+    is); and CLASSPATH_PREFIX, as it's set, which goes ahead of veraPDF's
+    own jar on its class path. OSError when the launcher can't be read."""
+    launcher = os.path.realpath(command[-1])
+    return [launcher, digest(launcher), said, [os.environ.get(name, "") for name in JAVA_SETTINGS],
+            os.path.realpath(shutil.which("java") or ""), os.environ.get("CLASSPATH_PREFIX", "")]
+
+
 def wcag_setup(command, folder):
     """What a PDF's WCAG findings turn on besides the PDF, as a key for
     the audit's cache, or None when veraPDF doesn't say which it is, or
-    a file the key is made of can't be read: veraPDF, by its launcher,
-    the launcher's SHA-256, and what its --version says; the Java it
-    runs (JAVA_SETTINGS, and the java on the path, by where it really
-    is); every file in the modules' folder by its SHA-256, the jars, all
-    of which go on veraPDF's class path, the profiles, and anything else
-    there; CLASSPATH_PREFIX, as it's set, which the folder goes ahead of;
-    and this file, which asks veraPDF for the report the findings are
-    read from. Worked out once a run."""
+    a file the key is made of can't be read: veraPDF, as verapdf_parts
+    has it; every file in the modules' folder by its SHA-256, the jars,
+    all of which go on veraPDF's class path, the profiles, and anything
+    else there; and this file, which asks veraPDF for the report the
+    findings are read from. Worked out once a run."""
     said = verapdf_said(command)
     if not said:
         return None
@@ -807,16 +816,110 @@ def wcag_setup(command, folder):
             files = [(name, digest(os.path.join(where, name)))
                      for name in sorted(os.listdir(where))
                      if os.path.isfile(os.path.join(where, name))]
-            launcher = os.path.realpath(command[-1])
-            parts = [launcher, digest(launcher), said,
-                     [os.environ.get(name, "") for name in JAVA_SETTINGS],
-                     os.path.realpath(shutil.which("java") or ""), where, files,
-                     os.environ.get("CLASSPATH_PREFIX", ""), digest(os.path.abspath(__file__))]
+            parts = [verapdf_parts(command, said), where, files,
+                     digest(os.path.abspath(__file__))]
         except OSError:
             parts = None
         _SETUPS[key] = None if parts is None else hashlib.sha256(
             json.dumps(parts).encode("utf-8")).hexdigest()
     return _SETUPS[key]
+
+
+def own_setup(command=None):
+    """What a PDF's own findings turn on besides the PDF, as a key for the
+    audit's cache, or None when veraPDF is to run and doesn't say which
+    it is, or a file the key is made of can't be read: pypdf, by its
+    version, which reads the PDF; veraPDF, when command is given, which
+    checks what the PDF claims, as verapdf_parts has it; and the code
+    the findings are made with, this file, alttext.py, which judges a
+    figure's alt text, and findings.py, which gives each check its
+    severity. Worked out once a run."""
+    key = ("own",) + tuple(command or ())
+    if key not in _SETUPS:
+        said = verapdf_said(command) if command else ""
+        try:
+            parts = None if command and not said else [
+                getattr(pypdf, "__version__", "?") if pypdf else None,
+                verapdf_parts(command, said) if command else None,
+                [digest(path) for path in (os.path.abspath(__file__), alttext.__file__,
+                                           findings_lib.__file__)]]
+        except OSError:
+            parts = None
+        _SETUPS[key] = None if parts is None else hashlib.sha256(
+            json.dumps(parts).encode("utf-8")).hexdigest()
+    return _SETUPS[key]
+
+
+def _own_kept(entry):
+    """Whether an entry in the cache's part for a PDF's own checks is one
+    an audit wrote."""
+    return isinstance(entry, dict) and isinstance(entry.get("sha"), str) \
+        and isinstance(entry.get("name"), str) and isinstance(entry.get("facts"), dict) \
+        and rows_of(entry.get("findings"))
+
+
+def _unchanged(path, sha):
+    """Whether the file still has the SHA-256 it had: a PDF a build wrote
+    again as it was read hasn't."""
+    try:
+        return digest(path) == sha
+    except OSError:
+        return False
+
+
+def own_checks(path, command=None, cache=None, reuse=True):
+    """(facts, findings, when) for one PDF, as an audit has them: what
+    inspect() reads, and with command, veraPDF's verdict on what the PDF
+    claims (run_verapdf, settle_claims); when, for a PDF the cache kept
+    them for, when the audit that read it did, else "". cache: a dict an
+    audit keeps, each PDF's facts and findings kept from a reading with
+    veraPDF's run, when there was one, finished and the PDF's bytes the
+    same after as before, by where the PDF is, with its SHA-256, so one
+    made again replaces its own and one renamed or copied is found by its
+    SHA-256; and, with reuse, given in place of reading the PDF again
+    while it, pypdf, veraPDF, and the code are the same (own_setup). A
+    part kept with another setup is emptied, as is one that isn't what
+    an audit wrote."""
+    name = os.path.basename(path)
+    where = os.path.realpath(path)
+    setup = own_setup(command) if cache is not None else None
+    stored = sha = None
+    if setup is not None:
+        if cache.get("setup") != setup or not isinstance(cache.get("pdfs"), dict):
+            cache.clear()
+            cache.update({"setup": setup, "pdfs": {}})
+        stored = cache["pdfs"]
+        sha = digest(path)
+        entry = None
+        if reuse:
+            entry = stored.get(where)
+            if not (_own_kept(entry) and entry["sha"] == sha):
+                entry = next((e for e in stored.values() if _own_kept(e) and e["sha"] == sha),
+                             None)
+        if entry is not None:
+            facts = dict(entry["facts"], file={"path": path, "sha256": sha,
+                                               "bytes": os.path.getsize(path)}) \
+                if entry["facts"] else {}
+            found = []
+            for row in entry["findings"]:
+                finding = from_row(row)
+                # The PDF's own findings are filed under its name: a PDF
+                # renamed has its new one.
+                if finding.where == entry["name"]:
+                    finding.where = name
+                if finding.file == entry["name"]:
+                    finding.file = name
+                found.append(finding)
+            return facts, found, str(entry.get("when") or "?")
+    facts, found = inspect(path)
+    if command:
+        found = settle_claims(found, run_verapdf(command, path))
+    if stored is not None and not any(f.check == "verapdf:failed" for f in found) \
+            and _unchanged(path, sha):
+        stored[where] = {"sha": sha, "name": name,
+                         "facts": {key: value for key, value in facts.items() if key != "file"},
+                         "findings": [f.row() for f in found], "when": now()}
+    return facts, found, ""
 
 
 def kept_job(path, entry):

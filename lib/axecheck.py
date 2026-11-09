@@ -250,7 +250,7 @@ def budget(limits, presentation):
 
 def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAULT_LEVEL,
           best_practice=False, experimental=False, verbose=False, policy="local", root=None,
-          timeout=None, by_epub=False, limits=None, cache=None, reuse=True):
+          timeout=None, by_epub=False, limits=None, cache=None, reuse=True, tally=None):
     """(findings, lines) for axe-core's rules on the pages and on each
     EPUB's content documents: a note for each rule a page fails, or that
     axe-core couldn't decide, and the lines for the run's summary or a
@@ -266,7 +266,10 @@ def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAUL
     among those checked at once, and three minutes. cache: a dict an
     audit keeps between runs, each page's result kept in it and, with
     reuse, a page's kept result used where nothing it turns on has
-    changed (kept), the page not checked again."""
+    changed (kept), the page not checked again. tally: a dict given the
+    setup's key (setup_key, None without a cache) and how many pages and
+    content documents the worker was given, as "setup" and "ran", which
+    an audit asks to tell whether its report is current."""
     limits = dict(LIMITS, **(limits or {}))
     if importlib.util.find_spec("playwright") is None:
         return [], [f"{NOT_RUN} on the pages: Playwright isn't installed ({INSTALL})."]
@@ -313,6 +316,9 @@ def check(pages=(), epubs=(), *, version=wcag.DEFAULT_VERSION, level=wcag.DEFAUL
     else:
         events = [dict(cache["ready"], kept=True)]
     events += [dict(held[i]["result"], event="page", id=i, kept=held[i]["when"]) for i in held]
+    if tally is not None:
+        tally.update(setup=setup_key(job) if cache is not None else None,
+                     ran=len(fresh) if fresh or not items else 0)
     return report(items, events, stopped, said, job, note)
 
 

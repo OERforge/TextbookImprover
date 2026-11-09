@@ -417,11 +417,9 @@ def case_wcag():
     WCAG profile a PDF fails, counting its failed checks, and with
     --verbose one for each failed check, an item in the report under its
     rule's, notes that leave the exit status the other findings', a
-    section of the report saying the checks ran and may be wrong, a run
-    with --wcag never taking the report for current, since what it finds
-    turns on what's installed too, a report made with other
-    options not taken for the one asked for, and a page read with
-    another --quick read again. At AAA, whose rule for 2.4.9 the stand-in
+    section of the report saying the checks ran and may be wrong, a
+    report made with other options not taken for the one asked for, and
+    a page read with another --quick read again. At AAA, whose rule for 2.4.9 the stand-in
     fails; a section on axe-core's checks of the page, which say why they
     didn't run without Playwright."""
     sys.path.insert(0, HERE)
@@ -496,10 +494,10 @@ def case_wcag():
          lambda: "## HTML pages and EPUBs: axe-core's WCAG checks" in report
          and re.search(r"\n- (axe-core [\d.]+ ran its \d+ rules for WCAG 2\.1 AAA on 1 "
                        r"page\(s\)|axe's WCAG checks not run on the pages)", report)),
-        ("a second audit with --wcag doesn't take the report for current, and checks "
-         "the PDF again, the page coming from the cache",
+        ("an audit with --wcag after one without doesn't take the report for current, the "
+         "page and the PDF coming from the cache",
          lambda: "is current" not in again.stderr
-         and "book.pdf: " in again.stderr and "page.html: unchanged" in again.stderr),
+         and "book.pdf: unchanged" in again.stderr and "page.html: unchanged" in again.stderr),
         ("one without --wcag doesn't take it for current either, and leaves the profile out",
          lambda: "is current" not in without.stderr
          and not any(f.check.startswith("verapdf-wcag:") for f in without_found)
@@ -510,6 +508,159 @@ def case_wcag():
          and "page.html: unchanged" not in quick.stderr),
         ("and another with --quick finds the report current",
          lambda: "is current" in quick_again.stderr),
+    ]
+
+
+def case_current():
+    """With nothing read again, nor checked, and what the checks found
+    turning on what it did, the audit takes its report for current, with
+    --wcag too, and leaves it as it is: not with another WCAG version,
+    level, best practices, experimental rules, or --verbose, nor another
+    veraPDF, its WCAG modules gone, another Ace or none, without veraPDF
+    when it had it, a form of the report asked for that wasn't written
+    with it, a page's stylesheet changed (in a browser), or a file named
+    another way; and again when nothing has changed since. Never while a
+    check runs again each time, keeping nothing: veraPDF's WCAG checks
+    with two versions of a module, Ace failing on an EPUB, veraPDF
+    failing on a PDF's PDF/UA checks; nor when a form of the report it
+    was written in is gone."""
+    sys.path.insert(0, HERE)
+    import fakeace
+    import fakeverapdf
+    import pdfcheck
+    folder = os.path.join(WORK, "current")
+    out = os.path.join(WORK, "current-out")
+    os.makedirs(folder)
+    with open(os.path.join(folder, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>A page</title><link '
+                 'rel="stylesheet" href="page.css"></head><body><main><h1>A page</h1><p>Text.'
+                 "</p></main></body></html>\n")
+    with open(os.path.join(folder, "page.css"), "w", encoding="utf-8") as fh:
+        fh.write("p { color: #222; }\n")
+    with open(os.path.join(folder, "book.pdf"), "wb") as fh:
+        fh.write(pdfcheck.wcag_probe())
+    # A PDF alone, whose WCAG findings turn on the version and level, and
+    # the setup of whose checks doesn't.
+    alone = os.path.join(WORK, "current-pdf")
+    os.makedirs(alone)
+    shutil.copy(os.path.join(folder, "book.pdf"), alone)
+    # And a page alone, whose checks don't name it as a PDF's do.
+    paged = os.path.join(WORK, "current-page")
+    os.makedirs(paged)
+    shutil.copy(os.path.join(folder, "page.html"), paged)
+    subprocess.run(["pandoc", "-f", "markdown", "-t", "epub3", "-o",
+                    os.path.join(folder, "book.epub"), "--metadata", "title=A Book",
+                    "--metadata", "lang=en"], input="# A Chapter\n\nText.\n",
+                   capture_output=True, text=True)
+    env = dict(os.environ, VERAPDF=fakeverapdf.install(os.path.join(WORK, "current-fake")),
+               VERAPDF_WCAG=fakeverapdf.modules(os.path.join(WORK, "current-modules")),
+               ACE=fakeace.install(os.path.join(WORK, "current-ace")))
+    env.pop("CLASSPATH_PREFIX", None)
+    browser = browser_problem() is None
+    stopped = []
+
+    def audit(*flags, paths=(folder,), out=out, **more):
+        """Whether the audit took its report for current, and left it as
+        it was, or else wrote it."""
+        report = os.path.join(out, "audit.md")
+        before = os.path.getmtime(report) if os.path.exists(report) else None
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), *paths,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, env=dict(env, **more))
+        current = "is current" in result.stderr
+        if "Traceback" in result.stderr or current == ("Written to" in result.stderr) \
+                or current != (os.path.getmtime(report) == before):
+            stopped.append(result.stderr)
+        return current
+
+    def twice(*flags, **more):
+        return [audit(*flags, **more) for _ in range(2)]
+    first = audit("--wcag")
+    second = audit("--wcag")
+    # Each choice in turn, then the run before it again, on the PDF alone.
+    choices = [twice("--wcag", *flags, paths=(alone,), out=alone + "-out")
+               + [audit("--wcag", paths=(alone,), out=alone + "-out")] for flags in (
+        ("--wcag-version", "2.2"), ("--wcag-level", "AAA"), ("--best-practice",),
+        ("--experimental",), ("--verbose",))]
+    forms = [audit("--wcag", "--report-html"), audit("--wcag", "--report-html"),
+             audit("--wcag")]
+    os.remove(os.path.join(out, "audit.html"))
+    forms += [audit("--wcag", "--report-html"), audit("--wcag", "--report-html")]
+    # The report made again without its page, the page the one before's.
+    with open(os.path.join(folder, "note.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\ntitle: A note\nlang: en\n---\n\n# A note\n\nText.\n")
+    forms += [audit("--wcag"), audit("--wcag", "--report-html"), audit("--wcag", "--report-html")]
+    # Another veraPDF: another launcher, since another version than its
+    # modules' warns, and a run with a warning keeps nothing.
+    upgraded = twice("--wcag", VERAPDF=fakeverapdf.install(os.path.join(WORK, "current-fake-2")))
+    unmodeled = twice("--wcag", VERAPDF_WCAG="")
+    reaced = twice("--wcag", FAKE_ACE_VERSION="1.4.7")
+    unaced = twice("--wcag", ACE=os.path.join(WORK, "no-ace")) \
+        + twice("--wcag", ACE=os.path.join(WORK, "no-ace-either"))
+    # Checks that keep nothing, so run each time: veraPDF's WCAG checks
+    # with two versions of a module in the folder, which warns; Ace
+    # failing on an EPUB; and veraPDF's PDF/UA checks failing on the PDF,
+    # each with another Ace or veraPDF, so that the cache has nothing for
+    # it.
+    extra = os.path.join(WORK, "current-modules", "wcag-validation-1.30.2.jar")
+    open(extra, "w").close()
+    duplicated = twice("--wcag")
+    os.remove(extra)
+    unduplicated = twice("--wcag")
+    failing = [twice("--wcag", FAKE_ACE_VERSION="1.4.8", FAKE_ACE_FAIL="1"),
+               twice("--wcag", FAKE_VERAPDF_UA_GARBLED="1",
+                     VERAPDF=fakeverapdf.install(os.path.join(WORK, "current-fake-3")))]
+    plain = twice()
+    unverapdf = twice(VERAPDF=os.path.join(WORK, "no-verapdf"))
+    again = audit("--wcag")
+    if browser:
+        with open(os.path.join(folder, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write("p { color: #333; }\n")
+    restyled = twice("--wcag")
+    named = twice("--wcag", paths=(os.path.relpath(folder, WORK),)) + [
+        audit("--wcag", paths=(paged,), out=paged + "-out"),
+        audit("--wcag", paths=(paged,), out=paged + "-out")] + twice(
+        "--wcag", paths=(os.path.relpath(paged, WORK),), out=paged + "-out")
+    # A file read again, as when the cache has lost what it found.
+    with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+        data = json.load(fh)
+    del data[os.path.realpath(os.path.join(folder, "page.html"))]
+    with open(os.path.join(out, "audit-cache.json"), "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    lost = twice("--wcag", paths=(os.path.relpath(folder, WORK),))
+    return [
+        ("each audit finishes, and takes the report for current just when it leaves it as it "
+         "was",
+         lambda: not stopped or fail(stopped[0][-2000:])),
+        ("an audit with --wcag and nothing changed takes the report for current",
+         lambda: not first and second),
+        ("but not with another WCAG version, level, best practices, experimental rules, or "
+         "--verbose, on a PDF alone, each of them current run again, and the run before them "
+         "not",
+         lambda: choices == [[False, True, False]] * 5 or fail(repr(choices))),
+        ("nor with a form of the report asked for that wasn't written with it, or is gone, "
+         "until it is",
+         lambda: forms == [False, True, True, False, True, False, False, True]
+         or fail(repr(forms))),
+        ("nor with another veraPDF, its WCAG modules gone, another Ace, or none, and none "
+         "said of in other words",
+         lambda: [upgraded, unmodeled, reaced, unaced] == [[False, True]] * 3
+         + [[False, True, False, True]] or fail(repr([upgraded, unmodeled, reaced, unaced]))),
+        ("never while a check runs again each time, keeping nothing: veraPDF's WCAG checks "
+         "with two versions of a module, Ace failing on an EPUB, or veraPDF on a PDF's PDF/UA "
+         "checks",
+         lambda: duplicated == [False, False] and unduplicated == [False, True]
+         and failing == [[False, False]] * 2 or fail(repr([duplicated, unduplicated, failing]))),
+        ("without --wcag, nor without veraPDF when it had it",
+         lambda: [plain, unverapdf, again] == [[False, True], [False, True], False]
+         or fail(repr([plain, unverapdf, again]))),
+        ("nor with a page's stylesheet changed, in a browser",
+         lambda: restyled == [False, True] if browser
+         else print("  skip  no browser: a stylesheet changed isn't checked") or True),
+        ("nor with its files named another way",
+         lambda: named == [False, True] * 3 or fail(repr(named))),
+        ("nor with a file read again, as when the cache has lost what it found",
+         lambda: lost == [False, True] or fail(repr(lost))),
     ]
 
 
@@ -674,15 +825,17 @@ def case_verapdf_cache():
          lambda: first["checked"] == both and [w[:2] for w in first["wcag"]] == [
              ("book.pdf", "verapdf-wcag:1.3.1-1"), ("other.pdf", "verapdf-wcag:1.3.1-1")]),
         ("the second runs it on neither, its findings the first's, saying each PDF wasn't "
-         "checked again, and asks veraPDF once which it is",
+         "checked again, and so the report is current, and asks veraPDF once which it is",
          lambda: second["checked"] == [] and second["wcag"] == first["wcag"]
          and second["result"].stderr.count(held) == 2
          and second["result"].stderr.count("WCAG 2.2 machine checks ran on no PDF again") == 2
-         and second["asked"] == 1 and held in second["report"]),
-        ("at AAA, the rule beyond AA is a note too, from what was kept, veraPDF not run",
+         and "is current" in second["result"].stderr and second["asked"] == 1),
+        ("at AAA, the rule beyond AA is a note too, from what was kept, veraPDF not run, the "
+         "report saying each PDF wasn't checked again",
          lambda: aaa["checked"] == [] and [w[:2] for w in aaa["wcag"]] == [
              ("book.pdf", "verapdf-wcag:1.3.1-1"), ("book.pdf", "verapdf-wcag:2.4.9-1"),
-             ("other.pdf", "verapdf-wcag:1.3.1-1"), ("other.pdf", "verapdf-wcag:2.4.9-1")]),
+             ("other.pdf", "verapdf-wcag:1.3.1-1"), ("other.pdf", "verapdf-wcag:2.4.9-1")]
+         and aaa["report"].count(held) == 2),
         ("with --verbose, each failed check a note at its page, from what was kept",
          lambda: loud["checked"] == [] and [w[:2] for w in loud["wcag"]] == [
              ("book.pdf#page=653", "verapdf-wcag:1.3.1-1"),
@@ -698,9 +851,11 @@ def case_verapdf_cache():
              ("other.pdf", "verapdf-wcag:1.3.1-1"), ("renamed.pdf", "verapdf-wcag:1.3.1-1")]
          and "book.pdf" not in renamed["report"]),
         ("a file more in the modules' folder has every PDF checked again, and so does a "
-         "profile edited there",
+         "profile edited there, neither PDF said to be unchanged",
          lambda: remodeled["checked"] == ["other.pdf", "renamed.pdf"]
-         and reprofiled["checked"] == ["other.pdf", "renamed.pdf"]),
+         and reprofiled["checked"] == ["other.pdf", "renamed.pdf"]
+         and "unchanged" not in remodeled["result"].stderr
+         and "renamed.pdf: unchanged" in renamed["result"].stderr),
         ("and so does --force",
          lambda: forced["checked"] == ["other.pdf", "renamed.pdf"]),
         ("and CLASSPATH_PREFIX, each setting the Java veraPDF runs turns on, the java on the "
@@ -1377,6 +1532,7 @@ def main():
                        ("a file renamed, copied, or made again", case_renamed),
                        ("a file's own text in the report", case_report_text),
                        ("veraPDF's WCAG checks, asked for", case_wcag),
+                       ("the report, current or not", case_current),
                        ("veraPDF's WCAG findings, cached", case_verapdf_cache),
                        ("a PDF's own checks, cached", case_pdf_cache),
                        ("axe-core's results, cached", case_axe_cache),

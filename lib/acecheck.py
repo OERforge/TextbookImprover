@@ -239,7 +239,7 @@ def kept(entry):
         and isinstance(entry.get("result"), dict)
 
 
-def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT):
+def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT, tally=None):
     """(findings, lines) for Ace on the EPUBs: a note for each of its own
     findings, and the summary's lines, the first saying what ran, then a
     warning for each EPUB it didn't check, then one for each rule. With no
@@ -250,7 +250,10 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
     reuse, used while the EPUB and Ace are the same (setup_key); nothing
     is kept or used with an Ace that doesn't say its version, nor kept of
     an EPUB written again as Ace read it, and a part that isn't what an
-    audit wrote is started again."""
+    audit wrote is started again. tally: a dict given the setup's key
+    (None when nothing could be kept) and how many EPUBs Ace was run on,
+    as "setup" and "ran", which an audit asks to tell whether its report
+    is current."""
     if not epubs:
         return [], probe(command, timeout)
     said_version = version(command)
@@ -264,7 +267,7 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
         for entry in stored.values():
             if kept(entry):
                 by_sha.setdefault(entry["sha"], entry)
-    found, failed, results, whens = [], [], [], set()
+    found, failed, results, whens, ran = [], [], [], set(), 0
     when = findings_lib.now()
     for epub in epubs:
         entry, sha, where = None, None, os.path.realpath(epub)
@@ -278,6 +281,7 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
             result = entry["result"]
             whens.add(str(entry.get("when") or "?"))
         else:
+            ran += 1
             result = run(command, epub, timeout)
             if "error" in result:
                 failed.append((epub, result["error"]))
@@ -286,6 +290,8 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
                 stored[where] = {"sha": sha, "result": result, "when": when}
         results.append((epub, result, entry is not None))
         found += own_findings(result, epub, by_epub)
+    if tally is not None:
+        tally.update(setup=setup, ran=ran)
     return found, summary(results, failed, said_version, whens, found)
 
 

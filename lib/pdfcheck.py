@@ -867,7 +867,7 @@ def _unchanged(path, sha):
         return False
 
 
-def own_checks(path, command=None, cache=None, reuse=True):
+def own_checks(path, command=None, cache=None, reuse=True, tally=None):
     """(facts, findings, when) for one PDF, as an audit has them: what
     inspect() reads, and with command, veraPDF's verdict on what the PDF
     claims (run_verapdf, settle_claims); when, for a PDF the cache kept
@@ -879,11 +879,16 @@ def own_checks(path, command=None, cache=None, reuse=True):
     SHA-256; and, with reuse, given in place of reading the PDF again
     while it, pypdf, veraPDF, and the code are the same (own_setup). A
     part kept with another setup is emptied, as is one that isn't what
-    an audit wrote."""
+    an audit wrote. tally: a dict given the setup's key (None when
+    nothing could be kept) and 1 when the PDF was read, else 0, as
+    "setup" and "ran", which an audit asks to tell whether its report is
+    current."""
     name = os.path.basename(path)
     where = os.path.realpath(path)
     setup = own_setup(command) if cache is not None else None
     stored = sha = None
+    if tally is not None:
+        tally.update(setup=setup, ran=1)
     if setup is not None:
         if cache.get("setup") != setup or not isinstance(cache.get("pdfs"), dict):
             cache.clear()
@@ -910,6 +915,8 @@ def own_checks(path, command=None, cache=None, reuse=True):
                 if finding.file == entry["name"]:
                     finding.file = name
                 found.append(finding)
+            if tally is not None:
+                tally["ran"] = 0
             return facts, found, str(entry.get("when") or "?")
     facts, found = inspect(path)
     if command:
@@ -931,7 +938,7 @@ def kept_job(path, entry):
 
 
 def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
-                     wcag_version=None, wcag_level=None, cache=None, reuse=True):
+                     wcag_version=None, wcag_level=None, cache=None, reuse=True, tally=None):
     """veraPDF's WCAG 2.2 machine checks on the PDFs, as (findings,
     lines): a note for each of the profile's own rules a PDF failed,
     counting its failed checks, and the lines for the run's summary or a
@@ -951,7 +958,11 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
     checked it with nothing amiss, by where the PDF is, with its SHA-256,
     and, with reuse, read again in place of a run while the PDF, veraPDF,
     and the modules' folder are the same (wcag_setup), what's reported
-    decided as for a run's: by verbose, wcag_version, and wcag_level."""
+    decided as for a run's: by verbose, wcag_version, and wcag_level.
+    tally: a dict given the setup's key (None when nothing could be kept)
+    and how many PDFs veraPDF was given, as "setup" and "ran", once the
+    checks can run at all, which an audit asks to tell whether its report
+    is current."""
     if folder is None:
         folder = os.environ.get(WCAG_VARIABLE, "").strip()
     if not folder:
@@ -1043,6 +1054,8 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
                 groups[major] = fresh
             else:
                 del groups[major]
+    if tally is not None:
+        tally.update(setup=setup, ran=sum(len(group) for group in groups.values()))
     if not groups and not held:
         return [], warnings + unfitting
     findings, rules, ran, left_out = [], [], [], []

@@ -10,10 +10,13 @@ directory given, or -o): audit.csv, one finding per row in the format
 every check here shares, and audit.md, the same findings as a report a
 person reads, with each PDF's metadata and claims. A file already
 audited where it is, and unchanged since (by SHA-256), is not read again
-unless --force says so. The reports aren't among what it reads, nor is a
-report an audit wrote found in a directory given, and it writes over
-nothing in the output directory that an audit didn't write: a file
-there by the name of one it writes stops it, unless an audit wrote it.
+unless --force says so; and with no file read again, no check run, and
+what each check's findings turn on as it was when the report was made,
+the report is current, and is left as it is. The reports aren't among
+what it reads, nor is a report an audit wrote found in a directory
+given, and it writes over nothing in the output directory that an audit
+didn't write: a file there by the name of one it writes stops it,
+unless an audit wrote it.
 
 Depends on lib/ and on Pandoc (to read a source), and optionally on
 pypdf (PDFs), epubcheck, the Nu HTML checker, and veraPDF, each found
@@ -53,6 +56,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import sys
@@ -141,11 +146,31 @@ def gather(paths):
     return out
 
 
+class Tally:
+    """What an audit's checks did, which says whether its report is
+    current: how many times one read a file or ran on one (ran), and what
+    each one's findings turned on besides the files (said): its setup's
+    key, or, from a check that couldn't run, what it said."""
+
+    def __init__(self):
+        self.ran, self.said = 0, []
+
+    def add(self, check, part, lines, path=""):
+        """A check's part of the tally, the dict it was given ("setup",
+        "ran"), and the lines it said; path names the file it checked,
+        for a check that runs on each file alone."""
+        self.ran += part.get("ran", 0)
+        self.said.append([check, path, part.get("setup") or lines])
+
+    def digest(self):
+        return hashlib.sha256(json.dumps(self.said).encode("utf-8")).hexdigest()
+
+
 def audit_one(path, kind, validators, wcag=False, verbose=False,
               version=wcag_lib.DEFAULT_VERSION, level=wcag_lib.DEFAULT_LEVEL,
-              wcag_cache=None, reuse=True, pdf_cache=None):
-    """(findings, sections, kept) for one file; kept: when the audit that
-    read it did, for a PDF the cache kept its own checks for, else "".
+              wcag_cache=None, reuse=True, pdf_cache=None, tally=None):
+    """(findings, sections, ran) for one file; ran: how many of its
+    checks read it or ran on it, 0 for a PDF whose checks the cache kept.
     wcag: a PDF is checked against veraPDF's WCAG 2.2 machine profile
     too, for the criteria of WCAG version at level, its own section
     saying whether the checks ran; verbose: each of its failed checks a
@@ -155,14 +180,17 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
     WCAG modules are the same (pdfcheck.wcag_setup); pdf_cache: its part
     for a PDF's own checks, its metadata and claims, read with pypdf,
     and veraPDF's PDF/UA run, kept there and, with reuse, read again
-    while it, pypdf, and veraPDF are the same (pdfcheck.own_checks). A
-    page's and an EPUB's WCAG checks are audit_pages'."""
+    while it, pypdf, and veraPDF are the same (pdfcheck.own_checks).
+    tally: a Tally, given what a PDF's checks did. A page's and an EPUB's
+    WCAG checks are audit_pages'."""
     name = os.path.basename(path)
+    if tally is None:
+        tally = Tally()
     if kind in ("source-docx", "source-md"):
         found = sourcecheck.check(path, kind)
         if kind == "source-docx":
             found += sourcecheck.census_findings(path, tablecensus)
-        return found, [], ""
+        return found, [], 1
     if kind == "source-pptx":
         # What PowerPoint's own checker reports, and more (pptxcheck.py),
         # with the defaults for alt text's length and placeholders: a
@@ -171,8 +199,8 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
             deck = pptxparse.read(path)
         except Exception as exc:       # a deck with a password, or no deck at all
             return [fl.Finding(name, "source-unreadable", str(exc)[:200], file=name,
-                               kind="source-pptx")], [], ""
-        return pptxcheck.check(deck, name), [], ""
+                               kind="source-pptx")], [], 1
+        return pptxcheck.check(deck, name), [], 1
     if kind == "html":
         pages = outputcheck.check_html_files([path])
         found = [fl.Finding(f.where, f.check, f.detail, file=name, kind="html")
@@ -183,7 +211,7 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                                  kind="html", tool="vnu") for f in more]
             for note in notes:
                 print(f"  {note}", file=sys.stderr)
-        return found, [], ""
+        return found, [], 1
     if kind == "epub":
         found = [fl.Finding(f.where, f.check, f.detail, file=name, kind="epub")
                  for f in outputcheck.check_epub(path)]
@@ -193,10 +221,13 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                                  kind="epub", tool="epubcheck") for f in more]
             for note in notes:
                 print(f"  {note}", file=sys.stderr)
-        return found, [], ""
+        return found, [], 1
     if kind == "pdf":
         command = outputcheck.find_validator("verapdf") if validators else None
-        facts, found, kept = pdfcheck.own_checks(path, command, pdf_cache, reuse)
+        part = {}
+        facts, found, kept = pdfcheck.own_checks(path, command, pdf_cache, reuse, part)
+        tally.add("pdf", part, [], path)
+        ran = part["ran"]
         lines = pdfcheck.facts_lines(facts)
         if kept:
             lines.append(f"- **Not read again:** the PDF is unchanged since the audit that read "
@@ -205,6 +236,7 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                          + ", so this section and the PDF's own findings are that audit's.")
         sections = [(f"{name}: metadata and claims", lines)]
         if wcag:
+            part = {}
             if not validators:
                 lines = ["veraPDF's WCAG checks not run (--quick)."]
             elif not command:
@@ -214,8 +246,10 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
                 more, lines = pdfcheck.run_verapdf_wcag(command, [path], verbose=verbose,
                                                         wcag_version=version,
                                                         wcag_level=level, cache=wcag_cache,
-                                                        reuse=reuse)
+                                                        reuse=reuse, tally=part)
                 found += more
+            tally.add("verapdf-wcag", part, lines, path)
+            ran += part.get("ran", 0)
             for line in lines:
                 print(f"  {line}", file=sys.stderr)
             # A failed check's line, with --verbose, an item under its rule's;
@@ -223,48 +257,55 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
             sections.append((f"{name}: veraPDF's WCAG 2.2 checks",
                              [f"  - {fl.md_text(line.strip())}" if line.startswith("  ")
                               else f"- {fl.md_text(line)}" for line in lines]))
-        return found, sections, kept
-    return [], [], ""
+        return found, sections, ran
+    return [], [], 1
 
 
-def audit_ace(files, validators, cache=None, reuse=True):
+def audit_ace(files, validators, cache=None, reuse=True, tally=None):
     """(findings, sections) of DAISY's Ace on the EPUBs among the files,
     when it's installed, its section saying whether it ran; for --wcag.
     cache: the audit cache's part for it, each EPUB's result kept by where
     the EPUB is, with its SHA-256, and, with reuse, used again while it
-    and Ace are the same (acecheck.check)."""
+    and Ace are the same (acecheck.check). tally: a Tally, given what
+    Ace did."""
     epubs = [path for path, kind in files if kind == "epub"]
     if not epubs:
         return [], []
-    found, lines = [], [acecheck.NOT_RUN_QUICK]
+    found, lines, part = [], [acecheck.NOT_RUN_QUICK], {}
     if validators:
         command, why = acecheck.find()
         lines = [why]
         if command:
             found, lines = acecheck.check(command, epubs, by_epub=True, cache=cache,
-                                          reuse=reuse)
+                                          reuse=reuse, tally=part)
+    if tally is not None:
+        tally.add("ace", part, lines)
     for line in lines:
         print(f"  {line}", file=sys.stderr)
     return found, [("EPUBs: DAISY's Ace", [f"- {fl.md_text(line)}" for line in lines])]
 
 
 def audit_pages(files, validators, verbose, version, level, best_practice, experimental,
-                cache=None, reuse=True):
+                cache=None, reuse=True, tally=None):
     """(findings, sections) of axe-core's rules on the HTML pages and EPUBs
     among the files, in one worker for all of them, its section saying
     whether they ran; for --wcag. cache: the audit cache's part for them,
     each page's result kept there and, with reuse, used again where the
-    page hasn't changed (axecheck.kept)."""
+    page hasn't changed (axecheck.kept). tally: a Tally, given what
+    axe-core did."""
     pages = [path for path, kind in files if kind == "html"]
     epubs = [path for path, kind in files if kind == "epub"]
     if not pages and not epubs:
         return [], []
-    found, lines = [], [axecheck.NOT_RUN_QUICK]
+    found, lines, part = [], [axecheck.NOT_RUN_QUICK], {}
     if validators:
         # Each finding filed under the file audited, an EPUB's under the EPUB.
         found, lines = axecheck.check(pages, epubs, version=version, level=level,
                                       best_practice=best_practice, experimental=experimental,
-                                      verbose=verbose, by_epub=True, cache=cache, reuse=reuse)
+                                      verbose=verbose, by_epub=True, cache=cache, reuse=reuse,
+                                      tally=part)
+    if tally is not None:
+        tally.add("axe", part, lines)
     for line in lines:
         print(f"  {line}", file=sys.stderr)
     return found, [("HTML pages and EPUBs: axe-core's WCAG checks",
@@ -333,55 +374,42 @@ def main():
                                                              "audit-cache.json"))
     inputs = [fl.describe_input(path) for path, _ in files]
     report_md = os.path.join(out_dir, "audit.md")
-    # What changes what a report says, besides its inputs, and what a
-    # file's findings are; --wcag changes only a PDF's, which its own
-    # parts of the cache keep with what they turn on.
     if args.verbose and not args.wcag:
         print(pdfcheck.WCAG_ALONE, file=sys.stderr)
     if wcag_lib.choices_given(args) and not args.wcag:
         print(wcag_lib.CHOICES_ALONE, file=sys.stderr)
     version, level, best_practice, experimental = wcag_lib.chosen(args)
+    # What the report says turns on, besides its files: --quick, and
+    # --wcag with what it's asked to check against, which a page's and a
+    # PDF's findings turn on too, kept in parts of their own.
     options = {"quick": bool(args.quick), "wcag": bool(args.wcag)}
+    if args.wcag:
+        options.update({"version": version, "level": level, "best-practice": best_practice,
+                        "experimental": experimental, "verbose": bool(args.verbose)})
     per_file = {"quick": bool(args.quick)}
-    # Nothing changed since the last audit: say so and leave the report
-    # as it is, so its date stays the date of the audit it records. Not
-    # with --wcag, whose findings turn on what's installed too, veraPDF
-    # and its WCAG modules, axe-core and Playwright, and Ace, which only
-    # each one's own part of the cache asks after, as it runs: a report
-    # made before the modules were set up isn't current once they are.
-    if cache is not None and not args.force and not args.wcag \
-            and os.path.exists(report_md) \
-            and all(cache.lookup(path, i["sha256"], per_file) is not None
-                    for (path, _), i in zip(files, inputs)) \
-            and cache.same_inputs((i["sha256"] for i in inputs), options):
-        when = cache.audited_at()
-        print(f"Nothing has changed since the audit of {when}; "
-              f"{report_md} is current. --force audits again.",
-              file=sys.stderr)
-        found = [f for (path, _), i in zip(files, inputs)
-                 for f in cache.lookup(path, i["sha256"], per_file)]
-        return 1 if any(f.severity == "error" for f in found) else 0
+    tally = Tally()
     all_found, sections = [], []
     for (path, kind), item in zip(files, inputs):
-        cached = None if (args.force or cache is None) else cache.lookup(
+        cached = None if (args.force or cache is None or kind == "pdf") else cache.lookup(
             path, item["sha256"], per_file)
-        if cached is not None and kind != "pdf":
+        if cached is not None:
             print(f"  {os.path.basename(path)}: unchanged, {len(cached)} "
                   "finding(s) from the last audit", file=sys.stderr)
             all_found += cached
             continue
         pdf = cache is not None and kind == "pdf"
-        found, extra, kept = audit_one(path, kind, not args.quick, args.wcag, args.verbose,
-                                       version, level,
-                                       cache.part("verapdf-wcag") if pdf and args.wcag else None,
-                                       not args.force, cache.part("pdf") if pdf else None)
-        print(f"  {os.path.basename(path)}: "
-              + ("unchanged, " if kept and not args.wcag else "")
-              + f"{len(found)} finding(s)"
-              + (" from the last audit" if kept and not args.wcag else ""), file=sys.stderr)
+        found, extra, ran = audit_one(path, kind, not args.quick, args.wcag, args.verbose,
+                                      version, level,
+                                      cache.part("verapdf-wcag") if pdf and args.wcag else None,
+                                      not args.force, cache.part("pdf") if pdf else None, tally)
+        if kind != "pdf":
+            tally.ran += ran
+        print(f"  {os.path.basename(path)}: " + ("unchanged, " if not ran else "")
+              + f"{len(found)} finding(s)" + (" from the last audit" if not ran else ""),
+              file=sys.stderr)
         all_found += found
         sections += extra
-        if cache is not None:
+        if cache is not None and kind != "pdf":
             cache.store(path, item["sha256"], found, per_file)
     if args.wcag:
         # After the cache has each file's own findings: axe-core's turn on
@@ -390,15 +418,28 @@ def main():
         found, extra = audit_pages(files, not args.quick, args.verbose, version, level,
                                    best_practice, experimental,
                                    None if cache is None else cache.part("axe"),
-                                   not args.force)
+                                   not args.force, tally)
         all_found += found
         sections += extra
         found, extra = audit_ace(files, not args.quick,
-                                 None if cache is None else cache.part("ace"), not args.force)
+                                 None if cache is None else cache.part("ace"), not args.force,
+                                 tally)
         all_found += found
         sections += extra
+    # Nothing read again, nor checked, and what the checks found turning
+    # on what it did when the report was made: the report is current, so
+    # it's left as it is, its date the date of the audit it records. Its
+    # files are named as given, as the report names them.
+    state = {"inputs": [[item["path"], item["sha256"]] for item in inputs],
+             "options": options, "said": tally.digest()}
+    if cache is not None and not args.force and not tally.ran \
+            and all(os.path.exists(target) for target in writes) \
+            and cache.report_current(state, names):
+        print(f"Nothing has changed since the audit of {cache.audited_at()}; "
+              f"{report_md} is current. --force audits again.", file=sys.stderr)
+        return 1 if any(fl.upgrade(f).severity == "error" for f in all_found) else 0
     if cache is not None:
-        cache.note_inputs((i["sha256"] for i in inputs), options)
+        cache.note_report(state, names)
         cache.save()
     fl.write_csv(os.path.join(out_dir, "audit.csv"), all_found)
     fl.write_report(report_md, all_found, inputs, sections, version=VERSION)

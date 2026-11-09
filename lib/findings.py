@@ -485,19 +485,21 @@ class Cache:
                                              "findings": [f.row() for f in findings],
                                              "options": options or {}, "when": now()}
 
-    def note_inputs(self, hashes, options=None):
-        """Which inputs the last report covered, with which options
-        (audit.py's --quick and --wcag), and when."""
-        self.data["__report__"] = {"inputs": sorted(hashes),
-                                   "options": options or {}, "when": now()}
+    def note_report(self, state, forms):
+        """What the report written now covers, as audit.py has it (state):
+        its inputs, its options, and what its checks' findings turned on;
+        the forms it was written in, by their files' names; and when."""
+        self.data["__report__"] = dict(state, forms=sorted(forms), when=now())
 
-    def same_inputs(self, hashes, options=None):
-        """Whether the last report covered these inputs with these
-        options: a report made without the validators, or without
-        veraPDF's WCAG checks, isn't the one asked for with them."""
-        report = self.data.get("__report__") or {}
-        return report.get("inputs") == sorted(hashes) \
-            and report.get("options", {}) == (options or {})
+    def report_current(self, state, forms):
+        """Whether the last report covered what state says, and was
+        written in each of these forms: one made without the validators,
+        or with another WCAG level, isn't the one asked for, nor is one
+        without its page when audit.html is asked for."""
+        report = self.data.get("__report__")
+        return isinstance(report, dict) and all(
+            report.get(key) == value for key, value in state.items()) \
+            and isinstance(report.get("forms"), list) and set(forms) <= set(report["forms"])
 
     def audited_at(self):
         return (self.data.get("__report__") or {}).get("when", "?")

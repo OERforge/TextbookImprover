@@ -810,9 +810,13 @@ def case_ace():
     (tests/fakeace.py): its own findings notes, filed under the EPUB, a
     section of the report saying it ran; the next audit keeps each
     unchanged EPUB's result, Ace not run, and runs it again on an EPUB
-    that has changed, and on every one with --force; a part of the cache
-    that isn't what the audit wrote is started again; --no-cache runs it
-    and leaves the cache alone; --quick and no --wcag don't run it."""
+    that has changed, its entry replacing its last, and on every one
+    with --force; a part of the cache that isn't what the audit wrote is
+    started again; --no-cache runs it and leaves the cache alone; an
+    EPUB renamed isn't checked again, and has its new name; another Ace
+    checks every EPUB again; an Ace that doesn't say its version, and an
+    EPUB written again as Ace read it, have nothing kept; --quick and no
+    --wcag don't run it."""
     sys.path.insert(0, HERE)
     import fakeace
     folder = os.path.join(WORK, "ace")
@@ -848,22 +852,27 @@ def case_ace():
         with open(log, encoding="utf-8") as fh:
             return sum(1 for line in fh if '"-o"' in line)
 
-    def audit(*flags):
+    def audit(*flags, **more):
         before = runs()
         result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
                                  "-o", out, *flags], cwd=WORK, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL,
-                                env=dict(os.environ, ACE=fake, FAKE_ACE_LOG=log))
+                                env=dict(os.environ, ACE=fake, FAKE_ACE_LOG=log, **more))
         found = sorted((f.where, f.check, f.file, f.severity)
                        for f in fl.read_csv(os.path.join(out, "audit.csv")) if f.tool == "ace")
         with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
             return result.stderr, found, fh.read(), runs() - before
+
+    def part():
+        with open(os.path.join(out, "audit-cache.json"), encoding="utf-8") as fh:
+            return json.load(fh)["__ace__"]
     plain = audit()
     quick = audit("--wcag", "--quick")
     first = audit("--wcag")
     second = audit("--wcag")
     book("two.epub", "Two, again")
     changed = audit("--wcag")
+    entries = sorted(os.path.basename(key) for key in part()["epubs"])
     forced = audit("--wcag", "--force")
 
     def broken(change):
@@ -878,11 +887,32 @@ def case_ace():
     no_epubs = broken(lambda part: part.update(epubs=None))
     one_entry = broken(lambda part: part["epubs"].update(
         {next(iter(sorted(part["epubs"]))): "not an entry"}))
+    # An entry as the audit wrote one before it kept the EPUB's SHA-256,
+    # and one whose result isn't one.
+    no_sha = broken(lambda part: part["epubs"].update(
+        {key: {"result": entry["result"], "when": entry["when"]}
+         for key, entry in sorted(part["epubs"].items())[:1]}))
+    no_result = broken(lambda part: [entry.update(result="not a result")
+                                     for _, entry in sorted(part["epubs"].items())[:1]])
     with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
         kept_bytes = fh.read()
     uncached = audit("--wcag", "--no-cache")
     with open(os.path.join(out, "audit-cache.json"), "rb") as fh:
         after_bytes = fh.read()
+    os.rename(os.path.join(folder, "one.epub"), os.path.join(folder, "renamed.epub"))
+    renamed = audit("--wcag")
+    upgraded = [audit("--wcag", FAKE_ACE_VERSION="1.4.7") for _ in range(2)]
+    unsaid = [audit("--wcag", FAKE_ACE_NO_VERSION="1") for _ in range(2)]
+    # A build that writes an EPUB again as Ace reads it: what Ace found
+    # isn't kept for the bytes it had before. Another Ace first, so the
+    # cache has nothing for the setup, and what the run keeps is all there is.
+    saved = {name: open(os.path.join(folder, name), "rb").read()
+             for name in ("renamed.epub", "two.epub")}
+    rewritten = audit("--wcag", FAKE_ACE_VERSION="1.4.8", FAKE_ACE_REWRITE="1")
+    for name, data in saved.items():
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(data)
+    after_rewritten = audit("--wcag", FAKE_ACE_VERSION="1.4.8")
     expected = [("EPUB/a.xhtml", "ace:epub-type-has-matching-role", "one.epub", "note"),
                 ("EPUB/a.xhtml", "ace:epub-type-has-matching-role", "two.epub", "note"),
                 ("EPUB/p.opf", "ace:metadata-accessmode", "one.epub", "note"),
@@ -906,13 +936,34 @@ def case_ace():
         ("an EPUB that has changed is checked again, and only it, and --force checks every one",
          lambda: changed[3] == 1 and "checked 1 EPUB(s)" in changed[0] and forced[3] == 2
          or fail("got: " + changed[0])),
+        ("its entry in the cache replaces its last, by where the EPUB is",
+         lambda: entries == ["one.epub", "two.epub"] or fail(repr(entries))),
         ("a part of the cache that isn't what the audit wrote is started again, and an entry "
-         "that isn't one has its EPUB checked again",
+         "that isn't one has its EPUB checked again, and said to be",
          lambda: "Traceback" not in no_epubs[0] + one_entry[0] and no_epubs[3] == 2
          and one_entry[3] == 1 and no_epubs[1] == one_entry[1] == expected
+         and "checked 1 EPUB(s)" in one_entry[0]
+         and "1 EPUB(s) weren't checked again" in one_entry[0]
          or fail("got: " + no_epubs[0] + one_entry[0])),
+        ("and so does one without the EPUB's SHA-256, or whose result isn't one",
+         lambda: "Traceback" not in no_sha[0] + no_result[0] and no_sha[3] == no_result[3] == 1
+         and no_sha[1] == no_result[1] == expected or fail("got: " + no_sha[0] + no_result[0])),
         ("--no-cache runs it, and leaves the cache as it was",
          lambda: uncached[3] == 2 and after_bytes == kept_bytes),
+        ("an EPUB renamed isn't checked again, and its findings have its new name",
+         lambda: renamed[3] == 0 and [f[2] for f in renamed[1]] == [
+             "renamed.epub", "two.epub", "renamed.epub", "two.epub"]
+         and "one.epub" not in renamed[2].split("## EPUBs: DAISY's Ace")[1]
+         or fail("got: " + renamed[0])),
+        ("another Ace checks every EPUB again, and keeps what it found",
+         lambda: [u[3] for u in upgraded] == [2, 0]
+         and "Ace by DAISY 1.4.7 checked 2 EPUB(s)" in upgraded[0][0]
+         or fail("got: " + upgraded[0][0])),
+        ("an Ace that doesn't say its version has nothing kept, nor read from the cache",
+         lambda: [u[3] for u in unsaid] == [2, 2] or fail("got: " + unsaid[1][0])),
+        ("nor is an EPUB written again as Ace read it kept for the bytes it had",
+         lambda: rewritten[3] == 2 and after_rewritten[3] == 2
+         or fail("got: " + after_rewritten[0])),
     ]
 
 

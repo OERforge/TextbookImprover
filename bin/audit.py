@@ -221,8 +221,9 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
 def audit_ace(files, validators, cache=None, reuse=True):
     """(findings, sections) of DAISY's Ace on the EPUBs among the files,
     when it's installed, its section saying whether it ran; for --wcag.
-    cache: the audit cache's part for it, each EPUB's result kept by its
-    SHA-256 and, with reuse, used again while it and Ace are the same."""
+    cache: the audit cache's part for it, each EPUB's result kept by where
+    the EPUB is, with its SHA-256, and, with reuse, used again while it
+    and Ace are the same (acecheck.check)."""
     epubs = [path for path, kind in files if kind == "epub"]
     if not epubs:
         return [], []

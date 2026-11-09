@@ -21,9 +21,9 @@ PUPPETEER_EXECUTABLE_PATH can name (Playwright's Chromium does). ACE
 names the command to run; otherwise the first of COMMANDS on the path
 is.
 
-An audit keeps each EPUB's result, by its SHA-256, with Ace's version
-and this file's, and runs Ace again only on an EPUB that has changed
-(check's cache).
+An audit keeps each EPUB's result, by where the EPUB is and its
+SHA-256, with Ace's version and this file's, and runs Ace again only on
+an EPUB that has changed (check's cache).
 
 Copyright 2026 Robert Szarka
 
@@ -223,30 +223,58 @@ def digest(path):
     return h.hexdigest()
 
 
+def unchanged(path, sha):
+    """Whether the file still has the SHA-256 it had: an EPUB a build
+    wrote again while Ace read it hasn't."""
+    try:
+        return digest(path) == sha
+    except OSError:
+        return False
+
+
+def kept(entry):
+    """Whether an entry in the cache's part is one an audit wrote: the
+    EPUB's SHA-256 and Ace's result on it."""
+    return isinstance(entry, dict) and isinstance(entry.get("sha"), str) \
+        and isinstance(entry.get("result"), dict)
+
+
 def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT):
     """(findings, lines) for Ace on the EPUBs: a note for each of its own
     findings, and the summary's lines, the first saying what ran, then a
     warning for each EPUB it didn't check, then one for each rule. With no
     EPUB, a probe of its own, which checks the setup. cache: a dict an
-    audit keeps, each EPUB's result kept by its SHA-256 and, with reuse,
-    used while the EPUB and Ace are the same; one that isn't what an
+    audit keeps, each EPUB's result kept from the run that checked it, by
+    where the EPUB is, with its SHA-256, so an EPUB made again replaces
+    its own and one renamed or copied is found by its SHA-256, and, with
+    reuse, used while the EPUB and Ace are the same (setup_key); nothing
+    is kept or used with an Ace that doesn't say its version, nor kept of
+    an EPUB written again as Ace read it, and a part that isn't what an
     audit wrote is started again."""
     if not epubs:
         return [], probe(command, timeout)
     said_version = version(command)
-    stored = {}
-    if cache is not None:
-        setup = setup_key(command, said_version)
+    setup = setup_key(command, said_version) if cache is not None and said_version else None
+    stored, by_sha = None, {}
+    if setup is not None:
         if cache.get("setup") != setup or not isinstance(cache.get("epubs"), dict):
             cache.clear()
             cache.update({"setup": setup, "epubs": {}})
         stored = cache["epubs"]
+        for entry in stored.values():
+            if kept(entry):
+                by_sha.setdefault(entry["sha"], entry)
     found, failed, results, whens = [], [], [], set()
     when = findings_lib.now()
     for epub in epubs:
-        sha = digest(epub) if cache is not None else None
-        entry = stored.get(sha) if reuse and sha else None
-        if isinstance(entry, dict) and isinstance(entry.get("result"), dict):
+        entry, sha, where = None, None, os.path.realpath(epub)
+        if stored is not None:
+            sha = digest(epub)
+            if reuse:
+                entry = stored.get(where)
+                if not (kept(entry) and entry["sha"] == sha):
+                    entry = by_sha.get(sha)
+        if entry is not None:
             result = entry["result"]
             whens.add(str(entry.get("when") or "?"))
         else:
@@ -254,9 +282,9 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
             if "error" in result:
                 failed.append((epub, result["error"]))
                 continue
-            if sha:
-                stored[sha] = {"result": result, "when": when}
-        results.append((epub, result, bool(entry)))
+            if stored is not None and unchanged(epub, sha):
+                stored[where] = {"sha": sha, "result": result, "when": when}
+        results.append((epub, result, entry is not None))
         found += own_findings(result, epub, by_epub)
     return found, summary(results, failed, said_version, whens, found)
 

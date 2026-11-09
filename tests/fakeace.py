@@ -16,7 +16,11 @@ folder, as Ace does, but the navigation document, from the EPUB's root
 after a /. FAKE_ACE_FAIL, set, has it write Ace's error for a browser it
 can't find, and end with 1, as Ace does; FAKE_ACE_BLIND, set, has it
 find nothing of its own on the package; FAKE_ACE_LOG names a file each
-run appends its arguments to, as a line of JSON.
+run appends its arguments to, as a line of JSON; FAKE_ACE_VERSION is the
+version it is, 1.4.6 unless it says, and FAKE_ACE_NO_VERSION, set, has
+--version print its usage and end with 1; and FAKE_ACE_REWRITE, set, has
+it add a line to the EPUB once it has read it, as a build writing the
+EPUB again while Ace reads it would change it.
 
 Copyright 2026 Robert Szarka
 
@@ -52,6 +56,10 @@ log = os.environ.get("FAKE_ACE_LOG")
 if log:
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(args) + "\n")
+VERSION = os.environ.get("FAKE_ACE_VERSION") or VERSION
+if args == ["--version"] and os.environ.get("FAKE_ACE_NO_VERSION"):
+    print("Usage: ace [options] <input>")
+    sys.exit(1)
 if args == ["--version"]:
     print(VERSION)
     sys.exit(0)
@@ -123,6 +131,9 @@ report = {"@type": "earl:report", "dct:title": "Ace Report",
                           else "pass"}}
 with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
     json.dump(report, fh)
+if os.environ.get("FAKE_ACE_REWRITE"):
+    with open(epub, "ab") as fh:
+        fh.write(b"rewritten as Ace read it\n")
 '''
 
 

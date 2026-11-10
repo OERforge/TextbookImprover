@@ -3991,6 +3991,41 @@ def case_pdf_with_old_latex(work):
     ]
 
 
+def case_pdf_with_newer_latex(work):
+    """A LuaLaTeX whose LaTeX is newer than the newest release the run is
+    tested with (latexbuild.TESTED_LATEX): the run warns, naming both, and
+    goes on to build. The LuaLaTeX here answers the release probe and
+    fails a build, so the PDF isn't built, for that reason alone."""
+    os.makedirs(work)
+    with open(os.path.join(work, "ch.md"), "w") as fh:
+        fh.write("# One\n\nText.\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
+    tools = work + "-bin"
+    os.makedirs(tools)
+    for program in ("pandoc", "python3", "file"):
+        found = shutil.which(program)
+        if found:
+            os.symlink(found, os.path.join(tools, program))
+    fake = os.path.join(tools, "lualatex")
+    with open(fake, "w") as fh:
+        fh.write("#!/bin/sh\n"
+                 "case \"$*\" in *OERFMT*) echo 'OERFMT:2099-06-01'; exit 0 ;; esac\n"
+                 "exit 1\n")
+    os.chmod(fake, 0o755)
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                            cwd=work, capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL,
+                            env=dict(os.environ, PATH=tools))
+    said = result.stdout + result.stderr
+    return [
+        ("a LaTeX newer than the newest tested builds with a warning naming both releases",
+         lambda: "WARNING: lualatex runs the LaTeX release of 2099-06-01, newer than "
+         "2026-11-01" in " ".join(said.split())
+         and "a tagged PDF needs" not in said and exists(work, "web")),
+    ]
+
+
 # What LuaHBTeX 1.24 (TeX Live 2026) writes in its log when a book outgrows
 # one of TeX's tables: three million names fill its strings, a table of
 # fixed size; a macro that calls itself without end fills the input stack.
@@ -10076,6 +10111,7 @@ CASES = [
     ("AsciiDoc layout attributes", case_asciidoc_layout),
     ("a pdf target without LuaLaTeX", case_pdf_without_latex),
     ("a pdf target with a LaTeX too old to tag", case_pdf_with_old_latex),
+    ("a pdf target with a LaTeX newer than the newest tested", case_pdf_with_newer_latex),
     ("a pdf target with an SVG and no rsvg-convert", case_pdf_svg_without_converter),
     ("a pdf target whose LaTeX runs out of room", case_pdf_capacity),
     ("a docx target's bookmarks", case_word_bookmarks),

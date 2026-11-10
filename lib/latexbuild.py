@@ -41,6 +41,13 @@ ENGINE = "lualatex"
 # Ubuntu 24.04's texlive packages (LaTeX 2023-11-01) stop on that file not
 # found.
 MINIMUM_LATEX = "2026-06-01"
+# The newest LaTeX release the run is tested with. Each release has changed
+# how LaTeX's tagging names and sets what it tags (2026-11-01 renamed a
+# paragraph's structure and a heading's, and set headings, lists, and their
+# keys with new code), and the fixes here reach into that code, so a newer
+# release is built with, and the run warns that what it makes of the PDF's
+# tagging hasn't been checked with it.
+TESTED_LATEX = "2026-11-01"
 MISSING_FILE = re.compile(r"File `([^']+)' not found")
 MISSING = re.compile(r"Missing character: There is no (\S+)")
 CAPACITY = re.compile(r"TeX capacity exceeded, sorry \[([^\]=]+)")
@@ -72,12 +79,18 @@ def latex_release():
 
 def latex_problem(warn):
     """Why the LuaLaTeX on the path can't tag a PDF, or None. warn gets a
-    message when the release can't be told."""
+    message when the release can't be told, or is newer than TESTED_LATEX."""
     release = latex_release()
     if release is None:
         warn(f"WARNING: couldn't tell which LaTeX release {ENGINE} runs; "
              f"a tagged PDF needs {MINIMUM_LATEX} or later.")
         return None
+    if release > TESTED_LATEX:
+        warn(f"WARNING: {ENGINE} runs the LaTeX release of {release}, newer than "
+             f"{TESTED_LATEX}, the newest TextbookImprover is tested with. Each "
+             "release has changed how LaTeX tags a PDF, and the fixes the run makes "
+             "to its tagging may not hold in this one: check the tagged PDFs, with "
+             "the output check's veraPDF and a screen reader (docs/checking.md).")
     if release < MINIMUM_LATEX:
         return (f"{ENGINE} runs the LaTeX release of {release}, and a tagged "
                 f"PDF needs {MINIMUM_LATEX} or later: TeX Live 2026 since its "

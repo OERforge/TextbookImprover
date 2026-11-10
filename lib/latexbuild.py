@@ -2897,6 +2897,20 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % with a space before it, has two, where LaTeX gave it one, as "A \\ B"
 % had two already. A star or a length after \\ is left in the string, as
 % hyperref left it ("I*J"), now after the space.
+%
+% A note leaves what follows it the link target it had. LaTeX's footnote
+% code, which \DocumentMetadata loads (latex-lab-footnotes.ltx), makes a
+% note's text a target with \MakeLinkTarget*, which sets \@currentHref
+% globally, so it outlasted the note: in a heading with notes, the
+% heading's contents entry, its bookmark, and a \label after it went to
+% its last note's text at the foot of the page, and the contents entry's
+% structure (TOCI) referred (/Ref) to that note's paragraph, with LaTeX
+% 2026-06-01, or to the note, with 2026-11-01, which veraPDF's PDF/UA-2
+% check fails, the note not referring back (measured 2026-11-10; LaTeX's
+% older footnote code, without \DocumentMetadata, kept the target to the
+% note). As each note's text ends (fntext/after), \@currentHref is put
+% back as it was when the text began (fntext/before); a \label in the
+% note is the note's still.
 \ifdefined\directlua
 \newattribute\OERBreakSpaceAttribute
 \directlua{
@@ -3395,6 +3409,11 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
         \cs_set:Npn \enspace { ~ }
       }
   }
+\tl_new:N \l__oer_note_href_tl
+\AddToHook { fntext / before } [ oer / notes ]
+  { \tl_set_eq:Nc \l__oer_note_href_tl { @currentHref } }
+\AddToHook { fntext / after } [ oer / notes ]
+  { \tl_gset_eq:cN { @currentHref } \l__oer_note_href_tl }
 \ExplSyntaxOff
 """
 

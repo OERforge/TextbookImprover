@@ -4489,6 +4489,60 @@ def head_of(source, words):
     return ""
 
 
+def heading_target(path, title):
+    """Whether a heading titled title, its notes after it, keeps its own
+    link target: its bookmark and its contents entry's link go to a
+    section's target, not a note's, and the entry's structure (its TOCI)
+    refers to the heading, or to its number, whose parent is the heading
+    (LaTeX 2026-06-01; pdftext.element_name)."""
+    if not os.path.exists(path):
+        return False
+    pikepdf = pdfparagraphs.pikepdf
+
+    def dest(item):
+        found = item.get("/Dest")
+        if found is None and "/A" in item:
+            found = item.A.get("/D")
+        return "" if found is None else str(found)
+    with pikepdf.open(path) as pdf:
+        marks = []
+
+        def outline(item):
+            while item is not None:
+                if str(item.get("/Title")) == title:
+                    marks.append(dest(item))
+                if "/First" in item:
+                    outline(item.First)
+                item = item.get("/Next")
+        if "/Outlines" in pdf.Root and "/First" in pdf.Root.Outlines:
+            outline(pdf.Root.Outlines.First)
+        entries = []
+
+        def links(element, found):
+            for kid in pdfparagraphs.kids_of(element):
+                if isinstance(kid, pikepdf.Dictionary) and kid.get("/Type") == "/OBJR":
+                    found.append(dest(kid.Obj))
+                elif pdfparagraphs.is_struct_elem(kid):
+                    links(kid, found)
+            return found
+
+        def walk(element):
+            if not pdfparagraphs.is_struct_elem(element):
+                return
+            if str(element.S) == "/TOCI" and str(element.get("/T")) == title:
+                refs = list(element.get("/Ref") or [])
+                entries.append((links(element, []),
+                                [pdftext.element_name(r) for r in refs]
+                                + [pdftext.element_name(r.P) for r in refs if "/P" in r]))
+            for kid in pdfparagraphs.kids_of(element):
+                walk(kid)
+        for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
+            walk(kid)
+    return bool(marks) and all(m.startswith("section") for m in marks) \
+        and len(entries) == 1 and bool(entries[0][0]) \
+        and all(d in marks for d in entries[0][0]) and "/section" in entries[0][1]
+
+
 def footnote_marks(path):
     """Each footnote mark of a tagged PDF, in order: its text, and the text
     of each note its /Ref links it to, in the order a screen reader reads
@@ -7887,6 +7941,14 @@ def checks(work, jobs=1):
          and notes_reader is not None and "Sets" in outline_titles(notes_reader)
          and {"Sets", "A gray circle"} <= {str(e.get("/T")) for e in elements(
              notes_reader.trailer["/Root"]["/StructTreeRoot"]) if kind(e) == "/TOCI"}),
+        # A note's text is a link target, which LaTeX's footnote code left the
+        # current one after the note, so a heading's contents entry, its
+        # bookmark, and a \label after it went to its last note, and with
+        # LaTeX 2026-11-01 the entry's structure referred to the note, which
+        # veraPDF's PDF/UA-2 profile fails (latexbuild.LINE_BREAK_SPACE).
+        ("a heading's notes leave it its own link target: its bookmark and its contents "
+         "entry go to the heading, not its last note, and the entry's structure refers to it",
+         lambda: heading_target(notes_path, "Sets")),
         # Its term whose definition opens with a note of its own and a space:
         # the two marks against the term, a comma between them and no space,
         # and one space after them, the term's, not the term's and the

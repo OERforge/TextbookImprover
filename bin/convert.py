@@ -4226,8 +4226,9 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   "numbered it twice, "
                   if counts.get("tag_caption_notes") else "")
                + ("amsbook's lists of contents, figures, and tables told to start their "
-                  "pages as amsbook does, where LaTeX's tagging made each list's heading a "
-                  "numbered chapter and numbered the book's chapters on from it, "
+                  "pages as amsbook does, where LaTeX 2026-06-01's tagging made each list's "
+                  "heading a numbered chapter and numbered the book's chapters on from it "
+                  "(2026-11-01's starts them so itself), "
                   if counts.get("tag_list_chapters") else "")
                + ("its lists of contents, figures, and tables headed as unnumbered "
                   "sections, set as the class sets their headings, where LaTeX's tagging "
@@ -4582,6 +4583,11 @@ def enumitem_message(found):
     defaults = [f"{k} ({found[k]})" for k in texremediate.ENUMITEM_DEFAULTS if found.get(k)]
     if defaults:
         parts.append(", ".join(defaults) + " laid out by its defaults")
+    earlier = [f"{k} ({found[k]})" for k in texremediate.ENUMITEM_EARLIER if found.get(k)]
+    if earlier:
+        parts.append(", ".join(earlier) + " laid out by its defaults or left out with LaTeX "
+                     "2026-06-01, whose emulation lacks them, and by the emulation itself "
+                     "with 2026-11-01")
     resumed = sum(found.get(k, 0) for k in ("resume", "resume*"))
     if resumed:
         parts.append(f"resume ({resumed}) continuing the numbering")

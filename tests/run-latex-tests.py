@@ -5557,7 +5557,7 @@ def case_line_breaks(work):
         if why:
             return skip(why)
         import pdftext
-        found = pdftext.element_texts(pdf_path, "/text") if os.path.exists(pdf_path) else []
+        found = pdftext.element_texts(pdf_path, pdftext.TEXT) if os.path.exists(pdf_path) else []
         return ("Breakthird breakfourth, breakfifth breaksixth, wordfirst wordsecond, "
                 "self-contained, co\u2010operate, anti-inflammatory, and an empty line after it."
                 in found
@@ -5586,6 +5586,7 @@ def case_line_breaks(work):
         del formulas[:]
         with pikepdf.open(pdf_path) as pdf:
             pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
+            renamed = pdftext.renames_headings(pdf)
 
             def text_of(element):
                 """An element's text, its own and its descendants', in
@@ -5608,8 +5609,9 @@ def case_line_breaks(work):
                     for kid in element:
                         walk(kid)
                 elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
-                    if str(element.S) in ("/part", "/chapter", "/section"):
-                        found.append((str(element.S), text_of(element)))
+                    level = pdftext.heading_level(element.S, renamed)
+                    if level in ("/part", "/chapter", "/section"):
+                        found.append((level, text_of(element)))
                         titles.append(str(element.get("/T", "")))
                     elif str(element.S) == "/TOCI":
                         found.append(("/TOCI", text_of(element)))
@@ -5803,7 +5805,15 @@ def case_line_breaks(work):
         found = texts(folder, "ams.pdf")
         if not isinstance(found, list):
             return found
-        return any("CHAPTER 1" in t for t in found) and any("Amsone Amstwo." in t for t in found) \
+        # The heading's text in the structure: LaTeX 2026-11-01 tags its
+        # number as a Lbl of its own, in a marked content sequence of its
+        # own, where 2026-06-01's "CHAPTER 1" was one sequence.
+        structure = pdf_structure(os.path.join(folder, "ams.pdf"))
+        if structure is None:
+            return skip("no pikepdf or pdfinfo to read the PDF's structure")
+        return any(role == "H1" and text.startswith("CHAPTER 1 ")
+                   for role, _, _, text, _ in structure) \
+            and any("Amsone Amstwo." in t for t in found) \
             and not any(re.search(r"CHAPTER [23]|sec/title/end", t) for t in found) \
             and any(t.strip() == "Contents" for t in found) \
             and any(t.strip() == "List of Figures" for t in found) \
@@ -6123,11 +6133,13 @@ def case_class_contents(work):
         return found == {"ourbook": (1, "amsbook"), "plainer": (0, None)}
 
     def art_pdf():
+        # Its section's heading, "1 Classone" as LaTeX 2026-06-01's tagging
+        # set it, and "1. Classone" as amsart does, as 2026-11-01's does.
         text = pages(art)
         if not isinstance(text, str):
             return text
         return "Contents" in text and "List of Figures" in text \
-            and re.search(r"(?m)^\s*1\s+Classone", text) \
+            and re.search(r"(?m)^\s*1\.?\s+Classone", text) \
             and not re.search(r"[0-9][ \t]+(Contents|List of Figures)", text) \
             and "Classfigure" in text and "wasn't built" not in art_said \
             and "its lists of contents, figures, and tables headed as unnumbered sections, " \
@@ -7084,8 +7096,10 @@ def case_latex_target(work):
 # layout): a title set as large type under the course's name, a table whose
 # column type the document defines, a box (a table of one paragraph column)
 # holding a display formula, an answer key of \ref-s to enumerated items,
-# enumitem's leftmargin=*, an unused titlesec, and an \appendix before its
-# last section. A binder gathers the topics' PDFs with \includepdf.
+# enumitem's leftmargin=*, a list resumed by a series' name, and a \ref to
+# an item of a list with enumitem's ref, an unused titlesec, and an
+# \appendix before its last section. A binder gathers the topics' PDFs with
+# \includepdf.
 TOPIC_A = r"""\documentclass[11pt]{article}
 \usepackage{amsmath}
 \usepackage{enumitem}
@@ -7143,9 +7157,17 @@ And the passage closes here.\\
         \item\label{QA1} The first
     \end{enumerate}
 \end{enumerate}
+\begin{enumerate}[resume=practice]
+    \item Which comes last?
+\end{enumerate}
+\begin{enumerate}[label=(\alph*),ref=\alph*]
+    \item\label{QB1} Which is lettered?
+\end{enumerate}
 
 \section{Answer Key}
 \ref{QA1}
+
+Lettered \ref{QB1}.
 
 \appendix
 \section{More Practice}
@@ -7300,6 +7322,37 @@ def case_documents(work):
                 titles.append(meta.get("dc:title"))
         return titles == ["Topic A: The First Topic", "Topic B: The Second Topic"]
 
+    def topic_a(test):
+        """test(the text of Topic A's PDF), or a skip."""
+        if not pdf:
+            return skip(pdf_why)
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        path = os.path.join(work, "pdf", "Topic-A-One.pdf")
+        if not os.path.exists(path):
+            return False
+        return test(subprocess.run(["pdftotext", path, "-"], capture_output=True,
+                                   text=True).stdout)
+
+    # The item of the list resumed by a series' name (enumitem's
+    # resume=name) is numbered on from the list before it: LaTeX
+    # 2026-06-01's tagging stopped on the name ("accepts boolean values
+    # only"), and 2026-11-01's set the item with no number. A \ref to an
+    # item of the list with enumitem's ref is as ref gives it with LaTeX
+    # 2026-11-01, whose emulation of enumitem has ref, and as the label
+    # gives it with 2026-06-01's, which hasn't, where the copy leaves ref out
+    # (texremediate.ENUMITEM_KEYS).
+    def resumed():
+        return topic_a(lambda text: bool(re.search(r"(?m)^2\.\s*Which comes last\?", text)))
+
+    def lettered():
+        import latexbuild
+        release = latexbuild.latex_release()
+        if release is None:
+            return skip("no LaTeX release to read")
+        return topic_a(lambda text: ("Lettered a." if release >= "2026-11-01"
+                                     else "Lettered (a).") in text)
+
     def pdfs_pass():
         if not pdf:
             return skip(pdf_why)
@@ -7365,6 +7418,11 @@ def case_documents(work):
         ("the PDF target builds a PDF of each, named as its page is, its title the "
          "document's", pdfs_titled),
         ("and each passes veraPDF's PDF/UA-2 profile", pdfs_pass),
+        ("a list resumed by a series' name continues the numbering in the PDF, where "
+         "LaTeX's tagging stopped on the name or set the item with no number", resumed),
+        ("and a \\ref to an item of a list with enumitem's ref is as ref gives it, where "
+         "LaTeX's emulation of enumitem has ref, and as the label gives it, where it "
+         "hasn't", lettered),
         ("the book's own cartridge beside its documents isn't taken for a book to unpack, "
          "with latex.main naming them and no master at the top",
          lambda: rerun.returncode == 0

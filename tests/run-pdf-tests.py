@@ -826,7 +826,15 @@ def elements(node, found=None):
 
 
 def kind(element):
-    return str(element.get("/S", ""))
+    """A structure element's name, its /S, as LaTeX 2026-06-01 named such an
+    element (pdftext.as_before), whichever release made the PDF."""
+    name = str(element.get("/S", ""))
+    kids = []
+    if name in pdftext.LEVELS:
+        found = resolve(element.get("/K"))
+        found = found if isinstance(found, list) else [found]
+        kids = [str(resolve(k).get("/S", "")) for k in found if isinstance(resolve(k), dict)]
+    return pdftext.as_before(name, kids)
 
 
 def classes(element):
@@ -900,7 +908,8 @@ def build_untagged(work):
 def languages(path):
     """(tag, /Lang, its text and its children's, the /Lang of the element
     holding it) for each structure element that declares a language, and
-    for each whose text holds a phrase of the book's own language."""
+    for each whose text holds a phrase of the book's own language, its tag
+    as LaTeX 2026-06-01 named it (pdftext.element_name)."""
     pikepdf = pdftext.pikepdf
     texts = pdftext.marked_text(path)
     out = []
@@ -924,7 +933,7 @@ def languages(path):
             lang = str(element.Lang) if "/Lang" in element else None
             text = whole(element)
             if lang or "own language" in text:
-                out.append((str(element.S), lang, " ".join(text.split()), above))
+                out.append((pdftext.element_name(element), lang, " ".join(text.split()), above))
             for kid in kids(element):
                 walk(kid, lang or above)
 
@@ -3078,7 +3087,7 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                         walk(kid, inside)
                 elif isinstance(element, pdftext.pikepdf.Dictionary) and "/S" in element:
                     if inside:
-                        found.add(str(element.S))
+                        found.add(pdftext.element_name(element))
                     if element.get("/K") is not None:
                         walk(element.K, inside or element.S == "/codeline")
             walk(pdf.Root.StructTreeRoot.K, False)
@@ -3208,7 +3217,7 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
     def inline_texts(path):
         """The PDF's structure's text of each paragraph holding highlighted
         code of the inline chapter's, in reading order."""
-        return [text for text in pdftext.element_texts(path, "/text") if "Inline" in text] \
+        return [text for text in pdftext.element_texts(path, pdftext.TEXT) if "Inline" in text] \
             if os.path.exists(path) else []
 
     def struck(path, word):
@@ -3328,8 +3337,8 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
     def lines_text(path, name, nbsp):
         """The paragraph's text in the PDF's structure holds each of its
         lines as written, no arrow among them."""
-        found = [text for text in pdftext.element_texts(path, "/text") if name + "head" in text] \
-            if os.path.exists(path) else []
+        found = [text for text in pdftext.element_texts(path, pdftext.TEXT)
+                 if name + "head" in text] if os.path.exists(path) else []
         return len(found) == 1 and "\u21b3" not in found[0] \
             and all(line_ in found[0] for line_ in lines_of_code(name, nbsp))
 
@@ -4482,17 +4491,15 @@ def head_of(source, words):
 
 def footnote_marks(path):
     """Each footnote mark of a tagged PDF, in order: its text, and the text
-    of each note its /Ref links it to."""
+    of each note its /Ref links it to, in the order a screen reader reads
+    it (pdftext.full_text): with LaTeX 2026-11-01, a note in a heading
+    holds its text as its own and its number as a child's, before it."""
     texts = pdftext.marked_text(path)
     pdf = pdfparagraphs.pikepdf.open(path)
     pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
 
     def text_of(element):
-        text = pdftext.own_text(element, texts, pages)
-        for kid in pdfparagraphs.kids_of(element):
-            if pdfparagraphs.is_struct_elem(kid):
-                text += text_of(kid)
-        return text
+        return pdftext.full_text(element, texts, pages)
     found = []
 
     def walk(element):
@@ -4544,7 +4551,7 @@ def text_paths(path, words):
     def walk(element, above):
         if not pdfparagraphs.is_struct_elem(element):
             return
-        here = above + [str(element["/S"])]
+        here = above + [pdftext.element_name(element)]
         if words in " ".join(pdftext.own_text(element, texts, pages).split()):
             found.append(here)
         for kid in pdfparagraphs.kids_of(element):
@@ -4578,8 +4585,8 @@ def deep_texts(path):
         value = element.get("/C")
         named = [str(v) for v in value] if isinstance(value, pdfparagraphs.pikepdf.Array) \
             else ([str(value)] if value is not None else [])
-        found[at] = (str(element["/S"]), named, text, kids)
-        return str(element["/S"]), text
+        found[at] = (pdftext.element_name(element), named, text, kids)
+        return pdftext.element_name(element), text
     for kid in pdfparagraphs.kids_of(pdf.Root.StructTreeRoot):
         walk(kid)
     return found
@@ -5283,7 +5290,7 @@ def footer_checks(footer_path):
         # stopped LaTeX.
         ("a line break leaves its paragraph one, and a caption's is a line of its caption",
          lambda: any(squeezed(t) == "Alineofaverse,anditsnextline,oneparagraph."
-                     for t in pdftext.element_texts(footer_path, "/text"))
+                     for t in pdftext.element_texts(footer_path, pdftext.TEXT))
          and "Henceforth.Andalineofitsown." in squeezed(
              footer_reader.pages[captioned].extract_text() or "")),
         # LaTeX's \\ leaves no space between its lines in a tagged PDF's
@@ -5292,18 +5299,18 @@ def footer_checks(footer_path):
          "words had run together: an address's lines, a verse's, and a caption's",
          lambda: os.path.exists(footer_path)
          and "OpenStax Rice University 6100 Main Street" in pdftext.element_texts(
-             footer_path, "/text")
+             footer_path, pdftext.TEXT)
          and "A line of a verse, and its next line, one paragraph." in pdftext.element_texts(
-             footer_path, "/text")
+             footer_path, pdftext.TEXT)
          and any(t.endswith("Henceforth. And a line of its own.")
-                 for t in pdftext.element_texts(footer_path, "/text"))),
+                 for t in pdftext.element_texts(footer_path, pdftext.TEXT))),
         # The line breaks' spaces had given the empty line a space of its
         # own, two in all, and the indented line one before its four.
         ("one space across a line block's empty line, and no more before an indented line "
          "than its four no-break spaces",
          lambda: os.path.exists(footer_path)
          and "A line block, its first line, a line after an empty one,    and an indented line."
-         in pdftext.element_texts(footer_path, "/text")),
+         in pdftext.element_texts(footer_path, pdftext.TEXT)),
     ]
     if shutil.which("verapdf") or os.environ.get("VERAPDF"):
         items.append(("veraPDF finds nothing in the footer book's PDF",
@@ -5316,8 +5323,9 @@ def heading_texts(path):
     """[(kind, text)] for each chapter's and section's heading, a caption,
     a list's term, a table's data cell, a contents entry, and a link, its
     text in its structure's order, its number's and its Spans' with its
-    own; and ("/Link+note", text) for a link that holds a note's mark or
-    its note."""
+    own, its kind as LaTeX 2026-06-01 named it (pdftext.element_name);
+    and ("/Link+note", text) for a link that holds a note's mark or its
+    note."""
     if not os.path.exists(path):
         return []
     texts = pdftext.marked_text(path)
@@ -5326,18 +5334,7 @@ def heading_texts(path):
     found = []
 
     def text_of(element):
-        kids = element.get("/K")
-        kids = list(kids) if isinstance(kids, pdfparagraphs.pikepdf.Array) else [kids]
-        page, text = element.get("/Pg"), ""
-        for kid in kids:
-            if pdfparagraphs.is_struct_elem(kid):
-                text += text_of(kid)
-            elif isinstance(kid, pdfparagraphs.pikepdf.Dictionary) and "/MCID" in kid:
-                where = kid.get("/Pg") or page
-                text += texts.get((pages[where.objgen], int(kid.MCID)), "")
-            elif isinstance(kid, int) and page is not None:
-                text += texts.get((pages[page.objgen], kid), "")
-        return text
+        return pdftext.full_text(element, texts, pages)
 
     def kinds_in(element):
         kinds = set()
@@ -5350,7 +5347,7 @@ def heading_texts(path):
     def walk(element):
         if not pdfparagraphs.is_struct_elem(element):
             return
-        kind = str(element["/S"])
+        kind = pdftext.element_name(element)
         if kind in ("/chapter", "/section", "/Caption", "/itemlabel", "/TD", "/TOCI", "/Link"):
             found.append((kind, text_of(element)))
         if kind == "/Link" and kinds_in(element) & {"/footnote", "/footnotemark", "/FENote"}:
@@ -7789,7 +7786,7 @@ def checks(work, jobs=1):
                   if said == "blank"] == [("blank", "_" * 16), ("blank", "_" * 18),
                                           ("blank", "_" * 4), ("blank", "_" * 8)]
          and "The Rating of Perceived Exertion (RPE) is an example of"
-         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, "/text")]),
+         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, pdftext.TEXT)]),
         # A blank in the middle of a paragraph: the words after it are the
         # paragraph's still, not an artifact, and its Span holds nothing
         # but the underscores, the next paragraph after the Span's, not in it.
@@ -7797,7 +7794,7 @@ def checks(work, jobs=1):
          "the paragraph's child and holding no other",
          lambda: "The terms and are often used interchangeably, the words after each blank "
                  "still in the paragraph."
-         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, "/text")]
+         in [" ".join(t.split()) for t in pdftext.element_texts(pdf_path, pdftext.TEXT)]
          and [(tag, has) for tag, _, has in pdftext.span_parents(pdf_path, "blank")]
          == [("/text", False)] * 4
          and [" ".join(text.split()) for _, text, _ in pdftext.span_parents(pdf_path, "blank")][2:]

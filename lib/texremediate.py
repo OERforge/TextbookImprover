@@ -1418,31 +1418,58 @@ FLOATS_HERE = (
     + latexbuild.FLOATS_HERE)
 # enumitem's settings for a list, which LaTeX's tagging replaces with an
 # emulation of its own (latex-lab-enumitem, loaded by latex-lab-testphase-
-# block in place of enumitem.sty, LaTeX 2026-06-01). The emulation stops on
-# the settings it lacks ("Some keys specified on the itemize environment
-# are unknown") and on * and ! for a computed width ("Missing number",
-# FINC 308's 101 lists with leftmargin=*), so each is taken here: a width
-# to compute or a label's indent is left to the emulation's defaults, resume
-# continues the numbering, nolistsep is nosep, and the rest -- code to run
-# around a list, a nested label, \ref's form, a description's style -- is
-# left out. Checked key by key against the emulation; with enumitem itself
-# (no tagging), the block does nothing.
+# block in place of enumitem.sty). The emulation stops on the settings it
+# lacks ("Some keys specified on the itemize environment are unknown"), so
+# each is taken here: nolistsep is nosep, resume continues the numbering,
+# and the rest -- code to run around a list, a nested label, a
+# description's style -- is left out. resume takes a series' name too
+# (resume=name), as enumitem's does and the list template's own, a
+# boolean, doesn't: LaTeX 2026-06-01 stopped on it ("accepts boolean
+# values only"), and 2026-11-01 set the list's item with no label, its
+# structure a Part and a P in an L, and a description after it numbered
+# (measured 2026-11-10). The emulation of LaTeX 2026-06-01 (0.80f) also
+# stopped on * and ! for a computed width ("Missing number", FINC 308's 101
+# lists with leftmargin=*) and had no labelindent or ref, so there a width
+# to compute or a label's indent is left to its defaults and ref is left
+# out; 2026-11-01's (0.80i, 2026-10-24) computes each width itself, * as !,
+# and has its own labelindent and ref, which these would hide. A
+# template's own keys are set through \SetTemplateKeys, which 2026-11-01
+# no longer keeps as l3keys of template/<type>/<name> ("The key
+# 'template/block/std/left-margin' is unknown"). Checked key by key
+# against both; with enumitem itself (no tagging), the block does nothing.
 ENUMITEM_KEYS = r"""% Written for LaTeX's tagging, which lays out lists with an emulation of
-% enumitem: the settings it lacks are taken, so the lists build. A width to
-% compute (leftmargin=*) or a label's indent is left to its defaults, resume
-% continues the numbering, and code around a list (before, after), a nested
-% label (label*), and ref are left out. With enumitem itself, nothing changes.
+% enumitem: the settings it lacks are taken, so the lists build. resume
+% continues the numbering, a series' name or not, and code around a list
+% (before, after) and a nested label (label*) are left out; with LaTeX
+% 2026-06-01, a width to compute (leftmargin=*) or a label's indent is
+% left to its defaults and ref is left out too. With enumitem itself,
+% nothing changes.
 \ExplSyntaxOn
 \cs_if_exist:cT { ver@latex-lab-enumitem.sty }
   {
+    \bool_lazy_and:nnF
+      { \cs_if_exist_p:N \ltlabenumdate }
+      { \str_compare_p:eNe { \ltlabenumdate } > { 2026-10-23 } }
+      {
+        \keys_define:nn { template / block / std }
+          {
+            leftmargin .code:n =
+              { \str_case:nnF {#1} { {*} { } {!} { } }
+                  { \SetTemplateKeys { block } { std } { left-margin = {#1} } } } ,
+            labelindent .code:n = { } , ref .code:n = { }
+          }
+        \keys_define:nn { template / list / std }
+          {
+            labelwidth .code:n =
+              { \str_case:nnF {#1} { {*} { } {!} { } }
+                  { \SetTemplateKeys { list } { std } { label-width = {#1} } } }
+          }
+      }
     \keys_define:nn { template / block / std }
       {
-        leftmargin .code:n =
-          { \str_case:nnF {#1} { {*} { } {!} { } }
-              { \keys_set:nn { template / block / std } { left-margin = {#1} } } } ,
-        labelindent .code:n = { } , labelindent* .code:n = { } ,
+        labelindent* .code:n = { } ,
         widest .code:n = { } , widest* .code:n = { } , left .code:n = { } ,
-        ref .code:n = { } , label* .code:n = { } , series .code:n = { } ,
+        label* .code:n = { } , series .code:n = { } ,
         before .code:n = { } , before* .code:n = { } ,
         after .code:n = { } , after* .code:n = { } ,
         first .code:n = { } , first* .code:n = { } , style .code:n = { } ,
@@ -1453,14 +1480,11 @@ ENUMITEM_KEYS = r"""% Written for LaTeX's tagging, which lays out lists with an 
       { nolistsep .meta:n = { nosep } }
     \keys_define:nn { template / list / std }
       {
-        labelwidth .code:n =
-          { \str_case:nnF {#1} { {*} { } {!} { } }
-              { \keys_set:nn { template / list / std } { label-width = {#1} } } } ,
         resume .code:n =
           { \tl_if_empty:NF \l__block_counter_tl
-              { \keys_set:ne { template / list / std }
+              { \exp_args:Nnne \SetTemplateKeys { list } { std }
                   { start = \int_eval:n { \value { \l__block_counter_tl } + 1 } } } } ,
-        resume* .code:n = { \keys_set:nn { template / list / std } { resume } }
+        resume* .code:n = { \SetTemplateKeys { list } { std } { resume } }
       }
   }
 \ExplSyntaxOff
@@ -1503,12 +1527,14 @@ HYPERREF_NOTE = (
 LIST_OPTIONS = re.compile(r"\\begin\s*\{(?:itemize|enumerate|description)\*?\}\s*\[|"
                           r"\\setlist\*?\s*(?:\[[^]]*\])?\s*\{")
 # The settings the emulation lacks, as the run names them: laid out by its
-# defaults, numbering continued, or left out.
-ENUMITEM_DEFAULTS = ("leftmargin=*", "leftmargin=!", "labelwidth=*", "labelwidth=!",
-                     "labelindent", "labelindent*", "widest", "widest*", "left", "style",
-                     "mode", "fullwidth", "nolistsep")
-ENUMITEM_LEFT_OUT = ("ref", "label*", "series", "before", "before*", "after", "after*",
+# defaults, numbering continued, or left out; and those LaTeX 2026-06-01's
+# lacked, which 2026-11-01's lays out itself (ENUMITEM_KEYS).
+ENUMITEM_DEFAULTS = ("labelindent*", "widest", "widest*", "left", "style", "mode",
+                     "fullwidth", "nolistsep")
+ENUMITEM_LEFT_OUT = ("label*", "series", "before", "before*", "after", "after*",
                      "first", "first*", "itemjoin", "itemjoin*", "afterlabel")
+ENUMITEM_EARLIER = ("leftmargin=*", "leftmargin=!", "labelwidth=*", "labelwidth=!",
+                    "labelindent", "ref")
 
 
 def enumitem_settings(texts):
@@ -1540,7 +1566,7 @@ def enumitem_settings(texts):
                 name = f"{key}={value}" if key in ("leftmargin", "labelwidth") \
                     and value in ("*", "!") else key
                 if name in ENUMITEM_DEFAULTS or name in ENUMITEM_LEFT_OUT \
-                        or name in ("resume", "resume*"):
+                        or name in ENUMITEM_EARLIER or name in ("resume", "resume*"):
                     found[name] = found.get(name, 0) + 1
     return found
 

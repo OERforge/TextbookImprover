@@ -2703,9 +2703,13 @@ CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc
 % waiting there is moved to \@labels, where fancyvrb sets one, as it did
 % before the tagging code. Only a label that's waiting: a fix of LaTeX's
 % own, which would leave none, isn't undone, and without the tagging code,
-% or with its box named otherwise, nothing is done. LaTeX's own verbatim,
-% as Pandoc sets code in no language, sets each line as a paragraph,
-% which sets the label.
+% or with its box named otherwise, nothing is done. LaTeX 2026-11-01's
+% tagging code makes \@labels its own box (\cs_set_eq:NN \@labels
+% \g__block_labels_box), so fancyvrb sets the label where it waits, and
+% there nothing is done either, since moving the label to \@labels and
+% clearing the tagging code's box would clear the label. LaTeX's own
+% verbatim, as Pandoc sets code in no language, sets each line as a
+% paragraph, which sets the label.
 \cs_if_exist:NT \g__block_labels_box
   {
     \AddToHook { package / fancyvrb / after }
@@ -2714,7 +2718,9 @@ CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc
           {
             \legacy_if:nT { @inlabel }
               {
-                \box_if_empty:NF \g__block_labels_box
+                \bool_lazy_or:nnF
+                  { \cs_if_eq_p:cN { @labels } \g__block_labels_box }
+                  { \box_if_empty_p:N \g__block_labels_box }
                   {
                     \box_gset_eq:cN { @labels } \g__block_labels_box
                     \box_gclear:N \g__block_labels_box
@@ -2777,7 +2783,21 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % read "Chapter 1Chapter onesecond line". A paragraph that opens right
 % after one that ended in text, as the next Span of the same structure,
 % starts with tagpdf's \pdffakespace; a P beside another, as a center
-% environment's lines are, is apart already.
+% environment's lines are, is apart already. LaTeX 2026-11-01 sets a
+% heading with templates of its own, which tag none of its paragraphs
+% (\tagpdfparaOff), so there a paragraph that opens in the structure that
+% a paragraph ended in text in, paragraph tagging off, starts with
+% \pdffakespace ("Chapter 1 Alphaone", where it read "Chapter
+% 1Alphaone"). Those templates put a \pdffakespace after the space between
+% a heading's number and its title, and between "Chapter" and its number
+% (\__template_insert_collected_separators:), which tagpdf had marked as a
+% space already, so a heading read "1.1  Sets", two spaces: before tagpdf
+% writes a page (pre_shipout_filter), a \pdffakespace's glue, of no width,
+% that follows a marked space with nothing between them is marked as no
+% space (tagpdf's interwordspaceOff), so tagpdf writes the one. pdfTeX
+% stops on \pdffakespace in a DVI ("not allowed in DVI mode"), which LaTeX
+% 2026-11-01's templates call in a heading (a \part's, measured
+% 2026-11-10), so with DVI output, as the document begins, it's nothing.
 %
 % A contents entry's number, title, and page number are apart too: the
 % classes set the number in a box of its width and the page number in a
@@ -2851,6 +2871,9 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % the page's style plain, no float at its top, its first paragraph
 % indented. The entries are still set from what LaTeX's headings write,
 % \numberline, which amsbook's own lines don't expect (docs/latex.md).
+% LaTeX 2026-11-01's tagging puts an \@starttoc of its own in amsbook's,
+% which starts each list with an unnumbered \chapter, and there this does
+% nothing (measured 2026-11-10).
 %
 % amsart and amsproc head a list with a sectioning command of no name and
 % level \@M (\@startsection{}\@M\z@...), which LaTeX's tagging can't tag:
@@ -2861,7 +2884,9 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % call and LaTeX's tagging is on, the list's heading is an unnumbered
 % section, \@startsection{section}{1}...*, set with the class's own
 % spacing and type; an unnumbered section writes no contents line, as the
-% level \@M, deeper than any the contents lists, didn't.
+% level \@M, deeper than any the contents lists, didn't. LaTeX 2026-11-01
+% stops on the heading too (30 errors for a contents and a list of
+% figures, measured 2026-11-10).
 %
 % \\ and \newline are a space in a bookmark and in a heading's title in
 % the structure, where they had left nothing ("Section witha break"):
@@ -3015,24 +3040,79 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
     return head
   end, "oer.break.space.box")
   luatexbase.declare_callback_rule("hpack_filter", "markspaces", "before", "oer.break.space.box")
+  local RULE = node.id("rule")
+  local function once(head, space, off)
+    local after = false
+    for n in node.traverse(head) do
+      local id = n.id
+      if id == HLIST or id == VLIST then
+        if n.head then once(n.head, space, off) end
+        after = false
+      elseif id == GLUE then
+        if node.has_attribute(n, space, 1) and not node.has_attribute(n, off) then
+          if after and n.width == 0 and n.stretch == 0 and n.shrink == 0 then
+            node.set_attribute(n, off, 1)
+          else
+            after = true
+          end
+        elseif not (n.width == 0) then
+          after = false
+        end
+      elseif id == GLYPH or id == DISC or id == RULE or id == MATH then
+        after = false
+      end
+    end
+  end
+  luatexbase.add_to_callback("pre_shipout_filter", function(box)
+    local a = luatexbase.attributes
+    local space, off = a.g__tag_interwordspace_attr, a.g__tag_interwordspaceOff_attr
+    if box.head and space and off then once(box.head, space, off) end
+    return true
+  end, "oer.break.space.once")
+  luatexbase.declare_callback_rule("pre_shipout_filter", "oer.break.space.once", "before",
+    "tagpdf")
 }
 \fi
 \ExplSyntaxOn
+\sys_if_engine_pdftex:T
+  {
+    \AddToHook { begindocument / before }
+      {
+        \int_compare:nNnT { \tex_pdfoutput:D } < { 1 }
+          { \cs_set_protected:Npn \pdffakespace { } }
+      }
+  }
 \sys_if_engine_luatex:T
   {
     \int_new:N \l__oer_break_int
     \bool_new:N \g__oer_heading_space_bool
     \int_new:N \g__oer_heading_struct_int
+    \tl_new:N \g__oer_para_struct_tl
     \cs_new_protected:Npn \__oer_heading_end:
       {
         \bool_gset_false:N \g__oer_heading_space_bool
-        \bool_lazy_and:nnT { \l__tag_para_bool } { \l__tag_para_flattened_bool }
+        \tl_gclear:N \g__oer_para_struct_tl
+        \bool_if:NTF \l__tag_para_bool
           {
-            \lua_now:n { oerbreak.text() }
-            \int_compare:nNnT \l__oer_break_int = \c_one_int
+            \bool_if:NT \l__tag_para_flattened_bool
               {
-                \bool_gset_true:N \g__oer_heading_space_bool
-                \int_gset:Nn \g__oer_heading_struct_int { \use:c { c@g__tag_struct_abs_int } }
+                \lua_now:n { oerbreak.text() }
+                \int_compare:nNnT \l__oer_break_int = \c_one_int
+                  {
+                    \bool_gset_true:N \g__oer_heading_space_bool
+                    \int_gset:Nn \g__oer_heading_struct_int
+                      { \use:c { c@g__tag_struct_abs_int } }
+                  }
+              }
+          }
+          {
+            \bool_lazy_and:nnT
+              { \bool_if_exist_p:N \g__tag_active_struct_bool }
+              { \g__tag_active_struct_bool }
+              {
+                \lua_now:n { oerbreak.text() }
+                \int_compare:nNnT \l__oer_break_int = \c_one_int
+                  { \tl_gset:Ne \g__oer_para_struct_tl { \tag_get:n { struct_num } } }
               }
           }
       }
@@ -3051,6 +3131,15 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
                 \str_if_eq:eeF { \l__tag_para_tag_tl } { \l__tag_para_tag_default_tl }
                   { \nobreak \pdffakespace }
               }
+          }
+        \tl_if_empty:NF \g__oer_para_struct_tl
+          {
+            \bool_if:NF \l__tag_para_bool
+              {
+                \str_if_eq:eeT { \tag_get:n { struct_num } } { \g__oer_para_struct_tl }
+                  { \nobreak \pdffakespace }
+              }
+            \tl_gclear:N \g__oer_para_struct_tl
           }
       }
     \AddToHook { begindocument }

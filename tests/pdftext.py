@@ -29,6 +29,105 @@ try:
 except ImportError:  # the suites' PDF cases need it, and skip without it
     pikepdf = None
 
+# LaTeX's own names for its structure elements that LaTeX 2026-11-01
+# changed (latex-lab's tagpdf-ns-latex-lab.def): a paragraph's text, a P,
+# is "text" in LaTeX 2026-06-01 and "text-block" since, inside a unit, a
+# Part, "text-unit" and "semantic-para"; a heading's number is a Span,
+# "section-number", and a Lbl, "heading-number"; and a heading is the
+# element its level names, "chapter" say, in 2026-06-01, and since then
+# "chapter-heading", inside a "chapter" that's its section (heading_level).
+# Each tuple holds both, so a check reads either release's PDF.
+TEXT = ("/text", "/text-block")
+TEXT_UNIT = ("/text-unit", "/semantic-para")
+HEADING_NUMBER = ("/section-number", "/heading-number")
+LEVELS = ("/part", "/chapter", "/section", "/subsection", "/subsubsection", "/paragraph",
+          "/subparagraph")
+
+# The names LaTeX 2026-11-01 gives what LaTeX 2026-06-01 named otherwise,
+# and those it gave them (as_before): besides the paragraph's text, its
+# unit, and a heading's number, a span of text (\textsubscript's, say) was
+# a Span, a heading's paragraph one too, and a minipage or \parbox a Div,
+# in a heading as anywhere else.
+BEFORE = {"/text-block": "/text", "/semantic-para": "/text-unit",
+          "/heading-number": "/section-number", "/text-fragment": "/Span",
+          "/heading-fragment": "/Span", "/text-minipage": "/Div", "/text-parbox": "/Div",
+          "/heading-minipage": "/Div", "/heading-parbox": "/Div"}
+
+
+def as_before(name, kids=()):
+    """A structure element's name, its /S, as LaTeX 2026-06-01 named such
+    an element, so that a check reads either release's PDF the same: a
+    name in BEFORE as it was; a heading, /chapter-heading say, by its
+    level, /chapter; and a level's section, a /chapter holding its
+    /chapter-heading (kids: the names of its children), Sect, or Part for
+    a part, as LaTeX 2026-06-01 named its section. Any other name is its
+    own."""
+    name = str(name)
+    if name in BEFORE:
+        return BEFORE[name]
+    if name.endswith("-heading") and name[:-len("-heading")] in LEVELS:
+        return name[:-len("-heading")]
+    if name in LEVELS and name + "-heading" in [str(k) for k in kids]:
+        return "/Part" if name == "/part" else "/Sect"
+    return name
+
+
+def element_name(element):
+    """A pikepdf structure element's name as LaTeX 2026-06-01 named it
+    (as_before)."""
+    name = str(element.get("/S", ""))
+    if name not in LEVELS:
+        return as_before(name)
+    kids = element.get("/K")
+    kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+    return as_before(name, [str(k.S) for k in kids
+                            if isinstance(k, pikepdf.Dictionary) and "/S" in k])
+
+
+def full_text(element, texts, pages):
+    """A structure element's text, its own marked content's and its
+    descendants', in the order of its /K, as a screen reader reads it:
+    texts from marked_text, pages {page's objgen: its index}."""
+    kids = element.get("/K")
+    kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
+    page = element.get("/Pg")
+    text = ""
+    for kid in kids:
+        if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+            text += full_text(kid, texts, pages)
+        elif isinstance(kid, pikepdf.Dictionary) and "/MCID" in kid:
+            where = kid.get("/Pg") or page
+            text += texts.get((pages[where.objgen], int(kid.MCID)), "")
+        elif isinstance(kid, int) and page is not None:
+            text += texts.get((pages[page.objgen], kid), "")
+    return text
+
+
+def heading_level(name, renamed):
+    """The level a heading element of LaTeX's names, /chapter say, from
+    its name, /chapter or /chapter-heading, or None for an element that
+    isn't a heading; renamed says whether its PDF names headings as LaTeX
+    2026-11-01 does, where /chapter is the chapter's section."""
+    name = str(name)
+    if name.endswith("-heading"):
+        return name[:-len("-heading")] if name[:-len("-heading")] in LEVELS else None
+    return name if name in LEVELS and not renamed else None
+
+
+def renames_headings(pdf):
+    """Whether pdf, a pikepdf.Pdf, names its headings as LaTeX 2026-11-01
+    does, an element named for a level alone being its section: whether
+    its structure's role map or namespaces name an X-heading."""
+    root = pdf.Root.get("/StructTreeRoot")
+    if root is None:
+        return False
+    maps = [root.get("/RoleMap")] + [ns.get("/RoleMapNS")
+                                     for ns in root.get("/Namespaces", [])
+                                     if isinstance(ns, pikepdf.Dictionary)]
+    return any(isinstance(m, pikepdf.Dictionary)
+               and any(str(k).endswith("-heading") for k in m.keys()) for m in maps)
+
+
 # A CMap's tokens: a hex string, an array's brackets, a literal string or a
 # dictionary's brackets (passed over), and any other word.
 _TOKEN = re.compile(rb"<([0-9A-Fa-f\s]*)>|(\[)|(\])|\([^)]*\)|<<|>>"
@@ -421,9 +520,11 @@ def own_text(element, texts, pages):
 
 def element_texts(path, tag):
     """The text of each structure element tagged tag (as LaTeX names it,
-    /codeline say), in reading order: its own marked content's characters."""
+    /codeline say), or any of tag where it's a tuple (TEXT), in reading
+    order: its own marked content's characters."""
     texts = marked_text(path)
     found = []
+    tags = tag if isinstance(tag, tuple) else (tag,)
     with pikepdf.open(path) as pdf:
         pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
 
@@ -432,7 +533,7 @@ def element_texts(path, tag):
                 for kid in element:
                     walk(kid)
             elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
-                if element.S == tag:
+                if str(element.S) in tags:
                     found.append(own_text(element, texts, pages))
                 if element.get("/K") is not None:
                     walk(element.K)
@@ -442,12 +543,13 @@ def element_texts(path, tag):
 
 
 def actual_texts(path, tag):
-    """(ActualText, own text) for each structure element tagged tag, in
-    reading order: what a screen reader says and copying gives in place
-    of the element's marked content (None without an ActualText), and the
-    characters of that content."""
+    """(ActualText, own text) for each structure element tagged tag, or
+    any of tag where it's a tuple, in reading order: what a screen reader
+    says and copying gives in place of the element's marked content (None
+    without an ActualText), and the characters of that content."""
     texts = marked_text(path)
     found = []
+    tags = tag if isinstance(tag, tuple) else (tag,)
     with pikepdf.open(path) as pdf:
         pages = {page.objgen: n for n, page in enumerate(pdf.pages)}
 
@@ -456,7 +558,7 @@ def actual_texts(path, tag):
                 for kid in element:
                     walk(kid)
             elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
-                if element.S == tag:
+                if str(element.S) in tags:
                     said = element.get("/ActualText")
                     found.append((None if said is None else str(said),
                                   own_text(element, texts, pages)))
@@ -469,9 +571,9 @@ def actual_texts(path, tag):
 
 def span_parents(path, said):
     """For each Span whose ActualText is said, in reading order: its
-    parent's tag, the parent's own text, and whether the Span holds a
-    structure element of its own, which it shouldn't (its marked content
-    is all it holds)."""
+    parent's tag, as LaTeX 2026-06-01 named it (element_name), the
+    parent's own text, and whether the Span holds a structure element of
+    its own, which it shouldn't (its marked content is all it holds)."""
     texts = marked_text(path)
     found = []
     with pikepdf.open(path) as pdf:
@@ -485,7 +587,7 @@ def span_parents(path, said):
                 if element.S == "/Span" and str(element.get("/ActualText", "")) == said:
                     kids = element.get("/K")
                     kids = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
-                    found.append((str(element.P.S), own_text(element.P, texts, pages),
+                    found.append((element_name(element.P), own_text(element.P, texts, pages),
                                   any(isinstance(kid, pikepdf.Dictionary) and "/S" in kid
                                       for kid in kids)))
                 if element.get("/K") is not None:

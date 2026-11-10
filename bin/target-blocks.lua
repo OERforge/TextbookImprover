@@ -352,6 +352,8 @@ end
 -- with no formula, the link with it.
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
+local owncolors = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
+                                            'own-colors.lua' }))
 
 local function holds(content, kinds)
   local found = false
@@ -466,6 +468,15 @@ local function hidden_caption(fig)
     fig.content = body
   end
   return fig
+end
+
+-- A source's own colors given what dark mode needs on a page and in an
+-- EPUB, whose stylesheets follow the reader's dark mode (own-colors.lua):
+-- a text color of its own a partner for it, a background of its own the
+-- class page.css keeps the light mode's text on.
+local function own_colors(doc)
+  if not (FORMAT:match('html') or FORMAT:match('epub')) then return nil end
+  return owncolors.dark_partners(doc)
 end
 
 local function hidden_captions(doc)
@@ -681,6 +692,7 @@ return {
   { Link = notes_after },
   separate_notes,
   { Pandoc = display_styles },
+  { Pandoc = own_colors },
   { Pandoc = title_heading },
   { Meta = drop_title_block },
 }

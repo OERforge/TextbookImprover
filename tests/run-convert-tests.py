@@ -931,8 +931,10 @@ def case_white_marks(work):
         ("no mark is emptied to make two spaces one: a span with a style holding only a "
          "space keeps it, and one holding a word loses the space at its end, beside "
          "another outside it or at the start of the next span",
-         lambda: re.search(r'<span\s+style="color:#000000;"> </span>', page) is not None
-         and re.search(r'<span\s+style="color:#000000;">red</span> is 0\.7', page) is not None
+         lambda: re.search(r'<span\s+style="color:#000000; color: light-dark\(#000000, #fdfdfd\)">'
+                           r' </span>', page) is not None
+         and re.search(r'<span\s+style="color:#000000; color: light-dark\(#000000, #fdfdfd\)">red'
+                       r'</span>\s+is\s+0\.7', page) is not None
          and "and red is 0.7, and so on." in said),
         ("a table's cell holding only a no-break space is empty",
          lambda: re.search(r"<td>0\.00135</td>\s*<td></td>", page) is not None
@@ -6703,6 +6705,152 @@ def case_remediate_docx(work):
     ]
 
 
+# A source's own colors, as an HTML page and Markdown give them: a word's
+# color, black, a highlight, a highlight with a word of its own, a head
+# cell's background, a cell's word in red, and a cell's own background.
+OWN_COLORS_HTML = """<!DOCTYPE html>
+<html lang="en"><head><title>From HTML</title></head><body>
+<h1>From HTML</h1>
+<p>A <span style="color:#1a237e">dark blue</span> word, a <span style="color:black">black</span>
+one, a <span style="background-color:yellow">highlight</span>, and a <span
+style="background-color:yellow">highlight with <span style="color:#1a237e">a word</span></span>.</p>
+<table><tr><th style="background-color:#00ccff">Head</th><th>Plain</th></tr>
+<tr><td><span style="color:#c00">red</span></td><td style="background-color:#fdd">pink</td></tr></table>
+</body></html>
+"""
+OWN_COLORS_MD = """---
+title: From Markdown
+---
+
+# From Markdown
+
+A [green]{style="color: #2e7d32"} word and a [highlight]{style="background-color: yellow"}.
+"""
+
+# Each element a page's or a chapter's style colors, drawn: its text, its
+# color, and what it sits on, the first background of its own up from it.
+OWN_COLORS_JS = """() => {
+  const rgb = s => (s.match(/[\\d.]+/g) || []).slice(0, 4).map(Number);
+  const lum = c => { const [r, g, b] = c.slice(0, 3).map(v => { v /= 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05); };
+  const under = el => { for (let n = el; n; n = n.parentElement) {
+    const c = rgb(getComputedStyle(n).backgroundColor);
+    if (c.length === 3 || (c.length === 4 && c[3] > 0)) return c; }
+    return [255, 255, 255]; };
+  return [...document.querySelectorAll('body [style]')].filter(el =>
+    /color/.test(el.getAttribute('style'))).map(el => [el.textContent.trim(),
+    Math.round(ratio(rgb(getComputedStyle(el).color), under(el)) * 100) / 100]);
+}"""
+
+
+def case_own_colors(work):
+    """A source's own colors in a page's and an EPUB's dark mode
+    (own-colors.lua): a text color of its own given a partner for dark
+    mode, black the dark mode's text, a background of its own the class
+    page.css keeps the light mode's text on, and a color of its own inside
+    it left; so, drawn in Chromium, each colored word reads at 4.5:1 or
+    more on what it sits on, in light mode and in dark, on a page and in an
+    EPUB's chapter. Drawing them needs Playwright and its Chromium, and
+    skips without them."""
+    os.makedirs(work)
+    with open(os.path.join(work, "01-html.html"), "w", encoding="utf-8") as fh:
+        fh.write(OWN_COLORS_HTML)
+    with open(os.path.join(work, "02-md.md"), "w", encoding="utf-8") as fh:
+        fh.write(OWN_COLORS_MD)
+    run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n",
+                  fixtures=())
+    page = read(work, "html", "01-html.html") if exists(work, "html", "01-html.html") else ""
+    md_page = read(work, "html", "02-md.html") if exists(work, "html", "02-md.html") else ""
+    chapters = {}
+    path = os.path.join(work, "ebook", "org.example.fixtures.epub")
+    unpacked = os.path.join(work, "unpacked")
+    if os.path.exists(path):
+        with zipfile.ZipFile(path) as epub:
+            epub.extractall(unpacked)
+            for name in epub.namelist():
+                if name.endswith(".xhtml") and "/text/" in name:
+                    text = epub.read(name).decode("utf-8")
+                    for heading in ("From HTML", "From Markdown"):
+                        if f">{heading}</h1>" in text:
+                            chapters[heading] = os.path.join(unpacked, name)
+
+    def chapter(heading):
+        if heading not in chapters:
+            return ""
+        with open(chapters[heading], encoding="utf-8") as fh:
+            return fh.read()
+
+    def flat(markup):
+        return re.sub(r"\s+", " ", markup)
+
+    def written(markup):
+        m = flat(markup)
+        return ('<span style="color:#1a237e; color: light-dark(#1a237e, #6c88eb)">dark blue' in m
+                and '<span style="color:black; color: light-dark(black, #fdfdfd)">black' in m
+                and '<span class="own-background" style="background-color:yellow">highlight</span>'
+                in m
+                and '<span class="own-background" style="background-color:yellow">highlight '
+                    'with <span style="color:#1a237e">a word</span>' in m
+                and re.search(r'<th class="own-background" style="background-color: ?#00ccff"', m)
+                and '<span style="color:#c00; color: light-dark(#c00, #ff4d3c)">red' in m
+                and re.search(r'<td class="own-background" style="background-color: ?#fdd"', m))
+
+    def md_written(markup):
+        m = flat(markup)
+        return ('<span style="color: #2e7d32; color: light-dark(#2e7d32, #509e52)">green' in m
+                and '<span class="own-background" style="background-color: yellow">highlight' in m)
+    drawn = {}
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sync_playwright = None
+    if sync_playwright and run.returncode == 0:
+        try:
+            with sync_playwright() as play:
+                browser = play.chromium.launch()
+                for scheme in ("light", "dark"):
+                    view = browser.new_page(color_scheme=scheme)
+                    for name, where in (("page", os.path.join(work, "html", "01-html.html")),
+                                        ("md page", os.path.join(work, "html", "02-md.html")),
+                                        ("chapter", chapters.get("From HTML")),
+                                        ("md chapter", chapters.get("From Markdown"))):
+                        if where:
+                            view.goto("file://" + where)
+                            drawn[(name, scheme)] = view.evaluate(OWN_COLORS_JS)
+                    view.close()
+                browser.close()
+        except Exception as exc:
+            print(f"  skip  Playwright's Chromium doesn't start ({str(exc)[:100]})")
+            sync_playwright = None
+    elif sync_playwright is None:
+        print("  skip  Playwright not installed; a source's own colors aren't drawn")
+
+    def readable():
+        low = [(k, text, r) for k, words in drawn.items() for text, r in words if r < 4.5]
+        for k, text, r in low:
+            print(f"        {k}: {text!r} at {r}:1")
+        return len(drawn) == 8 and all(len(words) >= 2 for words in drawn.values()) and not low
+    checks = [
+        ("the book is converted", lambda: run.returncode == 0 or print(run.stderr[-2000:])),
+        ("a text color of the source's own gets a partner for dark mode, black the dark "
+         "mode's text, a background of its own the class own-background, and a color of its "
+         "own inside one is left, on a page from HTML, a head cell and a cell's among them",
+         lambda: written(page) or print(flat(page)[-2500:])),
+        ("and on one from Markdown",
+         lambda: md_written(md_page) or print(flat(md_page)[-1500:])),
+        ("and in the EPUB's chapters",
+         lambda: written(chapter("From HTML")) and md_written(chapter("From Markdown"))),
+    ]
+    if sync_playwright:
+        checks.append(("drawn in Chromium, each colored word reads at 4.5:1 or more on what it "
+                       "sits on, in light mode and in dark, on a page and in an EPUB's chapter",
+                       readable))
+    return checks
+
+
 def case_side_by_side(work):
     """Pictures in a row in a figure (<figure><div class="row"><figure>, as
     LibreTexts sets two): in a browser, side by side in a wide window, one
@@ -9949,6 +10097,7 @@ CASES = [
     ("a title block's heading with a formula", case_title_block_formula),
     ("a formula in a picture's alt text", case_alt_formulas),
     ("a figure's caption with a note or a link", case_caption_notes_links),
+    ("a source's own colors in dark mode", case_own_colors),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),

@@ -91,6 +91,18 @@ table {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+/* A source's own background, a highlight or a shaded cell, which
+   own-colors.lua marks own-background where its style gives it one color
+   and its text none: dark mode turns the text and leaves the background,
+   #fdfdfd on yellow at 1.05:1, so its text, and what's in it, keeps the
+   light mode's #1a1a1a there, as the source made it to be read. A color
+   of its own inside it, in its style, still wins. */
+@media (prefers-color-scheme: dark) {
+  .own-background,
+  .own-background * {
+    color: #1a1a1a;
+  }
+}
 /* An empty header cell, which the run writes as a data cell and marks
    (lib/headercells.py), a head row's or a row head's: the line Pandoc's
    stylesheets, a page's and an EPUB's, draw over each header cell runs

@@ -2598,6 +2598,7 @@ def case_reading_limits(work):
 
     opening, closing = mark("\u00ab", "\u00a0"), mark("\u00a0", "\u00bb")
     german = r'<span lang="de(?:-DE)?">%s</span>'
+    RED = r"color: red; color: light-dark\(red, #ff4d3c\)"
     return [
         ("LaTeX books are read whose quotations csquotes sets, and whose \\textcolor holds a "
          "list",
@@ -2695,18 +2696,19 @@ def case_reading_limits(work):
              "{\\selectlanguage{french}% }\n\\{ \\enquote{h}} \\enquote{i}", {},
              {"main": "american", "variants": {}})
          == "{\\selectlanguage{french}% }\n\\{ \u00ab\u00a0h\u00a0\u00bb} \\enquote{i}"),
+        # Red is given its partner for dark mode after it (own-colors.lua).
         ("\\textcolor around a list is as LaTeX colors it, the words before it in their "
          "paragraph",
-         lambda: re.search(r'<p>\s*T <span style="color: red">red words</span>\s*</p>\s*'
-                           r'<div style="color: red">\s*<ul>\s*<li>\s*(?:<p>)?one(?:</p>)?\s*'
-                           r'</li>\s*</ul>\s*</div>\s*<p>\s*<span style="color: red">more</span>'
+         lambda: re.search(r'<p>\s*T <span style="' + RED + r'">red words</span>\s*</p>\s*'
+                           r'<div style="' + RED + r'">\s*<ul>\s*<li>\s*(?:<p>)?one(?:</p>)?\s*'
+                           r'</li>\s*</ul>\s*</div>\s*<p>\s*<span style="' + RED + r'">more</span>'
                            r" end\.\s*</p>", pages[english]) is not None),
         ("and in another command's words, the list colored between the command around the "
          "words before it and after it",
-         lambda: re.search(r'<p>\s*U <strong>gras <span style="color: red">a</span></strong>'
-                           r'\s*</p>\s*<div style="color: red">\s*<ul>\s*<li>\s*(?:<p>)?x'
+         lambda: re.search(r'<p>\s*U <strong>gras <span style="' + RED + r'">a</span></strong>'
+                           r'\s*</p>\s*<div style="' + RED + r'">\s*<ul>\s*<li>\s*(?:<p>)?x'
                            r'(?:</p>)?\s*</li>\s*</ul>\s*</div>\s*<p>\s*<strong><span style='
-                           r'"color: red">b</span> fin</strong> end\.\s*</p>', pages[english])
+                           r'"' + RED + r'">b</span> fin</strong> end\.\s*</p>', pages[english])
          is not None),
         ("the run says what it read so",
          lambda: "4 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in told
@@ -8793,11 +8795,14 @@ def case_customized(work):
          "text, and \\begingroup after a size command is a group",
          lambda: "An introduction to the first chapter." in one
          and "0pt" not in one + page("headers.html") and "Chapter~" not in one),
+        # The blue reads in dark mode as it is, the red is given a partner for
+        # it, and the tint the class that keeps its text dark (own-colors.lua).
         ("a color the book defines is CSS, and so are a mix and a name of dvipsnames's",
          lambda: re.search(r'<span\s+style="color: rgb\(86, 155, 189\)"><strong>A\s+question', one)
-         and re.search(r'<span\s+style="background-color: rgb\(221, 235, 242\)">tinted</span>',
-                       one)
-         and re.search(r'<span\s+style="color: rgb\(184, 20, 11\)">brick\s+red</span>', one)),
+         and re.search(r'<span\s+class="own-background"\s+style="background-color: '
+                       r'rgb\(221, 235, 242\)">tinted</span>', one)
+         and re.search(r'<span\s+style="color: rgb\(184, 20, 11\); color: light-dark\(rgb\(184, '
+                       r'20, 11\), #f55847\)">brick\s+red</span>', one)),
         ("\\nameref is a link to the label, its text the section's title, on another page "
          "too", lambda: re.search(r'<a\s+href="#sec:data"[^>]*>Data\s+basics</a>', one)
          and re.search(r'<a\s+href="ch_one\.html#ch_one"[^>]*>First\s+chapter</a>', two)),

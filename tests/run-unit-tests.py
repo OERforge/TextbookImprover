@@ -215,10 +215,15 @@ def check_page_css():
     and gives dark mode #232629. Every color page.css gives text has to
     clear WCAG AA against the background it lands on, in each, and a
     table's row rule 3:1, WCAG's for a line that tells something, but the
-    one OpenStax draws hardly seen."""
+    one OpenStax draws hardly seen. A rule for dark mode alone, the one
+    that keeps a source's own background's text in the light mode's
+    color, is held to what it's for, since what it lands on is the
+    source's."""
     import re as _re
     with open(os.path.join(ROOT, "bin", "page.css"), encoding="utf-8") as fh:
         css = _re.sub(r"/\*.*?\*/", "", fh.read(), flags=_re.S)
+    dark_only = _re.findall(r"@media \(prefers-color-scheme: dark\) \{(.*?)\n\}", css, _re.S)
+    css = _re.sub(r"@media \(prefers-color-scheme: dark\) \{.*?\n\}", "", css, flags=_re.S)
     screen = css.split("@media print")[0]
     pairs = _re.findall(r"(?<![-\w])color:\s*light-dark\((#[0-9a-fA-F]{3,6}),\s*"
                         r"(#[0-9a-fA-F]{3,6})\)", screen)
@@ -273,6 +278,10 @@ def check_page_css():
          lambda: all(any(expand(c) == expand(l) for l, _ in pairs) for c in fixed)),
         ("no outline is a fixed color that dark mode's background matches",
          lambda: not outlines),
+        ("in dark mode, a source's own background (own-background) keeps the light mode's "
+         "#1a1a1a for its text and what's in it, and nothing else is set for dark mode alone",
+         lambda: [_re.sub(r"\s+", " ", block).strip() for block in dark_only]
+         == [".own-background, .own-background * { color: #1a1a1a; }"]),
     ]
 
 
@@ -3850,6 +3859,182 @@ def check_passage_targets():
          lambda: by_lua == by_python and any(not kept for row in by_lua.values() for kept in row)
          and any(kept for row in by_lua.values() for kept in row)
          or print("    %r\n    %r" % (by_lua, by_python))),
+    ]
+
+
+def oklch_hue(color):
+    """A #rrggbb color's chroma and hue in OKLCH (Björn Ottosson's OKLab),
+    worked out here apart from own-colors.lua's."""
+    import math
+    rgb = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    r, g, b = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in rgb]
+    l, m, s_ = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+                0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+                0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    l, m, s_ = (x ** (1 / 3) for x in (l, m, s_))
+    a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s_
+    bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s_
+    return math.hypot(a, bb), math.degrees(math.atan2(bb, a)) % 360
+
+
+def check_own_colors():
+    """A source's own colors, as own-colors.lua gives them what a page's and
+    an EPUB's dark mode need, run with Pandoc's Lua. A color is read as CSS
+    Color 4 gives it, hex, rgb(), hsl(), or a name, and a value that says
+    none of its own (inherit, currentColor, transparent) is told from one
+    not known here or partly transparent. A text color's partner reads at
+    4.6:1 on #232629, and no more than it needs, its OKLCH hue kept, worked
+    out again here; one that reads there already keeps itself, and black
+    or near it, no lighter than the page's #1a1a1a, is the dark mode's
+    #fdfdfd. And each element as its style says: a text color of its own
+    a partner after its own declaration, a background of its own the class
+    own-background and what's in it left, both left, and a background that
+    isn't a color left with what's in it, a table's cells among them."""
+    if not shutil.which("pandoc"):
+        return [("a source's own colors in dark mode",
+                 lambda: print("  skip  no pandoc to run Lua") or True)]
+    values = ["#1a237e", "#abc", "#abcf", "#aabbccff", "#aabbcc80", "rgb(26, 35, 126)",
+              "rgb(10% 20% 30%)", "rgba(0,0,255,0.5)", "rgb(0 0 255 / 100%)",
+              "hsl(240, 100%, 25%)", "hsl(120deg 100% 50%)", "ForestGreen", "inherit",
+              "currentColor", "transparent", "none", "var(--x)", "bogus"]
+    read_as = {"#1a237e": "#1a237e", "#abc": "#aabbcc", "#abcf": "#aabbcc",
+               "#aabbccff": "#aabbcc", "#aabbcc80": None, "rgb(26, 35, 126)": "#1a237e",
+               "rgb(10% 20% 30%)": "#1a334d", "rgba(0,0,255,0.5)": None,
+               "rgb(0 0 255 / 100%)": "#0000ff", "hsl(240, 100%, 25%)": "#000080",
+               "hsl(120deg 100% 50%)": "#00ff00", "ForestGreen": "#228b22", "inherit": False,
+               "currentColor": False, "transparent": False, "none": False, "var(--x)": None,
+               "bogus": None}
+    raised = ["#1a237e", "#0000ff", "#228b22", "#cc0000", "#800080", "#2e7d32", "#777777"]
+    plain = ["#000000", "#111111", "#1a1a1a"]
+    readable = ["#ffff99", "#90ee90"]
+    page = ('<p><span style="color:#1a237e">a</span> <span style="background-color:yellow">b'
+            '</span> <span style="background:#ff0;color:#333">c</span> <span style="background-'
+            'color:transparent;color:#1a237e">d</span> <span style="background:url(x.png);color:'
+            'navy">e <span style="color:blue">e2</span></span> <span style="background-color:'
+            'yellow">f <span style="color:blue">g</span></span> <span style="color:inherit">h'
+            '</span> <span style="color:#000">i</span></p><div style="color:#2e7d32"><p>j <span '
+            'style="color:purple">k</span></p></div><table><tr><th style="background-color:'
+            '#00ccff">l</th><td><span style="color:#c00">m</span></td><td style="background-'
+            'color:#fdd"><span style="color:#c00">n</span></td></tr></table>')
+    work = tempfile.mkdtemp(prefix="own-colors-")
+    given, out = os.path.join(work, "given.json"), os.path.join(work, "out.json")
+    with open(given, "w", encoding="utf-8") as fh:
+        json.dump({"values": values, "partners": raised + plain + readable, "page": page}, fh)
+    script = os.path.join(work, "own.lua")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write("local own = dofile(%s)\n" % json.dumps(
+            os.path.join(ROOT, "bin", "own-colors.lua"), ensure_ascii=False)
+            + "local fh = io.open(%s)\n" % json.dumps(given, ensure_ascii=False)
+            + r"""local given = pandoc.json.decode(fh:read('a'))
+fh:close()
+local read = {}
+for _, v in ipairs(given.values) do
+  local rgb = own.parse(v)
+  read[#read + 1] = rgb and own.hex(rgb) or (rgb == false and 'none' or 'unknown')
+end
+local partners = {}
+for _, v in ipairs(given.partners) do partners[#partners + 1] = own.hex(own.partner(own.parse(v))) end
+local seen = {}
+local function note(text, attr)
+  seen[text] = { style = attr.attributes.style or '', classes = table.concat(attr.classes, ' ') }
+end
+local doc = own.dark_partners(pandoc.read(given.page, 'html'))
+doc:walk({
+  Span = function(el) note(pandoc.utils.stringify(el.content):match('^%S+'), el.attr) end,
+  Div = function(el) note(pandoc.utils.stringify(el.content):match('^%S+'), el.attr) end,
+  Table = function(tbl)
+    for _, body in ipairs(tbl.bodies) do
+      for _, row in ipairs(body.body) do
+        for _, cell in ipairs(row.cells) do
+          note('cell ' .. pandoc.utils.stringify(cell.contents), cell.attr)
+        end
+      end
+    end
+    for _, row in ipairs(tbl.head.rows) do
+      for _, cell in ipairs(row.cells) do
+        note('cell ' .. pandoc.utils.stringify(cell.contents), cell.attr)
+      end
+    end
+  end,
+})
+local names = {}
+for name in pairs(own.NAMED) do names[#names + 1] = name end
+""" + "fh = io.open(%s, 'w')\n" % json.dumps(out, ensure_ascii=False)
+            + "fh:write(pandoc.json.encode({ read = read, partners = partners, seen = seen, "
+              "names = #names }))\nfh:close()\n")
+    done = subprocess.run(["pandoc", "lua", script], capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    try:
+        with open(out, encoding="utf-8") as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        got = {"read": [], "partners": [], "seen": {}, "names": 0}
+        print("  pandoc lua said: " + done.stderr.strip()[-400:])
+    shutil.rmtree(work, ignore_errors=True)
+    read = dict(zip(values, got["read"]))
+    partner = dict(zip(raised + plain + readable, got["partners"]))
+    seen = got["seen"]
+
+    def read_right():
+        wrong = [(v, read.get(v), want) for v, want in read_as.items()
+                 if read.get(v) != (want if want else ("none" if want is False else "unknown"))]
+        for v, have, want in wrong:
+            print(f"  {v!r}: {have!r}, not {want!r}")
+        return not wrong
+
+    def raised_right():
+        wrong = []
+        for own in raised:
+            p = partner.get(own) or "#000000"
+            c, h = oklch_hue(own)
+            pc, ph = oklch_hue(p)
+            hue = c < 0.02 or min(abs(h - ph), 360 - abs(h - ph)) < 4
+            if not (4.6 <= contrast(p, "#232629") < 4.75 and hue):
+                wrong.append((own, p, round(contrast(p, "#232629"), 2), round(h), round(ph)))
+        for w in wrong:
+            print(f"  {w}")
+        return not wrong
+
+    def styled(text, style, classes=""):
+        have = seen.get(text)
+        if have != {"style": style, "classes": classes}:
+            print(f"  {text!r}: {have!r}")
+            return False
+        return True
+    return [
+        ("a color is read as CSS Color 4 gives it, hex, rgb(), hsl(), and a name, and a "
+         "value that says none of its own is told from one not known here or partly "
+         "transparent", read_right),
+        ("CSS's 148 named colors are known", lambda: got["names"] == 148),
+        ("a text color's partner reads at 4.6:1 on #232629, an EPUB's dark background, and "
+         "no more than it needs, its OKLCH hue kept", raised_right),
+        ("black or near it, no lighter than the page's #1a1a1a, is the dark mode's #fdfdfd, "
+         "and a color that reads in dark mode already keeps itself",
+         lambda: all(partner.get(c) == "#fdfdfd" for c in plain)
+         and all(partner.get(c) == c for c in readable)),
+        ("a text color of the source's own gets its partner after its own declaration, in a "
+         "span, a div, and a table's cell, a span in a div too",
+         lambda: styled("a", "color:#1a237e; color: light-dark(#1a237e, %s)" % partner["#1a237e"])
+         and styled("j", "color:#2e7d32; color: light-dark(#2e7d32, %s)" % partner["#2e7d32"])
+         and styled("k", "color:purple; color: light-dark(purple, %s)" % partner["#800080"])
+         and styled("m", "color:#c00; color: light-dark(#c00, %s)" % partner["#cc0000"])
+         and styled("i", "color:#000; color: light-dark(#000, #fdfdfd)")
+         and styled("d", "background-color:transparent;color:#1a237e; color: light-dark("
+                         "#1a237e, %s)" % partner["#1a237e"])),
+        ("a background of its own gets the class own-background, in a span and a cell, and "
+         "what's in it is left as the source colored it",
+         lambda: styled("b", "background-color:yellow", "own-background")
+         and styled("f", "background-color:yellow", "own-background")
+         and styled("g", "color:blue")
+         and styled("cell l", "background-color: #00ccff", "own-background")
+         and styled("cell n", "background-color: #fdd", "own-background")
+         and styled("n", "color:#c00")),
+        ("both colors of its own are left, and so is a background that isn't a color, with "
+         "what's in it, and a text color that says none of its own",
+         lambda: styled("c", "background:#ff0;color:#333")
+         and styled("e", "background:url(x.png);color:navy")
+         and styled("e2", "color:blue")
+         and styled("h", "color:inherit")),
     ]
 
 
@@ -8802,6 +8987,8 @@ GROUPS = [
     ("a heading's formula in the PDF filter's LaTeX, its text in the bookmark",
      check_heading_bookmarks),
     ("a formula's text, as math-text.lua writes it for a bookmark", check_math_text),
+    ("a source's own colors, as own-colors.lua gives them what dark mode needs",
+     check_own_colors),
     ("a title's formulas as text in an EPUB chapter's title, a piece's, a declared title's, "
      "and the run's note", check_formula_titles),
     ("a passage's targets, as the run's note and the target filter read them",

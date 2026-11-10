@@ -7894,9 +7894,11 @@ def checks(work, jobs=1):
         # the two marks against the term, a comma between them and no space,
         # and one space after them, the term's, not the term's and the
         # definition's too (about 6.5 points, where the two would be near 10).
+        # The space is the gaps' to measure: pypdf 4.0.2 reads the untagged
+        # copy as "Both19,20Its", where 5.9.0 reads a space before "Its".
         ("a term's note and the note its definition opens with are marked together against "
          "the term, a comma between, the term's space alone after them, tagged and untagged",
-         lambda: all(re.search(r"Both\s*\d+\s*,\s*\d+\s+Its\s+definition\s+opens", words)
+         lambda: all(re.search(r"Both\s*\d+\s*,\s*\d+\s*Its\s+definition\s+opens", words)
                      for words in (notes_text, notes_plain_text))
          and all(gaps is not None and abs(gaps[0]) < 1 and 3 < gaps[1] < 8 and gaps[2] < 1
                  for gaps in (pdftext.term_mark_gaps(notes_path, "Both", "Its"),

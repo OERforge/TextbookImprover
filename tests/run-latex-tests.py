@@ -8220,6 +8220,16 @@ def case_pieces(work):
                          "! Package fontspec Error: \n"
                          "(fontspec)                The font \"IBM Plex\n"
                          "(fontspec)                Serif Text\" cannot be found; this may\n"))),
+        # KOMA-Script 3.49.3's words (scrkernel-tagging.dtx), measured with
+        # TeX Live 2026 of November 2026.
+        ("a KOMA-Script class that refuses \\DocumentMetadata is named, with the PDF "
+         "from the pages and another class for one",
+         lambda: any("The scrbook class, KOMA-Script's, stops on \\DocumentMetadata" in advice
+                     and "pdf.from: pages" in advice and "documentclass" in advice
+                     for advice in latexbuild.failure_advice(
+                         "! Fatal Class scrbook Error: \\DocumentMetadata not supported!\n"
+                         "(scrbook)                    Note: This class currently does not "
+                         "support\n"))),
         ("LaTeX's first error is found when its file's name has spaces",
          lambda: latexbuild.first_errors(log)
          and "titlesec Error" in latexbuild.first_errors(log)[0]

@@ -4833,9 +4833,9 @@ def fit_report(output, source, pages):
 def failure_advice(log):
     """What to do about a failed build, from its log: a file LaTeX can't
     find, the two packages picture mode and a struck-out term need among
-    them, a language
-    babel hasn't, a font that isn't installed, or one of TeX's tables
-    outgrown."""
+    them, a language babel hasn't, a font that isn't installed, a
+    KOMA-Script class that refuses \\DocumentMetadata, or one of TeX's
+    tables outgrown."""
     said = []
     missing = list(dict.fromkeys(MISSING_FILE.findall(log)))
     # PICTURE_PATHS loads pict2e at \begin{document} for every PDF, unless
@@ -4924,6 +4924,22 @@ def failure_advice(log):
                     "LaTeX's own headings would build. A source target with tagging on "
                     "writes a copy that doesn't load it, unless the status list "
                     "installed with TeX rates it compatible.")
+    # KOMA-Script 3.49.3 (2026-10-19) stops on \DocumentMetadata, which a
+    # tagged PDF begins with (Pandoc's template writes it for pdfstandard,
+    # and a LaTeX book's tagged copy before \documentclass), and tells the
+    # author to load pdfmanagement and set document/metadata's keys in its
+    # place, where tagging isn't one ("The key 'document/metadata/tagging'
+    # is unknown"). 3.49.2 built with it (measured 2026-11-10).
+    koma = re.search(r"Fatal Class (\S+) Error: \\DocumentMetadata not supported", log)
+    if koma:
+        said.append(f"The {koma.group(1)} class, KOMA-Script's, stops on \\DocumentMetadata, "
+                    "which a tagged PDF begins with: KOMA-Script 3.49.3 refuses it, where "
+                    "3.49.2 built with it, and the way the class says to name a PDF's "
+                    "metadata instead can't switch tagging on. For a book's own LaTeX, "
+                    "pdf.from: pages builds its PDF from the converted pages, set with the "
+                    "book class; for a PDF from the pages, the pdf.metadata file's "
+                    "documentclass names the class, and another, or none for the book "
+                    "class, builds it.")
     capacity = CAPACITY.search(log)
     if capacity:
         table = capacity.group(1).strip()

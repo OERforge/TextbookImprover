@@ -346,9 +346,10 @@ end
 -- the writer hid a caption with one whole, its marks too: so in a caption
 -- with a note only the words are hidden, each run of them in a span of its
 -- own, and each mark is left to be read after the alt text, a link to its
--- note, a formula in the caption or not (hidden_words). Not a caption with
--- an author's link, whose words are the link's too: it's shown beside a
--- formula, and the writer hides one without, the link with it, as before.
+-- note, a formula in the caption or not (hidden_words). A caption with an
+-- author's link is shown whole, its words said twice, since its words are
+-- the link's too and a link can't be reached hidden: the writer hid one
+-- with no formula, the link with it.
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
 
@@ -415,16 +416,16 @@ local function hidden_caption(fig)
   local body = fig.content
   if #body ~= 1 or body[1].t ~= 'Plain' or #body[1].content ~= 1 then return nil end
   local only, caption, alt = body[1].content[1], fig.caption, nil
-  local noted = holds(caption.long, NOTE)
+  local noted, linked = holds(caption.long, NOTE), holds(caption.long, LINK)
   if only.t == 'Image' then
-    if noted then
+    if noted or linked then
       -- The writer compares the caption with the picture's alt attribute
       -- where it has one, and else with its description.
       alt = only.attributes.alt or pandoc.utils.stringify(only.caption)
     elseif only.attributes.alt ~= nil or not holds(caption.long, FORMULA) then
-      -- A caption with no formula and no note the writer hides itself;
-      -- beside a picture with an alt attribute, it compares the caption
-      -- with that.
+      -- A caption with no formula, no note, and no link the writer hides
+      -- itself; beside a picture with an alt attribute, it compares the
+      -- caption with that.
       return nil
     else
       alt = pandoc.utils.stringify(only.caption)
@@ -439,10 +440,17 @@ local function hidden_caption(fig)
     return nil
   end
   if pandoc.utils.stringify(mathtext.texted(caption.long)) ~= alt then return nil end
+  if linked then
+    -- Shown whole, beside the picture as beside an EPUB's link, which the
+    -- writer hides no caption beside: an empty string beside the picture,
+    -- which it writes as nothing, keeps it from comparing (captionIsAlt).
+    if only.t ~= 'Image' then return nil end
+    body[1].content:insert(pandoc.Str(''))
+    fig.content = body
+    return fig
+  end
   for _, block in ipairs(caption.long) do
-    if (block.t ~= 'Plain' and block.t ~= 'Para') or holds(block.content, LINK) then
-      return nil
-    end
+    if block.t ~= 'Plain' and block.t ~= 'Para' then return nil end
   end
   caption.long = caption.long:map(function(block)
     block.content = hidden_words(block.content)

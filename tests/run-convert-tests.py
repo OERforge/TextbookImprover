@@ -4808,8 +4808,9 @@ def case_alt_formulas(work):
     Markdown keeps the formula, its description the figure's caption read
     again. Where the HTML writer would have hidden a figure's caption
     repeating the alt text from a screen reader, its words are hidden in a
-    span, but for a caption with a link, and in one with a note the words
-    and not the note's mark (case_noted_captions); a caption the alt text
+    span, but for a caption with a link, shown whole, and in one with a
+    note the words and not the note's mark (case_caption_notes_links); a
+    caption the alt text
     doesn't repeat is shown, its formula MathML, a figure div's own among
     them; and one with no formula is the writer's to hide, as it does. An
     EPUB's link for a picture on another server is named by the formula's
@@ -5004,11 +5005,16 @@ NOTED_CAPTIONS_MD = """# Noted
 
 ![A plain square](square.png)
 
+![See [the source](https://example.org/) for more](square.png)
+
+![See [its source](https://example.org/) for a note[^l]](square.png)
+
 [^c1]: The first note on the circle.
 [^c2]: The second note on the circle.
 [^m]: A note in the emphasis.
 [^g]: A note on the gray square.
 [^h]: A note on the other gray square.
+[^l]: A note beside a link.
 """
 
 # A picture on another server, for the EPUB alone, which makes it a link.
@@ -5016,13 +5022,15 @@ NOTED_CAPTIONS_REMOTE_MD = """# Remote
 
 :::: {targets="ebook"}
 ![A remote square, with a note[^r]](https://example.org/square.png)
+
+![A remote circle, see [its source](https://example.org/)](https://example.org/circle.png)
 ::::
 
 [^r]: A note on the remote square.
 """
 
 
-def case_noted_captions(work):
+def case_caption_notes_links(work):
     """A figure's caption with a note that says what its picture's alt
     text says, which Pandoc's HTML writer hid from a screen reader whole,
     its notes' marks too, so that none could be reached from the figure:
@@ -5031,9 +5039,11 @@ def case_noted_captions(work):
     each its own, and one in emphasis with the words around it hidden. So
     beside a picture whose alt attribute says what the caption says, but
     not beside one whose alt text is its own, whose caption is shown; and
-    beside an EPUB's link for a picture on another server. One with no
-    note is the writer's to hide, as it was. (A caption with a formula and
-    a note: case_alt_formulas.)"""
+    beside an EPUB's link for a picture on another server. One with an
+    author's link, which the writer hid with the link, is shown whole, its
+    words said twice, a note in it too, and so beside the EPUB's link. One
+    with neither is the writer's to hide, as it was. (A caption with a
+    formula and a note, or a link: case_alt_formulas.)"""
     os.makedirs(work)
     for name, page in (("01-noted", NOTED_CAPTIONS_MD), ("02-remote", NOTED_CAPTIONS_REMOTE_MD)):
         with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
@@ -5082,24 +5092,31 @@ def case_noted_captions(work):
                 ("", "[hidden: A ]<em>[hidden: noted][mark]</em>[hidden:  triangle]"),
                 ("", "[hidden: A gray square][mark]"),
                 ("", "A gray square, with a note[mark]"),
-                (' aria-hidden="true"', "A plain square")]
+                (' aria-hidden="true"', "A plain square"),
+                ("", 'See <a href="https://example.org/">the source</a> for more'),
+                ("", 'See <a href="https://example.org/">its source</a> for a note[mark]')]
     alts = ["A plain circle, with two notes", "A noted triangle", "A gray square",
-            "Words of its own", "A plain square"]
+            "Words of its own", "A plain square", "See the source for more",
+            "See its source for a note"]
     return [
         ("the book is converted", lambda: run.returncode == 0 or fail(run.stderr[-2000:])),
         ("a caption with a note that says what the alt text says has its words hidden in a "
          "span on a page, and each mark after them, a link to its note, two in a row and one "
          "in emphasis; so beside a picture whose alt attribute says it, but not one whose alt "
-         "text is its own; and one with no note the writer hides, as it did",
+         "text is its own; one with an author's link is shown whole, a note in it too; and one "
+         "with neither the writer hides, as it did",
          lambda: shapes(page()) == expected and img_alts(page()) == alts
          or fail(repr(shapes(page())))),
         ("and in an EPUB",
          lambda: shapes(chapter("Noted")) == expected and img_alts(chapter("Noted")) == alts
          or fail(repr(shapes(chapter("Noted"))))),
-        ("and beside an EPUB's link for a picture on another server",
+        ("and beside an EPUB's link for a picture on another server, one with an author's link "
+         "shown whole there too",
          lambda: re.search(r'<a href="https://example\.org/square\.png">A remote square, with a '
                            r'note</a>', chapter("Remote"))
-         and shapes(chapter("Remote")) == [("", "[hidden: A remote square, with a note][mark]")]
+         and shapes(chapter("Remote")) == [
+             ("", "[hidden: A remote square, with a note][mark]"),
+             ("", 'A remote circle, see <a href="https://example.org/">its source</a>')]
          or fail(repr(shapes(chapter("Remote"))))),
     ]
 
@@ -9931,7 +9948,7 @@ CASES = [
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
     ("a title block's heading with a formula", case_title_block_formula),
     ("a formula in a picture's alt text", case_alt_formulas),
-    ("a figure's caption with a note", case_noted_captions),
+    ("a figure's caption with a note or a link", case_caption_notes_links),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),

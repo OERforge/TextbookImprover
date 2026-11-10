@@ -2329,7 +2329,8 @@ def case_note_in_link(work):
          and re.search(r'One<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
          and re.search(r'<dt>Term<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
          and re.search(r'<h2[^>]*>Sets<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
-         and re.search(r'A gray square<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
+         and re.search(r'A gray square</span><a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s',
+                       pairs)
          and re.search(r'<caption>Plans<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
          and re.search(r'alt="A gray square"', pairs)),
         ("and the Markdown target keeps them as the author wrote them, with no comma",
@@ -4807,7 +4808,8 @@ def case_alt_formulas(work):
     Markdown keeps the formula, its description the figure's caption read
     again. Where the HTML writer would have hidden a figure's caption
     repeating the alt text from a screen reader, its words are hidden in a
-    span, but for a caption with a link or a note; a caption the alt text
+    span, but for a caption with a link, and in one with a note the words
+    and not the note's mark (case_noted_captions); a caption the alt text
     doesn't repeat is shown, its formula MathML, a figure div's own among
     them; and one with no formula is the writer's to hide, as it does. An
     EPUB's link for a picture on another server is named by the formula's
@@ -4889,10 +4891,18 @@ def case_alt_formulas(work):
     def shown_rest(markup):
         found = captions(markup)
         return len(found) == 6 and all(attrs == "" and "aria-hidden" not in words
-                                       for attrs, words in found[1:5]) \
+                                       for attrs, words in (found[1], found[2], found[4])) \
             and "<math" in found[1][1] and "<a href" in found[2][1] \
-            and 'href="#fn' in found[3][1] \
             and re.match(r"(<p>)?A caption of its own,\s*<math\b", found[4][1])
+
+    def noted(markup):
+        # The words hidden in a span, the formula MathML, and the note's
+        # mark after them, shown.
+        found = captions(markup)
+        return len(found) == 6 and found[3][0] == "" and re.fullmatch(
+            r'<span aria-hidden="true">A square of side\s*<math\b.*</math>,\s*with\s+a\s+note'
+            r'</span><a\b[^>]*role="doc-noteref"[^>]*>(<sup>)?\d+(</sup>)?</a>', found[3][1],
+            re.S)
 
     def writer_hidden(markup):
         found = captions(markup)
@@ -4917,13 +4927,16 @@ def case_alt_formulas(work):
         ("and a figure's caption repeating it is hidden in a span, its formula MathML",
          lambda: hidden_first(text("html", "01-squares.html"))),
         ("but one the alt text doesn't repeat is shown, its formula MathML, a figure div's "
-         "own caption too, and so is one with a link, and one with a note",
+         "own caption too, and so is one with a link",
          lambda: shown_rest(text("html", "01-squares.html"))),
+        ("and one with a note has its words hidden in a span, and its mark not",
+         lambda: noted(text("html", "01-squares.html"))),
         ("and one with no formula the writer hides itself",
          lambda: writer_hidden(text("html", "01-squares.html"))),
         ("an EPUB's alt text and its captions are the page's",
          lambda: img_alts(chapter("Squares")) == alts and hidden_first(chapter("Squares"))
-         and shown_rest(chapter("Squares")) and writer_hidden(chapter("Squares"))),
+         and shown_rest(chapter("Squares")) and noted(chapter("Squares"))
+         and writer_hidden(chapter("Squares"))),
         ("an EPUB's link for a picture on another server is named by the formula's text, "
          "and a caption beside it that says the same is hidden in a span, as beside a "
          "picture, a formula in it or not; one of its own is shown",
@@ -4976,6 +4989,118 @@ def case_alt_formulas(work):
          "one in a passage for another target, which they leave out",
          lambda: lost() == sorted((target, alt, True) for target in ("adoc", "word")
                                   for alt in alts + [choice] if alt not in (alts[1], alts[5]))),
+    ]
+
+
+NOTED_CAPTIONS_MD = """# Noted
+
+![A plain circle, with two notes[^c1][^c2]](square.png)
+
+![A *noted[^m]* triangle](square.png)
+
+![A gray square[^g]](square.png){alt="A gray square"}
+
+![A gray square, with a note[^h]](square.png){alt="Words of its own"}
+
+![A plain square](square.png)
+
+[^c1]: The first note on the circle.
+[^c2]: The second note on the circle.
+[^m]: A note in the emphasis.
+[^g]: A note on the gray square.
+[^h]: A note on the other gray square.
+"""
+
+# A picture on another server, for the EPUB alone, which makes it a link.
+NOTED_CAPTIONS_REMOTE_MD = """# Remote
+
+:::: {targets="ebook"}
+![A remote square, with a note[^r]](https://example.org/square.png)
+::::
+
+[^r]: A note on the remote square.
+"""
+
+
+def case_noted_captions(work):
+    """A figure's caption with a note that says what its picture's alt
+    text says, which Pandoc's HTML writer hid from a screen reader whole,
+    its notes' marks too, so that none could be reached from the figure:
+    its words are hidden in a span, and its marks aren't, on a page and in
+    an EPUB, each mark a link to its note after the words, two in a row
+    each its own, and one in emphasis with the words around it hidden. So
+    beside a picture whose alt attribute says what the caption says, but
+    not beside one whose alt text is its own, whose caption is shown; and
+    beside an EPUB's link for a picture on another server. One with no
+    note is the writer's to hide, as it was. (A caption with a formula and
+    a note: case_alt_formulas.)"""
+    os.makedirs(work)
+    for name, page in (("01-noted", NOTED_CAPTIONS_MD), ("02-remote", NOTED_CAPTIONS_REMOTE_MD)):
+        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+    with open(os.path.join(work, "square.png"), "wb") as fh:
+        fh.write(ONE_PIXEL)
+    run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n",
+                  fixtures=())
+
+    def fail(message):
+        print("        " + message[:2000])
+        return False
+
+    def page():
+        return read(work, "html", "01-noted.html") if exists(work, "html", "01-noted.html") \
+            else ""
+
+    def chapter(heading):
+        path = os.path.join(work, "ebook", "org.example.fixtures.epub")
+        if not os.path.exists(path):
+            return ""
+        with zipfile.ZipFile(path) as epub:
+            return "".join(t for t in (epub.read(name).decode("utf-8") for name in epub.namelist()
+                                       if name.endswith(".xhtml") and "/text/" in name)
+                           if f">{heading}</h1>" in t)
+
+    def shapes(markup):
+        """Each figure's caption, its attributes and its parts: [hidden: …]
+        a span hidden from a screen reader, [mark] a note's mark, linking
+        to a note the markup has."""
+        out = []
+        for attrs, words in re.findall(r"<figcaption([^>]*)>(.*?)</figcaption>", markup, re.S):
+            words = re.sub(r"\s+", " ", words)
+
+            def mark(match):
+                target = re.search(r'href="#([^"]+)"', match.group(0))
+                return "[mark]" if target and f'id="{target.group(1)}"' in markup else "[lost]"
+            words = re.sub(r'<a\b[^>]*role="doc-noteref"[^>]*>.*?</a>', mark, words)
+            out.append((attrs, re.sub(r'<span aria-hidden="true">(.*?)</span>', r"[hidden: \1]",
+                                      words)))
+        return out
+
+    def img_alts(markup):
+        return [html_lib.unescape(a) for a in re.findall(r'<img\b[^>]*?\balt="([^"]*)"', markup)]
+    expected = [("", "[hidden: A plain circle, with two notes][mark][mark]"),
+                ("", "[hidden: A ]<em>[hidden: noted][mark]</em>[hidden:  triangle]"),
+                ("", "[hidden: A gray square][mark]"),
+                ("", "A gray square, with a note[mark]"),
+                (' aria-hidden="true"', "A plain square")]
+    alts = ["A plain circle, with two notes", "A noted triangle", "A gray square",
+            "Words of its own", "A plain square"]
+    return [
+        ("the book is converted", lambda: run.returncode == 0 or fail(run.stderr[-2000:])),
+        ("a caption with a note that says what the alt text says has its words hidden in a "
+         "span on a page, and each mark after them, a link to its note, two in a row and one "
+         "in emphasis; so beside a picture whose alt attribute says it, but not one whose alt "
+         "text is its own; and one with no note the writer hides, as it did",
+         lambda: shapes(page()) == expected and img_alts(page()) == alts
+         or fail(repr(shapes(page())))),
+        ("and in an EPUB",
+         lambda: shapes(chapter("Noted")) == expected and img_alts(chapter("Noted")) == alts
+         or fail(repr(shapes(chapter("Noted"))))),
+        ("and beside an EPUB's link for a picture on another server",
+         lambda: re.search(r'<a href="https://example\.org/square\.png">A remote square, with a '
+                           r'note</a>', chapter("Remote"))
+         and shapes(chapter("Remote")) == [("", "[hidden: A remote square, with a note][mark]")]
+         or fail(repr(shapes(chapter("Remote"))))),
     ]
 
 
@@ -9806,6 +9931,7 @@ CASES = [
     ("a title's formulas as text, in every title made from a heading", case_formula_titles),
     ("a title block's heading with a formula", case_title_block_formula),
     ("a formula in a picture's alt text", case_alt_formulas),
+    ("a figure's caption with a note", case_noted_captions),
     ("a numbered page's title and heading, whatever they hold", case_numbered_titles),
     ("a declared title's formulas as text, where a title is text", case_declared_formula_titles),
     ("link titles from every source through every target", case_link_titles),

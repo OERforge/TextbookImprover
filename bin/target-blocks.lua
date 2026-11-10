@@ -332,17 +332,23 @@ end
 --
 -- Pandoc's HTML writer hides a figure's caption from a screen reader where
 -- it says what the figure's one picture's alt text says, comparing the
--- caption's text with the alt text (captionIsAlt, Writers/HTML.hs, 3.13),
--- as a Markdown figure's image, ![caption](file), has its caption for alt
--- text. With the formula's text in the alt text and its TeX in the
--- caption's, the writer would show the caption to a screen reader beside
--- the alt text, the words said twice, so the caption's words are hidden in
--- a span (aria-hidden) where, each formula its text, they're the alt text's;
--- and so beside the link an EPUB makes of a picture on another server,
--- named by its alt text, beside which the writer hides no caption, a
--- formula in it or not (hidden_captions, once the link is made); but for a
--- caption with a link or a note, whose mark is a link, which a screen
--- reader can't reach hidden (axe-core's aria-hidden-focus).
+-- caption's text, its notes left out, with the alt text (captionIsAlt,
+-- Writers/HTML.hs, 3.9 to 3.13), as a Markdown figure's image,
+-- ![caption](file), has its caption for alt text. With the formula's text
+-- in the alt text and its TeX in the caption's, the writer would show the
+-- caption to a screen reader beside the alt text, the words said twice, so
+-- the caption's words are hidden in a span (aria-hidden) where, each
+-- formula its text, they're the alt text's; and so beside the link an EPUB
+-- makes of a picture on another server, named by its alt text, beside
+-- which the writer hides no caption, a formula in it or not
+-- (hidden_captions, once the link is made). A note's mark is a link, which
+-- a screen reader can't reach hidden (axe-core's aria-hidden-focus), and
+-- the writer hid a caption with one whole, its marks too: so in a caption
+-- with a note only the words are hidden, each run of them in a span of its
+-- own, and each mark is left to be read after the alt text, a link to its
+-- note, a formula in the caption or not (hidden_words). Not a caption with
+-- an author's link, whose words are the link's too: it's shown beside a
+-- formula, and the writer hides one without, the link with it, as before.
 local mathtext = dofile(pandoc.path.join({ pandoc.path.directory(PANDOC_SCRIPT_FILE),
                                            'math-text.lua' }))
 
@@ -359,7 +365,8 @@ local function holds(content, kinds)
 end
 
 local FORMULA = { Math = true }
-local REACHED = { Link = true, Note = true }
+local NOTE = { Note = true }
+local LINK = { Link = true }
 
 local function formula_alts(doc)
   if FORMAT == 'markdown' then return nil end
@@ -376,15 +383,52 @@ local function formula_alts(doc)
   return doc
 end
 
+-- A caption's words, each run of them in a span hidden from a screen
+-- reader, and its notes not, so that each mark, a link to its note, is
+-- read after the alt text; a note in emphasis, or in anything else of the
+-- caption's that holds words, is left so too, the words around it hidden.
+local function hidden_words(inlines)
+  local out, run = pandoc.Inlines({}), pandoc.Inlines({})
+  local function close()
+    if #run > 0 then
+      out:insert(pandoc.Span(run, pandoc.Attr('', {}, { { 'aria-hidden', 'true' } })))
+    end
+    run = pandoc.Inlines({})
+  end
+  for _, inline in ipairs(inlines) do
+    if inline.t == 'Note' then
+      close()
+      out:insert(inline)
+    elseif pandoc.utils.type(inline.content) == 'Inlines' and holds(inline.content, NOTE) then
+      close()
+      inline.content = hidden_words(inline.content)
+      out:insert(inline)
+    else
+      run:insert(inline)
+    end
+  end
+  close()
+  return out
+end
+
 local function hidden_caption(fig)
   local body = fig.content
   if #body ~= 1 or body[1].t ~= 'Plain' or #body[1].content ~= 1 then return nil end
   local only, caption, alt = body[1].content[1], fig.caption, nil
+  local noted = holds(caption.long, NOTE)
   if only.t == 'Image' then
-    -- A caption with no formula the writer hides itself; beside a picture
-    -- with an alt attribute, it compares the caption with that.
-    if only.attributes.alt ~= nil or not holds(caption.long, FORMULA) then return nil end
-    alt = pandoc.utils.stringify(only.caption)
+    if noted then
+      -- The writer compares the caption with the picture's alt attribute
+      -- where it has one, and else with its description.
+      alt = only.attributes.alt or pandoc.utils.stringify(only.caption)
+    elseif only.attributes.alt ~= nil or not holds(caption.long, FORMULA) then
+      -- A caption with no formula and no note the writer hides itself;
+      -- beside a picture with an alt attribute, it compares the caption
+      -- with that.
+      return nil
+    else
+      alt = pandoc.utils.stringify(only.caption)
+    end
   elseif only.t == 'Link'
       and remote_links[only.target .. '\0' .. pandoc.utils.stringify(only.content)] then
     -- An EPUB's link for a picture on another server, named by its alt
@@ -396,15 +440,23 @@ local function hidden_caption(fig)
   end
   if pandoc.utils.stringify(mathtext.texted(caption.long)) ~= alt then return nil end
   for _, block in ipairs(caption.long) do
-    if (block.t ~= 'Plain' and block.t ~= 'Para') or holds(block.content, REACHED) then
+    if (block.t ~= 'Plain' and block.t ~= 'Para') or holds(block.content, LINK) then
       return nil
     end
   end
   caption.long = caption.long:map(function(block)
-    block.content = { pandoc.Span(block.content, pandoc.Attr('', {}, { { 'aria-hidden', 'true' } })) }
+    block.content = hidden_words(block.content)
     return block
   end)
   fig.caption = caption
+  if only.t == 'Image' and noted then
+    -- The writer would still hide the whole caption, marks and all, where
+    -- its text is the alt text's; it compares only a figure that holds its
+    -- picture alone (captionIsAlt), so an empty string beside the picture,
+    -- which it writes as nothing, leaves the hiding to the spans.
+    body[1].content:insert(pandoc.Str(''))
+    fig.content = body
+  end
   return fig
 end
 

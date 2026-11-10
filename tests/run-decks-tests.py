@@ -1287,6 +1287,49 @@ def case_alt_formula(work):
     return checks
 
 
+def case_noted_caption(work):
+    """A figure's caption with a note in a deck's PowerPoint file, where the
+    writer writes the note's mark, a link to the notes' slide, in the
+    caption: not marked decorative where its words repeat the alt text,
+    since the mark would hide the mark with them, and shown and read, as a
+    figure of two pictures' caption with one is; one with no note is marked
+    decorative, as before; and a figure of two pictures' last picture's own
+    caption with a note kept before the figure's, where it gave way to it,
+    its note lost."""
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; a PowerPoint caption with a note isn't checked")
+        return []
+    work = folder(work, PPTX, decks_given={"noted.md": NOTED})
+    result = convert(work, "--quick")
+    path = os.path.join(work, "slides", "noted.pptx")
+    deck = pptx_deck(path) if os.path.exists(path) else None
+
+    def caption(title):
+        """(text, marked decorative) of the slide's caption, and its
+        pictures' descriptions."""
+        slide = slide_titled(deck, title) if deck else None
+        if slide is None:
+            return None
+        return ([(s.text, s.decorative) for s in slide.shapes if s.kind == "sp" and not s.is_title],
+                [s.descr for s in slide.shapes if s.kind == "pic"])
+    return [
+        ("the deck is converted", lambda: result.returncode == 0 and deck is not None),
+        ("a caption with a note whose words repeat the alt text is shown and read, its "
+         "mark with it, not marked decorative",
+         lambda: caption("Noted Picture") == ([("A rising line1", False)], ["A rising line"])),
+        ("and a figure of two pictures' caption with one too",
+         lambda: caption("Noted Pair (2)") == ([("A square2", False)], ["A square"])),
+        ("and one with no note is marked decorative, as before",
+         lambda: caption("Plain Picture") == ([("A rising line", True)], ["A rising line"])),
+        ("a figure of two pictures' last picture's own caption with a note is kept before the "
+         "figure's, its note on the notes' slide",
+         lambda: caption("Owned Pair (2)") == ([("A square3\nTwo shapes", False)], ["A square"])
+         and caption("Notes") is not None
+         and "3. Its own." in caption("Notes")[0][0][0]),
+    ]
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -3097,6 +3140,53 @@ PPTX = """\
 targets:
   slides:
     format: pptx
+"""
+
+# A figure's caption with a note, whose words repeat its picture's alt
+# text, a figure of two pictures' with one too, a caption with none, and
+# a figure of two pictures whose last picture's own caption has one.
+NOTED = """\
+---
+title: Noted
+---
+
+# Noted Picture
+
+![A rising line[^seen]](img/chart.png)
+
+[^seen]: Seen in 2026.
+
+# Plain Picture
+
+![A rising line](img/chart.png)
+
+# Noted Pair
+
+::: {.figure}
+![A circle](img/chart.png)
+
+![A square](img/chart.png)
+
+::: caption
+A square[^pair]
+:::
+:::
+
+[^pair]: The pair.
+
+# Owned Pair
+
+::: {.figure}
+![A circle](img/chart.png)
+
+![A square[^own]](img/chart.png)
+
+::: caption
+Two shapes
+:::
+:::
+
+[^own]: Its own.
 """
 
 # What Pandoc's PowerPoint writer does with a deck, as deck-pptx.lua and
@@ -5210,6 +5300,7 @@ CASES = [("the pieces", case_pieces),
          ("one alt text on a deck's different pictures", case_shared_alt),
          ("a deck's title with a formula", case_title_formula),
          ("a formula in a picture's alt text", case_alt_formula),
+         ("a PowerPoint caption with a note", case_noted_caption),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),

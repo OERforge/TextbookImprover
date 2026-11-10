@@ -48,7 +48,10 @@
 --    PDF do, and no other. A caption that repeats the alt text, a formula
 --    in it as its text, as in the alt text, is recorded, for
 --    pptxtarget.py to mark decorative, as the page hides one from a
---    screen reader (aria-hidden).
+--    screen reader (aria-hidden); but not one with a note, whose mark the
+--    writer writes in it, a link to the notes' slide, which the mark
+--    would hide with the words, as a text box is marked whole: it's shown
+--    and read, its words twice, as the page hides its words alone.
 -- 6. An image in a line of text, a list, or a table is written as its alt
 --    text: each is counted.
 -- 7. A table's header column isn't written: each table's first cell
@@ -188,6 +191,22 @@ local function is_shape(block)
   return block.t == 'Table' or is_picture(block)
 end
 
+-- Whether a caption holds a note, which stringify leaves out of its text
+-- and the writer writes in it as its mark, a link to the notes' slide.
+local function noted(inlines)
+  local found = false
+  pandoc.Inlines(inlines):walk({ Note = function() found = true end })
+  return found
+end
+
+-- Whether a picture's caption repeats its alt text, for the caption to be
+-- marked decorative: its text, each formula as its text, the alt text,
+-- and no note in it, whose mark the decorative mark would hide too.
+local function repeats_alt(caption, alt)
+  local own = squeezed(stringify(mathtext.texted(caption)))
+  return own ~= '' and own == alt and not noted(caption)
+end
+
 -- An image the writer makes a picture of: titled to be found, its alt text
 -- and mark recorded, and shown with a caption only when it's a figure's
 -- with one (caption: the figure's, as inlines, or nil).
@@ -197,7 +216,8 @@ local function picture(img, caption)
   local alt = mark and '' or alt_text(img)
   local own = caption and squeezed(stringify(mathtext.texted(caption))) or ''
   record.pictures[tostring(pictures)] = {
-    alt = alt, decorative = mark, caption = own ~= '', repeats = own ~= '' and own == alt,
+    alt = alt, decorative = mark, caption = own ~= '',
+    repeats = caption ~= nil and repeats_alt(caption, alt),
   }
   img.title = PICTURE .. pictures
   img.caption = own ~= '' and caption or pandoc.Inlines({})
@@ -614,7 +634,8 @@ local function shapes(blocks)
       -- which the writer writes as text, its images their alt text: each
       -- picture in it a figure of its own, the figure's id the first's and
       -- its caption the last's, after any of that one's own but one that
-      -- repeats its alt text, which the page hides from a screen reader.
+      -- repeats its alt text (repeats_alt), which the page hides from a
+      -- screen reader.
       local inner = shapes(block.content)
       local figures = {}
       for _, b in ipairs(inner) do
@@ -637,7 +658,7 @@ local function shapes(blocks)
             img.caption = caption
           end
           facts.caption = true
-          facts.repeats = squeezed(stringify(mathtext.texted(img.caption))) == facts.alt
+          facts.repeats = repeats_alt(img.caption, facts.alt)
         end
         out:extend(inner)
       end

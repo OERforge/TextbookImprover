@@ -29,7 +29,7 @@ Two of the three EPUBs this was built against hold the whole book in one content
 
 ## Why not Pandoc's EPUB reader
 
-Read from `Readers/EPUB.hs` at 3.11, and in [the Pandoc notes](../PANDOC-NOTES.md): it concatenates the spine into one document, rewrites every id to `<file>_<id>` on some kinds of element and every internal link to match, so a link to a figure or a table dies; it drops each file's own title and language; and it doesn't read the navigation document. Unpacked, each page goes through Pandoc's HTML reader with its ids as the publisher wrote them.
+Read from `Readers/EPUB.hs` at 3.11, and in [the Pandoc notes](../notes/PANDOC-NOTES.md): it concatenates the spine into one document, rewrites every id to `<file>_<id>` on some kinds of element and every internal link to match, so a link to a figure or a table dies; it drops each file's own title and language; and it doesn't read the navigation document. Unpacked, each page goes through Pandoc's HTML reader with its ids as the publisher wrote them.
 
 The unpacker parses no content document. One of the three EPUBs isn't well-formed XML (an unclosed `<br>`, which epubcheck calls fatal and reading systems shrug at), so references are rewritten in the text, attribute by attribute.
 

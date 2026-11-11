@@ -7346,6 +7346,7 @@ def case_documents(work):
         return topic_a(lambda text: bool(re.search(r"(?m)^2\.\s*Which comes last\?", text)))
 
     def lettered():
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
         import latexbuild
         release = latexbuild.latex_release()
         if release is None:

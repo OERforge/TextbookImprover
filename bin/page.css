@@ -68,6 +68,18 @@ pre.numberSource code > span > a:first-child::before {
   font-weight: bold;
 }
 
+/* A comma between two notes' marks in a heading or a caption, "1,2", set
+   as the body's superscript comma is. target-blocks.lua puts an empty span
+   there, since the heading's words are copied where its notes aren't (a
+   page's title, the menu and the contents, an EPUB's navigation), and a
+   comma of text would stay; drawn only right after a note's mark, it's
+   drawn nowhere else. */
+a.footnote-ref + span.note-comma::before {
+  content: ",";
+  vertical-align: super;
+  font-size: smaller;
+}
+
 /* Pandoc's stylesheet sets `display: block` on tables so they can scroll
    sideways. That silently strips the table role from the browser
    accessibility tree, so screen readers stop exposing rows, columns and

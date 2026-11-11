@@ -2176,7 +2176,37 @@ end
 -- A table counted with its notes' marks as wide as its last note's number
 -- (count_notes, note_mark), the attribute that says it taken off, so the
 -- LaTeX never has it.
+-- A caption's inlines without its notes and the commas target-blocks.lua
+-- puts between two in a row (note_comma, a span of class note-comma), for
+-- the caption the list of figures or tables takes, which the writer makes
+-- of the caption without its notes, the commas kept ("Sets,").
+local function caption_without_notes(blocks)
+  return pandoc.utils.blocks_to_inlines(blocks):walk({
+    Note = function() return {} end,
+    Span = function(span)
+      if span.classes:includes('note-comma') then return {} end
+    end,
+  })
+end
+
+local function caption_commas(caption)
+  local found = false
+  pandoc.Blocks(caption and caption.long or {}):walk({
+    Span = function(span)
+      if span.classes:includes('note-comma') then found = true end
+    end,
+  })
+  return found
+end
+
 function Table(tbl)
+  -- A table's caption with a comma between two notes is given the caption
+  -- its list takes, as a figure's is (numbered_notes).
+  if caption_commas(tbl.caption) and not (tbl.caption.short and #tbl.caption.short > 0) then
+    local caption = tbl.caption
+    caption.short = caption_without_notes(caption.long)
+    tbl.caption = caption
+  end
   TABLE_NOTES = tonumber(tbl.attributes['oer-last-note'])
   tbl.attributes['oer-last-note'] = nil
   local result = table_pass(tbl)
@@ -2517,7 +2547,8 @@ end
 -- twice (latexbuild's PDF_MACROS): the caption opens with
 -- \OERCaptionNotes and a number of its own, and the caption the list of
 -- figures takes, which the writer makes of the caption without its notes,
--- is given, without it too.
+-- is given, without it too, and without the commas between its notes
+-- (caption_without_notes).
 local caption_notes = 0
 
 local function numbered_notes(fig)
@@ -2527,8 +2558,7 @@ local function numbered_notes(fig)
   caption_notes = caption_notes + 1
   local caption = fig.caption
   if not caption.short or #caption.short == 0 then
-    caption.short = pandoc.utils.blocks_to_inlines(long):walk({
-      Note = function() return {} end })
+    caption.short = caption_without_notes(long)
   end
   local mark = pandoc.RawInline('latex', '\\OERCaptionNotes{' .. caption_notes .. '}')
   if long[1].t == 'Plain' or long[1].t == 'Para' then

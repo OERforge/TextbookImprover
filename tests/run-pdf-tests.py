@@ -8013,21 +8013,25 @@ def checks(work, built):
          and numbered_notes(notes_plain_text, "defgh", 4, CELL_MARKS)),
         ("and its mark is linked to its note",
          lambda: linked_notes(notes_marks()[3:8], "defgh", 4)),
-        # NOTES_PAIRS: a comma left in a heading or a caption would stay
+        # NOTES_PAIRS: a comma of text in a heading or a caption would stay
         # behind in the contents, the bookmarks, or the list of figures,
-        # where the notes are left out (a review).
+        # where the notes are left out (a review), so the heading's is in a
+        # span with an id, which the writer leaves out of them, and a
+        # caption's is left out of the caption its list takes (pdf-target.lua,
+        # caption_without_notes); they had run together, "1011".
         ("two notes in a term are set at the head of its definition, a comma between their "
          "marks, against the term, tagged and untagged; two in a heading and two in a "
-         "caption get none, and the contents, the bookmarks, and the list of figures have "
-         "their words alone",
+         "caption a comma between their marks too, and the contents, the bookmarks, the "
+         "running heads, and the list of figures have their words alone",
          lambda: re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_text)
          and re.search(r"Term\s*14\s*,\s*15\s*Its\s+definition", notes_plain_text)
          and all(gaps is not None and abs(gaps[0]) < 1 and gaps[1] > 3 and gaps[2] < 1
                  for gaps in (pdftext.term_mark_gaps(notes_path, "Term", "Its"),
                               pdftext.term_mark_gaps(notes_plain, "Term", "Its")))
-         and re.search(r"Sets\s*1011\s", notes_text)
-         and re.search(r"A\s+gray\s+circle\s*1213", notes_text)
-         and not re.search(r"Sets\s*,|circle\s*,", notes_text + notes_plain_text)
+         and all(re.search(r"Sets\s*10\s*,\s*11\s", text)
+                 and re.search(r"A\s+gray\s+circle\s*12\s*,\s*13", text)
+                 for text in (notes_text, notes_plain_text))
+         and not re.search(r"(?i)sets\s*,|circle\s*,", notes_text + notes_plain_text)
          and notes_reader is not None and "Sets" in outline_titles(notes_reader)
          and {"Sets", "A gray circle"} <= {str(e.get("/T")) for e in elements(
              notes_reader.trailer["/Root"]["/StructTreeRoot"]) if kind(e) == "/TOCI"}),

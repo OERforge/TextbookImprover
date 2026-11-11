@@ -166,27 +166,61 @@ end
 -- author wrote together. LaTeX's footmisc package sets them so with its
 -- multiple option. Not for a source writer, whose file keeps what the
 -- author wrote. A space between two notes keeps their marks apart
--- already. Only in the body's text, a paragraph's, a line block's, a
--- table's cell's, a definition's, a term's, what a figure holds: not in a
--- heading or a caption, whose words are a title, a contents entry, a
--- bookmark, or a list of figures' entry too, where the notes are taken out
--- and a comma would have stayed ("Sets,"; a review). Nor in a picture's
--- description, which isn't text with marks. And not in a term for LaTeX,
--- where pdf-target.lua's term_notes moves a term's notes to the head of
--- its definition, a comma between them, so none stays behind in the term.
+-- already. In the body's text, a paragraph's, a line block's, a table's
+-- cell's, a definition's, a term's, what a figure holds, the comma is
+-- text. A heading's and a caption's words are a title, a contents entry,
+-- a bookmark, or a list of figures' entry too, where the notes are taken
+-- out and a comma there would stay ("Sets,"; a review), so between their
+-- notes the comma is a mark that sets nothing where the notes are gone
+-- (note_comma): for an HTML writer, an empty span of class note-comma,
+-- whose comma page.css draws only right after a note's mark; for LaTeX,
+-- the comma in a span with an id, which Pandoc's writer leaves out of a
+-- heading's contents entry, running head, and bookmark (removeInvalidInline,
+-- Writers/LaTeX.hs, with notes and images), and a caption's span without
+-- one, which pdf-target.lua leaves out of the caption the list of figures
+-- or tables takes. No other writer gets one: a Word file's contents copies
+-- a heading's words, a comma and all. Nor in a picture's description,
+-- which isn't text with marks. And not in a term for LaTeX, where
+-- pdf-target.lua's term_notes moves a term's notes to the head of its
+-- definition, a comma between them, so none stays behind in the term.
 local NOTE_HOLDERS = { Emph = true, Strong = true, Underline = true, Strikeout = true,
                        SmallCaps = true, Superscript = true, Subscript = true, Span = true,
                        Quoted = true }
 local TERMS_MOVED = { latex = true, beamer = true }
 
-local function comma_notes(inlines)
+local LATEX_COMMA = '\\textsuperscript{,}'
+local headed_commas = 0
+
+-- The mark between two notes in a heading (heading true) or a caption,
+-- for the writer, or nil where it gets none.
+local function note_comma(heading)
+  if FORMAT:match('html') or FORMAT:match('epub') then
+    return pandoc.Span({}, pandoc.Attr('', { 'note-comma' }))
+  elseif FORMAT == 'latex' then
+    local id = ''
+    if heading then
+      headed_commas = headed_commas + 1
+      id = 'oer-note-comma-' .. headed_commas
+    end
+    return pandoc.Span({ pandoc.RawInline('latex', LATEX_COMMA) },
+                       pandoc.Attr(id, { 'note-comma' }))
+  end
+  return nil
+end
+
+-- inlines with a comma between each two notes in a row, as text, or, where
+-- comma is given, as what it returns; nil where nothing changed.
+local function comma_notes(inlines, comma)
   local out, changed = pandoc.Inlines({}), false
   for i, inline in ipairs(inlines) do
     if inline.t == 'Note' and i > 1 and inlines[i - 1].t == 'Note' then
-      out:insert(pandoc.Superscript({ pandoc.Str(',') }))
-      changed = true
+      local mark = comma and comma() or pandoc.Superscript({ pandoc.Str(',') })
+      if mark then
+        out:insert(mark)
+        changed = true
+      end
     elseif NOTE_HOLDERS[inline.t] then
-      local inner = comma_notes(inline.content)
+      local inner = comma_notes(inline.content, comma)
       if inner then
         inline.content = inner
         changed = true
@@ -219,9 +253,9 @@ if not SOURCE_WRITERS[FORMAT] then
       return block
     end
   end
-  -- A table's cells, each as the body is, its caption left alone; each
-  -- part read, changed, and assigned back, as a table's head and bodies
-  -- are copies when read (PANDOC-NOTES).
+  -- A table's cells, each as the body is, its caption as a caption is;
+  -- each part read, changed, and assigned back, as a table's head and
+  -- bodies are copies when read (PANDOC-NOTES).
   local function in_rows(rows)
     for _, row in ipairs(rows) do
       local cells = row.cells
@@ -232,13 +266,32 @@ if not SOURCE_WRITERS[FORMAT] then
     end
     return rows
   end
+  -- A caption's blocks with a mark between each two notes in a row.
+  local function in_caption(caption)
+    local caption_comma = function() return note_comma(false) end
+    local long = pandoc.Blocks(caption.long):walk({
+      Para = function(block) block.content = comma_notes(block.content, caption_comma)
+        or block.content return block end,
+      Plain = function(block) block.content = comma_notes(block.content, caption_comma)
+        or block.content return block end,
+    })
+    caption.long = long
+    return caption
+  end
   separate_notes = {
     traverse = 'topdown',
+    Header = function(header)
+      local content = comma_notes(header.content, function() return note_comma(true) end)
+      if content then header.content = content end
+      return header, false
+    end,
     Figure = function(fig)
       fig.content = fig.content:walk(separate_notes)
+      fig.caption = in_caption(fig.caption)
       return fig, false
     end,
     Table = function(tbl)
+      tbl.caption = in_caption(tbl.caption)
       local head, bodies, foot = tbl.head, tbl.bodies, tbl.foot
       head.rows = in_rows(head.rows)
       for _, body in ipairs(bodies) do
@@ -616,6 +669,11 @@ local function title_heading(doc)
   local content = marked
   if pandoc.utils.type(content) ~= 'Inlines' then
     content = pandoc.Inlines(pandoc.utils.stringify(content))
+  end
+  -- The heading's two notes in a row a comma's mark apart, as any
+  -- heading's are (separate_notes, which ran before it was back).
+  if not SOURCE_WRITERS[FORMAT] then
+    content = comma_notes(content, function() return note_comma(true) end) or content
   end
   local attributes = {}
   if TITLE_WRITER == 'markdown' and page_type ~= '' then

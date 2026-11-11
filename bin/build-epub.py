@@ -469,6 +469,38 @@ def link_across_chapters(path):
     return fixed
 
 
+# The empty span target-blocks.lua puts between two notes in a row in a
+# heading, which page.css draws a comma in after a note's mark: the
+# writer copies the heading's words, notes left out, into the navigation
+# document, the span with them, and epubcheck refuses an empty span there
+# ("Spans within nav elements must contain text", RSC-005).
+NAV_COMMA = re.compile(r'<span class="note-comma"\s*(?:/>|></span>)')
+
+
+def nav_without_commas(path):
+    """The navigation document without the comma's spans (NAV_COMMA), where
+    it has any. Returns how many were taken out."""
+    with zipfile.ZipFile(path) as archive:
+        nav_name = next((n for n in archive.namelist() if n.endswith("nav.xhtml")), None)
+        nav = archive.read(nav_name).decode("utf-8") if nav_name else ""
+    new_nav, taken = NAV_COMMA.subn("", nav)
+    if not taken:
+        return 0
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename == nav_name:
+                data = new_nav.encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return taken
+
+
 # A page's division, as the body of its chapter file says it (epub:type),
 # from its top-level entry's role in contents; and what a page is (its type
 # in contents, or its heading's), with the DPUB-ARIA role, which Ace
@@ -1033,6 +1065,7 @@ def build(base, name, resolved, keep, intermediates=None):
         if numbering != "page" or placement != "page":
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)
+        nav_without_commas(out_path)
         mark_divisions(out_path, assembly.divisions(), assembly.contents_id)
         # Last, as it marks the footer the notes are placed before.
         mark_page_languages(out_path, assembly, project["language"])

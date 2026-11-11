@@ -2275,10 +2275,14 @@ def case_note_in_link(work):
     it. A link whose text is a note alone goes, as a link with no text
     does, and its note stays, where it had gone with the link. Two notes
     in a row, a link's two after it among them, get a comma between their
-    marks in the pages, in a table's cell and a term too, but not in a
-    heading or a caption, whose words are a title or an entry elsewhere
-    too, where a comma would stay behind; and keep the author's text in
-    the Markdown target."""
+    marks in the pages, in a table's cell and a term too; in a heading or
+    a caption, whose words are a title or an entry elsewhere too, where a
+    comma would stay behind, a mark the stylesheet draws a comma in right
+    after a note's mark, in the pages and the EPUB, the EPUB's navigation
+    the heading's words alone, and in the LaTeX a comma in a span with an
+    id, which the heading's contents entry and bookmark leave out, a
+    caption's left out of the caption its list takes; and keep the
+    author's text in the Markdown target."""
     os.makedirs(work)
     with open(os.path.join(work, "links.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_LINK_MD)
@@ -2286,16 +2290,33 @@ def case_note_in_link(work):
         fh.write(NOTE_ALONE_MD)
     with open(os.path.join(work, "pairs.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_PAIRS_MD)
+    # A page whose title is its own heading, which the filter takes out of
+    # the body and puts back (title_heading).
+    with open(os.path.join(work, "titled.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Titled[^x][^y]\n\nIts words.\n\n[^x]: Note x.\n[^y]: Note y.\n")
     with open(os.path.join(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
-                           "  md:\n    format: markdown\n", fixtures=())
+                           "  md:\n    format: markdown\n  epub:\n    format: epub3\n"
+                           "  latex:\n    format: latex\n", fixtures=())
     page = read(work, "html", "links.html") if exists(work, "html", "links.html") else ""
     markdown = read(work, "md", "links.md") if exists(work, "md", "links.md") else ""
     alone = read(work, "html", "alone.html") if exists(work, "html", "alone.html") else ""
     alone_md = read(work, "md", "alone.md") if exists(work, "md", "alone.md") else ""
     pairs = read(work, "html", "pairs.html") if exists(work, "html", "pairs.html") else ""
     pairs_md = read(work, "md", "pairs.md") if exists(work, "md", "pairs.md") else ""
+    pairs_tex = read(work, "latex", "pairs.tex") if exists(work, "latex", "pairs.tex") else ""
+    titled = read(work, "html", "titled.html") if exists(work, "html", "titled.html") else ""
+    epub_files = {}
+    epubs = glob.glob(os.path.join(work, "epub", "*.epub"))
+    if epubs:
+        with zipfile.ZipFile(epubs[0]) as z:
+            epub_files = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                          if n.endswith((".xhtml", ".css"))}
+    epub_text = "".join(v for k, v in epub_files.items() if k.endswith(".xhtml")
+                        and not k.endswith("nav.xhtml"))
+    nav = next((v for k, v in epub_files.items() if k.endswith("nav.xhtml")), "")
+    comma = r'<span\s+class="note-comma"\s*(?:/>|></span>)'
     return [
         ("a note in a link's text is after the link in the pages, each link's text its "
          "words alone, in a raw <a> too, and no anchor opens inside another",
@@ -2326,16 +2347,45 @@ def case_note_in_link(work):
                        r'<a\s+href="#fn4"', pairs)
          and re.search(r'<sup>5</sup></a>\s+<a\s+href="#fn6"', pairs)
          and pairs.count("<sup>,</sup>") == 5),
-        ("and two in a table's cells, its head's and its body's, and in a term, but not in a "
-         "heading, a figure's caption, or a table's, or the picture's description",
+        ("and two in a table's cells, its head's and its body's, and in a term, a comma of "
+         "text; in a heading, a page's title heading among them, a figure's caption, and a "
+         "table's, an empty span the stylesheet draws the comma in right after a note's "
+         "mark, the page's <title> its words alone; not in the picture's description",
          lambda: re.search(r'Cell<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
          and re.search(r'One<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
          and re.search(r'<dt>Term<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><sup>,</sup>', pairs)
-         and re.search(r'<h2[^>]*>Sets<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
-         and re.search(r'A gray square</span><a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s',
-                       pairs)
-         and re.search(r'<caption>Plans<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a><a\s', pairs)
+         and re.search(r'<h2[^>]*>Sets<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a>' + comma
+                       + r'<a\s', pairs)
+         and re.search(r'A gray square</span><a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a>'
+                       + comma + r'<a\s', pairs)
+         and re.search(r'<caption>Plans<a\s+href="#fn\d+"[^>]*><sup>\d+</sup></a>' + comma
+                       + r'<a\s', pairs)
+         and len(re.findall(comma, pairs)) == 3
+         and re.search(r'<h1[^>]*>Titled<a\s+href="#fn1"[^>]*><sup>1</sup></a>' + comma
+                       + r'<a\s+href="#fn2"', titled)
+         and "<title>Titled</title>" in titled
+         and "a.footnote-ref + span.note-comma::before" in pairs
          and re.search(r'alt="A gray square"', pairs)),
+        ("in the EPUB too, its stylesheet drawing the comma, and its navigation has the "
+         "heading's words alone, the mark taken out, as epubcheck refuses an empty span "
+         "there",
+         lambda: re.search(r'>Sets<a\s[^>]*class="footnote-ref"[^>]*>\d+</a>' + comma
+                           + r'<a\s', epub_text)
+         and len(re.findall(comma, epub_text)) == 4
+         and any("a.footnote-ref + span.note-comma::before" in v
+                 for k, v in epub_files.items() if k.endswith(".css"))
+         and re.search(r'>Sets</a>', nav) and not re.search(comma, nav)
+         and "," not in re.sub(r"<[^>]+>", "", nav)),
+        ("in the LaTeX, a comma in the heading and the captions, the heading's in a span with "
+         "an id, which its contents entry and bookmark leave out, and the captions' left out "
+         "of the captions their lists take",
+         lambda: re.search(r"\\section\[Sets\]\{\\texorpdfstring\{Sets\\footnote\{[^}]*\}"
+                           r"\\protect\\hypertarget\{oer-note-comma-1\}\{\}"
+                           r"\{\\textsuperscript\{,\}\}\\footnote\{[^}]*\}\}\{Sets\}\}", pairs_tex)
+         and re.search(r"\\caption\[A\s+gray\s+square\]\{\\OERCaptionNotes\{\d+\}A\s+gray\s+"
+                       r"square\\footnotemark\{\}\{\\textsuperscript\{,\}\}\\footnotemark", pairs_tex)
+         and re.search(r"\\caption\[Plans\]\{Plans\\footnotemark\{\}\{\\textsuperscript\{,\}\}"
+                       r"\\footnotemark", pairs_tex)),
         ("and the Markdown target keeps them as the author wrote them, with no comma",
          lambda: re.search(r"\[both\[\^1\]\s+notes\[\^2\]\]\(https://example\.edu/\)", pairs_md)
          and re.search(r"side\s+by\s+side\.\[\^3\]\[\^4\]", pairs_md)
@@ -5074,7 +5124,9 @@ def case_caption_notes_links(work):
     its notes' marks too, so that none could be reached from the figure:
     its words are hidden in a span, and its marks aren't, on a page and in
     an EPUB, each mark a link to its note after the words, two in a row
-    each its own, and one in emphasis with the words around it hidden. So
+    each its own, the mark page.css draws their comma in between them
+    (target-blocks.lua's note_comma), and one in emphasis with the words
+    around it hidden. So
     beside a picture whose alt attribute says what the caption says, but
     not beside one whose alt text is its own, whose caption is shown; and
     beside an EPUB's link for a picture on another server. One with an
@@ -5126,7 +5178,8 @@ def case_caption_notes_links(work):
 
     def img_alts(markup):
         return [html_lib.unescape(a) for a in re.findall(r'<img\b[^>]*?\balt="([^"]*)"', markup)]
-    expected = [("", "[hidden: A plain circle, with two notes][mark][mark]"),
+    expected = [("", '[hidden: A plain circle, with two notes][mark]<span class="note-comma">'
+                     '</span>[mark]'),
                 ("", "[hidden: A ]<em>[hidden: noted][mark]</em>[hidden:  triangle]"),
                 ("", "[hidden: A gray square][mark]"),
                 ("", "A gray square, with a note[mark]"),

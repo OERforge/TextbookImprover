@@ -48,7 +48,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
-import concurrent.futures
 import contextlib
 import csv
 import glob
@@ -7446,87 +7445,87 @@ def ams_checks(ams_path, ams_said):
          and re.search(r"collection\.\s*1\s*,\s*2", ams_text)),
     ]
 
-def checks(work, jobs=1):
-    # The two books, at once when there's room: each is a LaTeX build of
-    # its own, in a directory of its own.
+# Each book's build, by its folder's suffix (BOOK_FOLDERS), in the order
+# they're built one at a time.
+BUILDS = {
+    "": build,
+    "-ua1": build_ua1,
+    "-untagged": build_untagged,
+    "-notes": build_notes,
+    "-footer": build_footer,
+    "-headings": build_headings,
+    "-sized": build_sized,
+    "-fancy": build_fancy,
+    "-default": build_default,
+    "-preamble": build_preamble,
+    "-aaa": build_aaa,
+    "-fit": build_fit,
+    "-columns": build_fit_columns,
+    "-bars": build_blank_lines,
+    "-drawn": build_drawn_blanks,
+    "-languages": build_languages,
+    "-rules": build_rules,
+    "-code": build_code,
+    "-mathfont": build_math_font,
+    "-cff2": build_cff2_face,
+    "-measured": build_measured,
+    "-ams": build_ams,
+    "-doctoc": build_doc_toc,
+}
+
+# The longest builds, started first when they run side by side, in this
+# order: the code book's four runs and the math-font book's seven PDFs
+# took 255 s and 249 s of the suite's 1,813 (2026-11-10, two processors),
+# and the next longest 112 and 82.
+SLOW = ("-code", "-mathfont", "-default", "-columns")
+
+
+def build_books(work, jobs=1):
+    """What each book's build returns, by its folder's suffix. Each is a
+    LaTeX build of its own, in a directory of its own, reading nothing
+    another writes, so with room they're built side by side, `jobs` at a
+    time, the longest first, so the run isn't left waiting on one at its
+    end; each holding one of the run's workers, where run-all.sh has the
+    suites share them (parallel.slot). Ctrl-C starts no more of them, and
+    main's removal of their folders ends the ones running at their next
+    step."""
+    def one(suffix):
+        with parallel.slot():
+            return BUILDS[suffix](work + suffix)
+
     if jobs > 1:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            book = pool.submit(build, work)
-            ua1 = pool.submit(build_ua1, work + "-ua1")
-            plain = pool.submit(build_untagged, work + "-untagged")
-            noted = pool.submit(build_notes, work + "-notes")
-            footed = pool.submit(build_footer, work + "-footer")
-            headed = pool.submit(build_headings, work + "-headings")
-            sized = pool.submit(build_sized, work + "-sized")
-            fancied = pool.submit(build_fancy, work + "-fancy")
-            defaulted = pool.submit(build_default, work + "-default")
-            prefaced = pool.submit(build_preamble, work + "-preamble")
-            aaa = pool.submit(build_aaa, work + "-aaa")
-            fitted = pool.submit(build_fit, work + "-fit")
-            columned = pool.submit(build_fit_columns, work + "-columns")
-            barred = pool.submit(build_blank_lines, work + "-bars")
-            drawn = pool.submit(build_drawn_blanks, work + "-drawn")
-            spoken = pool.submit(build_languages, work + "-languages")
-            ruled = pool.submit(build_rules, work + "-rules")
-            coded = pool.submit(build_code, work + "-code")
-            mathed = pool.submit(build_math_font, work + "-mathfont")
-            cff2ed = pool.submit(build_cff2_face, work + "-cff2")
-            measured = pool.submit(build_measured, work + "-measured")
-            amsed = pool.submit(build_ams, work + "-ams")
-            doc_tocced = pool.submit(build_doc_toc, work + "-doctoc")
-            reader, source, rows, log, placements = book.result()
-            ua1_path, ua1_said, ua1_rows = ua1.result()
-            untagged_path, untagged_said = plain.result()
-            notes_path, notes_plain, notes_said, notes_source = noted.result()
-            footer_path = footed.result()
-            headings_path = headed.result()
-            sized_path, sized_said = sized.result()
-            fancy_path, fancy_said = fancied.result()
-            default_path, default_said, lacking_path, lacking_said = defaulted.result()
-            preamble_path, preamble_source, preamble_said = prefaced.result()
-            (aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
-             aaa_lacking_said) = aaa.result()
-            fit_path, fit_said, fit_source, fit_third = fitted.result()
-            columns_path, columns_said, columns_wrapped_path = columned.result()
-            bars_path, bars_source = barred.result()
-            drawn_path, drawn_glyphs_path, drawn_source, drawn_more = drawn.result()
-            languages_path = spoken.result()
-            rules_path = ruled.result()
-            (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
-             tall_said, wrap_paths, wrap_said) = coded.result()
-            math_paths, math_said = mathed.result()
-            cff2_result = cff2ed.result()
-            measured_path, measured_said, measured_source = measured.result()
-            ams_path, ams_said = amsed.result()
-            doc_toc_path, doc_toc_said = doc_tocced.result()
-    else:
-        reader, source, rows, log, placements = build(work)
-        ua1_path, ua1_said, ua1_rows = build_ua1(work + "-ua1")
-        untagged_path, untagged_said = build_untagged(work + "-untagged")
-        notes_path, notes_plain, notes_said, notes_source = build_notes(work + "-notes")
-        footer_path = build_footer(work + "-footer")
-        headings_path = build_headings(work + "-headings")
-        sized_path, sized_said = build_sized(work + "-sized")
-        fancy_path, fancy_said = build_fancy(work + "-fancy")
-        default_path, default_said, lacking_path, lacking_said = build_default(
-            work + "-default")
-        preamble_path, preamble_source, preamble_said = build_preamble(work + "-preamble")
-        (aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
-         aaa_lacking_said) = build_aaa(work + "-aaa")
-        fit_path, fit_said, fit_source, fit_third = build_fit(work + "-fit")
-        columns_path, columns_said, columns_wrapped_path = build_fit_columns(work + "-columns")
-        bars_path, bars_source = build_blank_lines(work + "-bars")
-        drawn_path, drawn_glyphs_path, drawn_source, drawn_more = build_drawn_blanks(
-            work + "-drawn")
-        languages_path = build_languages(work + "-languages")
-        rules_path = build_rules(work + "-rules")
-        (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
-         tall_said, wrap_paths, wrap_said) = build_code(work + "-code")
-        math_paths, math_said = build_math_font(work + "-mathfont")
-        cff2_result = build_cff2_face(work + "-cff2")
-        measured_path, measured_said, measured_source = build_measured(work + "-measured")
-        ams_path, ams_said = build_ams(work + "-ams")
-        doc_toc_path, doc_toc_said = build_doc_toc(work + "-doctoc")
+        order = sorted(BUILDS, key=lambda suffix: SLOW.index(suffix) if suffix in SLOW
+                       else len(SLOW))
+        return dict(parallel.side_by_side(one, list(BUILDS), jobs, order))
+    return {suffix: one(suffix) for suffix in BUILDS}
+
+
+def checks(work, built):
+    reader, source, rows, log, placements = built[""]
+    ua1_path, ua1_said, ua1_rows = built["-ua1"]
+    untagged_path, untagged_said = built["-untagged"]
+    notes_path, notes_plain, notes_said, notes_source = built["-notes"]
+    footer_path = built["-footer"]
+    headings_path = built["-headings"]
+    sized_path, sized_said = built["-sized"]
+    fancy_path, fancy_said = built["-fancy"]
+    default_path, default_said, lacking_path, lacking_said = built["-default"]
+    preamble_path, preamble_source, preamble_said = built["-preamble"]
+    (aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
+     aaa_lacking_said) = built["-aaa"]
+    fit_path, fit_said, fit_source, fit_third = built["-fit"]
+    columns_path, columns_said, columns_wrapped_path = built["-columns"]
+    bars_path, bars_source = built["-bars"]
+    drawn_path, drawn_glyphs_path, drawn_source, drawn_more = built["-drawn"]
+    languages_path = built["-languages"]
+    rules_path = built["-rules"]
+    (code_path, latin_code_path, code_said, margins_path, margins_said, tall_path,
+     tall_said, wrap_paths, wrap_said) = built["-code"]
+    math_paths, math_said = built["-mathfont"]
+    cff2_result = built["-cff2"]
+    measured_path, measured_said, measured_source = built["-measured"]
+    ams_path, ams_said = built["-ams"]
+    doc_toc_path, doc_toc_said = built["-doctoc"]
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -8470,9 +8469,9 @@ def main():
     parser.add_argument("--keep", action="store_true",
                         help="leave the built output in place")
     parser.add_argument("-j", "--jobs", type=int, default=parallel.default_jobs(),
-                        metavar="N", help="with 2 or more, build the two books at "
-                        "once (default: half the processors, "
-                        f"{parallel.default_jobs()} here)")
+                        metavar="N", help="build N books at once (default: half "
+                        f"the processors, {parallel.default_jobs()} here); -j 1 "
+                        "builds them one after another")
     arguments = parser.parse_args()
 
     if shutil.which("pandoc") is None:
@@ -8515,17 +8514,25 @@ def main():
     failed = 0
     try:
         try:
-            items = checks(work, arguments.jobs)
+            built = build_books(work, arguments.jobs)
         except Exception as exc:
             print(f"  ERROR building the book: {exc}")
             return 1
-        for name, predicate in items:
+        # The checks read the PDFs here, in this process, about a minute
+        # of it: one of the run's workers too.
+        with parallel.slot():
             try:
-                passed = predicate()
+                items = checks(work, built)
             except Exception as exc:
-                passed, name = False, f"{name}  ({exc})"
-            print(("  ok    " if passed else "  FAIL  ") + name)
-            failed += not passed
+                print(f"  ERROR building the book: {exc}")
+                return 1
+            for name, predicate in items:
+                try:
+                    passed = predicate()
+                except Exception as exc:
+                    passed, name = False, f"{name}  ({exc})"
+                print(("  ok    " if passed else "  FAIL  ") + name)
+                failed += not passed
     finally:
         # Each book's folder (BOOK_FOLDERS).
         folders = [work + suffix for suffix in BOOK_FOLDERS]

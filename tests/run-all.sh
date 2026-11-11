@@ -2,17 +2,25 @@
 #
 # run-all.sh -- run every check in this directory.
 #
-#     bash tests/run-all.sh          # cases side by side, half the processors
-#     bash tests/run-all.sh -j 4     # four at a time; -j 1, one at a time
+#     bash tests/run-all.sh          # side by side, on half the processors
+#     bash tests/run-all.sh -j 4     # four things at a time; -j 1, one at a time
 #     PATH="$PWD/tests/pandoc39:$PATH" bash tests/run-all.sh
 #                                    # as Pandoc 3.9 would (tests/pandoc39/pandoc)
 #
 # Exits non-zero if anything failed, so it works as a pre-commit hook or a
-# CI step. Each suite is independent and runs even if an earlier one
-# failed, because knowing everything that broke is more useful than
-# knowing the first thing that broke. -j goes to the suites whose cases
-# can run side by side (convert, LaTeX, EPUB, decks) and to the PDF suite, which
-# builds its two books at once; each prints its cases in its own order.
+# CI step. Each suite is independent and runs even if another failed,
+# because knowing everything that broke is more useful than knowing the
+# first thing that broke.
+#
+# -j is how many things run at once in the whole run. The suites that do
+# one thing at a time run in turn, in the order below, as one of the
+# run's workers. Beside them, from the start, run the suites whose cases
+# can run side by side (convert, EPUB, LaTeX, decks) and the PDF suite,
+# which builds its books so: a case or a book holds one of the other
+# workers while it runs (tests/parallel.py), and of them all once the
+# suites run in turn are done. Each suite's output is printed whole, in
+# the order below, the suite being waited for as it comes. With -j 1
+# every suite runs in turn, each printing as it goes.
 #
 # WHAT EACH ONE COVERS (docs/testing.md says more)
 #
@@ -48,12 +56,10 @@
 #
 #   With Pandoc 3.9 or later:
 #   run-filter-tests.py    the Lua filters on six .docx fixtures.
-#   run-convert-tests.py   convert.py, every source and target.
-#   run-epub-tests.py      build-epub.py: the book's shape and claims.
-#   run-pdf-tests.py       the pdf target, tagged; needs LuaLaTeX and the
-#                          packages its books load (skipped without).
 #   run-split-tests.py     split-pages.py, and what reads its pieces.
 #   run-audit-tests.py     the audit, and convert.py --check-only.
+#   run-convert-tests.py   convert.py, every source and target.
+#   run-epub-tests.py      build-epub.py: the book's shape and claims.
 #   run-latex-tests.py     LaTeX as a source, and the copies and PDFs
 #                          made from it; its drawings and builds need a
 #                          TeX with the packages its books load (skipped
@@ -68,6 +74,11 @@
 #                          twelve of whose checks open it in a browser
 #                          with the optional Playwright and its Chromium
 #                          (skipped without).
+#   run-pdf-tests.py       the pdf target, tagged; needs LuaLaTeX and the
+#                          packages its books load (skipped without).
+#                          Last, as the longest: its books are built
+#                          before any is checked, so it has nothing to
+#                          print until near its end.
 #
 # Copyright 2026 Robert Szarka
 #
@@ -85,7 +96,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # This script needs bash: it reads PIPESTATUS to gate on a suite's exit
-# code rather than tee's. If it was started as `sh tests/run-all.sh`,
+# code rather than tee's, and keeps its list of suites in arrays. If it
+# was started as `sh tests/run-all.sh`,
 # Ubuntu and WSL run it under dash -- re-exec under bash so it works
 # either way. Must stay POSIX-parseable and above anything bash-specific.
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -95,7 +107,7 @@ fi
 set -u
 
 usage () {
-  echo "usage: bash tests/run-all.sh [-j N]   (N cases at once; default half the processors)"
+  echo "usage: bash tests/run-all.sh [-j N]   (N things at once; default half the processors)"
 }
 
 jobs=""
@@ -110,14 +122,16 @@ while [ $# -gt 0 ]; do
 done
 case "$jobs" in
   "") ;;
-  *[!0-9]*|0) echo "run-all.sh: -j wants a number of cases, 1 or more" >&2; exit 2 ;;
+  *[!0-9]*|0) echo "run-all.sh: -j wants a number, 1 or more" >&2; exit 2 ;;
 esac
-# For the suites that take it; empty when -j wasn't given, so each uses
-# its own default. A number alone, so it splits into two words safely.
-side=""
-if [ -n "$jobs" ]; then side="-j $jobs"; fi
 
 here="$(cd "$(dirname "$0")" && pwd)"
+
+# Without -j, the suites' own default: half the processors.
+if [ -z "$jobs" ]; then
+  jobs="$(python3 "$here/parallel.py" --default-jobs 2>/dev/null)"
+  case "$jobs" in ""|*[!0-9]*|0) jobs=1 ;; esac
+fi
 
 # Under the stand-in for Pandoc 3.9 (tests/pandoc39 first on the PATH),
 # the Pandoc it runs, named in PANDOC39_REAL for every suite: the first
@@ -144,59 +158,45 @@ failed=""
 skipped=""
 summary="$(mktemp)"
 skips="$(mktemp)"
-trap 'rm -f "$summary" "$summary.suite" "$skips"' EXIT
+outs="$(mktemp -d)"
+trap 'rm -rf "$summary" "$skips" "$outs"' EXIT
+# Ctrl-C ends the run here too, with its files removed: the suites take
+# the signal themselves, and the ones run in turn stop when the folder
+# they write to is gone.
+trap 'exit 130' INT TERM
 
-run () {
-  local script="$1"
-  shift
-  printf '\n=== %s\n' "$script"
-  # Show the suite's output as it runs, and keep its FAIL and ERROR
-  # lines for a summary at the end, where they are findable after ten
-  # suites have scrolled past.
-  python3 "$here/$script" "$@" 2>&1 | tee "$summary.suite"
-  local status="${PIPESTATUS[0]}"
-  # A check skipped for want of a tool or a library passes, and a summary
-  # that says only "passed" hides it, so the skips are listed at the end.
-  grep -E '^ *skip\b|\bskip: ' "$summary.suite" \
-    | sed -E "s/^ *(ok +)?//; s|^|  $script: |" >> "$skips"
-  if [ "$status" -ne 0 ]; then
-    failures=$((failures + 1))
-    failed="$failed $script"
-    grep -E '^ *(FAIL|ERROR)\b' "$summary.suite" \
-      | sed "s|^ *|  $script: |" >> "$summary"
-  fi
-  rm -f "$summary.suite"
-}
+# The suites, in the order their output is printed, and how each runs
+# side by side with the rest: "cases" for one that takes -j and has each
+# of its cases or builds hold one of the run's workers, "whole" for one
+# that does one thing at a time, which run in turn, in this order, as
+# one worker.
+names=()
+kinds=()
+suite () { names+=("$1"); kinds+=("${2:-whole}"); }
 
 # First, because a file that does not parse makes every other result
 # meaningless on someone else's machine.
-run run-portability-test.py
-
+suite run-portability-test.py
 # The three settings reference pages under docs/ are written from the
 # schemas; this fails when a schema changed and nobody regenerated them.
-printf '\n=== settings-reference.py --check\n'
-if ! python3 "$here/../util/settings-reference.py" --check; then
-  failures=$((failures + 1))
-  failed="$failed settings-reference.py"
-fi
-
-run run-spelling-tests.py
-run run-config-tests.py
-run run-roundtrip-test.py
-run run-unit-tests.py
-run run-census-tests.py
-run run-check-tests.py
-run run-headers-tests.py
-run run-unpack-tests.py
-run run-slides-tests.py
-run run-site-tests.py
-run run-cnx-tests.py
-run run-mathjax-tests.py
+suite settings-reference.py
+suite run-spelling-tests.py
+suite run-config-tests.py
+suite run-roundtrip-test.py
+suite run-unit-tests.py
+suite run-census-tests.py
+suite run-check-tests.py
+suite run-headers-tests.py
+suite run-unpack-tests.py
+suite run-slides-tests.py
+suite run-site-tests.py
+suite run-cnx-tests.py
+suite run-mathjax-tests.py
 
 # These convert real documents, so they need Pandoc. Skipping is
 # reported rather than silent: a suite that quietly does not run is worse
 # than one that fails.
-needs_pandoc="run-filter-tests.py, run-convert-tests.py, run-epub-tests.py, run-pdf-tests.py, run-split-tests.py, run-audit-tests.py, run-latex-tests.py, and run-decks-tests.py"
+needs_pandoc="run-filter-tests.py, run-split-tests.py, run-audit-tests.py, run-convert-tests.py, run-epub-tests.py, run-latex-tests.py, run-decks-tests.py, and run-pdf-tests.py"
 if ! command -v pandoc >/dev/null 2>&1; then
   skipped="$needs_pandoc (pandoc not found)"
 elif [ "$(printf '%s\n3.9\n' \
@@ -205,14 +205,144 @@ elif [ "$(printf '%s\n3.9\n' \
   skipped="$needs_pandoc (pandoc $(pandoc --version | head -1 \
            | awk '{print $2}') is older than 3.9)"
 else
-  run run-filter-tests.py
-  run run-convert-tests.py $side
-  run run-epub-tests.py $side
-  run run-pdf-tests.py $side
-  run run-split-tests.py
-  run run-audit-tests.py
-  run run-latex-tests.py $side
-  run run-decks-tests.py $side
+  suite run-filter-tests.py
+  suite run-split-tests.py
+  suite run-audit-tests.py
+  suite run-convert-tests.py cases
+  suite run-epub-tests.py cases
+  suite run-latex-tests.py cases
+  suite run-decks-tests.py cases
+  suite run-pdf-tests.py cases
+fi
+
+# A suite's command, in the array `command`: the settings pages' check is
+# a utility's, the rest are this folder's. What follows the suite's kind
+# goes before its script: parallel.py, side by side.
+command_of () {
+  local script="$1" kind="$2"
+  shift 2
+  if [ "$script" = settings-reference.py ]; then
+    command=(python3 "$@" "$here/../util/settings-reference.py" --check)
+  elif [ "$kind" = cases ]; then
+    command=(python3 "$@" "$here/$script" -j "$jobs")
+  else
+    command=(python3 "$@" "$here/$script")
+  fi
+}
+
+# What a suite's output and exit status add to the summary at the end.
+account () {
+  local script="$1" status="$2" output="$3"
+  if [ "$script" = settings-reference.py ]; then
+    if [ "$status" -ne 0 ]; then
+      failures=$((failures + 1))
+      failed="$failed $script"
+    fi
+    return
+  fi
+  # A check skipped for want of a tool or a library passes, and a summary
+  # that says only "passed" hides it, so the skips are listed at the end.
+  grep -E '^ *skip\b|\bskip: ' "$output" \
+    | sed -E "s/^ *(ok +)?//; s|^|  $script: |" >> "$skips"
+  if [ "$status" -ne 0 ]; then
+    failures=$((failures + 1))
+    failed="$failed $script"
+    # Its FAIL and ERROR lines, for a summary at the end, where they are
+    # findable after twenty suites have scrolled past.
+    grep -E '^ *(FAIL|ERROR)\b' "$output" \
+      | sed "s|^ *|  $script: |" >> "$summary"
+  fi
+}
+
+heading () {
+  if [ "$1" = settings-reference.py ]; then
+    printf '\n=== %s --check\n' "$1"
+  else
+    printf '\n=== %s\n' "$1"
+  fi
+}
+
+if [ "$jobs" -eq 1 ]; then
+  # In turn: each suite's output shown as it runs.
+  for i in "${!names[@]}"; do
+    heading "${names[$i]}"
+    command_of "${names[$i]}" "${kinds[$i]}"
+    "${command[@]}" 2>&1 | tee "$outs/output"
+    account "${names[$i]}" "${PIPESTATUS[0]}" "$outs/output"
+  done
+else
+  # Side by side, on one count of workers. The suites that take -j share
+  # a folder of files, one a worker, which each case or build holds a
+  # lock on while it runs (parallel.py): one fewer than -j, since the
+  # suites run in turn are a worker too, whose file is added when they're
+  # done.
+  mkdir "$outs/slots"
+  i=1
+  while [ "$i" -lt "$jobs" ]; do
+    : > "$outs/slots/$i"
+    i=$((i + 1))
+  done
+  OER_TEST_SLOTS="$outs/slots"
+  export OER_TEST_SLOTS
+  echo "Running the suites side by side, $jobs thing(s) at a time (-j 1 for one at a time)."
+  # Each suite is started through parallel.py, which has it take Ctrl-C
+  # though this script isn't waiting on it, writes to a file of its own,
+  # and leaves its exit status beside it when it ends.
+  start () {
+    command_of "${names[$1]}" "${kinds[$1]}" "$here/parallel.py"
+    "${command[@]}" > "$outs/$1.output" 2>&1
+    # Said to no one once the run is stopped and its folder gone.
+    { echo "$?" > "$outs/$1.status"; } 2>/dev/null
+  }
+  running=()
+  for i in "${!names[@]}"; do
+    if [ "${kinds[$i]}" = cases ]; then
+      start "$i" &
+      running[$i]="$!"
+    fi
+  done
+  (
+    for i in "${!names[@]}"; do
+      if [ "${kinds[$i]}" = whole ]; then
+        # Stopped: this script gone, and its folder with it, or the
+        # suite ended by Ctrl-C, which this loop doesn't take.
+        [ -d "$outs/slots" ] || exit
+        start "$i"
+        [ "$(cat "$outs/$i.status" 2>/dev/null)" != 130 ] || exit
+      fi
+    done
+    [ ! -d "$outs/slots" ] || : > "$outs/slots/0"
+  ) &
+  for i in "${!names[@]}"; do
+    if [ "${kinds[$i]}" = whole ]; then
+      running[$i]="$!"
+    fi
+  done
+  # Printed in the list's order: what the suite being waited for has
+  # written so far, as it comes, and the rest of it once it ends.
+  for i in "${!names[@]}"; do
+    heading "${names[$i]}"
+    shown=0
+    # Until it says how it ended, or what was running it is gone.
+    until [ -s "$outs/$i.status" ] || ! kill -0 "${running[$i]}" 2>/dev/null; do
+      if [ -f "$outs/$i.output" ]; then
+        size="$(wc -c < "$outs/$i.output")"
+        if [ "$size" -gt "$shown" ]; then
+          tail -c "+$((shown + 1))" "$outs/$i.output" | head -c "$((size - shown))"
+          shown="$size"
+        fi
+      fi
+      sleep 0.5
+    done
+    if [ ! -s "$outs/$i.status" ]; then
+      # Stopped from outside before it could say how it ended.
+      echo "  ERROR ${names[$i]} was stopped before it ended" >> "$outs/$i.output"
+      echo 1 > "$outs/$i.status"
+    fi
+    tail -c "+$((shown + 1))" "$outs/$i.output"
+    account "${names[$i]}" "$(cat "$outs/$i.status")" "$outs/$i.output"
+  done
+  wait
 fi
 
 printf '\n'

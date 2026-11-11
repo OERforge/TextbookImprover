@@ -8955,6 +8955,428 @@ def check_axe_setup():
          and outputcheck.epub_documents(os.path.join(work, "page.html")) == []),
     ]
 
+# --------------------------------------------------------------------------
+# the suites' own runner
+# --------------------------------------------------------------------------
+
+def check_shared_workers():
+    """tests/parallel.py's slots, which a run's suites share its workers
+    by: no more held at once than there are files, in one process's
+    threads and across processes, one freed when the process holding it
+    is killed, one added to the folder found by a wait, a wait ended when
+    the run is stopped, and nothing waited for when no folder is named; a
+    suite's cases, run side by side, each holding one, their lines in the
+    list's order, and none started once the run is stopped; and the PDF
+    suite's books built so, the longest first. And the command run-all.sh
+    starts a suite through: the default -j, the suite's exit status, and
+    Ctrl-C's signal taken again."""
+    import contextlib
+    import io
+    import select
+    import threading
+    import time
+    script = os.path.join(HERE, "parallel.py")
+    work = scratch()
+    two, growing = os.path.join(work, "two"), os.path.join(work, "growing")
+    for folder, count in ((two, 2), (growing, 1)):
+        os.makedirs(folder)
+        for number in range(count):
+            open(os.path.join(folder, str(number)), "w").close()
+
+    def fresh(folder):
+        """The module as a process told of the folder has it."""
+        saved = os.environ.get("OER_TEST_SLOTS")
+        os.environ.pop("OER_TEST_SLOTS", None)
+        if folder:
+            os.environ["OER_TEST_SLOTS"] = folder
+        try:
+            module = load(script, "parallel_" + os.path.basename(folder or "none"))
+            return module, module.slots()
+        finally:
+            os.environ.pop("OER_TEST_SLOTS", None)
+            if saved is not None:
+                os.environ["OER_TEST_SLOTS"] = saved
+    shared, shared_count = fresh(two)
+    alone, alone_count = fresh(None)
+
+    def most_at_once(module):
+        """Six threads, each holding a slot for a moment."""
+        state, lock = {"now": 0, "most": 0}, threading.Lock()
+
+        def hold():
+            with module.slot():
+                with lock:
+                    state["now"] += 1
+                    state["most"] = max(state["most"], state["now"])
+                time.sleep(0.05)
+                with lock:
+                    state["now"] -= 1
+        threads = [threading.Thread(target=hold) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        return state["most"]
+    in_threads, unshared = most_at_once(shared), most_at_once(alone)
+
+    # Two processes hold both slots; a third wait gets in only when one
+    # of them is killed.
+    holding = ("import sys, time\nsys.path.insert(0, %r)\nimport parallel\n"
+               "with parallel.slot():\n    print('held', flush=True)\n    time.sleep(60)\n" % HERE)
+    holders = [subprocess.Popen([sys.executable, "-c", holding], stdout=subprocess.PIPE,
+                                text=True, stdin=subprocess.DEVNULL,
+                                env=dict(os.environ, OER_TEST_SLOTS=two)) for _ in range(2)]
+    # Each says when it has one; a holder that never does isn't waited on.
+    said = [holder.stdout.readline().strip()
+            if select.select([holder.stdout], [], [], 20)[0] else "" for holder in holders]
+    got, done = threading.Event(), threading.Event()
+
+    def wait_for_one():
+        with shared.slot():
+            got.set()
+            done.wait(30)
+    waiter = threading.Thread(target=wait_for_one)
+    waiter.start()
+    kept_out = not got.wait(0.5)
+    holders[0].kill()
+    holders[0].wait()
+    let_in = got.wait(10)
+    for holder in holders:
+        holder.kill()
+        holder.wait()
+        holder.stdout.close()
+    done.set()
+    waiter.join()
+
+    # A folder of one slot, held here; a second wait gets in when a file
+    # is added, and a third, with every slot held, ends when the run is
+    # stopped, as a suite's remaining cases do.
+    grown, _ = fresh(growing)
+    grown.LIST = 0.1
+    second_in, third = threading.Event(), []
+
+    def wait_for_second():
+        with grown.slot():
+            second_in.set()
+            done_growing.wait(30)
+
+    def wait_for_third():
+        try:
+            with grown.slot():
+                third.append("in")
+        except grown.Stopped:
+            third.append("stopped")
+    done_growing = threading.Event()
+    with grown.slot():
+        second = threading.Thread(target=wait_for_second)
+        second.start()
+        before_added = second_in.wait(0.4)
+        open(os.path.join(growing, "added"), "w").close()
+        after_added = second_in.wait(10)
+        last = threading.Thread(target=wait_for_third)
+        last.start()
+        last.join(0.4)
+        before_stop = list(third)
+        stopped_log = os.path.join(work, "stopped.log")
+        stopped_suite = os.path.join(work, "stopped.py")
+        with open(stopped_suite, "w", encoding="utf-8") as fh:
+            fh.write(f"open({stopped_log!r}, 'a').write('ran\\n')\n")
+        # A suite's cases, every slot held: Ctrl-C's signal itself, half
+        # a second into the wait for the first, taken as Python takes it
+        # in the foreground whatever this suite was started with.
+        import signal
+        before = signal.signal(signal.SIGINT, signal.default_int_handler)
+        interrupt = threading.Timer(0.5, lambda: os.kill(os.getpid(), signal.SIGINT))
+        interrupt.start()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                grown.run(stopped_suite, [("a", None), ("b", None), ("c", None)], (), 2)
+            interrupted = False
+        except KeyboardInterrupt:
+            interrupted = True
+        finally:
+            interrupt.cancel()
+            signal.signal(signal.SIGINT, before)
+        last.join(10)
+        done_growing.set()
+        second.join()
+    cases_started = os.path.exists(stopped_log)
+
+    def most_logged(log):
+        """The most at once of what logged its start and its end there."""
+        with open(log, encoding="utf-8") as fh:
+            events = sorted(line.split() for line in fh)
+        now = most = 0
+        for _, what in events:
+            now += 1 if what == "start" else -1
+            most = max(most, now)
+        return most
+
+    # A suite's cases, six threads' worth on the two slots: a script that
+    # runs the case it's told, as the suites' do.
+    suite = os.path.join(work, "suite.py")
+    cases_log = os.path.join(work, "cases.log")
+    with open(suite, "w", encoding="utf-8") as fh:
+        fh.write("import sys, time\n"
+                 "index = sys.argv[sys.argv.index('--case-index') + 1]\n"
+                 "def note(what):\n"
+                 f"    with open({cases_log!r}, 'a') as fh:\n"
+                 "        fh.write('%.6f %s\\n' % (time.time(), what))\n"
+                 "note('start')\n"
+                 "time.sleep(0.1)\n"
+                 "print('  ok    case ' + index)\n"
+                 "note('end')\n"
+                 "sys.exit(1 if index == '3' else 0)\n")
+    cases = [(f"case {number}", None) for number in range(6)]
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        cases_failed = shared.run(suite, cases, (), 6, first={"case 5"})
+    cases_lines = printed.getvalue().splitlines()
+    cases_most = most_logged(cases_log)
+
+    # The PDF suite's books, with stand-ins for their builds.
+    pdf_suite = load(os.path.join(HERE, "run-pdf-tests.py"), "pdf_suite")
+    pdf_suite.parallel = shared
+    builds_log = os.path.join(work, "builds.log")
+    order, order_lock = [], threading.Lock()
+
+    def stand_in(suffix):
+        def build(folder):
+            with order_lock:
+                order.append(suffix)
+                with open(builds_log, "a", encoding="utf-8") as fh:
+                    fh.write("%.6f start\n" % time.time())
+            time.sleep(0.05)
+            with order_lock:
+                with open(builds_log, "a", encoding="utf-8") as fh:
+                    fh.write("%.6f end\n" % time.time())
+            return folder
+        return build
+    suffixes = list(pdf_suite.BUILDS)
+    pdf_suite.BUILDS = {suffix: stand_in(suffix) for suffix in suffixes}
+    # Six threads on the two slots; then two, which start the builds in
+    # the order they were handed them; then one after another.
+    built = pdf_suite.build_books("book", 6)
+    builds_most = most_logged(builds_log)
+    del order[:]
+    pdf_suite.build_books("book", 2)
+    side_order = list(order)
+    del order[:]
+    one_by_one = pdf_suite.build_books("book", 1)
+    turn_order = list(order)
+
+    # The command a suite is started through.
+    probe = os.path.join(work, "probe.py")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write("import signal, sys\n"
+                 "print(signal.getsignal(signal.SIGINT) is signal.default_int_handler, "
+                 "sys.argv[1:])\n"
+                 "sys.exit(3)\n")
+
+    def ignoring(*command, **env):
+        """The command's output and status, started as a shell starts one
+        it doesn't wait for: Ctrl-C's signal ignored."""
+        import signal
+        done = subprocess.run([sys.executable, *command], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, env=dict(os.environ, **env),
+                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
+        return done.stdout.strip(), done.returncode
+    direct = ignoring(probe)
+    through = ignoring(script, probe, "-j", "4")
+    default = subprocess.run([sys.executable, script, "--default-jobs"], capture_output=True,
+                             text=True).stdout.strip()
+    return [
+        ("a run's slots are the files in the folder it names, and none without one",
+         lambda: (shared_count, alone_count) == (2, 0)
+         or fail(f"got: {shared_count}, {alone_count}")),
+        ("six threads hold no more than two slots at once, and all at once when nothing's "
+         "shared",
+         lambda: (in_threads, unshared) == (2, 6) or fail(f"got: {in_threads}, {unshared}")),
+        ("with both held by other processes a wait is kept out, and let in when one of them "
+         "is killed",
+         lambda: said == ["held", "held"] and kept_out and let_in
+         or fail(f"got: {said}, kept out {kept_out}, let in {let_in}")),
+        ("a file added to the folder is a slot more, which a wait finds",
+         lambda: grown.slots() == 2 and not before_added and after_added
+         or fail(f"got: {grown.slots()} slots, in before {before_added}, after {after_added}")),
+        ("Ctrl-C ends a suite's wait for its cases, and a wait for a slot, with nothing "
+         "started after it",
+         lambda: interrupted and before_stop == [] and third == ["stopped"]
+         and not cases_started
+         or fail(f"got: interrupted {interrupted}, {before_stop}, {third}, "
+                 f"started {cases_started}")),
+        ("a suite's cases hold no more than the two at once, their lines printed in the "
+         "list's order and their failures counted",
+         lambda: cases_most == 2 and cases_failed == 1
+         and cases_lines[1:] == [f"  ok    case {number}" for number in range(6)]
+         and "on the workers the run's suites share" in cases_lines[0]
+         or fail(f"got: {cases_most} at once, {cases_failed} failed, {cases_lines}")),
+        ("the PDF suite's books are built no more than two at once, the longest first, each "
+         "in its own folder, and one after another in their own order with -j 1",
+         lambda: builds_most == 2
+         and set(side_order[:len(pdf_suite.SLOW)]) == set(pdf_suite.SLOW) < set(suffixes)
+         and turn_order == suffixes and suffixes[0] not in pdf_suite.SLOW
+         and built == one_by_one == {suffix: "book" + suffix for suffix in suffixes}
+         and set(suffixes) <= set(pdf_suite.BOOK_FOLDERS)
+         or fail(f"got: {builds_most} at once, {side_order[:5]}, {turn_order[:3]}")),
+        ("a suite started with Ctrl-C's signal ignored takes it again when started through "
+         "parallel.py, with its arguments and its exit status",
+         lambda: direct == ("False []", 3) and through == ("True ['-j', '4']", 3)
+         or fail(f"got: {direct}, {through}")),
+        ("--default-jobs says the suites' default, half the processors",
+         lambda: default == str(shared.default_jobs()) or fail(f"got: {default}")),
+    ]
+
+
+def check_run_all():
+    """run-all.sh on stand-ins for the suites it lists, each saying when
+    it started and ended: side by side, the suites that do one thing at a
+    time in turn, in the list's order, beside the ones that take -j, on a
+    folder of slots one fewer than -j, the last added when the suites in
+    turn are done; each suite's lines under its own heading in the list's
+    order, -j handed to the suites that take it, every suite run though
+    one fails, the failed suite named with its FAIL line and a skip
+    counted at the end; in turn with -j 1, started as sh; and a -j that
+    isn't a number refused."""
+    if shutil.which("bash") is None:
+        return [("run-all.sh runs the suites side by side",
+                 lambda: print("  skip  no bash to run run-all.sh with") or True)]
+    work = scratch()
+    for folder in ("tests", "util", "bin"):
+        os.makedirs(os.path.join(work, folder))
+    for name in ("run-all.sh", "parallel.py"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(work, "tests"))
+    with open(os.path.join(HERE, "run-all.sh"), encoding="utf-8") as fh:
+        listed = re.findall(r"^ *suite (\S+\.py)( cases)?$", fh.read(), re.M)
+    names = [name for name, _ in listed]
+    cases = {name for name, kind in listed if kind}
+    # The suites in this folder, and the ones that hold the run's workers
+    # themselves (tests/parallel.py).
+    here = sorted(name for name in os.listdir(HERE) if re.match(r"run-.*\.py$", name))
+    sharing = set()
+    for name in here:
+        with open(os.path.join(HERE, name), encoding="utf-8") as fh:
+            if re.search(r"^import parallel\b", fh.read(), re.M):
+                sharing.add(name)
+    stand_in = ("import json, os, sys, time\n"
+                "name = os.path.basename(sys.argv[0])\n"
+                "start = time.time()\n"
+                "def note(what):\n"
+                "    with open(os.environ['STAND_IN_LOG'], 'a') as fh:\n"
+                "        fh.write(json.dumps([name, what, time.time(), sys.argv[1:]]) + '\\n')\n"
+                "slots = os.environ.get('OER_TEST_SLOTS')\n"
+                "note('start %d' % len(os.listdir(slots)) if slots else 'start')\n"
+                "print('  ok    ' + name + ' ran', flush=True)\n"
+                "time.sleep(float(os.environ['STAND_IN_SLEEP']))\n"
+                "if name == os.environ.get('STAND_IN_SKIP'):\n"
+                "    print('  skip  12 checks of a thing, for want of a tool')\n"
+                "failing = name == os.environ.get('STAND_IN_FAIL')\n"
+                "if failing:\n"
+                "    print('  FAIL  ' + name + ' found something')\n"
+                "if name == 'run-pdf-tests.py':\n"
+                "    while slots and len(os.listdir(slots)) < 3 and time.time() < start + 20:\n"
+                "        time.sleep(0.05)\n"
+                "note('end %d' % len(os.listdir(slots)) if slots else 'end')\n"
+                "sys.exit(1 if failing else 0)\n")
+    for name in names:
+        folder = "util" if name == "settings-reference.py" else "tests"
+        with open(os.path.join(work, folder, name), "w", encoding="utf-8") as fh:
+            fh.write(stand_in)
+    # A Pandoc new enough, whatever the machine has, so every suite is run.
+    pandoc = os.path.join(work, "bin", "pandoc")
+    with open(pandoc, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 3.13'\n")
+    os.chmod(pandoc, 0o755)
+
+    def run_all(shell, *options, **env):
+        log = os.path.join(work, f"log-{len(os.listdir(work))}.jsonl")
+        open(log, "w").close()
+        environ = dict(os.environ, STAND_IN_LOG=log,
+                       PATH=os.path.join(work, "bin") + os.pathsep + os.environ["PATH"], **env)
+        environ.pop("OER_TEST_SLOTS", None)
+        done = subprocess.run([shell, os.path.join(work, "tests", "run-all.sh"), *options],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                              env=environ, cwd=work)
+        with open(log, encoding="utf-8") as fh:
+            events = sorted((json.loads(line) for line in fh), key=lambda event: event[2])
+        # The most at once: of the suites that do one thing at a time,
+        # and of them all.
+        most = {}
+        for which in ("whole", "all"):
+            now = most[which] = 0
+            for name, what, _, _ in events:
+                if which == "all" or name not in cases:
+                    now += 1 if what.startswith("start") else -1
+                    most[which] = max(most[which], now)
+        given = {name: arguments for name, what, _, arguments in events
+                 if what.startswith("start")}
+        return done, most, given, events
+    side, side_most, side_given, side_events = run_all("bash", "-j", "3", STAND_IN_SLEEP="0.05",
+                                          STAND_IN_FAIL="run-epub-tests.py",
+                                          STAND_IN_SKIP="run-cnx-tests.py")
+    shell = "sh" if shutil.which("sh") else "bash"
+    turn, turn_most, turn_given, turn_events = run_all(shell, "-j1", STAND_IN_SLEEP="0.01")
+    whole = [name for name in names if name not in cases]
+    refused = subprocess.run(["bash", os.path.join(work, "tests", "run-all.sh"), "-j", "two"],
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def headings(output):
+        return re.findall(r"^=== (\S+)", output, re.M)
+
+    def under_its_own(output):
+        """Each suite's line right under its own heading."""
+        return re.findall(r"^=== (\S+)[^\n]*\n  ok    (\S+) ran$", output, re.M)
+    return [
+        ("run-all.sh lists every suite here, the ones that share the run's workers among "
+         "their cases as the ones that do",
+         lambda: names[0] == "run-portability-test.py"
+         and sorted(name for name in names if name != "settings-reference.py") == here
+         and cases == sharing or fail(f"got: {names}, {sorted(cases)}, {sorted(sharing)}")),
+        ("side by side, every suite runs though one fails: the ones that do one thing at a "
+         "time in turn, in the list's order, beside the ones that take -j",
+         lambda: set(side_given) == set(names) and side_most["whole"] == 1
+         and side_most["all"] > 1
+         and [name for name, what, _, _ in side_events
+              if what.startswith("start") and name not in cases] == whole
+         and "Running the suites side by side, 3 thing(s) at a time" in side.stdout
+         or fail(f"got: {sorted(set(names) ^ set(side_given))}, {side_most} at once")),
+        ("the suites that take -j share a folder of slots, one fewer than -j, and the last "
+         "is added when the suites in turn are done",
+         lambda: {what for name, what, _, _ in side_events
+                  if name in cases and what.startswith("start")} == {"start 2"}
+         and [what for name, what, _, _ in side_events if name == "run-pdf-tests.py"][-1]
+         == "end 3"
+         and not [what for name, what, _, _ in turn_events if what not in ("start", "end")]
+         or fail(f"got: {[e[:2] for e in side_events if e[0] in cases]}")),
+        ("each suite's lines are under its own heading, in the list's order",
+         lambda: headings(side.stdout) == names
+         and under_its_own(side.stdout) == [(name, name) for name in names]
+         or fail("got: " + side.stdout)),
+        ("-j goes to the suites that take it, and --check to the settings pages' check",
+         lambda: all(side_given[name] == (["-j", "3"] if name in cases else
+                                          ["--check"] if name == "settings-reference.py"
+                                          else []) for name in names)
+         or fail(f"got: {side_given}")),
+        ("the failed suite is named at the end with its FAIL line, the skip counted as its "
+         "twelve checks, and the run fails",
+         lambda: side.returncode == 1
+         and "1 suite(s) failed: run-epub-tests.py\n"
+             "  run-epub-tests.py: FAIL  run-epub-tests.py found something\n" in side.stderr
+         and "12 check(s) skipped, which passing doesn't cover:\n"
+             "  run-cnx-tests.py: skip  12 checks of a thing" in side.stderr
+         and "All suites passed." not in side.stdout or fail("got: " + side.stderr)),
+        ("with -j 1, started as sh, the suites run in turn, in the same order, and pass",
+         lambda: turn.returncode == 0 and turn_most["all"] == 1
+         and "side by side" not in turn.stdout and headings(turn.stdout) == names
+         and under_its_own(turn.stdout) == [(name, name) for name in names]
+         and turn.stdout.rstrip().endswith("All suites passed.")
+         and all(turn_given[name] == ["-j", "1"] for name in cases)
+         or fail(f"got: {turn.returncode}, {turn_most} at once, " + turn.stdout + turn.stderr)),
+        ("a -j that isn't a number is refused, and nothing run",
+         lambda: refused.returncode == 2 and "-j wants a number" in refused.stderr
+         and refused.stdout == "" or fail(f"got: {refused.returncode}, " + refused.stderr)),
+    ]
+
 
 GROUPS = [
     ("a report's rows", check_report_rows),
@@ -9067,6 +9489,8 @@ GROUPS = [
     ("a page's language in its source's copy", check_copy_languages),
     ("a one-page book's title page, its page in another language", check_title_page_languages),
     ("the warning for a class's own contents", check_own_contents_warning),
+    ("the workers a run's suites share", check_shared_workers),
+    ("run-all.sh, on stand-ins for its suites", check_run_all),
 ]
 
 

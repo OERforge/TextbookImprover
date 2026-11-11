@@ -505,4 +505,4 @@ From the directory you cloned into:
 bash tests/run-all.sh
 ```
 
-Twenty suites run, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set, say, or the checks that open a page in a browser, without the optional Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.
+Twenty-one suites run, side by side, and a check that the settings pages are current. A check that needs something not installed prints `skip` with the reason and what to install, a validator whose jar isn't set, say, or the checks that open a page in a browser, without the optional Playwright, and `run-all.sh` lists every skip at its end, so a pass without Java means the pipeline is sound and the validators are simply absent.

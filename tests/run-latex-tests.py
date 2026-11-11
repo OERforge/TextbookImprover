@@ -6046,8 +6046,9 @@ def case_class_contents(work):
     book's copy, warned of too. And a class whose own \\title and \\author
     don't give LaTeX's tagging the PDF's title and author: the amsbook
     book's PDF, which has no \\maketitle, has them, and the memoir book's,
-    with a footnote, builds, where its \\title, its \\author, and its note
-    each stopped LaTeX, and has them too."""
+    with two footnotes in succession, builds, where its \\title, its
+    \\author, and its notes each stopped LaTeX, and has them too, the
+    marks a comma apart, as memoir sets them."""
     ams, art, memoir = (os.path.join(work, name) for name in ("amsbook", "amsart", "memoir"))
     for folder, cls, extra, unit in ((ams, "amsbook", "\\listoffigures\n", "chapter"),
                                      (art, "amsart", "\\listoffigures\n", "section"),
@@ -6059,7 +6060,8 @@ def case_class_contents(work):
                      + "\\begin{document}\n"
                      + ("\\maketitle\n" if folder == art else "")
                      + "\\tableofcontents\n" + extra + "\\" + unit + "{Classone}\nClasstext."
-                     + ("\\footnote{Classnote.}" if folder == memoir else "") + "\n"
+                     + ("\\footnote{Classnote.}\\footnote{Classnote two.}" if folder == memoir
+                        else "") + "\n"
                      "\\begin{figure}\\centering\\rule{1cm}{1cm}\\caption{Classfigure}"
                      "\\end{figure}\n\\end{document}\n")
         with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
@@ -6185,7 +6187,7 @@ def case_class_contents(work):
             return text
         return found[:2] == ("Classed", ["Classauthor"]) \
             and any(link.startswith("footnote") for link in found[2]) \
-            and "Classtext." in text and "Classnote." in text \
+            and "Classtext.1,2" in text and "Classnote." in text \
             and "memoir given LaTeX's own \\title and \\author to change" in memoir_said \
             and "memoir's \\title, \\author, and footnote marks made to build with " \
             "LaTeX's tagging" in memoir_said \
@@ -6295,8 +6297,9 @@ def case_class_contents(work):
         ("an amsart article's PDF has its title from \\maketitle, as LaTeX's tagging takes "
          "it, and the copy takes it no other way", art_titled),
         ("a memoir book's PDF builds, where its \\title, its \\author, and its footnote each "
-         "stopped LaTeX, with its title and author, its note's mark a link to its note, and "
-         "the run says so", memoir_pdf),
+         "stopped LaTeX, with its title and author, its notes' marks links to their notes, "
+         "the two in succession a comma apart as memoir sets them, and the run says so",
+         memoir_pdf),
     ]
 
 

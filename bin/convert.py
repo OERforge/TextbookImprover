@@ -4252,9 +4252,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   if counts.get("tag_own_title") else "")
                + ("memoir given LaTeX's own \\title and \\author to change, where LaTeX's "
                   "tagging's, which memoir's changes don't fit, stopped LaTeX at the book's "
-                  "\\title (\"Extra \\endgroup\"), and its footnote mark kept from hyperref's "
+                  "\\title (\"Extra \\endgroup\"), its footnote mark kept from hyperref's "
                   "changes for memoir, which stopped LaTeX at a note (\"No counter "
-                  "'Hfootnote' defined\"), "
+                  "'Hfootnote' defined\"), and its comma between marks in succession given to "
+                  "LaTeX's footnote mark, which ran them together (\"12\" for \"1,2\"), "
                   if counts.get("tag_memoir_commands") else "")
                + (f"hyperref loaded in {counts['tag_hyperref']} document(s), for the PDF's "
                   "bookmarks, "
@@ -4886,7 +4887,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                f"{counts['tag_own_title']}'s own commands don't give LaTeX's tagging, "
                if counts.get("tag_own_title") else "")
             + ("memoir's \\title, \\author, and footnote marks made to build with LaTeX's "
-               "tagging, " if counts.get("tag_memoir_commands") else "")
+               "tagging, its marks in succession a comma apart, "
+               if counts.get("tag_memoir_commands") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

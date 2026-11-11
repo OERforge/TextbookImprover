@@ -1557,21 +1557,33 @@ OWN_TITLE = (
 # before the class, gives memoir LaTeX's own \title and \author to change,
 # as latex.ltx declares them, and keeps the footnote mark memhfixc would
 # replace, LaTeX's tagging's, which links a note's mark to its note;
-# memhfixc's links for \pagenote stay. Measured with LaTeX 2026-06-01 and
-# 2026-11-01.
+# memhfixc's links for \pagenote stay. And LaTeX's footnote code, loaded
+# with \DocumentMetadata, sets its own mark in memoir's place at
+# class/memoir/after, which has none of memoir's comma between marks in
+# succession (\multfootsep), so two notes' marks ran together, "12" for
+# "1,2"; MEMOIR_COMMANDS gives memoir's two macros for it (\m@mmf@check,
+# \m@mmf@prepare) to that mark's hooks, fnmark and fnmark/end, where they
+# go in memoir's own, where memoir defines them. Measured with LaTeX
+# 2026-06-01 and 2026-11-01.
 MEMOIR_COMMANDS = (
     "% Written for LaTeX's tagging: \\title and \\author as LaTeX defines them,\n"
     "% for memoir to change, where LaTeX's tagging's own, which memoir's changes\n"
-    "% don't fit, stopped LaTeX (\"Extra \\endgroup\"); and the footnote mark\n"
+    "% don't fit, stopped LaTeX (\"Extra \\endgroup\"); the footnote mark\n"
     "% hyperref's changes for memoir (memhfixc) would replace kept, where theirs\n"
     "% steps a counter hyperref doesn't make with \\DocumentMetadata (\"No\n"
-    "% counter 'Hfootnote' defined\").\n"
+    "% counter 'Hfootnote' defined\"); and memoir's comma between marks in\n"
+    "% succession given to the footnote mark LaTeX sets in memoir's place,\n"
+    "% which ran them together (\"12\" for \"1,2\").\n"
     "\\makeatletter\n"
     "\\AddToHook{class/memoir/before}{%\n"
     "  \\DeclareRobustCommand\\title[1]{\\gdef\\@title{#1}}%\n"
     "  \\DeclareRobustCommand*\\author[1]{\\gdef\\@author{#1}}}\n"
     "\\AddToHook{package/memhfixc/before}{\\global\\let\\oer@footnotemark\\@footnotemark}\n"
     "\\AddToHook{package/memhfixc/after}{\\global\\let\\@footnotemark\\oer@footnotemark}\n"
+    "\\AddToHook{class/memoir/after}{%\n"
+    "  \\ifdefined\\m@mmf@check\n"
+    "    \\AddToHook{fnmark}{\\m@mmf@check}\\AddToHook{fnmark/end}{\\m@mmf@prepare}%\n"
+    "  \\fi}\n"
     "\\makeatother\n")
 # The PDF's bookmarks, which hyperref makes from the headings (PDF/UA-1
 # 7.17 recommends them), its links as the book had them (hidelinks): for a

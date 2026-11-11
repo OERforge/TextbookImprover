@@ -37,6 +37,30 @@ another column is found by the cells' text, and the page is read as
 Pandoc reads it. In a YAML metadata block, whose strings have escapes of
 their own, nothing is marked.
 
+An element over more than one line of its paragraph, its closing tag on a
+later line before a blank one, is marked a line at a time: its first
+line's part, from its opening tag to the line's end, and each later
+line's, from after what Pandoc's reading of the paragraph takes off the
+line, the paragraph's quotation markers, as many as the element's first
+line has, and its indentation, to the line's end or the element's, each
+a tag of its own, <tv0-N-1>, <tv0-N-2>, and on, the line breaks and what
+they take off left as they are. Put back, the tags in a row, a line break
+between each two, are the element as the HTML reader reads its parts,
+one line each, whose white space it makes one space, as a browser shows
+it. Over two lines, Pandoc's reader had read the element's text as
+Markdown, so that <code>open("c:\\new.txt",⏎'r') -- see...</code> was
+open(“c:\new.txt”, ‘r’) – see…. Not where a later line has nothing past
+what's taken off, or opens with a '>' that isn't one of the first line's
+markers, which Pandoc's reading may take for one, a lazy line's, or with
+a '|' or a '+', a table's line or a line block's. Where the parts aren't
+read side by side, a soft break or a space between each two, or marking
+the elements over lines changes how the page's blocks are read, as in a
+multiline table's row, whose other cells' words such an element's text
+as written takes in, the page is read again with the elements on one
+line alone marked, and then with each over lines in turn too, up to 30
+of them, kept where the page's blocks are still read as Pandoc reads
+them; the rest are left to Pandoc's reader, and the run says how many.
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -114,10 +138,10 @@ local function tag_end(text, pos)
 end
 
 -- (start, end) of the tag that closes an element named name whose
--- contents start at pos, the same element inside counted, on its line;
--- nil where the line ends first.
-local function matching_close(text, pos, name)
-  local line_end = text:find('\n', pos, true) or (#text + 1)
+-- contents start at pos, the same element inside counted, before stop,
+-- by default the end of its line; nil where none does.
+local function matching_close(text, pos, name, stop)
+  local line_end = stop or text:find('\n', pos, true) or (#text + 1)
   local rest = text:sub(pos, line_end - 1):lower()
   local depth, p = 1, 1
   while true do
@@ -132,6 +156,60 @@ local function matching_close(text, pos, name)
       local _, d = rest:find('^<' .. name .. '[%s>]', s)
       if d then depth = depth + 1 end
       p = (d or s) + 1
+    end
+  end
+end
+
+-- Where the paragraph that pos is in ends: the line break before its next
+-- blank line, or the text's end.
+local function paragraph_end(text, pos)
+  return text:find('\n[ \t]*\r?\n', pos) or (#text + 1)
+end
+
+-- How many quotation markers open line, each '>' after up to three spaces,
+-- with a space after it or not, as Pandoc reads a block quote's, no more
+-- than most where most is given; and the length they take.
+local function quote_markers(line, most)
+  local count, at = 0, 1
+  while not most or count < most do
+    local _, e = line:find('^ ? ? ?> ?', at)
+    if not e then break end
+    count, at = count + 1, e + 1
+  end
+  return count, at - 1
+end
+
+-- The parts of an element from s to close_end, over more than one line, as
+-- {from, to} in text: the first line's from s to the line's end, and each
+-- later line's from after the quotation markers its paragraph's first
+-- line has, a lazy line's fewer, and its indentation, which Pandoc's
+-- reading of the paragraph takes off, to the line's end or close_end. nil
+-- where a later line has nothing past them, or opens with a '>' that
+-- isn't one of those markers, which Pandoc's reading may take for one, or
+-- with a '|' or a '+', a grid table's or a pipe table's line, whose other
+-- cells the element's parts would take in.
+local function element_parts(text, s, close_end)
+  local line_start = s
+  while line_start > 1 and text:sub(line_start - 1, line_start - 1) ~= '\n' do
+    line_start = line_start - 1
+  end
+  local depth = quote_markers(text:sub(line_start, s - 1))
+  local parts, from = {}, s
+  while true do
+    local nl = text:find('\n', from, true)
+    if not nl or nl > close_end then
+      parts[#parts + 1] = { from, close_end }
+      return parts
+    end
+    local to = nl - 1
+    if text:sub(to, to) == '\r' then to = to - 1 end
+    parts[#parts + 1] = { from, to }
+    local _, used = quote_markers(text:sub(nl + 1, close_end), depth)
+    local lead = text:match('^[ \t]*', nl + 1 + used)
+    from = nl + 1 + used + #lead
+    local c = text:sub(from, from)
+    if from > close_end or c == '\n' or c == '\r' or c == '>' or c == '|' or c == '+' then
+      return nil
     end
   end
 end
@@ -175,8 +253,14 @@ end
 -- tag that stands for it, numbers[the element] k. Not an element holding a
 -- backtick, which may be a code span's, so that two spans became one
 -- (`<code>` and `</code>`), nor one holding \|, which in a pipe table is
--- the table's escape, not the code's.
-local function mark(text, originals, markers, numbers, prefix)
+-- the table's escape, not the code's. An element over more than one line
+-- of its paragraph too, where over(its place) is true, each line's part a
+-- tag of its own, its number and the part's, as wide as the part or as the
+-- tag (element_parts): originals[k] its parts as written, a line break
+-- between each two, and parts[k] {marker, text} for each part. The place
+-- of each such element is added to places, source's number and where it
+-- starts, whether over takes it or not.
+local function mark(text, originals, markers, numbers, prefix, parts, over, source, places)
   local yaml = yaml_lines(text)
   local out, i, line, counted = {}, 1, 1, 1
   while i <= #text do
@@ -198,6 +282,44 @@ local function mark(text, originals, markers, numbers, prefix)
         local open_end = tag_end(text, after)
         if open_end and text:sub(open_end - 1, open_end - 1) ~= '/' then
           local close_start, close_end = matching_close(text, open_end + 1, name:lower())
+          if not close_start then
+            close_start, close_end = matching_close(text, open_end + 1, name:lower(),
+                                                    paragraph_end(text, open_end + 1))
+            local spans = close_start and element_parts(text, s, close_end)
+            local place = source .. ':' .. s
+            if spans then places[#places + 1] = place end
+            if not over(place) then spans = nil end
+            local whole = close_start and text:sub(s, close_end)
+            local texts = {}
+            for _, span in ipairs(spans or {}) do
+              texts[#texts + 1] = text:sub(span[1], span[2])
+            end
+            local element = table.concat(texts, '\n')
+            local k = numbers[element] or #originals + 1
+            local fits = spans and not whole:find('`', 1, true)
+              and not whole:find('\\|', 1, true)
+            for j, part in ipairs(fits and texts or {}) do
+              local wide = width(part)
+              if not wide then fits = false break end
+              local tag = '<' .. prefix .. '-' .. k .. '-' .. j
+              texts[j] = { tag .. string.rep(' ', math.max(0, wide - #tag - 1)) .. '>', part }
+            end
+            if fits then
+              if not numbers[element] then
+                numbers[element] = k
+                originals[k] = element
+                parts[k] = texts
+              end
+              for j, span in ipairs(spans) do
+                out[#out + 1] = text:sub(i, span[1] - 1)
+                out[#out + 1] = parts[k][j][1]
+                i = span[2] + 1
+              end
+              i = close_end + 1
+              done = true
+            end
+            close_start = nil
+          end
           local element = close_start and text:sub(s, close_end)
           local k = element and (numbers[element] or #originals + 1)
           local tag = k and '<' .. prefix .. '-' .. k
@@ -353,59 +475,115 @@ local function readable(sources)
   return table.concat(texts, '\n\n')
 end
 
-function Reader(input, opts)
-  local plain = pandoc.read(input, 'markdown', opts)
-  local texts = {}
-  for _, source in ipairs(input) do texts[#texts + 1] = source.text end
-  local prefix = free_prefix(texts)
-  local sources, originals, markers, numbers = {}, {}, {}, {}
-  for _, source in ipairs(input) do
-    sources[#sources + 1] = { name = source.name,
-                              text = mark(source.text, originals, markers, numbers, prefix) }
+-- inlines with each element over lines, its parts' spans in a row, a line
+-- break between each two (part), its first part's span alone, which is put
+-- back as the element; nil where an element's parts aren't so, which then
+-- can't be put back.
+local function joined(inlines, marker, part, parts)
+  local out, i = pandoc.Inlines({}), 1
+  while i <= #inlines do
+    local el = inlines[i]
+    local k, j = marker(el), part(el)
+    if k and j then
+      if j ~= 1 then return nil end
+      local m = i
+      for next_part = 2, #parts[k] do
+        local gap, span = inlines[m + 1], inlines[m + 2]
+        if not (gap and (gap.t == 'SoftBreak' or gap.t == 'LineBreak' or gap.t == 'Space')
+                and span and marker(span) == k and part(span) == next_part) then
+          return nil
+        end
+        m = m + 2
+      end
+      out:insert(el)
+      i = m + 1
+    else
+      out:insert(el)
+      i = i + 1
+    end
   end
-  if #originals == 0 then return plain end
+  return out
+end
+
+-- The page read with its raw code elements marked (mark), those over lines
+-- where over(their place) is true, and put back: the document, how many
+-- elements were taken as written, how many were marked, and the places of
+-- the elements over lines, taken or not; the document nil where the
+-- marking changed how the page's blocks were read or an element can't be
+-- put back.
+local function read_marked(input, opts, plain, prefix, over)
+  local sources, originals, markers, numbers, parts, places = {}, {}, {}, {}, {}, {}
+  for n, source in ipairs(input) do
+    sources[#sources + 1] = { name = source.name,
+                              text = mark(source.text, originals, markers, numbers, prefix,
+                                          parts, over, n, places) }
+  end
+  if #originals == 0 then return plain, 0, 0, places end
   local doc = pandoc.read(readable(sources), 'markdown', opts)
-  -- Each tag the reader kept as raw HTML made a span of its number, with
-  -- an attribute no span in the source has (free_prefix); a tag left is
-  -- text to the reader, in code or a comment, as many times as Pandoc
-  -- repeats it (an image's description is its figure's caption too), and
-  -- is put back as written.
+  -- Each tag the reader kept as raw HTML made a span of its number, and a
+  -- part's of its part's, with an attribute no span in the source has
+  -- (free_prefix); a tag left is text to the reader, in code or a comment,
+  -- as many times as Pandoc repeats it (an image's description is its
+  -- figure's caption too), and is put back as written.
   local key = 'data-' .. prefix .. '-verbatim'
+  local part_key = 'data-' .. prefix .. '-part'
   local pattern = '^<' .. prefix .. '%-(%d+)%s*>$'
+  local part_pattern = '^<' .. prefix .. '%-(%d+)%-(%d+)%s*>$'
   local found = {}
   doc = doc:walk({ RawInline = function(raw)
     if raw.format ~= 'html' then return nil end
     local k = tonumber(raw.text:match(pattern))
-    if not k or not originals[k] then return nil end
-    found[k] = true
-    return pandoc.Span({}, pandoc.Attr('', {}, { { key, tostring(k) } }))
+    if k and originals[k] and not parts[k] then
+      found[k] = true
+      return pandoc.Span({}, pandoc.Attr('', {}, { { key, tostring(k) } }))
+    end
+    local pk, pj = raw.text:match(part_pattern)
+    pk, pj = tonumber(pk), tonumber(pj)
+    if pk and parts[pk] and parts[pk][pj] then
+      found[pk .. '-' .. pj] = true
+      return pandoc.Span({}, pandoc.Attr('', {}, { { key, tostring(pk) },
+                                                    { part_key, tostring(pj) } }))
+    end
+    return nil
   end })
   local function marker(el)
     return el.t == 'Span' and tonumber(el.attributes[key]) or nil
   end
+  local function part(el)
+    return el.t == 'Span' and tonumber(el.attributes[part_key]) or nil
+  end
   local json = pandoc.write(doc, 'json')
   local ok, back = true, false
-  for k = 1, #originals do
-    local text = json_text(markers[k])
+  local function put_back(marked, original, seen)
+    local text = json_text(marked)
     if json:find(text, 1, true) then
-      json = replace_all(json, text, json_text(originals[k]))
+      json = replace_all(json, text, json_text(original))
       back = true
-    elseif not found[k] then
+    elseif not seen then
       ok = false
     end
   end
+  for k = 1, #originals do
+    if parts[k] then
+      for j, piece in ipairs(parts[k]) do put_back(piece[1], piece[2], found[k .. '-' .. j]) end
+    else
+      put_back(markers[k], originals[k], found[k])
+    end
+  end
   if ok and back then doc = pandoc.read(json, 'json') end
+  if ok then
+    doc = doc:walk({ Inlines = function(inlines)
+      local together = joined(inlines, marker, part, parts)
+      if not together then ok = false end
+      return together
+    end })
+  end
   if ok and shape(doc, marker) ~= shape(plain) then ok = false end
   -- A link to a heading by its text goes where Pandoc's reading has it go,
   -- since a heading's id, made from its text, is the plain reading's below.
   local plain_targets, targets = link_targets(plain), link_targets(doc)
   if ok and #plain_targets ~= #targets then ok = false end
-  if not ok then
-    io.stderr:write(('[markdown-reader] %s: its %d raw code element(s) are read as '
-      .. 'Markdown, as Pandoc reads them: taken as written, they changed how the page\'s '
-      .. 'blocks were read\n'):format(name_of(input), #originals))
-    return plain
-  end
+  if not ok then return nil, 0, #originals, places end
   local taken, count, n = {}, 0, 0
   doc = doc:walk({ traverse = 'topdown', Link = function(link)
     n = n + 1
@@ -431,6 +609,50 @@ function Reader(input, opts)
       return h
     end
   end })
+  return doc, count, #originals, places
+end
+
+-- The most elements over lines a page's are tried one at a time for, where
+-- taking them all changed how its blocks were read: each try reads the
+-- page again.
+local MOST_TRIED = 30
+
+function Reader(input, opts)
+  local plain = pandoc.read(input, 'markdown', opts)
+  local texts = {}
+  for _, source in ipairs(input) do texts[#texts + 1] = source.text end
+  local prefix = free_prefix(texts)
+  local function all() return true end
+  local doc, count, marked, places = read_marked(input, opts, plain, prefix, all)
+  if not doc and #places > 0 then
+    -- The elements on one line, and then each over lines in turn, kept
+    -- where the page's blocks are still read as Pandoc reads them.
+    local taken, left = {}, #places
+    local function chosen(place) return taken[place] == true end
+    doc, count = read_marked(input, opts, plain, prefix, chosen)
+    if doc and #places <= MOST_TRIED then
+      for _, place in ipairs(places) do
+        taken[place] = true
+        local tried, tried_count = read_marked(input, opts, plain, prefix, chosen)
+        if tried then
+          doc, count, left = tried, tried_count, left - 1
+        else
+          taken[place] = nil
+        end
+      end
+    end
+    if doc then
+      io.stderr:write(('[markdown-reader] %s: %d raw code element(s) over more than a line '
+        .. 'are read as Markdown, as Pandoc reads them: taken as written, they changed how '
+        .. 'the page\'s blocks were read\n'):format(name_of(input), left))
+    end
+  end
+  if not doc then
+    io.stderr:write(('[markdown-reader] %s: its %d raw code element(s) are read as '
+      .. 'Markdown, as Pandoc reads them: taken as written, they changed how the page\'s '
+      .. 'blocks were read\n'):format(name_of(input), marked))
+    return plain
+  end
   if count > 0 then
     io.stderr:write(('[markdown-reader] %s: %d raw code element(s) taken as written\n')
       :format(name_of(input), count))

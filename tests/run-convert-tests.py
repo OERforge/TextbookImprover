@@ -2062,8 +2062,8 @@ def case_markdown_html(work):
 
 
 # Raw code in a Markdown page (markdown-reader.lua): elements on a line of
-# their own, their quotation marks, backslashes, dashes, and dots as
-# written, in a paragraph, a raw HTML table's cell, and a heading; and as
+# their own and one over two lines, their quotation marks, backslashes,
+# dashes, and dots as written, in a paragraph, a raw HTML table's cell, and a heading; and as
 # Markdown's own code, where an element is text. A raw HTML table whose
 # cell holds a note, and a raw <pre> (markdown-html.lua). And a grid table
 # holding an element, which taking it as written would leave no table.
@@ -2125,8 +2125,8 @@ def case_markdown_raw_code(work):
     curled and a backslash taken for an escape; a raw HTML table whose cell
     holds a note a table, which lost its rows and cells; a raw <pre> a
     code block, which only the pages and the EPUB had; and one over two
-    lines, which Pandoc's reader reads, read as HTML, as code, its tags
-    gone from a PDF where they were left as raw HTML."""
+    lines taken as written too, its line break a space, where Pandoc's
+    reader read its text as Markdown."""
     os.makedirs(work)
     for name, text in (("code.md", RAW_CODE_MD), ("grid.md", RAW_GRID_MD),
                        ("pipe.md", RAW_PIPE_MD)):
@@ -2146,7 +2146,7 @@ def case_markdown_raw_code(work):
          lambda: result.returncode == 0 and '<code>open("c:\\\\projects")</code>' in page
          and "<code>--flag ...</code>" in page and '<kbd>Ctrl-"</kbd>' in page
          and '<samp>"out"</samp>' in page
-         and "[markdown-reader] code.md: 6 raw code element(s) taken as written" in said),
+         and "[markdown-reader] code.md: 7 raw code element(s) taken as written" in said),
         ("a raw HTML table whose cell holds a note is a table, its note in its cell, and in "
          "the Markdown target a table too",
          lambda: re.search(r"<td><code>x = 'a' -- b</code><a href=\"#fn1\"", page)
@@ -2163,9 +2163,10 @@ def case_markdown_raw_code(work):
          and "    line one\n      \"two\" -- x" in markdown
          and "<td><pre><code>cell &quot;pre&quot;\n  two</code></pre></td>" in page
          and "<pre><code>upper &quot;pre&quot;</code></pre>" in page),
-        ("raw code over two lines, left to Pandoc's reader, is read as HTML with the rest, "
-         "code in the Markdown target, its text as Markdown read it",
-         lambda: "`first \u201cq\u201d second`" in markdown),
+        ("raw code over two lines is taken as written, its line break a space, on the page "
+         "and in the Markdown target",
+         lambda: '<code>first "q" second</code>' in page
+         and '`first "q" second`' in markdown),
         ("in a grid table and a simple table, whose columns are where their lines put them, "
          "raw code is taken as written, a row's words in their columns",
          lambda: '<td><code>"g"</code></td>' in grid

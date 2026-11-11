@@ -4806,12 +4806,12 @@ READER_PAGE = ('---\ntitle: "Using <code>open(\\"x\\")</code>"\n---\n\n'
 def check_markdown_reader():
     """markdown-reader.lua: a raw <code> and its kin taken as written where
     the Markdown reader reads raw HTML, an attribute's quoted '<' and '/>'
-    and an element of the same name inside it, and its name in capitals among
-    them; and left to Pandoc's reader where a backslash escapes its '<', in
-    a YAML metadata block, whose strings have escapes of their own, self-
-    closed, a closing tag after it no element's, and over two lines; smart
-    punctuation outside it as before. Outside quotes, the attribute's '<'
-    would end the tag, and its '/>' close it."""
+    and an element of the same name inside it, its name in capitals, and
+    over two lines among them; and left to Pandoc's reader where a
+    backslash escapes its '<', in a YAML metadata block, whose strings have
+    escapes of their own, and self-closed, a closing tag after it no
+    element's; smart punctuation outside it as before. Outside quotes, the
+    attribute's '<' would end the tag, and its '/>' close it."""
     done = subprocess.run(["pandoc", "-f", os.path.join(ROOT, "bin", "markdown-reader.lua"),
                            "-t", "json", "-s"], input=READER_PAGE, capture_output=True,
                           text=True)
@@ -4841,16 +4841,16 @@ def check_markdown_reader():
         tables[name] = (read.stdout.splitlines()[2:3] or [""])[0].split(), read.stderr
     return [
         ("a raw code element taken as written: an attribute's quoted '<' and '/>' and all, "
-         "one inside another, and one named in capitals, and the run says how many",
+         "one inside another, one named in capitals, and one over two lines, and the run "
+         "says how many",
          lambda: codes("Quoted") == ['"q"'] and "".join(codes("Nested:")) == 'a "b" c'
-         and codes("Upper:") == ['"up"']
-         and "[markdown-reader] -: 3 raw code element(s) taken as written" in done.stderr),
-        ("and left to Pandoc's reader where a backslash escapes it, in YAML, self-closed, or "
-         "over two lines, smart punctuation outside it as before",
+         and codes("Upper:") == ['"up"'] and codes("Two") == ['"one two"']
+         and "[markdown-reader] -: 4 raw code element(s) taken as written" in done.stderr),
+        ("and left to Pandoc's reader where a backslash escapes it, in YAML, or self-closed, "
+         "smart punctuation outside it as before",
          lambda: "Quoted" in kinds("Escaped:") and "Code" not in kinds("Escaped:")
          and any(i["t"] == "Quoted" for i in title)
-         and "RawInline" in kinds("Self-closing:") and "Quoted" in kinds("Self-closing:")
-         and "Quoted" in kinds("Two") and "Code" not in kinds("Two")),
+         and "RawInline" in kinds("Self-closing:") and "Quoted" in kinds("Self-closing:")),
         ("a tag of the source's own with the reader's name is kept as it is, the reader's "
          "named otherwise",
          lambda: kinds("Own:").count("RawInline") == 2 and "Code" not in kinds("Own:")),
@@ -4861,6 +4861,127 @@ def check_markdown_reader():
          lambda: tables["cjk"][0] == ['漢字"k"', "and", "wor", "ds", "b"]
          and "1 raw code element(s) taken as written" in tables["cjk"][1]
          and tables["watch"][0][1:] == ["and", "wor", "ds", "b"]),
+    ]
+
+
+# Raw code elements over more than one line of their paragraphs, for
+# markdown-reader.lua: in a paragraph, a block quote, a list's item, a list
+# in a quote, and over three lines, taken as written; and where a later
+# line is a lazy line's or opens with a '>', with a blank line before the
+# close, in a code span, in an indented code block, or in a grid table,
+# left as Pandoc reads them, and where it holds a backtick or a pipe
+# table's escaped bar, as on one line.
+LINES_PAGE = ('Plain: <code>open("c:\\\\new.txt",\n\'r\') -- see...</code> here.\n\n'
+              '> Quoted: <code>"p" --\n> "q"</code> z\n\n'
+              '- Listed: <code>"u"\n  -- v</code> w\n- next\n\n'
+              '> - Nested: <code>"n" --\n>   "m"</code>\n\n'
+              'Three: <code>"a"\n"b" --\n"c"</code> end.\n\n'
+              '> Lazy\nline <code>"y"\n> z</code>\n\n'
+              'Literal: <code>"x"\n> b</code>\n\n'
+              'Blank: <code>"a"\n\n"b"</code> end.\n\n'
+              'Span: `x <code>"a"\n"b"</code> y`\n\n'
+              'Spans: `<code>` and\n`</code>` "too"\n\n'
+              'Bar: <code>"a" \\|\n"b"</code>\n\n'
+              '    indented <code>"a"\n      "b"</code>\n\n'
+              '+------------------+-----------+\n'
+              '| <code>"a"        | x         |\n'
+              '| "b"</code>       | y         |\n'
+              '+------------------+-----------+\n')
+
+# A multiline table whose cell holds an element over two lines, which
+# taken as written would push the row's next cell over, among two that
+# aren't in a table.
+LINES_TABLE = ('Before: <code>"a"\n-- b</code> end.\n\n'
+               '-------------------------------------------------------------\n'
+               ' Centered   Default           Right Left\n'
+               '  Header    Aligned         Aligned Aligned\n'
+               '----------- ------- --------------- -------------------------\n'
+               '   First    <code>"r"     12.0 Example of a row that\n'
+               '            -- x</code>            spans multiple lines.\n'
+               '-------------------------------------------------------------\n\n'
+               'After: <code>"one" -- two</code>.\n')
+
+
+def check_markdown_reader_lines():
+    r"""markdown-reader.lua on raw code elements over more than one line,
+    which Pandoc's reader had read as Markdown, so that
+    <code>open("c:\\new.txt",⏎'r') -- see...</code> was open(“c:\new.txt”,
+    ‘r’) – see…: each line's part marked, after what Pandoc's reading of
+    the paragraph takes off the line, a quote's markers and the
+    indentation, the element read as written, its white space one space as
+    a browser shows it. Left to Pandoc's reader where a later line is a
+    lazy line's, opens with a '>', which Pandoc may take for a quote's
+    marker, or comes after a blank line, and where it holds a backtick,
+    which may be a code span's, or \|, as on one line; restored as written
+    in a code span and an indented code block; not tried in a grid table;
+    and in a multiline table, where its parts taken as written moved the
+    table's words, the page read again with the elements outside the table
+    taken alone, the run saying how many were left."""
+    reader = os.path.join(ROOT, "bin", "markdown-reader.lua")
+
+    def read(page, source=reader):
+        done = subprocess.run(["pandoc", "-f", source, "-t", "json"], input=page,
+                              capture_output=True, text=True)
+        return (json.loads(done.stdout) if done.returncode == 0 else {"blocks": []}), done.stderr
+
+    def walk(node, found):
+        if isinstance(node, dict):
+            if node.get("t") in ("Para", "Plain") and node["c"] and node["c"][0]["t"] == "Str":
+                found.setdefault(node["c"][0]["c"], node["c"])
+            for value in node.values():
+                walk(value, found)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, found)
+        return found
+    doc, said = read(LINES_PAGE)
+    plain, _ = read(LINES_PAGE, "markdown")
+    paras = walk(doc["blocks"], {})
+
+    def codes(key):
+        return [i["c"][1] for i in paras.get(key, []) if i["t"] == "Code"]
+
+    def kinds(key):
+        return [i["t"] for i in paras.get(key, [])]
+
+    def blocks(d, kind):
+        return [b for b in d["blocks"] if b["t"] == kind]
+    table, table_said = read(LINES_TABLE)
+    table_plain, _ = read(LINES_TABLE, "markdown")
+    table_paras = walk(table["blocks"], {})
+    return [
+        ("over two lines, its text as written, its backslashes and quotes and dashes and "
+         "dots, its line break a space; and in a quote, a list's item, a list in a quote, "
+         "and over three lines, what Pandoc's reading takes off each line left off, the page "
+         "read once",
+         lambda: codes("Plain:") == ['open("c:\\\\new.txt", \'r\') -- see...']
+         and codes("Quoted:") == ['"p" -- "q"'] and codes("Listed:") == ['"u" -- v']
+         and codes("Nested:") == ['"n" -- "m"'] and codes("Three:") == ['"a" "b" -- "c"']
+         and [len(b["c"]) for b in blocks(doc, "BulletList")] == [2]
+         and "5 raw code element(s) taken as written" in said
+         and "over more than a line" not in said),
+        ("left to Pandoc's reader where a later line is a lazy line's, opens with a '>', or "
+         "follows a blank line",
+         lambda: all("Quoted" in kinds(k) and "Code" not in kinds(k)
+                     for k in ("Lazy", "Literal:", "Blank:"))
+         and "RawInline" in kinds("Blank:")),
+        ("in a code span and an indented code block, as Pandoc reads them, and two spans "
+         "holding its tags two still; holding a pipe table's escaped bar, as Pandoc reads "
+         "it; in a grid table, the cells as Pandoc reads them",
+         lambda: codes("Span:") == ['x <code>"a" "b"</code> y']
+         and codes("Spans:") == ["<code>", "</code>"] and "Quoted" in kinds("Spans:")
+         and "Code" not in kinds("Bar:") and "Quoted" in kinds("Bar:")
+         and blocks(doc, "CodeBlock") == blocks(plain, "CodeBlock") != []
+         and blocks(doc, "Table") == blocks(plain, "Table") != []),
+        ("in a multiline table, the table as Pandoc reads it, the elements outside it "
+         "taken as written, and the run says how many were left",
+         lambda: blocks(table, "Table") == blocks(table_plain, "Table") != []
+         and [i["c"][1] for i in table_paras.get("Before:", []) if i["t"] == "Code"]
+         == ['"a" -- b']
+         and [i["c"][1] for i in table_paras.get("After:", []) if i["t"] == "Code"]
+         == ['"one" -- two']
+         and "1 raw code element(s) over more than a line are read as Markdown" in table_said
+         and "2 raw code element(s) taken as written" in table_said),
     ]
 
 
@@ -9584,6 +9705,7 @@ GROUPS = [
     ("a note's mark, as the counts take it", check_note_mark),
     ("a table's notes numbered as LaTeX numbers them", check_note_numbers),
     ("raw code in Markdown, as written", check_markdown_reader),
+    ("raw code in Markdown over more than a line, as written", check_markdown_reader_lines),
     ("raw code in Markdown, where Pandoc repeats, pairs, or escapes it",
      check_markdown_reader_contexts),
     ("a figure's glyph names given their text", check_glyph_names),

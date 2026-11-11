@@ -430,20 +430,17 @@ def main():
         # own name on the path, so a note about a missing one says both.
         # Both are hidden here, each variable naming a file that isn't
         # there, so the notes are checked wherever the suite runs, and
-        # neither validator starts.
+        # neither validator starts. And they stay hidden for the rest of
+        # the suite: the checks above are the ones that read what the two
+        # say, and the runs of check-output.py below, which ask for
+        # veraPDF, Ace, and axe-core, started a Java process for each of
+        # them with nothing reading its verdict (half the suite's time,
+        # 109 s to 56, 2026-11-10).
         hidden = {"EPUBCHECK_JAR": os.path.join(work, "none"),
                   "VNU_JAR": os.path.join(work, "none")}
-        saved = {name: os.environ.get(name) for name in hidden}
         os.environ.update(hidden)
-        try:
-            _, notes = outputcheck.run_validators(
-                [os.path.join(work, "good.html")], [os.path.join(work, "b.epub")])
-        finally:
-            for name, value in saved.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
+        _, notes = outputcheck.run_validators(
+            [os.path.join(work, "good.html")], [os.path.join(work, "b.epub")])
         cases += [
             ("a note about a validator that isn't here names the variable "
              "and the path",

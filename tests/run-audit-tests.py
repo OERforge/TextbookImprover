@@ -37,7 +37,19 @@ BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import findings as fl  # noqa: E402
+import outputcheck  # noqa: E402
 import sourcecheck  # noqa: E402
+
+# epubcheck and the Nu checker as the machine has them, by the variables
+# that name them (unset where each is a command on the path). main hides
+# both from every case's runs, each variable naming a file that isn't
+# there, which the audit takes as missing without looking on the path:
+# an audit without --quick started a Java process for each EPUB and each
+# folder of pages, and no check read what either said (the suite took
+# 261 s with them and 93 s without, 2026-11-10). --quick won't do for
+# those runs, which ask for veraPDF, Ace, and axe-core, since it leaves
+# them out too. case_validators has the two back, and reads them.
+VALIDATORS = {name: os.environ.get(name) for name in ("EPUBCHECK_JAR", "VNU_JAR")}
 
 MARKDOWN = """---
 title: A Page
@@ -1478,6 +1490,79 @@ def case_report_text():
     ]
 
 
+def case_validators():
+    """epubcheck's and the Nu checker's findings in the report, each as
+    its own, where they're installed: the suite's one audit that starts
+    them. And with both hidden, as every other case has them, neither's,
+    the audit saying what it didn't find."""
+    folder = os.path.join(WORK, "validators")
+    out = os.path.join(WORK, "validators-out")
+    os.makedirs(folder)
+    # A page the Nu checker faults, and an EPUB, as Pandoc writes one,
+    # with a link broken inside it, which epubcheck reports (RSC-012).
+    with open(os.path.join(folder, "page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html><html lang="en"><head><title>A page</title></head>'
+                 '<body><h1>A page</h1><p><img src="p.png"></p></body></html>\n')
+    made = os.path.join(WORK, "validators-made.epub")
+    subprocess.run(["pandoc", "-f", "markdown", "-t", "epub3", "-o", made,
+                    "--metadata", "title=A Book", "--metadata", "lang=en"],
+                   input="# One\n\nSee [two](#two).\n\n# Two {#two}\n\nText.\n",
+                   capture_output=True, text=True)
+    with zipfile.ZipFile(made) as src, \
+            zipfile.ZipFile(os.path.join(folder, "book.epub"), "w") as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.endswith("ch001.xhtml"):
+                data = data.replace(b"#two", b"#gone")
+            dst.writestr(info, data)
+    hidden = dict(os.environ)
+    found_env = dict(hidden)
+    for name, value in VALIDATORS.items():
+        if value is None:
+            found_env.pop(name, None)
+        else:
+            found_env[name] = value
+    # Which of the two the machine has, as the audit will find them.
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(found_env)
+    try:
+        have = {name: outputcheck.find_validator(name) is not None
+                for name in ("epubcheck", "vnu")}
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+    def audit(env, *flags):
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True,
+                                text=True, stdin=subprocess.DEVNULL, env=env)
+        return result, fl.read_csv(os.path.join(out, "audit.csv"))
+    ran, found = audit(found_env) if any(have.values()) else (None, [])
+    without, lacking = audit(hidden, "--force")
+    return [
+        ("epubcheck's findings are in the report, as its own",
+         lambda: any(f.check == "epubcheck:RSC-012" and f.tool == "epubcheck"
+                     and f.kind == "epub" and f.file == "book.epub" for f in found)
+         and "epubcheck ran on 1 EPUB(s)." in ran.stderr
+         if have["epubcheck"]
+         else print("  skip  epubcheck not installed (EPUBCHECK_JAR); the audit's report "
+                    "of its findings isn't tried") or True),
+        ("and the Nu checker's",
+         lambda: any(f.check == "vnu:error" and f.tool == "vnu" and f.kind == "html"
+                     and f.file == "page.html" and "alt" in f.detail for f in found)
+         and "The Nu HTML checker ran on 1 page(s)" in ran.stderr
+         if have["vnu"]
+         else print("  skip  the Nu HTML checker not installed (VNU_JAR); the audit's "
+                    "report of its findings isn't tried") or True),
+        ("with both hidden, as the suite's other runs have them, the report has neither's, "
+         "and the audit says what it didn't find",
+         lambda: lacking and not [f for f in lacking if f.tool in ("epubcheck", "vnu")]
+         and "epubcheck not found" in without.stderr
+         and "The Nu HTML checker not found" in without.stderr),
+    ]
+
+
 def case_check_only():
     d = os.path.join(WORK, "book")
     os.makedirs(d, exist_ok=True)
@@ -1498,6 +1583,10 @@ def main():
     global WORK
     keep = "--keep" in sys.argv
     WORK = tempfile.mkdtemp(prefix="audit-tests-")
+    # The two validators hidden from every run but case_validators'
+    # (VALIDATORS).
+    nowhere = os.path.join(WORK, "no-such-validator")
+    os.environ.update(EPUBCHECK_JAR=nowhere, VNU_JAR=nowhere)
     with open(os.path.join(WORK, "page.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN)
     for name, data in (("up.png", b"up"), ("up-2.png", b"up"), ("down.png", b"down"),
@@ -1537,6 +1626,8 @@ def main():
                        ("a PDF's own checks, cached", case_pdf_cache),
                        ("axe-core's results, cached", case_axe_cache),
                        ("DAISY's Ace, asked for", case_ace),
+                       ("epubcheck and the Nu checker, where they're installed",
+                        case_validators),
                        ("convert.py --check-only", case_check_only)]:
         print(f"\n{name}")
         try:

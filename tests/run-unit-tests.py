@@ -3144,7 +3144,7 @@ def check_drawings_without_preview():
         os.environ["PATH"] = tools + os.pathsep + path
         # And without pdfseparate, as where poppler isn't installed, whose
         # warning that the drawings are SVGs alone isn't said of drawings
-        # LaTeX left out (Round 34's suites without poppler).
+        # LaTeX left out (the suites without poppler, 2026-10-30).
         which = latexsource.shutil.which
         latexsource.shutil.which = lambda name, *args, **kwargs: (
             None if name == "pdfseparate" else which(name, *args, **kwargs))
@@ -4526,7 +4526,7 @@ def check_measure_page():
         build_pdf.COUNT_FORMULAS = saved
     # OER_MEASURES set before the run: as an earlier version wrote it, with
     # no bold widths or label space, which the filter would have taken for
-    # none, without a word (a review); as Round 34's wrote it, with no
+    # none, without a word (a review); as 2026-10-30's wrote it, with no
     # note's mark; as this one writes it; as it writes a book's own mark of
     # one width whatever its digits, a digit adding nothing to it; and
     # none.
@@ -5039,7 +5039,7 @@ def check_markdown_reader_39():
 
 def check_markdown_reader_contexts():
     """markdown-reader.lua where Pandoc repeats, pairs, or escapes what's
-    around raw code, as a review of Round 35 found it: two code spans
+    around raw code, as a review of 2026-11-01 found it: two code spans
     holding an element's tags are two spans still, where the element was
     taken whole and the spans made one; an element in an image's
     description is in its figure's caption and its alt, and one in a code
@@ -5159,7 +5159,7 @@ def check_glyph_names():
     Glyph List's specification maps it, a suffix after a period dropped,
     ligatures' parts, uniXXXX, uXXXX, and the rest to nothing; and a PDF
     whose Type 3 fonts name minus.case, as Ghostscript leaves matplotlib's
-    EPS (Round 33), given ToUnicode entries for that font's glyphs, one in
+    EPS (2026-10-30), given ToUnicode entries for that font's glyphs, one in
     a form XObject too, its own entries kept in another, and a font whose
     names are all the list's left as it is; once, the second run finding
     nothing to do."""
@@ -5420,7 +5420,7 @@ def check_natural_sizes():
         if alone is None or any(abs(a - b) >= 0.001 for a, b in zip(alone, (100, 200))):
             return False
         # A pikepdf found that can't be imported is none (the setup that
-        # hides it, Round 34).
+        # hides it, 2026-10-30).
         try:
             import pikepdf  # noqa: F401
         except ImportError:
@@ -5741,7 +5741,7 @@ def check_sidecars_another_user():
     os.access and the euid unpatched, which the other checks stand in for.
     Root's file that nothing but whose it is keeps the run from rewriting
     is warned of, of ASCII alone too, the run saying it isn't given the
-    mark or rewritten, not that it can't be (Rob, 2026-10-27), whether the
+    mark or rewritten, not that it can't be (2026-10-27), whether the
     user may write it or only root may, said to be root's, not read-only,
     which it isn't; in a folder with the sticky bit, as /tmp has, it's
     root's to put right, a copy of one's own unable to replace it there,
@@ -6034,10 +6034,10 @@ def check_sidecars_another_user():
 
 def check_sidecars_left_as_they_are():
     """Every reader reads a sidecar the run can't rewrite as UTF-8 as the
-    run reads it (sidecars.opened), not with open: Rob, 2026-10-26, "upgrade
-    all sidecars to UTF-8 and read UTF-8 for all of them", and "assume that
-    users will be sloppy about permissions but files in the directory are
-    there for a reason". Each kind, as Excel's plain "CSV" saves it, in
+    run reads it (sidecars.opened), not with open (2026-10-26): all
+    sidecars are upgraded to UTF-8 and read as UTF-8, and the assumption is
+    that users will be sloppy about permissions but files in the directory
+    are there for a reason. Each kind, as Excel's plain "CSV" saves it, in
     Windows-1252, and read-only, so that a run as root leaves it as it is
     too, is read as written, a character outside ASCII in its row; and one
     that can't be read is read as none, by every reader, none stopping.
@@ -6191,8 +6191,8 @@ def check_sidecar_code_pages():
     both stop it, as saved in another code page. A sidecar so saved had
     stopped the run, its characters having been U+FFFD on the pages and a
     traceback before that. And every sidecar is made UTF-8 with the mark
-    (Rob, 2026-10-26: "upgrade all sidecars to UTF-8 and read UTF-8 for all
-    of them"): one without the mark given it, of ASCII alone too; one the
+    (2026-10-26: all sidecars are upgraded to UTF-8, and UTF-8 read for all
+    of them): one without the mark given it, of ASCII alone too; one the
     run can't rewrite, read-only, another user's, linked, held open, or in
     a folder that can't be written, read as it is, in its code page or as
     UTF-8, and left so, the run saying why; and one that's there and can't
@@ -6418,7 +6418,7 @@ def check_sidecar_code_pages():
             os.geteuid = saved_euid
     theirs_name = sidecars.owner_of(os.stat(os.path.join(work, "theirs-utf8.csv")))
     # Another user's that nothing but whose it is keeps the run from
-    # rewriting, warned of whatever it holds (Rob, 2026-10-27): of ASCII
+    # rewriting, warned of whatever it holds (2026-10-27): of ASCII
     # alone, which this user may write, and one that only its owner may
     # write, as the usual 0644 is; and in a folder with the sticky bit that
     # isn't this user's, where only a file's owner, or the folder's, may

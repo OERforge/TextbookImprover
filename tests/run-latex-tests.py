@@ -577,9 +577,9 @@ TEX_UNREADY = []
 # babel's German and its 1996 spelling's hyphenation, and British
 # English's hyphenation, without which babel sets british with the
 # American patterns ("Hyphen rules for 'british' set to \l@english").
-# The CNX session's TeX Lives lacked them (CNX-NOTES, item 185 and What
-# Round 53 left open): Ubuntu 26.10's without its German packages, which
-# stopped on a book in ngerman ("Unknown option 'ngerman'"), and TinyTeX.
+# Two TeX Lives used in testing lacked them (2026-11-06 and 2026-11-08):
+# Ubuntu 26.10's without its German packages, which stopped on a book in
+# ngerman ("Unknown option 'ngerman'"), and TinyTeX.
 LANGUAGE_TEX = {"ngerman": [("babel-german", "ngerman.ldf"),
                             ("hyphen-german", "hyph-de-1996.pat.txt")],
                 "british": [("hyphen-english", "hyph-en-gb.pat.txt")]}
@@ -4091,7 +4091,7 @@ def case_kept_images(work):
         """Each font's ToUnicode entries in the PDF at path, read with
         pikepdf, those of a form XObject's fonts too; None without pikepdf,
         found or not: one that can't be imported is none (the setup that
-        hides it, Round 34)."""
+        hides it, 2026-10-30)."""
         try:
             import pikepdf
         except ImportError:
@@ -5021,7 +5021,7 @@ def case_book_pdf(work):
         """The drawing, set in the PDF from the pages and the latex target
         as the page LaTeX made of it, rendered/one-1.pdf beside the SVG its
         pages show: its word text, where the SVG made it outlines, as it
-        made a PDF image's before Round 33 and a drawing's before Round 34."""
+        made a PDF image's and a drawing's before 2026-10-30."""
         if pages_unbuilt():
             return skip(pages_unbuilt())
         if why_no_drawings():

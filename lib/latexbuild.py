@@ -459,7 +459,7 @@ CODE_SPACES = r"""\makeatletter
 # space, as a tagged PDF does between words. The static faces' other
 # differences, the missing hinting, the merged composites, and the
 # misfilled parts, made no difference to Acrobat, measured by Rob on the
-# book and on small files with each changed alone (CNX-NOTES, item 177):
+# book and on small files with each changed alone (2026-11-05):
 # the book opened cleanly with only those records emptied, and a page of
 # nothing but the space glyph, as built, didn't. The provider's own
 # callback is wrapped where it's registered, under its own name, which
@@ -660,9 +660,9 @@ def book_template(work, warn=None):
 # average, at the text's size, which line_length reads and build-pdf.py
 # warns of where it's more than LINE_MOST: Latin Modern holds more to a
 # line at a size, 88 at 12 points, and the default's face gives way to it
-# where TeX lacks Plex. Rob (2026-10-29): "Yes, we should warn whenever a
-# book falls back to Latin Modern, and specifically that it no longer
-# meets AAA when it otherwise would have."
+# where TeX lacks Plex. The run is to warn whenever a book falls back to
+# Latin Modern, and specifically that it no longer meets AAA when it
+# otherwise would have (2026-10-29).
 LINE_LENGTH = r"""\ifdefined\directlua
 \directlua{
   oerline = { font = nil, width = 0, size = 0, characters = 0, lines = 0 }
@@ -923,9 +923,9 @@ FIT_FLOOR = 0.75
 FIT_LEAST = 0.5
 # How far a block of code too wide for its line is set smaller before
 # its lines too long for it wrap, a part of its size (the code_wrap
-# setting's default): Rob (2026-10-29), of letting a setting say it, 1
-# wrapping every line too long and 0.75 wrapping what won't fit at 75
-# percent, "Otherwise, I'd say that 75% is a good compromise."
+# setting's default): a setting says it, 1 wrapping every line too long
+# and 0.75 wrapping what won't fit at 75 percent, and where none does, 75
+# percent is a good compromise (2026-10-29).
 CODE_WRAP = 0.75
 
 
@@ -1143,7 +1143,7 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % out. Measured without it, a word that opened a hung row had the hang's
 % two characters less room than its column, and TeX broke it, as the
 % counts had left one in a table whose columns' widths are given
-% (Introduction to Python Programming's Table 14.2, Round 33). A box before
+% (Introduction to Python Programming's Table 14.2, 2026-10-30). A box before
 % a line's code that isn't its paragraph's indentation (labels), the label
 % a description list's term is set in, which sticks out of the list's
 % margin by as much as the term and its label space reach past it, isn't
@@ -2550,10 +2550,10 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % literal in a box of no width, where fvextra's is a character, and one
   % that Lua makes, carrying none of tagging's attributes, so that tagpdf
   % puts it in an artifact's marked content: no copy of the code holds it,
-  % and a screen reader passes it by. Rob (2026-10-29): "Can we add an
-  % arrow for a wrapped line in such a way that it wouldn't get read and
-  % also wouldn't get included in a copy/paste of the code? If not, let's
-  % not add it." Its right skip ends a part at the line's
+  % and a screen reader passes it by. An arrow for a wrapped line was
+  % to be added only in such a way that it wouldn't be read and wouldn't
+  % be included in a copy and paste of the code, and not otherwise
+  % (2026-10-29). Its right skip ends a part at the line's
   % end, the fit's line from \OERFitCode (oerfit.right), whatever the
   % paragraph's line: a quotation's line ends inside the text's, where
   % LaTeX's own verbatim sets only a left skip, and latex-lab's a
@@ -2628,11 +2628,11 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
   % with the fit's room of 2 percent where there's room for it, where a
   % line of 86 characters, which three quarters fits, had wrapped for the
   % want of that room; one that doesn't is set at that size, and its lines
-  % too long for their line wrap (\__oer_fit_wrap:, above). Rob
-  % (2026-10-29), asked how far wrapping should reach: "Would it be simple
-  % to create a config option to control when to wrap code blocks? Let `1`
-  % mean wrap every too-long line and, e.g., `.75` mean wrap when it won't
-  % fit at 75%, etc. Otherwise, I'd say that 75% is a good compromise."
+  % too long for their line wrap (\__oer_fit_wrap:, above). How far
+  % wrapping reaches is a configuration option (2026-10-29), which says
+  % when blocks of code wrap: 1 means wrap every line too long, and 0.75
+  % means wrap when it won't fit at 75 percent, and so on. Where a book
+  % sets none, 75 percent is a good compromise.
   % Wrapping had reached only a block
   % too long for the paper even at half its size, set at three quarters,
   % in OpenStax's books 7 of 667 blocks of code, 5 of Principles of Data
@@ -2730,10 +2730,10 @@ CODE_LINES = r"""% A code block's lines a line each to a reader that knows only 
 
 
 # A list's item that opens with fancyvrb's code keeps its label beside
-# the code's first line under tagging (CNX-NOTES, item 103): in every
-# PDF (PDF_MACROS), and in a LaTeX book's tagged copy, which loads
-# fancyvrb itself where the book does (texremediate.tag). In expl3's
-# syntax, which both are read in.
+# the code's first line under tagging (2026-10-28): in every PDF
+# (PDF_MACROS), and in a LaTeX book's tagged copy, which loads fancyvrb
+# itself where the book does (texremediate.tag). In expl3's syntax, which
+# both are read in.
 CODE_ITEM_LABEL = r"""% A list's item that opens with fancyvrb's code, as Pandoc sets
 % highlighted code (Highlighting), has its label beside the code's first
 % line. LaTeX's tagging code for lists (latex-lab-testphase-block.sty)
@@ -2797,7 +2797,7 @@ LINE_BREAK_SPACE = r"""% A line that a line break ends has a space at its end in
 % the \rightskip the penalty's attributes, and nothing on the page
 % moves. In a box, where a line break is no line's end and ends nothing
 % (a list's term, \mbox, a running head), a glue with those marks goes
-% after the text, as Round 36 put a \pdffakespace there (hpack_filter,
+% after the text, where 2026-11-02's \pdffakespace went (hpack_filter,
 % after tagpdf's markspaces, so the space after the break is marked when
 % it's read): before \\ and \newline (\unskip\nobreak\hfil\break), as wide
 % as the font's space, which can shrink to nothing, since in a box of its

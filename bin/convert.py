@@ -3241,8 +3241,8 @@ def report_languages(project, reports, paths, wholes=()):
         said = {"sidecar": sidecar, "file": "its file", "producer": "its producer's property"}
         listed = [f"{LANGUAGE_NAMES.get(stem, stem)} in {d.language} ({said[d.source]})"
                   for stem, d in other]
-        # Said plainly (Rob, 2026-11-05, of "Each target marks each one so":
-        # "opaque"): what every output does with such a page, and what
+        # Said plainly, as "Each target marks each one so" was opaque
+        # (2026-11-05): what every output does with such a page, and what
         # stands for the whole book, the EPUB's language, the cartridge's,
         # and the book's PDF's own, which keep the book's.
         one = len(other) == 1

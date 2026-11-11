@@ -428,7 +428,7 @@ KEYS_SKIPPED = r"""% Written for LaTeX's tagging, which reads the alt and artifa
 # \CurrentFile), so nothing of the author's but the master's preamble
 # changes. Once one page needs it, every page an \include begins gets its
 # language, the copy's for one in the copy's: an element with no /Lang
-# takes the one around it, so with only the French pages set (Round 27's
+# takes the one around it, so with only the French pages set (2026-10-28's
 # first patch, as its review found), an English file of sections after a
 # French chapter was in that chapter's section, French, and so was every
 # chapter after a French file that opens a part, in the part. Set back, the
@@ -1211,8 +1211,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     # block written again, or taken out where no page needs one. In every
     # copy, tagged or not: built without LaTeX's tagging, the block sets
     # nothing, and built with it, as a person may build any copy, it's
-    # there (Rob, 2026-11-05: "we rewrite the language everywhere that's
-    # applicable"). Against the copy's own language, its \DocumentMetadata's
+    # there (2026-11-05: the language is rewritten everywhere that it's
+    # applicable). Against the copy's own language, its \DocumentMetadata's
     # or its preamble's, which a page's elements take where the block
     # gives them none.
     texts[master] = LANGUAGES_BLOCK.sub("", texts[master])
@@ -1245,8 +1245,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         totals["languages_tagged"] = int(tagged_copy)
     # The passages the book's own babel commands set the language of, as
     # the book has them now, in every copy as the pages' languages are
-    # (Rob, 2026-11-05: "If an author is running TextbookImprover against
-    # their source, they are expecting us to remediate it"): a copy made
+    # (2026-11-05: an author who runs TextbookImprover against their
+    # source is expecting the run to remediate it): a copy made
     # from a copy has its block written again, or taken out where nothing
     # needs it, as in a book whose commands all name the copy's language
     # (a \selectlanguage{english} at each chapter's head) and whose pages
@@ -2327,8 +2327,8 @@ PICTURE = re.compile(r"\\begin\s*\{picture\}")
 # tagging makes plain (\pdf_purify:nN), which keeps the arguments of a
 # command it has no equivalent for: "Le \foreignlanguage{french}{titre}"
 # was titled "Le frenchtitre", where its bookmark, hyperref's, had "Le
-# titre" (CNX-NOTES, item 185). Its words alone are, an option before its
-# language taken with it, as latexbuild's \href is.
+# titre" (2026-11-06). Its words alone are, an option before its language
+# taken with it, as latexbuild's \href is.
 FOREIGNLANGUAGE = re.compile(r"\\foreignlanguage(?![A-Za-z@])")
 FOREIGN_TITLES = r"""% In a title LaTeX's tagging makes plain, \foreignlanguage's words alone.
 \ExplSyntaxOn
@@ -2582,9 +2582,9 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             latexsource.code_matches(PICTURE, t) for t in texts.values()))
     # A list's item that opens with fancyvrb's code keeps its label beside
     # the code's first line under tagging, as a book's PDF from its pages
-    # does (latexbuild.CODE_ITEM_LABEL, CNX-NOTES' item 103), where the
-    # book loads fancyvrb or a package that loads it; not again in a copy
-    # made from a copy.
+    # does (latexbuild.CODE_ITEM_LABEL, 2026-10-28), where the book loads
+    # fancyvrb or a package that loads it; not again in a copy made from a
+    # copy.
     if packages & FANCYVRB_LOADERS and not any(
             "cmd / FV@ListVSpace / before" in piece for piece in pieces):
         block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"

@@ -220,8 +220,8 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
             "{\\OERFallbackFonts})}\n")
 # The default's faces: IBM Plex, its Serif for the text, its Sans and Mono
 # for the sans-serif and monospaced families, and IBM Plex Math for
-# formulas, whose letters are Plex Serif's (Rob, 2026-10-27: "Let's go with
-# your suggestion of Plex with Plex Math as the new default"). Of the serif
+# formulas, whose letters are Plex Serif's (the default since 2026-10-27,
+# Plex with Plex Math, where Latin Modern had been). Of the serif
 # faces with a math font made for them, its small letters are the largest at
 # a given size, the measure research on reading uses (2.18 mm at 12 points,
 # where Latin Modern's are 1.82), its thinnest strokes are two and a half
@@ -234,13 +234,13 @@ FALLBACK = ("\\def\\OERFallbackFonts{\"Latin Modern Math:mode=harf;\"}\n"
 # letters are Plex Serif's, wherever TeX has every file they take. Where it
 # lacks any, they're all set in Latin Modern, as they were before, and
 # LaTeX writes a line for each file it lacks (FACE_MISSING), which the run
-# gives as one warning (face_warning): "Have it fall back to Latin Modern
-# with a warning, if it's not available." TeX Live's plex has every file.
+# gives as one warning (face_warning): a face that isn't available falls
+# back to Latin Modern with a warning. TeX Live's plex has every file.
 # Plex Mono is scaled to the text face's small letters, as Pandoc's
 # template scales every face but the text's (Scale=MatchLowercase), which
 # beside Plex Serif, whose small letters are as tall, is the text's size,
-# as Rob chose (2026-10-27: "I think it's worth also setting the code at
-# the text's size and fitting lines the way tables are"): 65 characters
+# as chosen (2026-10-27), since code is worth setting at the text's size
+# with its lines fitted to the line the way tables are: 65 characters
 # fill the default page's 6.5 inches at 12 points, and a block of code
 # with a longer line is set smaller to fit it, as a table too wide is
 # (latexbuild.FIT_MACROS). It had been set at 0.858 of the text's size,
@@ -1428,9 +1428,9 @@ def pdf_targets(schema, project_schema, documents, requested, allow_unknown):
 # of the book class's page, 70 to a line of 10-point type, where the
 # default's page, 12-point IBM Plex Serif on 6.5 inches, holds about 84:
 # a table whose longest words fit its line was taken for one wider than
-# it, and set smaller to fit (Rob, 2026-10-29: "We don't want to make
-# tables or anything else smaller than it needs to be, which works against
-# accessibility"). OER_MEASURES set before the run is used as it is, and
+# it, and set smaller to fit (2026-10-29: tables, like anything else,
+# aren't to be made smaller than they need to be, which works against
+# accessibility). OER_MEASURES set before the run is used as it is, and
 # none counts in characters, as the PDF suite's fit book does, whose cases
 # are set for them. Where the page can't be measured, the counts are in
 # characters, and the run warns why (unmeasured_warning).

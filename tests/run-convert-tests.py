@@ -2182,8 +2182,8 @@ def case_markdown_raw_code(work):
 
 
 # A note in a link's text, which Pandoc's HTML writer wrote as an anchor
-# inside the link's, and a raw <a> holding one (Round 35's item 137); and
-# one in a span meant for the EPUB alone, which goes with the span.
+# inside the link's, and a raw <a> holding one (2026-11-01); and one in a
+# span meant for the EPUB alone, which goes with the span.
 NOTE_LINK_MD = """# Links
 
 A [linked word[^l]](https://example.org/) here, [two[^m] words](https://example.com/)
@@ -6278,7 +6278,7 @@ def case_markdown_table_captions(work):
     filter's isn't its place in the file. Before, a description went to
     the table before its own after a note's table, and to the table after
     it after an HTML one, and in a list item or a quote it was a paragraph
-    after it (Round 35)."""
+    after it (2026-11-01)."""
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Chapter\n---\n\n"

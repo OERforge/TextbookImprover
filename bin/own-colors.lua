@@ -11,7 +11,7 @@ style, which the HTML, Markdown, and LaTeX readers keep (PANDOC-NOTES, The
 HTML writer), doesn't turn, so dark mode leaves it beside a color that has:
 a text color of its own on the dark page, a background of its own under the
 dark page's light text, each read well in light mode and at 1.05:1 to
-2.02:1 in dark (CNX-NOTES, item 223). So, as each element's style says:
+2.02:1 in dark (2026-11-09). So, as each element's style says:
 
 - A text color of its own and no background: a partner for dark mode, the
   color with its lightness raised in OKLCH, its hue kept and its chroma as

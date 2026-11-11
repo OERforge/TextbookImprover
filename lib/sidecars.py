@@ -403,9 +403,9 @@ def _look(path):
     there: (None, None, None, False) for one that isn't, and (None, why,
     what to do, whether it stops the run), clauses, for one it can't read.
     The run goes on without one this user may not read, which is what to
-    do something about (Rob, 2026-10-26: "assume that users will be sloppy
-    about permissions but files in the directory are there for a
-    reason"), and without a link to nothing, a folder, and something other
+    do something about (2026-10-26: the assumption is that users will be
+    sloppy about permissions, but files in the directory are there for a
+    reason), and without a link to nothing, a folder, and something other
     than a file, as a pipe is, which reading would wait on. Any other error
     reading it, a disk's, or a network share's gone stale, stops the run,
     which would otherwise make a book without what the sidecar holds, as
@@ -473,10 +473,10 @@ def _kept(path, beside=False):
     whose folder this user can't write has nowhere for the new file, nor,
     for one whose file as it was is kept beside it (beside, _keep), a
     link's folder for that. Another user's, whose owner a run that isn't
-    root can't keep, is read and left to its owner (Rob, 2026-10-26: "If
-    there are files owned by other users but in the correct directory and
-    readable by us, then we should use them (with an appropriate
-    warning)"), said to be theirs (_theirs). So is one of a user outside
+    root can't keep, is read and left to its owner (2026-10-26: files
+    owned by other users, if they're in the correct directory and the
+    run can read them, are to be used, with an appropriate
+    warning), said to be theirs (_theirs). So is one of a user outside
     the user namespace root runs in, as a rootless container runs it, whom
     root sees as the kernel's overflow uid (_overflow_uid), nobody, and may
     write only as anyone may: it had been said to be marked immutable, say,
@@ -528,8 +528,8 @@ def _theirs(path, status, others=(), unwritable=None):
     run from rewriting it, as nothing would were it this user's, though
     this user may not write it (the usual 0644 is the owner's alone to
     write), it's warned of, whatever it holds, the reason's third item
-    True (Rob, 2026-10-27: "we want to warn ... where a sidecar isn't being
-    rewritten when it otherwise would be because of file ownership"); else
+    True (2026-10-27: the run is to warn where a sidecar isn't being
+    rewritten when it otherwise would be because of file ownership); else
     the others that would keep it so are said too (others), read-only,
     another name linked to it, or its folder unwritable. A link's own name
     is the one the run says, so a link says whose file it leads to. What to
@@ -701,8 +701,8 @@ def _mark(path, data, limit=10):
     empty, which reads the same either way, is given it too, so that every
     sidecar is UTF-8 as Excel's "CSV UTF-8" writes it, and a script reading
     one as plain UTF-8 finds the mark in every one at once, not in one that
-    comes to hold a character outside ASCII later (Rob, 2026-10-26: "Let's
-    break everything now, not later"). Nothing else in it changes. Returns
+    comes to hold a character outside ASCII later (2026-10-26: better to
+    break everything now, not later). Nothing else in it changes. Returns
     the lines to say: what was done, and for one that holds characters
     outside ASCII the first limit of its lines that do, as they read, since
     one Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in
@@ -810,8 +810,8 @@ def _rewrite(path, data, reading, limit=10):
 def rewrite_as_utf8(path, limit=10):
     """A sidecar at path made UTF-8 with the byte-order mark, as Excel's
     "CSV UTF-8" writes one, and every reader reads one (text), whatever it
-    holds (Rob, 2026-10-26: "upgrade all sidecars to UTF-8 and read UTF-8
-    for all of them"): one that isn't UTF-8, as Excel's plain "CSV" saves
+    holds (2026-10-26: all sidecars are upgraded to UTF-8, and UTF-8 read
+    for all of them): one that isn't UTF-8, as Excel's plain "CSV" saves
     one, rewritten as UTF-8 (_rewrite), and one that's UTF-8 without the
     mark given it (_mark). One the run may not rewrite (_kept), or fails
     to, is left as it is and read all the same, the run saying why; one

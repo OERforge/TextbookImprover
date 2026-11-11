@@ -28,8 +28,8 @@ deleted elements' ids from the ID tree. A paragraph holding a \\rule or an
 inline figure draws something and stays; table cells, list items, notes,
 figures, and captions are never pruned, even when empty.
 
-Written in another session against a hand-built textbook and contributed
-here as util/contrib/fix-empty-paragraphs.py; wired into the PDF target
+Written against a hand-built textbook and first contributed as
+util/contrib/fix-empty-paragraphs.py; wired into the PDF target
 (pdf.remove_empty_paragraphs) once measured on both test books, with the
 page text and every table, figure, formula, and link left as they were.
 util/fix-empty-paragraphs.py runs it on any PDF. Needs pikepdf.

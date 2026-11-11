@@ -629,10 +629,10 @@ NOT_PROPERTIES = frozenset("""
 def bar_accents(xml):
     """xml with each of Pandoc's bar accents, an accent of the overline
     (U+203E), which Narrator reads nothing for and LibreOffice draws as an
-    acute accent, given the macron (U+00AF), as a Word file's is (round 6's
-    form E, docxtarget.bar_accents): Narrator reads it "overbar", and
-    LibreOffice draws a bar. NVDA reads no accent's character in
-    PowerPoint, the macron's or another. (xml, count)."""
+    acute accent, given the macron (U+00AF), as a Word file's is (form E
+    of those tested 2026-10-10, docxtarget.bar_accents): Narrator reads it
+    "overbar", and LibreOffice draws a bar. NVDA reads no accent's
+    character in PowerPoint, the macron's or another. (xml, count)."""
     return docxtarget.bar_accents(xml)
 
 

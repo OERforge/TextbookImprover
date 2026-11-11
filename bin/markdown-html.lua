@@ -127,8 +127,8 @@ end
 -- and cleaned. Written as HTML, a note's text went at the end of what the
 -- writer wrote, a <section> inside the raw element it was in: a <table>
 -- holding one was no table to the HTML reader, which kept its cells' text
--- and lost its rows and cells (Round 34, a note after a line of code in a
--- table's cell). The span has text, so the cleaning keeps it, as a
+-- and lost its rows and cells (2026-10-30, a note after a line of code in
+-- a table's cell). The span has text, so the cleaning keeps it, as a
 -- heading's empty anchor isn't kept.
 local NOTE_ID = 'textbookimprover-note-'
 local NOTE_PATTERN = '^' .. (NOTE_ID:gsub('%-', '%%-')) .. '(%d+)$'
@@ -143,7 +143,7 @@ local held = {}
 -- it, which HTML drops from a <pre>, is dropped: inside a <code> it would
 -- be the code's first line, blank, and before a <code> the HTML reader
 -- takes it for the <pre>'s text, and the <code> for inline code (a review
--- of Round 35).
+-- of 2026-11-01).
 local function code_pre(text)
   local quote, open_end = nil, nil
   for p = 1, #text do

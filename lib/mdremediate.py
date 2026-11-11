@@ -270,7 +270,7 @@ def numbered_tables(blocks):
     reads that one into as many tables as its header rows split it into,
     or none (html-source.lua), so the filter's positions past it aren't
     the reading's. Before, a description for the table after one was
-    written under the table after that (Round 35)."""
+    written under the table after that (2026-11-01)."""
     tables = []
 
     def walk(blocks):
@@ -397,7 +397,7 @@ def remediate_captions(text, doc, applied):
             # starts where the table does, the stretch's last table being
             # the table, and after a quote's own blank line: at
             # the margin, it was a paragraph after the list or the quote,
-            # its table still without a caption (Round 35). The table's
+            # its table still without a caption (2026-11-01). The table's
             # last line had been the measure, which a lazy line of a quote
             # or a simple table's right-aligned first cell isn't.
             rule = next((line for line in reversed(lines[a:at]) if TABLE_RULE.match(line)),

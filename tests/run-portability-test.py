@@ -59,7 +59,7 @@ one backslash, say, which Python 3.12 and later print each time the file
 is compiled, as a script run as a program is on every run, and which a
 later Python is to make an error (3.6 to 3.11 warn too, where warnings of
 deprecation aren't shown). No suite reads a script's warnings, and that
-one went to build-pdf.py's every run (Round 35).
+one went to build-pdf.py's every run (2026-11-01).
 
 Copyright 2026 Robert Szarka
 

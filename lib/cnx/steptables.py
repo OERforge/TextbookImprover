@@ -149,8 +149,8 @@ STEPS_CLASS = "steps"
 # row-rules, which every format but Word draws so, a Key Equations table
 # in those styles row-rules-faint too, for the lighter gray; and so does a
 # dev-math book's table of steps of another class, which OpenStax draws in
-# a grid, a rule under each row among its lines (Rob, 2026-10-27, of a
-# light rule under each step: "Everywhere OpenStax rules").
+# a grid, a rule under each row among its lines (2026-10-27: a light rule
+# under each step, everywhere OpenStax rules).
 RULED_STYLES = {"additive-manufacturing", "algebra-1", "calculus", "contemporary-math",
                 "dev-math", "precalculus", "precalculus-coreq", "statistics"}
 FAINT_KEY_EQUATIONS = {"algebra-1", "calculus"}

@@ -15,7 +15,7 @@ embeds a PDF image's fonts (latexbuild.EMBED_GS), writes no ToUnicode
 entry for such a name, in 10.02.1 and 10.07.1 alike (measured,
 2026-10-30): matplotlib's EPS, whose fonts are Type 3 fonts it names the
 TrueType font's glyphs in, drew its minus sign in Inter as minus.case, and
-veraPDF's PDF/UA-2 profile failed the one glyph (Round 33).
+veraPDF's PDF/UA-2 profile failed the one glyph.
 
 Each font whose encoding names such a glyph gets a ToUnicode entry for
 every glyph it names that the specification maps (to_unicode), the

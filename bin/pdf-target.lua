@@ -1139,7 +1139,7 @@ end
 -- code (HANG_ROOM). So a word of code that may open such a part needs
 -- that much more room than its own: in a column only as wide as the word,
 -- the part's room was the word's less two characters, and TeX broke the
--- word (Introduction to Python Programming's Table 14.2, in Round 33). A
+-- word (Introduction to Python Programming's Table 14.2, 2026-10-30). A
 -- word of ROOM characters or fewer fits in a column as wide as it, the
 -- hang there no wider than leaves it ROOM. The line's first word opens
 -- its first row, where the indentation is all there is before it.
@@ -1542,7 +1542,7 @@ end
 -- which is as wide as its count, monospaced, was a few scaled points too
 -- narrow for it, and TeX broke the word; rounded up to four places, it
 -- still was where TeX's 65,536ths fell short of them (a line of code after
--- a line of text in a cell, in the PDF suite's measured book, Round 34).
+-- a line of text in a cell, in the PDF suite's measured book, 2026-10-30).
 local function held_part(part)
   local least = math.ceil(part * (1 + 1e-6) * 65536 - 1e-9)
   local n = math.ceil(part * 10000 - 1e-6)
@@ -3049,7 +3049,7 @@ end
 -- LaTeX sets a term's label with its label space (\labelsep) after it, so
 -- a kern back over that space goes before them and the space after them,
 -- unbroken, where they had sat after the term's space and against the
--- definition's first word ("6,7A term's", What Round 39 left open). The
+-- definition's first word ("6,7A term's", left open on 2026-11-03). The
 -- kern begins the paragraph (\leavevmode), which sets the label first; in
 -- the vertical mode an \item leaves LaTeX in, it would have been a kern
 -- between lines. The marks of notes the definition opens with go with
@@ -3421,7 +3421,7 @@ end
 -- highlighted code's (oer.inline.code). The writer sets code in no
 -- language as \texttt, each space a \ , which breaks at its spaces only,
 -- so that a word of it longer than its line ran on into the margin: a
--- word of 94 characters, 213 points past the text (Round 30's trial). A
+-- word of 94 characters, 213 points past the text (a trial, 2026-10-28). A
 -- group, so the mark ends with the code; in a heading, whose writer sets
 -- code as \texttt too, and a caption, the mark is a protected macro.
 local function mark_code(code)

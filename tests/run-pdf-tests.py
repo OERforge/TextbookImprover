@@ -4229,7 +4229,7 @@ MEASURED_INLINE = "os.path.join(base,name)"
 # columns' widths are given (as Introduction to Python Programming's Table
 # 14.2), and in one whose columns LaTeX lays out, whose word of code
 # opening a hung row had two characters less room than it was counted
-# (Round 33); a word of a list nested in another, two depths' margins in,
+# (2026-10-30); a word of a list nested in another, two depths' margins in,
 # where the counts gave a list's words the column's whole width and its
 # items' text as one, an item's last word and the next's first one word;
 # and a word of a description list's definition, whose rows after the
@@ -4238,7 +4238,7 @@ MEASURED_INLINE = "os.path.join(base,name)"
 # a minipage, where a line break ends one, hung by itself; an indented
 # line of code, whose hung rows are set its indentation further in; a line
 # of code whose first word is its longest, which opens its first row, and
-# needs no hang; and what the round's review found: a line of code with a
+# needs no hang; and what a review found: a line of code with a
 # superscript or a note after it, or after no-break spaces of the text's,
 # which LaTeX hangs as any line of code, the note's mark beside its last
 # word, the spaces its indentation; lines in emphasis,
@@ -4248,7 +4248,7 @@ MEASURED_INLINE = "os.path.join(base,name)"
 # row; a term, which LaTeX sets in bold in a box it doesn't break, the
 # label space after it; and a word in bold. The note's case a raw HTML
 # table as the rest are, where it had been a pipe table, since a raw HTML
-# table holding a note lost its rows and cells (Round 34; markdown-html.lua
+# table holding a note lost its rows and cells (2026-10-30; markdown-html.lua
 # holds a note's place now). And raw code as written, in a paragraph and
 # in a raw table's cell, its quotation marks and backslashes as they are,
 # which the Markdown reader had curled and taken for escapes
@@ -6192,7 +6192,7 @@ def preamble_checks(preamble_path, preamble_source, preamble_said):
         # from tagpdf's label at the last page, which holds the page's number
         # (@tag@LastPage): new on the first run, and changed on any run whose
         # count did, LaTeX says its labels may have changed, and Pandoc runs it
-        # again (CNX-NOTES, item 216).
+        # again (2026-11-08).
         ("and its XMP gives its page count, LaTeX run again for the label LaTeX's "
          "tagging puts at its last page",
          lambda: reader is not None and len(reader.pages) > 1
@@ -8370,7 +8370,7 @@ def checks(work, built):
                   if r["Check"] == "pdf-figure-alt-is-placeholder"]
          == [("pdf-figure-alt-is-placeholder", "IMG_2041")]),
         # NVDA announces no column header for a cell holding only a
-        # formula, and announces the words beside one (round 5).
+        # formula, and announces the words beside one (heard 2026-10-10).
         ("a header cell holding only a formula is reported, in the PDF and on its "
          "page, and one with words beside its formula isn't",
          lambda: [r["Check"] for r in pdf_rows].count("pdf-table-header-is-formula") == 1

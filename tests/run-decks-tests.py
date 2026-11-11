@@ -2798,10 +2798,11 @@ def case_pdf_settings(work):
 
 
 # What a newer ltx-talk or LaTeX would change, as the template's checks of
-# their code see it: the copy of ltx-talk's code for a slide's title, and
-# for a block, made unlike the class's, and LaTeX's footnote variable the
-# template looks for named as one that doesn't exist.
-FALLBACKS = [("        tag      = frametitle ,\n", "        tag      = frametitle-changed ,\n"),
+# their code see it: the copies of ltx-talk's code for a slide's title,
+# 0.6.10's and 0.6.11's, and its code for a block, made unlike the class's,
+# and LaTeX's footnote variable the template looks for named as one that
+# doesn't exist.
+FALLBACKS = [("    tag      = frametitle ,\n", "    tag      = frametitle-changed ,\n"),
              ("\\normalfont \\large \\bfseries", "\\normalfont \\Large \\bfseries"),
              ("{ \\bool_if_exist_p:N \\l__fnote_autodetect_bool }",
               "{ \\bool_if_exist_p:N \\l__fnote_autodetect_changed_bool }")]
@@ -2843,7 +2844,7 @@ def case_fallbacks(work):
     levels = lambda path: [h[0] for h in heading_elements(path)]  # noqa: E731
     checks = [
         ("each of the template's checks found the code it changes",
-         lambda: FALLBACK != AGENDA + "\n[^r]: The rule's note.\n" and found == [1, 1, 1]),
+         lambda: FALLBACK != AGENDA + "\n[^r]: The rule's note.\n" and found == [2, 1, 1]),
         ("the PDF is built, and the run warns of each fallback, and of the mark LaTeX"
          " couldn't tie",
          lambda: result.returncode == 0 and os.path.exists(agenda)

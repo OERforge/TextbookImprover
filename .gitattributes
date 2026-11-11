@@ -10,3 +10,5 @@ vendor/reveal.js/README.md text
 vendor/axe-core/** -text
 vendor/axe-core/axe.min.js -diff
 vendor/axe-core/README.md text
+# Two branches that each add an entry in the same place both keep theirs
+CHANGELOG.md merge=union

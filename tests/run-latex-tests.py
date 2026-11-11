@@ -6043,21 +6043,28 @@ def case_class_contents(work):
     unnumbered section, its own section numbered 1, where LaTeX stopped on
     the class's own headings;
     the runs saying so, and warning of what's still wrong; and a memoir
-    book's copy, warned of too."""
+    book's copy, warned of too. And a class whose own \\title and \\author
+    don't give LaTeX's tagging the PDF's title and author: the amsbook
+    book's PDF, which has no \\maketitle, has them, and the memoir book's,
+    with a footnote, builds, where its \\title, its \\author, and its note
+    each stopped LaTeX, and has them too."""
     ams, art, memoir = (os.path.join(work, name) for name in ("amsbook", "amsart", "memoir"))
     for folder, cls, extra, unit in ((ams, "amsbook", "\\listoffigures\n", "chapter"),
                                      (art, "amsart", "\\listoffigures\n", "section"),
                                      (memoir, "memoir", "", "chapter")):
         os.makedirs(folder)
         with open(os.path.join(folder, "book.tex"), "w", encoding="utf-8") as fh:
-            fh.write("\\documentclass{" + cls + "}\n\\title{Classed}\n\\begin{document}\n"
+            fh.write("\\documentclass{" + cls + "}\n\\title{Classed}\n"
+                     + ("" if folder == art else "\\author{Classauthor}\n")
+                     + "\\begin{document}\n"
                      + ("\\maketitle\n" if folder == art else "")
-                     + "\\tableofcontents\n" + extra + "\\" + unit + "{Classone}\nClasstext.\n"
+                     + "\\tableofcontents\n" + extra + "\\" + unit + "{Classone}\nClasstext."
+                     + ("\\footnote{Classnote.}" if folder == memoir else "") + "\n"
                      "\\begin{figure}\\centering\\rule{1cm}{1cm}\\caption{Classfigure}"
                      "\\end{figure}\n\\end{document}\n")
         with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
-                     + ("" if folder == memoir else "  pdf:\n    format: pdf\n"))
+                     "  pdf:\n    format: pdf\n")
     ams_done, art_done, memoir_done = convert(ams), convert(art), convert(memoir)
     ams_said = ams_done.stdout + ams_done.stderr
     art_said = art_done.stdout + art_done.stderr
@@ -6132,6 +6139,105 @@ def case_class_contents(work):
             found[cls] = (counts.get("list_chapters"), counts.get("own_contents"))
         return found == {"ourbook": (1, "amsbook"), "plainer": (0, None)}
 
+    def metadata(folder):
+        """The book's PDF's dc:title and dc:creator and its links' targets, a
+        reason to skip, or False with no PDF."""
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return skip(why)
+        try:
+            import pikepdf
+        except ImportError:
+            return skip("no pikepdf to read the PDF")
+        path = os.path.join(folder, "pdf", "book.pdf")
+        if not os.path.exists(path):
+            return False
+        with pikepdf.open(path) as found, found.open_metadata() as meta:
+            links = [str((a.get("/A") or {}).get("/D") or a.get("/Dest") or "")
+                     for page in found.pages for a in (page.get("/Annots") or [])
+                     if a.get("/Subtype") == "/Link"]
+            return meta.get("dc:title"), meta.get("dc:creator"), links
+
+    def ams_titled():
+        found = metadata(ams)
+        if not isinstance(found, tuple):
+            return found
+        return found[:2] == ("Classed", ["Classauthor"]) \
+            and "the PDF's title and author taken from \\title and \\author at the end of " \
+            "the preamble, which LaTeX's tagging takes from amsbook's own commands only at " \
+            "\\maketitle, which the book doesn't have" in ams_said \
+            and "its title and author in the PDF taken from \\title and \\author, which " \
+            "amsbook's own commands don't give LaTeX's tagging" in ams_said
+
+    def art_titled():
+        found = metadata(art)
+        if not isinstance(found, tuple):
+            return found
+        return found[0] == "Classed" and "the PDF's title and author" not in art_said \
+            and "its title and author in the PDF" not in art_said
+
+    def memoir_pdf():
+        found = metadata(memoir)
+        if not isinstance(found, tuple):
+            return found
+        text = pages(memoir)
+        if not isinstance(text, str):
+            return text
+        return found[:2] == ("Classed", ["Classauthor"]) \
+            and any(link.startswith("footnote") for link in found[2]) \
+            and "Classtext." in text and "Classnote." in text \
+            and "memoir given LaTeX's own \\title and \\author to change" in memoir_said \
+            and "memoir's \\title, \\author, and footnote marks made to build with " \
+            "LaTeX's tagging" in memoir_said \
+            and "its title and author in the PDF taken from \\title and \\author, which " \
+            "memoir's own commands don't give LaTeX's tagging" in memoir_said
+
+    def copy_titles():
+        """The copy's text: memoir's commands after \\DocumentMetadata and
+        before the class, in a class of the book's own built on memoir too;
+        the PDF's title and author taken after the copy's \\title, in an AMS
+        class or memoir, not where \\maketitle or hyperref's pdftitle gives
+        them, nor in the book class; neither again in a copy made from a
+        copy."""
+        sys.path.insert(0, os.path.join(ROOT, "lib"))
+        import texremediate
+        folder = os.path.join(work, "titles")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "mymemoir.cls"), "w", encoding="utf-8") as fh:
+            fh.write("\\ProvidesClass{mymemoir}\n\\LoadClass{memoir}\n")
+
+        def copy(cls, preamble="", body="Text.\n"):
+            texts = {"book.tex": "\\documentclass{%s}\n%s\\begin{document}\n%s\\end{document}\n"
+                                 % (cls, preamble, body)}
+            counts = texremediate.tag(texts, "book.tex", "en", False, ("ua-2",), folder)
+            again = dict(texts)
+            texremediate.tag(again, "book.tex", "en", False, ("ua-2",), folder)
+            return texts["book.tex"], counts, again["book.tex"] == texts["book.tex"]
+
+        commands, own = texremediate.MEMOIR_COMMANDS, texremediate.OWN_TITLE
+        memoir_text, memoir_counts, memoir_once = copy("memoir", "\\title{T}\n")
+        mine_text, mine_counts, _ = copy("mymemoir")
+        ams_text, ams_counts, ams_once = copy("amsart")
+        made = copy("amsproc", "\\title{T}\n", "\\maketitle\nText.\n")[0]
+        named = copy("amsbook", "\\usepackage{hyperref}\n\\hypersetup{pdftitle={T}}\n")[0]
+        plain = copy("book")[0]
+        # Each at the start of its line: comments name \\begin{document} too.
+        def at(text, line):
+            found = re.search("(?m)^" + re.escape(line), text)
+            return found.start() if found else -1
+        return 0 <= at(memoir_text, "\\DocumentMetadata") < memoir_text.find(commands) \
+            < at(memoir_text, "\\documentclass") \
+            and 0 <= at(memoir_text, "\\title{T}") < memoir_text.find(own) \
+            < at(memoir_text, "\\begin{document}") \
+            and memoir_counts.get("memoir_commands") == 1 \
+            and memoir_counts.get("own_title") == "memoir" and memoir_once \
+            and commands in mine_text and mine_counts.get("own_title") == "memoir" \
+            and 0 <= at(ams_text, "\\title{book}") < ams_text.find(own) \
+            < at(ams_text, "\\begin{document}") \
+            and ams_counts.get("own_title") == "amsart" and commands not in ams_text \
+            and ams_once and own not in made and own not in named \
+            and own not in plain and commands not in plain
+
     def art_pdf():
         # Its section's heading, "1 Classone" as LaTeX 2026-06-01's tagging
         # set it, and "1. Classone" as amsart does, as 2026-11-01's does.
@@ -6178,6 +6284,19 @@ def case_class_contents(work):
          and "WARNING: tagged: " + warning % ("the copy", "memoir") in memoir_said
          and "its dot leaders are read as text" in memoir_said
          and "amsbook's lists" not in memoir_said and "unnumbered sections" not in memoir_said),
+        ("the copy gives memoir LaTeX's own \\title and \\author before the class, and keeps "
+         "its footnote mark from hyperref's changes for it, in a class of the book's own built "
+         "on memoir too; and takes the PDF's title and author from \\title and \\author, after "
+         "the copy's own \\title, in an AMS class or memoir, not where \\maketitle or "
+         "hyperref's pdftitle gives them, nor in the book class; neither again in a copy made "
+         "from a copy", copy_titles),
+        ("an amsbook book's PDF, with no \\maketitle, has its title and author, which the "
+         "class's own commands don't give LaTeX's tagging, and the run says so", ams_titled),
+        ("an amsart article's PDF has its title from \\maketitle, as LaTeX's tagging takes "
+         "it, and the copy takes it no other way", art_titled),
+        ("a memoir book's PDF builds, where its \\title, its \\author, and its footnote each "
+         "stopped LaTeX, with its title and author, its note's mark a link to its note, and "
+         "the run says so", memoir_pdf),
     ]
 
 
@@ -10301,7 +10420,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("a list's item that opens with fancyvrb's code", case_code_label),
          ("a line break's two lines in a tagged PDF's text", case_line_breaks),
-         ("a class's own contents, under tagging", case_class_contents),
+         ("a class's own contents and title, under tagging", case_class_contents),
          ("a note's mark in a longtable's, a minipage's, and a \\captionbox's caption",
           case_caption_notes),
          ("the AAA page's measure of its lines", case_line_measure),

@@ -4246,6 +4246,16 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                   + (f", {counts['tag_title_visual']} of them from the title their large "
                      "type sets" if counts.get("tag_title_visual") else "") + ", "
                   if counts.get("tag_title") else "")
+               + ("the PDF's title and author taken from \\title and \\author at the end "
+                  f"of the preamble, which LaTeX's tagging takes from {counts['tag_own_title']}'s "
+                  "own commands only at \\maketitle, which the book doesn't have, "
+                  if counts.get("tag_own_title") else "")
+               + ("memoir given LaTeX's own \\title and \\author to change, where LaTeX's "
+                  "tagging's, which memoir's changes don't fit, stopped LaTeX at the book's "
+                  "\\title (\"Extra \\endgroup\"), and its footnote mark kept from hyperref's "
+                  "changes for memoir, which stopped LaTeX at a note (\"No counter "
+                  "'Hfootnote' defined\"), "
+                  if counts.get("tag_memoir_commands") else "")
                + (f"hyperref loaded in {counts['tag_hyperref']} document(s), for the PDF's "
                   "bookmarks, "
                   if counts.get("tag_hyperref") else "")
@@ -4872,6 +4882,11 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                "as amsbook starts them, " if counts.get("tag_list_chapters") else "")
             + ("its lists of contents, figures, and tables headed as unnumbered "
                "sections, " if counts.get("tag_list_headings") else "")
+            + ("its title and author in the PDF taken from \\title and \\author, which "
+               f"{counts['tag_own_title']}'s own commands don't give LaTeX's tagging, "
+               if counts.get("tag_own_title") else "")
+            + ("memoir's \\title, \\author, and footnote marks made to build with LaTeX's "
+               "tagging, " if counts.get("tag_memoir_commands") else "")
             + ("its figures and tables tagged where the text has them, "
                if counts.get("tag_floats") else "")
             + (f"{counts['tag_boxes']} table(s) of one column of prose tagged as a "

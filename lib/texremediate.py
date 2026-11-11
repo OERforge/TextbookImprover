@@ -1516,6 +1516,63 @@ MAKETITLE = re.compile(r"\\maketitle(?![A-Za-z@])")
 TITLE_NOTE = (
     "% Written for LaTeX's tagging: the document's title, for the PDF's title,\n"
     "% which PDF/UA-2 requires; nothing prints it without \\maketitle.\n")
+# A class whose own \title and \author replace LaTeX's tagging's, loaded
+# before the class at \DocumentMetadata, which give the PDF its title
+# (dc:title) and author (dc:creator): LaTeX's tagging takes them otherwise
+# only at \maketitle (cmd/maketitle/before), so a book in one with no
+# \maketitle, the copy's \title (TITLE_NOTE) among them, had no title.
+# OWN_TITLE takes them as \maketitle would, at the preamble's end, where
+# LaTeX's tagging has none; and hyperref's pdftitle, where the book gives
+# it, is the PDF's title anyway. Measured with amsart, amsbook, amsproc,
+# and memoir (given LaTeX's own commands, MEMOIR_COMMANDS), LaTeX
+# 2026-06-01 and 2026-11-01.
+OWN_TITLE_CLASSES = ("amsart", "amsbook", "amsproc", "memoir")
+PDFTITLE = re.compile(r"pdftitle\s*=")
+OWN_TITLE = (
+    "% Written for LaTeX's tagging: the PDF's title and author from \\title and\n"
+    "% \\author, as LaTeX's tagging takes them at \\maketitle, where it has none:\n"
+    "% this class's own \\title and \\author don't give them to it.\n"
+    "\\makeatletter\\ExplSyntaxOn\n"
+    "\\tl_if_exist:NT \\g__tag_title_title_tl\n"
+    "  {\n"
+    "    \\tl_if_empty:NT \\g__tag_title_title_tl\n"
+    "      { \\cs_if_exist:NT \\@title { \\tl_gset_eq:NN \\g__tag_title_title_tl \\@title } }\n"
+    "  }\n"
+    "\\tl_if_exist:NT \\g__tag_title_author_tl\n"
+    "  {\n"
+    "    \\tl_if_empty:NT \\g__tag_title_author_tl\n"
+    "      { \\cs_if_exist:NT \\@author { \\tl_gset_eq:NN \\g__tag_title_author_tl \\@author } }\n"
+    "  }\n"
+    "\\ExplSyntaxOff\\makeatother\n")
+# memoir 3.8.4b changes \title and \author (with xpatch), which under
+# tagging are LaTeX's tagging's own, and its changes don't fit them: a
+# \title or an \author, the book's or the copy's, stopped the build ("Extra
+# \endgroup"). And hyperref loads memoir's changes for it (memhfixc), whose
+# footnote mark steps a counter hyperref doesn't make where
+# \DocumentMetadata is given (Hfootnote; hyperref.sty's
+# \IfDocumentMetadataT), so with hyperref, the book's or the copy's
+# (HYPERREF_NOTE), the first note stopped it ("No counter 'Hfootnote'
+# defined"); hyperfootnotes=false would build, but LaTeX's footnote code
+# then links no note's mark. MEMOIR_COMMANDS,
+# before the class, gives memoir LaTeX's own \title and \author to change,
+# as latex.ltx declares them, and keeps the footnote mark memhfixc would
+# replace, LaTeX's tagging's, which links a note's mark to its note;
+# memhfixc's links for \pagenote stay. Measured with LaTeX 2026-06-01 and
+# 2026-11-01.
+MEMOIR_COMMANDS = (
+    "% Written for LaTeX's tagging: \\title and \\author as LaTeX defines them,\n"
+    "% for memoir to change, where LaTeX's tagging's own, which memoir's changes\n"
+    "% don't fit, stopped LaTeX (\"Extra \\endgroup\"); and the footnote mark\n"
+    "% hyperref's changes for memoir (memhfixc) would replace kept, where theirs\n"
+    "% steps a counter hyperref doesn't make with \\DocumentMetadata (\"No\n"
+    "% counter 'Hfootnote' defined\").\n"
+    "\\makeatletter\n"
+    "\\AddToHook{class/memoir/before}{%\n"
+    "  \\DeclareRobustCommand\\title[1]{\\gdef\\@title{#1}}%\n"
+    "  \\DeclareRobustCommand*\\author[1]{\\gdef\\@author{#1}}}\n"
+    "\\AddToHook{package/memhfixc/before}{\\global\\let\\oer@footnotemark\\@footnotemark}\n"
+    "\\AddToHook{package/memhfixc/after}{\\global\\let\\@footnotemark\\oer@footnotemark}\n"
+    "\\makeatother\n")
 # The PDF's bookmarks, which hyperref makes from the headings (PDF/UA-1
 # 7.17 recommends them), its links as the book had them (hidelinks): for a
 # book that loads neither hyperref nor a package that must come after it.
@@ -2460,8 +2517,11 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     float's tags where the text has it (FLOATS_HERE), the packages
     tagging can't build or tag with replaced by definitions that keep the
     text (SHIMS), pict2e for picture mode, unless picture_paths is false,
-    and for the terms cancel strikes out (latexbuild.PICTURE_PATHS), and,
-    unless mathml is false, unicode-math
+    and for the terms cancel strikes out (latexbuild.PICTURE_PATHS), the
+    PDF's title and author from a class's own \\title and \\author, which
+    don't give them to LaTeX's tagging (OWN_TITLE), memoir given LaTeX's
+    own \\title and \\author to change and its footnote mark kept
+    (MEMOIR_COMMANDS), and, unless mathml is false, unicode-math
     for the formulas' MathML (math_block). Returns counts."""
     counts = {"metadata": 0, "pdftex_options": 0, "pdftex_settings": 0,
               "theorems": 0, "centerline": 0, "formulas": 0, "floats": 0}
@@ -2526,6 +2586,7 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     breaks = any(paragraph_breaks(t) for t in texts.values())
     classes = latexsource.code_matches(latexsource.DOCUMENT_CLASS, texts[master])
     name = loaded_class(classes[0].group(1), master, base) if classes else ""
+    book_class = name
     lists = any(latexsource.code_matches(CONTENTS_LIST, t) for t in texts.values())
     headings = name in HEADING_CLASSES and any(numbered_headings(t) for t in texts.values())
     contents = name in CONTENTS_CLASSES and lists
@@ -2601,13 +2662,24 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
     if "hyperref" not in packages and not packages & HYPERREF_AFTER:
         block += HYPERREF_NOTE
         counts["hyperref"] = 1
+    maketitle = any(latexsource.code_matches(MAKETITLE, t) for t in texts.values())
     if not any(latexsource.code_matches(TITLE_SET, piece) for piece in pieces) \
-            and not any(latexsource.code_matches(MAKETITLE, t) for t in texts.values()):
+            and not maketitle:
         found = latexsource.visual_title(texts[master])
         title = found[4] if found else escape(os.path.splitext(os.path.basename(master))[0])
         block += TITLE_NOTE + "\\title{%s}\n" % title
         counts["title"] = 1
         counts["title_visual"] = int(bool(found))
+    # The PDF's title and author from \title and \author, after the
+    # copy's \title, in a class whose own commands don't give them to
+    # LaTeX's tagging (OWN_TITLE_CLASSES), where nothing takes them at
+    # \maketitle and the book names no pdftitle; not again in a copy made
+    # from a copy.
+    if book_class in OWN_TITLE_CLASSES and not maketitle \
+            and not any(latexsource.code_matches(PDFTITLE, piece) for piece in pieces) \
+            and not any("g__tag_title_title_tl" in piece for piece in pieces):
+        block += OWN_TITLE
+        counts["own_title"] = book_class
     if block:
         begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
         if begin:
@@ -2660,6 +2732,13 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             + text[after:]
         if shimmed:
             counts["shims"] = ", ".join(shimmed)
+    # memoir given LaTeX's own \title and \author to change, and its
+    # footnote mark kept from hyperref's changes for it (MEMOIR_COMMANDS),
+    # before the class, a class of the book's own that loads memoir's too;
+    # not again in a copy made from a copy.
+    if book_class == "memoir" and after is not None and "class/memoir/before" not in text:
+        text = text[:after] + MEMOIR_COMMANDS + text[after:]
+        counts["memoir_commands"] = 1
     # First after \DocumentMetadata, before anything loads a face; not again
     # in a copy made from a copy.
     if after is not None and "oerfonts = {" not in text:

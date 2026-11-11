@@ -2698,6 +2698,37 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 """
 
 
+# A code block's lines a line each to a reader that knows only PDF 1.7's
+# tags, Acrobat's copy among them: in every PDF (PDF_MACROS), and in a
+# LaTeX book's tagged copy (texremediate.tag). In expl3's syntax, which
+# both are read in.
+CODE_LINES = r"""% A code block's lines a line each to a reader that knows only PDF
+% 1.7's tags. LaTeX's tagging code tags a block of code, LaTeX's verbatim,
+% fancyvrb's, or listings', as a Code holding a codeline for each line,
+% which its namespace maps to PDF 2.0's Sub, made for a line of source
+% code (ISO 32000-2, 14.8.4.6). tagpdf also writes a RoleMap for a reader
+% that doesn't read PDF 2.0's namespaces, each tag mapped there to a PDF
+% 1.7 type, and it maps Sub, which PDF 1.7 hasn't, to Span, and codeline
+% with it: to such a reader a block of code was one run of inline text,
+% and copied from Acrobat a block of two lines was one line
+% ("...contribution=0.0): return principal * ..."). In that RoleMap
+% alone, codeline is a P: a reader of PDF 2.0 reads it as a Sub, as
+% before. Only where tagpdf maps it to Span, as tagpdf 1.0i does
+% (2026-10-29, read); a tagpdf that maps it otherwise is left as it is.
+\AddToHook { tagpdf / finish / before } [ oer / code-lines ]
+  {
+    \prop_if_exist:NT \g__tag_role_rolemap_prop
+      {
+        \prop_get:NnNT \g__tag_role_rolemap_prop { codeline } \l_tmpa_tl
+          {
+            \str_if_eq:VnT \l_tmpa_tl { Span }
+              { \prop_gput:Nnn \g__tag_role_rolemap_prop { codeline } { P } }
+          }
+      }
+  }
+"""
+
+
 # A list's item that opens with fancyvrb's code keeps its label beside
 # the code's first line under tagging (CNX-NOTES, item 103): in every
 # PDF (PDF_MACROS), and in a LaTeX book's tagged copy, which loads
@@ -3749,7 +3780,7 @@ PDF_MACROS = r"""\ExplSyntaxOn
         \legacy_if:nF { @inlabel } { \everypar { } }
       }
   }
-""" + CODE_ITEM_LABEL + r"""% A line too wide in the contents, or in a list of figures or tables, is
+""" + CODE_ITEM_LABEL + CODE_LINES + r"""% A line too wide in the contents, or in a list of figures or tables, is
 % reported by TeX at a line of the list's own file (book.toc), which the
 % build had looked up in the book's LaTeX: Sociology's front matter's page
 % numbers, too wide for the contents' column, were counted as lines of

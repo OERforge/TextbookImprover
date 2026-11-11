@@ -5375,6 +5375,96 @@ def case_code_label(work):
     ]
 
 
+def code_roles(path):
+    """What a /codeline is in path's structure: (in its RoleMap, for a
+    reader that knows only PDF 1.7's tags, in its namespace's RoleMapNS),
+    or None without the PDF or pikepdf."""
+    try:
+        import pikepdf
+    except ImportError:
+        return None
+    if not os.path.exists(path):
+        return None
+    with pikepdf.open(path) as pdf:
+        root = pdf.Root.StructTreeRoot
+        old = str((root.get("/RoleMap") or {}).get("/codeline", ""))
+        new = ""
+        for ns in root.get("/Namespaces", []):
+            mapped = (ns.get("/RoleMapNS") or {}).get("/codeline")
+            if mapped is not None:
+                new = str(mapped[0] if isinstance(mapped, pikepdf.Array) else mapped)
+    return old, new
+
+
+def case_code_lines(work):
+    """A book with blocks of code, LaTeX's verbatim and fancyvrb's
+    Verbatim, each line of which LaTeX's tagging tags a codeline, a Sub in
+    its namespace and a Span in the RoleMap for a reader that knows only
+    PDF 1.7's tags, so that Acrobat copied a block as one line
+    (latexbuild's CODE_LINES, as a book's PDF from its pages has it): its
+    tagged copy maps codeline to P in that RoleMap, and the run says so;
+    its PDF, built from its own LaTeX, has codeline a P there and a Sub in
+    its namespace; a copy made from the copy has the fix once; a book that
+    reads a file of code in gets it, and one with a verbatim only in a
+    comment, or a comment environment, doesn't. A paragraph between the
+    two blocks: a verbatim right before a Verbatim stops LaTeX's tagging,
+    with LaTeX 2026-06-01 and 2026-11-01, without the copy too ("The
+    number of automatic begin (2) and end (1) text-block para hooks
+    differ!")."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexbuild
+    import texremediate
+    os.makedirs(work)
+    with open(os.path.join(work, "code.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage{fancyvrb}\n\\begin{document}\n"
+                 "Two blocks.\n\\begin{verbatim}\nfirst line\n  second line\n"
+                 "\\end{verbatim}\nBetween them.\n\\begin{Verbatim}\nthird line\nfourth line\n"
+                 "\\end{Verbatim}\n\\end{document}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
+                 "  pdf:\n    format: pdf\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    copy = os.path.join(work, "tagged", "code.tex")
+    hook = "oer / code-lines"
+
+    def roles():
+        why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+        if why:
+            return skip(why)
+        try:
+            import pikepdf  # noqa: F401
+        except ImportError:
+            return skip("no pikepdf to read the PDF")
+        return code_roles(os.path.join(work, "pdf", "book.pdf")) == ("/P", "/Sub")
+
+    def tagged(body):
+        texts = {"b.tex": "\\documentclass{article}\n\\usepackage{listings}\n"
+                          "\\begin{document}\n" + body + "\\end{document}\n"}
+        counts = texremediate.tag(texts, "b.tex", "en", False, ("ua-2",), None)
+        return texts["b.tex"], counts
+    again = {"code.tex": read(work, "tagged", "code.tex")} if os.path.exists(copy) else {}
+    if again:
+        texremediate.tag(again, "code.tex", "en", True, ("ua-2",), None)
+    listed, listed_counts = tagged("\\lstinputlisting{code.py}\n")
+    commented, commented_counts = tagged("% \\begin{verbatim}\n\\begin{comment}\nx\n"
+                                         "\\end{comment}\nA line.\n")
+    return [
+        ("a tagged copy of a book with blocks of code maps a code block's line to P for a "
+         "reader that knows only PDF 1.7's tags, and the run says so",
+         lambda: os.path.exists(copy) and read(work, "tagged", "code.tex").count(hook) == 1
+         and "a line each to a reader" in said),
+        ("its PDF, built from its own LaTeX, has a codeline a P in its RoleMap and a Sub in "
+         "its namespace", roles),
+        ("a copy made again from such a copy has it once",
+         lambda: again and again["code.tex"].count(hook) == 1),
+        ("a book that reads a file of code in gets it too, counted, and one whose verbatim "
+         "is in a comment, or that has a comment environment, doesn't",
+         lambda: latexbuild.CODE_LINES in listed and listed_counts.get("code_lines") == 1
+         and hook not in commented and not commented_counts.get("code_lines")),
+    ]
+
+
 def case_line_breaks(work):
     r"""A book that breaks lines with \\, \newline, \linebreak, and \break,
     which leave no space between their lines in a tagged PDF's text, the
@@ -10422,6 +10512,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("a list's item that opens with fancyvrb's code", case_code_label),
+    ("a block of code's lines, a line each in PDF 1.7's role map", case_code_lines),
          ("a line break's two lines in a tagged PDF's text", case_line_breaks),
          ("a class's own contents and title, under tagging", case_class_contents),
          ("a note's mark in a longtable's, a minipage's, and a \\captionbox's caption",

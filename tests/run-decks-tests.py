@@ -1788,6 +1788,14 @@ def role_of(path, name):
         return str(mapped)[1:] if mapped is not None else None
 
 
+def old_role_of(path, name):
+    """The type a structure type maps to in the RoleMap alone, which a
+    reader that knows only PDF 1.7's tags reads."""
+    with pikepdf.open(path) as pdf:
+        mapped = (pdf.Root.StructTreeRoot.get("/RoleMap") or {}).get("/" + name)
+        return str(mapped)[1:] if mapped is not None else None
+
+
 def table_kids(path):
     """The kinds of each Table element's children."""
     found = []
@@ -2576,6 +2584,10 @@ def case_pdf(work):
         ("a code block's spaces are characters in the PDF, its indentation kept",
          lambda: pdftext.code_lines(sectioned) == ["def demand(p):",
                                                    "    return 12 - 2 * p > 0"]),
+        ("and each of its lines a P in the structure's RoleMap, for a reader that knows "
+         "only PDF 1.7's tags, which copied a block as one line, a Sub in its namespace",
+         lambda: old_role_of(sectioned, "codeline") == "P"
+         and role_of(sectioned, "codeline") == "Sub"),
         # LaTeX's footnote takes its text as an argument, where a code
         # block's verbatim can't be read (footnote-code.lua), and a
         # section's footnotes are written apart from the deck, which had

@@ -3073,6 +3073,23 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
         return len(found) >= 2 and all("".join(g[2] for g in glyphs).endswith("-")
                                        for _p, _b, glyphs in found[:-1])
 
+    def code_roles(path):
+        """What a /codeline is in path's structure: (in its RoleMap, for a
+        reader that knows only PDF 1.7's tags, in its namespace's
+        RoleMapNS)."""
+        if not os.path.exists(path):
+            return None
+        with pdftext.pikepdf.open(path) as pdf:
+            root = pdf.Root.StructTreeRoot
+            old = str((root.get("/RoleMap") or {}).get("/codeline", ""))
+            new = ""
+            for ns in root.get("/Namespaces", []):
+                mapped = (ns.get("/RoleMapNS") or {}).get("/codeline")
+                if mapped is not None:
+                    new = str(mapped[0] if isinstance(mapped, pdftext.pikepdf.Array)
+                              else mapped)
+        return old, new
+
     def codeline_kids(path):
         """The tags of the structure elements a /codeline element holds,
         none where each line's text is its own marked content."""
@@ -3460,6 +3477,13 @@ def code_checks(code_path, latin_path, said, margins_path, margins_said, tall_pa
                             "wrapped where it reaches the line's end: on code." % n) == 1
                  for n in (9, 7))
          and "too wide for the paper" not in said),
+        # Acrobat, which reads the RoleMap, copied a block of two lines as
+        # one: a Span each, its lines were one run of inline text
+        # (latexbuild.CODE_LINES).
+        ("a block of code's line is a P in the structure's RoleMap, for a reader that knows "
+         "only PDF 1.7's tags, and a Sub in its namespace, as LaTeX's tagging maps it, in "
+         "Plex Mono and in Latin Modern Mono",
+         lambda: all(code_roles(path) == ("/P", "/Sub") for path in (code_path, latin_path))),
         # A path, not a glyph: no character for a copy to hold or a screen
         # reader to read (the lines' texts above, and the structure's).
         ("each part of a wrapped line after its first has a hook drawn before it, an arrow "

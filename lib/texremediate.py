@@ -2302,6 +2302,23 @@ def _opening_formulas(text):
 # item's label beside the code that opens it (tag).
 FANCYVRB_LOADERS = {"fancyvrb", "fvextra", "minted"}
 
+# A block of code, whose lines a tagged copy has a reader of PDF 1.7 read
+# a line each (latexbuild.CODE_LINES, tag): an environment the LaTeX
+# reader keeps as written (latexsource.VERBATIM) but comment, one of
+# fancyvrb's that it reads as code, alltt, or a file of code read in.
+CODE_INPUTS = re.compile(r"\\begin\s*\{(?:alltt|BVerbatim|LVerbatim)\}"
+                         r"|\\(?:lstinputlisting|VerbatimInput|inputminted)(?![a-zA-Z@])")
+
+
+def code_blocks(text):
+    """Whether text holds a block of code (CODE_INPUTS), outside a comment."""
+    for start, _end in latexsource.skip_spans(text):
+        m = latexsource.VERBATIM_BEGIN.match(text, start)
+        if m and m.group(1) != "comment":
+            return True
+    return bool(latexsource.code_matches(CODE_INPUTS, text))
+
+
 # A drawing in LaTeX's picture mode, which a tagged copy has pict2e draw
 # (tag), counted to say so.
 PICTURE = re.compile(r"\\begin\s*\{picture\}")
@@ -2572,6 +2589,13 @@ def tag(texts, master, language, mathml=True, standard=("ua-2",), base=None,
             "cmd / FV@ListVSpace / before" in piece for piece in pieces):
         block += "\\ExplSyntaxOn\n" + latexbuild.CODE_ITEM_LABEL + "\\ExplSyntaxOff\n"
         counts["code_label"] = 1
+    # A block of code's lines a line each to a reader of PDF 1.7, as in a
+    # book's PDF from its pages (latexbuild.CODE_LINES), where the book has
+    # a block of code; not again in a copy made from a copy.
+    if any(code_blocks(t) for t in texts.values()) and not any(
+            "oer / code-lines" in piece for piece in pieces):
+        block += "\\ExplSyntaxOn\n" + latexbuild.CODE_LINES + "\\ExplSyntaxOff\n"
+        counts["code_lines"] = 1
     # A title that holds \foreignlanguage titled by its words alone
     # (FOREIGN_TITLES), where the book has one; not again in a copy made
     # from a copy.

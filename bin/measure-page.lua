@@ -5,7 +5,8 @@
 -- printable ASCII characters, its space the first, and in bold; its small
 -- letters, each as often as in English, for a character outside ASCII; its
 -- space; a character of code; a list's margins in a table's cell, at each
--- depth, and its label space; a note's mark; and the width of each formula
+-- depth, and its label space; a note's mark, and whether a chapter numbers
+-- the notes from 1 again; and the width of each formula
 -- count-formulas.txt lists. Loaded by the
 -- document measure_page writes, which calls each function in turn and
 -- reads the line report writes.
@@ -107,6 +108,20 @@ function oer_measure.notedigit(one, two)
   oer_measure.noteone_ = math.max(oer_measure.noteone_ or 0, one / size)
 end
 
+-- Whether the book numbers its notes from 1 again at each chapter it
+-- numbers: the class resets the footnote counter when the chapter's is
+-- stepped (\@addtoreset's list for the chapter, \cl@chapter, names it, as
+-- the book class's, report's, memoir's, scrbook's, and scrreprt's do and
+-- article's, with no chapters, doesn't), and its chapters are numbered
+-- (\c@secnumdepth 0 or more, which \@chapter asks before it steps the
+-- counter; Pandoc's template sets it below that without numbersections).
+-- "chapter" where it does, "through" where it doesn't.
+function oer_measure.notes()
+  local resets = token.get_macro("cl@chapter") or ""
+  local numbered = (tex.count["c@secnumdepth"] or -1) >= 0
+  oer_measure.notes_ = resets:find("{footnote}", 1, true) and numbered and "chapter" or "through"
+end
+
 -- A formula's width, in scaled points, as LaTeX set it in text style.
 function oer_measure.formula(w)
   local widths = oer_measure.widths
@@ -138,6 +153,7 @@ function oer_measure.report(name)
   -- which a mark of more digits is wider by for each: "(9)", then "(99)".
   parts[#parts + 1] = "note=" .. string.format("%.6f,%.6f",
     math.max(oer_measure.note_ or 0, oer_measure.noteone_ or 0), oer_measure.notedigit_ or 0)
+  parts[#parts + 1] = "notes=" .. (oer_measure.notes_ or "through")
   parts[#parts + 1] = "chars=" .. table.concat(oer_measure.chars, ",")
   parts[#parts + 1] = "bold=" .. table.concat(oer_measure.bold_ or {}, ",")
   local widths = {}

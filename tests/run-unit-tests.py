@@ -4579,7 +4579,10 @@ def check_measure_report():
     than it is. And a note's mark: the widest of a mark of the first nine
     notes, as the book numbers them, and of a mark of one digit, a digit's
     advance the second, which a symbol's mark wider than a digit's is
-    reported as, \\fnsymbol's doubled ones from the seventh."""
+    reported as, \\fnsymbol's doubled ones from the seventh. And whether a
+    chapter numbers the notes from 1 again, "chapter" where the measuring
+    said so (oer_measure.notes, which TeX's registers are read for, set
+    here as it would leave it), "through" where it didn't."""
     folder = tempfile.mkdtemp()
     out, symbols = os.path.join(folder, "report.txt"), os.path.join(folder, "symbols.txt")
     size = 786432
@@ -4589,7 +4592,8 @@ def check_measure_report():
               "oer_measure.size = %d "
               "for _, w in ipairs({0.39, 0.40}) do oer_measure.note(w * %d) end "
               "for d = 0, 9 do oer_measure.notedigit(0.43 * %d, 0.82 * %d) end "
-              "oer_measure.report(%s) oer_measure.note(0.95 * %d) oer_measure.report(%s)"
+              "oer_measure.report(%s) oer_measure.note(0.95 * %d) "
+              "oer_measure.notes_ = 'chapter' oer_measure.report(%s)"
               % (json.dumps(os.path.join(ROOT, "bin", "measure-page.lua")), size, size, size,
                  size, json.dumps(out), size, json.dumps(symbols)))
     ran = subprocess.run(["pandoc", "lua", "-e", script], capture_output=True, text=True)
@@ -4609,6 +4613,10 @@ def check_measure_report():
          "and a digit's advance in it, a symbol's wider than a digit its own width",
          lambda: ";note=0.430000,0.390000;" in said
          and ";note=0.950000,0.390000;" in symbol_said),
+        ("whether a chapter numbers the notes from 1 again, reported after the mark, and "
+         "counted through where the measuring didn't say",
+         lambda: ";note=0.430000,0.390000;notes=through;" in said
+         and ";notes=chapter;" in symbol_said),
     ]
 
 
@@ -4680,6 +4688,107 @@ def check_note_mark():
          "digits' for 100, as its LaTeX's comment says",
          lambda: whole == {99: "0.8217", 100: "1.2117"}),
     ]
+
+
+def check_note_numbers():
+    """pdf-target.lua's count_notes: each table's notes numbered as LaTeX
+    numbers them, the number of its last given it (oer-last-note), and the
+    widest number kept. Measured as numbered by chapter (MEASURES.notes),
+    from 1 again at each top-level heading in the main matter, an
+    appendix's among them, but an unnumbered one, the book opening in its
+    front matter where has-frontmatter is false, a chapter there or in the
+    back matter starting nothing; counted through without it, as an
+    earlier version's OER_MEASURES says nothing of it, which errs wide. A
+    table inside a table given the outer's number, its notes among it."""
+    with open(os.path.join(ROOT, "bin", "pdf-target.lua"), encoding="utf-8") as fh:
+        source = fh.read()
+    cut = source.rfind("\nreturn {")
+    script = ("PANDOC_SCRIPT_FILE = %s\n" % json.dumps(os.path.join(ROOT, "bin", "pdf-target.lua"))
+              + source[:cut]) + """
+local doc = pandoc.read(io.open('book.json'):read('a'), 'json')
+doc = count_notes(doc)
+local out = {}
+doc.blocks:walk{ Table = function(t) out[#out + 1] = t.attributes['oer-last-note'] or '-' end }
+print(table.concat(out, ' ') .. ' widest ' .. NOTES)
+"""
+    table = "| A | B |\n|---|---|\n| x[^%s] | y[^%s] |\n\n[^%s]: T.\n\n[^%s]: U.\n\n"
+
+    def notes(label, count):
+        return "".join("Text.[^%s%d]\n\n[^%s%d]: Note.\n\n" % (label, k, label, k)
+                       for k in range(1, count + 1))
+    book = ("Before.[^z]\n\n[^z]: Z.\n\n# Preface\n\n" + notes("p", 3) + table % ("p1", "p2", "p1", "p2")
+            + "```{=latex}\n\\mainmatter\n```\n\n# One\n\n" + notes("a", 8)
+            + table % ("a1", "a2", "a1", "a2")
+            + "# Aside {.unnumbered}\n\n" + notes("u", 1)
+            + "# Two\n\n" + table % ("b1", "b2", "b1", "b2")
+            + "```{=latex}\n\\appendix\n```\n\n# Appendix\n\n" + notes("c", 2)
+            + table % ("c1", "c2", "c1", "c2")
+            + "```{=latex}\n\\backmatter\n```\n\n# Index\n\n" + notes("d", 1)
+            + table % ("d1", "d2", "d1", "d2"))
+    measures = ("line=39.146278;gap=1.000000;lower=0.520000;space=0.232000;points=469.755000;"
+                "mono=0.600000;lists=2.5,4.7,6.57,8.27,9.27,10.27;chars="
+                + ",".join(["0.5"] * 95) + ";labelsep=0.500000;bold=" + ",".join(["0.52"] * 95)
+                + ";note=0.431667,0.390000")
+    with open(os.path.join(ROOT, "bin", "count-formulas.txt"), encoding="utf-8") as fh:
+        measures += ";math=" + ",".join(["4.8"] * sum(1 for line in fh if line.strip()))
+    said = {}
+    with tempfile.TemporaryDirectory() as folder:
+        with open(os.path.join(folder, "numbers.lua"), "w", encoding="utf-8") as fh:
+            fh.write(script)
+        for name, front, given in (("chapter", True, ";notes=chapter"),
+                                   ("through", True, ";notes=through"),
+                                   ("unsaid", True, ""), ("open", False, ";notes=chapter")):
+            meta = "---\nhas-frontmatter: false\n---\n\n" if front else ""
+            done = subprocess.run(["pandoc", "-f", "markdown", "-t", "json", "-o",
+                                   os.path.join(folder, "book.json")],
+                                  input=meta + book, capture_output=True, text=True)
+            environment = dict(os.environ, OER_MEASURES=measures + given)
+            done = subprocess.run(["pandoc", "lua", "numbers.lua"], cwd=folder,
+                                  env=environment, capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL)
+            said[name] = done.stdout.strip() if done.returncode == 0 else done.stderr[-300:]
+        nested = pandoc_json_nested()
+        with open(os.path.join(folder, "book.json"), "w", encoding="utf-8") as fh:
+            fh.write(nested)
+        done = subprocess.run(["pandoc", "lua", "numbers.lua"], cwd=folder,
+                              env=dict(os.environ, OER_MEASURES=measures + ";notes=chapter"),
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        said["nested"] = done.stdout.strip() if done.returncode == 0 else done.stderr[-300:]
+    return [
+        ("numbered by chapter: the front matter's notes counted on, a chapter there "
+         "starting nothing, from 1 again at each chapter of the main matter and the appendix "
+         "but an unnumbered one, the back matter's counted on, each table given its last "
+         "note's number",
+         lambda: said["chapter"] == "6 10 2 4 7 widest 11"),
+        ("counted through, the measuring saying so or saying nothing",
+         lambda: said["through"] == "6 16 19 23 26 widest 26"
+         and said["unsaid"] == said["through"]),
+        ("a book that doesn't open in its front matter starts its notes from 1 again at its "
+         "first chapter too, which the class numbers",
+         lambda: said["open"] == "5 10 2 4 7 widest 11"),
+        ("a table inside a table given the outer's last number, the inner's notes counted "
+         "among the outer's",
+         lambda: said["nested"] == "3 3 widest 3"),
+    ]
+
+
+def pandoc_json_nested():
+    """A document of one table whose cell holds a note and a table of two
+    notes, as JSON (Markdown has no table in a table's cell)."""
+    note = lambda text: {"t": "Note", "c": [{"t": "Para", "c": [{"t": "Str", "c": text}]}]}
+    def cell(blocks):
+        return [["", [], []], {"t": "AlignDefault"}, 1, 1, blocks]
+    def table(rows):
+        return {"t": "Table", "c": [["", [], []], [None, []],
+                                    [[{"t": "AlignDefault"}, {"t": "ColWidthDefault"}]],
+                                    [["", [], []], []],
+                                    [[["", [], []], 0, [], [[["", [], []], [cell(r)]]
+                                                           for r in rows]]],
+                                    [["", [], []], []]]}
+    inner = table([[{"t": "Plain", "c": [{"t": "Str", "c": "i"}, note("n2")]}],
+                   [{"t": "Plain", "c": [{"t": "Str", "c": "j"}, note("n3")]}]])
+    outer = table([[{"t": "Plain", "c": [{"t": "Str", "c": "o"}, note("n1")]}, inner]])
+    return json.dumps({"pandoc-api-version": [1, 23, 1], "meta": {}, "blocks": [outer]})
 
 
 # A page of raw code elements where the Markdown reader reads raw HTML, and
@@ -9473,6 +9582,7 @@ GROUPS = [
     ("the page's measures, their files missing", check_measure_page),
     ("the page's measures, to six places", check_measure_report),
     ("a note's mark, as the counts take it", check_note_mark),
+    ("a table's notes numbered as LaTeX numbers them", check_note_numbers),
     ("raw code in Markdown, as written", check_markdown_reader),
     ("raw code in Markdown, where Pandoc repeats, pairs, or escapes it",
      check_markdown_reader_contexts),

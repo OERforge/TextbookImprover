@@ -1445,9 +1445,11 @@ LIST_DEPTHS = ("itemize",) * 4 + ("enumerate",) * 2
 # numbers them, \thefootnote, and for each digit alone and twice, a
 # digit's advance in a mark of more. The counts had taken a mark for two
 # digits of IBM Plex Serif at 12 points, 0.8 of an em, in any face, and
-# for any number of digits or symbols.
+# for any number of digits or symbols. And whether a chapter the book
+# numbers starts its notes from 1 again (measure-page.lua's notes), which
+# the filter counts each table's notes' numbers by.
 NOTE_MARKS = (
-    "\\makeatletter{\\normalfont"
+    "\\directlua{oer_measure.notes()}\\makeatletter{\\normalfont"
     + "".join("\\setcounter{footnote}{%d}\\protected@xdef\\@thefnmark{\\thefootnote}"
               "\\setbox0\\hbox{\\@makefnmark}\\directlua{oer_measure.note(\\number\\wd0)}"
               % n for n in range(1, 10))

@@ -561,6 +561,10 @@ do
   local note = {}
   for value in (found.note or ''):gmatch('[^,]+') do note[#note + 1] = tonumber(value) end
   numbers.note, numbers.notedigit = note[1], note[2]
+  -- Whether a chapter the book numbers starts its notes from 1 again
+  -- (count_notes); not said, as OER_MEASURES set by an earlier version
+  -- doesn't, they're counted through, which errs wide.
+  numbers.notes = found.notes == 'chapter' and 'chapter' or 'through'
   ok = ok and #note == 2 and (note[1] or 0) > 0 and (note[2] or -1) >= 0
   if ok and #widths > 0 and #chars == 95 and #lists == 6 and #bold == 95 then
     numbers.math, numbers.chars, numbers.lists, numbers.bold = widths, chars, lists, bold
@@ -1192,39 +1196,96 @@ local function code_hang(inlines)
   return nil
 end
 
--- How many notes the book has (count_notes), which LaTeX numbers in turn.
+-- The widest number a note of the book has (count_notes), and the number
+-- of the last note of the table being counted (Table), whose marks are
+-- counted as that one's, as LaTeX numbers them.
 local NOTES = 0
+local TABLE_NOTES = nil
 
 -- A note's mark, as wide as the book's faces set it (MEASURES.note, which
 -- build-pdf.py's measuring takes of LaTeX's \@makefnmark: the widest of a
 -- mark of the book's first nine notes, as it numbers them, a symbol as
 -- \fnsymbol has them among them, and of a mark of one digit), a digit's
--- advance wider for each digit more than one the book's notes need, so that
--- a book that numbers its notes "(9)" has "(99)" counted as wide as it is;
--- in characters, a digit each. Not knowing a note's number, each is counted
--- as wide as the book's last note's: so it is where the book's chapters
--- aren't numbered, and the book class numbers its notes through (it starts
--- them from 1 again at a chapter it numbers, \@chapter stepping the
--- chapter's counter only then); where they are, a book whose notes need
--- more digits than a chapter's do gives each mark a digit's advance more
--- than it needs. It had been 0.8 of an em in any face, two of IBM Plex
--- Serif's digits at 12 points, where the mark of two is 0.8217, the
--- \scriptspace after them, half a point, left out, and Latin Modern's
--- 0.7851 (measured in the book class at 12 points); a third digit, or a
--- symbol wider than two, was counted narrower than it is; and a book of
--- nine notes or fewer was given two digits to a mark.
+-- advance wider for each digit more than one its number needs, so that a
+-- book that numbers its notes "(9)" has "(99)" counted as wide as it is;
+-- in characters, a digit each. The number is the last of the table's notes
+-- (TABLE_NOTES), as LaTeX numbers them (count_notes), outside a table the
+-- widest the book has: each of a table's marks counted as wide as its last,
+-- which is never narrower than one before it in the table, and only wider
+-- where the table's notes go from 9 to 10, or 99 to 100. Each had been
+-- counted as wide as the book's last note's, which in a book whose
+-- chapters LaTeX numbers, and numbers the notes from 1 again at each, gave
+-- a mark a digit's advance more than it needed wherever the book's notes
+-- needed more digits than a chapter's. It had been 0.8 of an em in any
+-- face, two of IBM Plex Serif's digits at 12 points, where the mark of two
+-- is 0.8217, the \scriptspace after them, half a point, left out, and
+-- Latin Modern's 0.7851 (measured in the book class at 12 points); a third
+-- digit, or a symbol wider than two, was counted narrower than it is; and a
+-- book of nine notes or fewer was given two digits to a mark.
 local function note_mark()
-  local digits = #tostring(math.max(NOTES, 1))
+  local digits = #tostring(math.max(TABLE_NOTES or NOTES, 1))
   if MEASURES then
     return MEASURES.note + (digits - 1) * MEASURES.notedigit
   end
   return digits
 end
 
+-- The commands build-pdf.py writes where a book's part changes
+-- (DIVISIONS), and the part each begins: \appendix is the main matter's,
+-- where a chapter is numbered too.
+local DIVISION = { ['\\frontmatter'] = 'front', ['\\mainmatter'] = 'main',
+                   ['\\appendix'] = 'main', ['\\backmatter'] = 'back' }
+
+-- Each note's number as LaTeX gives it, in turn through the book, and from
+-- 1 again at a chapter it numbers where the class starts the notes again
+-- there (MEASURES.notes, measured; counted through where it isn't, which
+-- errs wide): a top-level heading in the main matter, an appendix's among
+-- them, that isn't unnumbered, as \@chapter steps the chapter's counter
+-- only in the main matter and only for \chapter, not \chapter*. The book
+-- opens in the front matter where build-pdf.py opens it there (OPEN_FRONT,
+-- with has-frontmatter false), and each part begins where its command
+-- stands. A table's notes are counted together, the number of its last,
+-- one in a table inside it among them, given it and every table inside it
+-- (oer-last-note, which Table reads and takes off), and the widest number
+-- kept for the LaTeX's comment (counted). In the order the book has them,
+-- a heading before the notes in its title, which the new chapter numbers.
 local function count_notes(doc)
   NOTES = 0
-  doc.blocks:walk({ Note = function() NOTES = NOTES + 1 end })
-  return nil
+  local by_chapter = MEASURES and MEASURES.notes == 'chapter'
+  local part = doc.meta['has-frontmatter'] == false and 'front' or 'main'
+  local number = 0
+  local function add(n)
+    number = number + n
+    NOTES = math.max(NOTES, number)
+  end
+  doc.blocks = doc.blocks:walk{
+    traverse = 'topdown',
+    RawBlock = function(raw)
+      if raw.format == 'latex' then
+        part = DIVISION[(raw.text:gsub('%s', ''))] or part
+      end
+    end,
+    Header = function(header)
+      if by_chapter and header.level == 1 and part == 'main'
+          and not header.classes:includes('unnumbered') then
+        number = 0
+      end
+    end,
+    Table = function(tbl)
+      local n = 0
+      tbl:walk{ Note = function() n = n + 1 end }
+      add(n)
+      if n == 0 then return tbl, false end
+      local last = tostring(number)
+      tbl.attributes['oer-last-note'] = last
+      return tbl:walk{ Table = function(inner)
+        inner.attributes['oer-last-note'] = last
+        return inner
+      end }, false
+    end,
+    Note = function() add(1) end,
+  }
+  return doc
 end
 
 -- What cell_size counts a line of a cell's text by: a formula by its
@@ -2080,7 +2141,7 @@ local function rule_rows(tbl)
   end
 end
 
-function Table(tbl)
+local function table_pass(tbl)
   local nested = tbl.attributes[IN_CELL] ~= nil
   local steps = tbl.classes:includes('formula-steps')
   local unruled = is_layout(tbl) and (steps or tbl.classes:includes('steps'))
@@ -2110,6 +2171,17 @@ function Table(tbl)
     return fitted({ result })
   end
   return fitted(result)
+end
+
+-- A table counted with its notes' marks as wide as its last note's number
+-- (count_notes, note_mark), the attribute that says it taken off, so the
+-- LaTeX never has it.
+function Table(tbl)
+  TABLE_NOTES = tonumber(tbl.attributes['oer-last-note'])
+  tbl.attributes['oer-last-note'] = nil
+  local result = table_pass(tbl)
+  TABLE_NOTES = nil
+  return result
 end
 
 -- 20. A table whose columns have no widths, a cell of which holds a line
@@ -3353,8 +3425,9 @@ local function fit_code(doc)
 end
 
 -- What the counts were in, a comment the LaTeX opens with: the measures
--- in ems, a note's mark as the book's notes have it counted (note_mark),
--- or characters. Only where build-pdf.py says which (OER_MEASURES, none
+-- in ems, a note's mark as wide as the widest number the book's notes have
+-- (note_mark), and whether a chapter numbers them from 1 again
+-- (count_notes), or characters. Only where build-pdf.py says which (OER_MEASURES, none
 -- for characters), as for a book's PDF and its latex target: a deck's PDF,
 -- through ltx-talk, made the comment a slide of its own before the deck's
 -- first, a blank page.
@@ -3364,9 +3437,11 @@ local function counted(doc)
   for depth = 1, 6 do lists[depth] = string.format('%.4f', list_room(depth)) end
   local said = MEASURES and string.format(
     'ems of the text\'s type: line %.4f, gap %.4f, lower %.4f, space %.4f, mono %.4f, '
-    .. 'note mark %.4f, note digit %.4f, math length %.4f, math width %.4f, lists %s',
+    .. 'note mark %.4f, note digit %.4f, notes numbered %s, math length %.4f, '
+    .. 'math width %.4f, lists %s',
     LINE, GAP, MEASURES.lower, MEASURES.space, MEASURES.mono, note_mark(),
-    MEASURES.notedigit, MATH_LENGTH, MATH_WIDTH, table.concat(lists, ' '))
+    MEASURES.notedigit, MEASURES.notes == 'chapter' and 'by chapter' or 'through',
+    MATH_LENGTH, MATH_WIDTH, table.concat(lists, ' '))
     or 'characters, 70 to a line, lists ' .. table.concat(lists, ' ')
   doc.blocks:insert(1, pandoc.RawBlock('latex', '% TextbookImprover\'s table counts, in ' .. said))
   return doc

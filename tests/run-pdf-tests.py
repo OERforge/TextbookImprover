@@ -4330,6 +4330,71 @@ MEASURED_BOOK = (
     + "+\n" + MEASURED_HUNG)
 
 
+# A table whose narrow column is held at its word and the note's mark after
+# it (pdf-target.lua's held_part), in each of two chapters of a numbered
+# book (build_note_numbers): the first chapter's mark is its 11th note's,
+# two digits, and the second's its 1st, one, since the book class numbers
+# notes from 1 again at each chapter it numbers.
+NUMBERED_TABLE = ("| Term | Meaning |\n|--|" + "-" * 60 + "|\n| Abcdefghijklmnop[^cell] | "
+                  "Besideterm, words that wrap in what the term leaves of the line, and then "
+                  "some more of them to fill it. |\n\n[^cell]: A note in a cell.\n")
+
+
+def build_note_numbers(work):
+    """A book of two numbered chapters, the first with ten notes in its text
+    and NUMBERED_TABLE, the second with NUMBERED_TABLE alone, measured as
+    every book's PDF is: (the PDF's path, its LaTeX)."""
+    os.makedirs(work)
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\n" + "".join("Text %d.[^n%d]\n\n[^n%d]: Note %d.\n\n" % (k, k, k, k)
+                                       for k in range(1, 11)) + NUMBERED_TABLE)
+    with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Two\n\n" + NUMBERED_TABLE)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Numbered\n  identifier: org.example.numbered\n"
+                 "  language: en-US\n  numbering: true\n  contents:\n    - one\n    - two\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    measuring = {key: value for key, value in os.environ.items() if key != "OER_MEASURES"}
+    run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work, measuring)
+    run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, measuring)
+    source = ""
+    tex = os.path.join(work, "pdf", "book.tex")
+    if os.path.exists(tex):
+        with open(tex, encoding="utf-8") as fh:
+            source = fh.read()
+    return os.path.join(work, "pdf", "org.example.numbered.pdf"), source
+
+
+def note_numbers_checks(path, source):
+    """build_note_numbers' book: its LaTeX's comment says the notes are
+    numbered by chapter, the second chapter's table holds its column a
+    digit's advance narrower than the first's, the mark of note 1 against
+    that of note 11, and LaTeX numbers them so."""
+    counts = table_counts(source)
+    chapters = re.split(r"^\\chapter\{", source, flags=re.M)
+
+    def held(chapter):
+        found = re.search(r"\\real\{([\d.]+)\}", chapter)
+        return float(found.group(1)) if found else None
+    parts = [held(chapter) for chapter in chapters[1:3]] if len(chapters) >= 3 else []
+    marks = [mark for mark, _ in footnote_marks(path)] if os.path.exists(path) else []
+    return [
+        ("a numbered book's LaTeX says its notes are counted by chapter, as the book class "
+         "numbers them",
+         lambda: re.search(r"^% TextbookImprover's table counts, .*notes numbered by chapter,",
+                           source, re.M)),
+        ("a table's column held at a word with a note's mark is a digit's advance narrower in "
+         "a chapter whose note is its 1st than in one whose note is its 11th",
+         lambda: counts is not None and counts["notedigit"] is not None
+         and len(parts) == 2 and None not in parts
+         and abs((parts[0] - parts[1]) * (counts["line"] - 2 * counts["gap"])
+                 - counts["notedigit"]) < 0.01),
+        ("and LaTeX numbers the notes so, from 1 again at the second chapter",
+         lambda: marks == [str(k) for k in range(1, 12)] + ["1"]),
+    ]
+
+
 def build_measured(work):
     """MEASURED_BOOK on the default page, in its faces, its tables counted
     in what the build measures of them, whatever OER_MEASURES the suite
@@ -7325,7 +7390,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-ams", "-doctoc")
+                "-measured", "-numbered", "-ams", "-doctoc")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7469,6 +7534,7 @@ BUILDS = {
     "-mathfont": build_math_font,
     "-cff2": build_cff2_face,
     "-measured": build_measured,
+    "-numbered": build_note_numbers,
     "-ams": build_ams,
     "-doctoc": build_doc_toc,
 }
@@ -7524,6 +7590,7 @@ def checks(work, built):
     math_paths, math_said = built["-mathfont"]
     cff2_result = built["-cff2"]
     measured_path, measured_said, measured_source = built["-measured"]
+    numbered_path, numbered_source = built["-numbered"]
     ams_path, ams_said = built["-ams"]
     doc_toc_path, doc_toc_said = built["-doctoc"]
 
@@ -8372,6 +8439,7 @@ def checks(work, built):
     items += math_font_checks(math_paths, math_said)
     items += cff2_face_checks(cff2_result)
     items += measured_checks(measured_path, measured_said, measured_source)
+    items += note_numbers_checks(numbered_path, numbered_source)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)
     items += aaa_checks(aaa_path, aaa_said, aaa_latin_path, aaa_latin_said, aaa_lacking_path,
                         aaa_lacking_said)

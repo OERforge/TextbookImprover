@@ -49,9 +49,10 @@
 -- 6. A heading's label and links (below).
 --
 -- 7. A footnote in a definition list's term, which the writer gives as a
---    mark in the term and its text after the list (\footnotemark,
---    \footnotetext), and LaTeX's tagging stops on that pair in a list's
---    label (the number of automatic begin and end text-unit hooks differ,
+--    mark in the term and its text after the list (\footnotemark and
+--    \footnotetext to Pandoc 3.13, \pandocfootnotemark and
+--    \pandocfootnotetext from 3.14), and LaTeX's tagging stops on that
+--    pair in a list's label (the number of automatic begin and end text-unit hooks differ,
 --    LaTeX 2026-06-01). It goes at the head of the term's definition, where
 --    the writer gives it as a footnote, as it does in a paragraph; two or
 --    more go there in a row, a comma between their marks, "1,2".
@@ -363,7 +364,8 @@ end
 --
 -- A footnote in such a table's cell stays a note, between the tabular's
 -- pieces in a div, so the writer gives it as it gives one in the outer
--- table's cells: its mark (\footnotemark) in the cell, its text after
+-- table's cells: its mark (\footnotemark, or from Pandoc 3.14
+-- \pandocfootnotemark) in the cell, its text after
 -- the outer table, with the outer table's own, in their order. Written
 -- with the cell's text, as \footnote, it was a minipage's note in the
 -- outer cell, lettered, where its text took a number another note had.

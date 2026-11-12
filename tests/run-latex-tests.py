@@ -10667,7 +10667,7 @@ CITED_BOOK = r"""\documentclass{book}
 \addbibresource{refs.bib}
 \begin{document}
 \chapter{One}
-As \textcite{k84} says.
+As \textcite{k84} says, and \hyperlink{ref-k84}{its entry} shows.
 \begin{figure}
 \includegraphics{sq.png}
 \caption{A square, as drawn in \parencite[5]{lamport}.}
@@ -10735,6 +10735,12 @@ def case_cited_pdf(work):
          and ("cite.ref-page-book--lamport", "Lamport 1994, 5") in found["links"]),
         ("a caption holding a citation is titled in the list of figures by its words",
          lambda: "A square, as drawn in (Lamport 1994, 5)." in found["entries"]),
+        # The entry's id is made to begin "ref-" for \\bibitem, which makes
+        # no label, so a link to the id it had went nowhere.
+        ("and a link to an entry from outside a citation, a hand \\hyperlink, leads "
+         "to it",
+         lambda: any(contents == "its entry" and dest.startswith("section*")
+                     for dest, contents in found["links"])),
     ]
 
 

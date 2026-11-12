@@ -3487,13 +3487,31 @@ end
 -- paragraphs in the template's CSLReferences list, which stopped LaTeX
 -- ("Something's wrong--perhaps a missing \item"). An entry's id is put
 -- back to begin "ref-", the page's prefix after it (ref-page-book--knuth),
--- and every link to it the same.
+-- and a citation's links to it the same. \bibitem makes no label, so the
+-- entry keeps its own id too, as an anchor at its start, for a link to it
+-- from outside a citation (a \hyperlink in the book's LaTeX), which is
+-- left as it is.
+local function first_text(blocks)
+  for _, block in ipairs(blocks) do
+    if block.t == 'Para' or block.t == 'Plain' then
+      return block
+    elseif block.t == 'Div' then
+      local found = first_text(block.content)
+      if found then return found end
+    end
+  end
+end
+
 local function citation_entries(doc)
   local renamed = {}
   doc.blocks = doc.blocks:walk{ Div = function(div)
     if div.classes:includes('csl-entry') then
       local page, key = div.identifier:match('^(.-%-%-)ref%-(.+)$')
       if page then
+        local text = first_text(div.content)
+        if text then
+          text.content:insert(1, pandoc.Span({}, {id = div.identifier}))
+        end
         renamed[div.identifier] = 'ref-' .. page .. key
         div.identifier = renamed[div.identifier]
         return div
@@ -3501,12 +3519,16 @@ local function citation_entries(doc)
     end
   end }
   if next(renamed) then
-    doc.blocks = doc.blocks:walk{ Link = function(link)
+    local relink = { Link = function(link)
       local id = link.target:match('^#(.+)$')
       if id and renamed[id] then
         link.target = '#' .. renamed[id]
         return link
       end
+    end }
+    doc.blocks = doc.blocks:walk{ Cite = function(cite)
+      cite.content = cite.content:walk(relink)
+      return cite
     end }
   end
   return doc

@@ -4284,7 +4284,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                                          else ", which reaches no file the others don't")
                             + f", {c.get('described', 0)} image(s) and drawing(s) given alt "
                             f"text and {c.get('decorative', 0)} marked artifact"
-                            + babel_said_short(c)
+                            + babel_said_short(c) + babel_main_said_short(c)
                             for name, only, c in others)
                 + (", each made to build with LaTeX's tagging as the book's is"
                    + ("; luatex85 loaded for LuaLaTeX in "
@@ -4438,6 +4438,17 @@ def babel_main_said(counts):
         return (", babel's main language left to \\DocumentMetadata's "
                 f"lang={counts['tag_babel_main_unknown']}, which may not be the book's, "
                 "since babel's options and the class's don't name it (main= would)")
+    return ""
+
+
+def babel_main_said_short(counts):
+    """babel_main_said for a line of the book's other masters, which are
+    given main= as the book is."""
+    if counts.get("tag_babel_main"):
+        return f", babel given main={counts['tag_babel_main']}"
+    if counts.get("tag_babel_main_unknown"):
+        return (", babel's main language left to \\DocumentMetadata's "
+                f"lang={counts['tag_babel_main_unknown']}")
     return ""
 
 

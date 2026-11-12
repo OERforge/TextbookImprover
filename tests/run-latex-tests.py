@@ -3638,7 +3638,8 @@ def case_babel_languages(work):
          "\\foreignlanguage's words, the paragraph they open keeps its own",
          lambda: page_check(os.path.join(older, "pdf", "org.example.babel.pdf"), [
              ("H1", "en"), ("P", "en"), ("P", "en")], older_status, [("fr", "Bonjour")])),
-        ("the book's other master gets them too, and the run counts its own",
+        ("the book's other master gets them too, and the run counts its own, and says it's "
+         "given babel's main= as the book is",
          lambda: masters_status == 0 and answers.count(texremediate.BABEL_BEGIN) == 1
          and "1 of babel's commands for a passage's language (french 1), each passage tagged "
              "in its language as LaTeX reads it, where babel or the table has a tag for it, "
@@ -3646,7 +3647,8 @@ def case_babel_languages(work):
              in masters_said
          and "answers.tex with 1 file(s) only it reaches, 0 image(s) and drawing(s) given "
              "alt text and 0 marked artifact, 3 of babel's commands for a passage's language, "
-             "each passage tagged in its language" in masters_said),
+             "each passage tagged in its language, babel given main=english, each made to "
+             "build with LaTeX's tagging as the book's is" in masters_said),
         ("and that master's copy builds with tagging, a \\foreignlanguage of two paragraphs "
          "tagged in its language, its Span closed before the paragraph", other_built),
         ("a passage babel's otherlanguage or babeltags begin inside a paragraph is a Span to "

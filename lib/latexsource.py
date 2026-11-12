@@ -2393,6 +2393,46 @@ def language_marks(text, counter):
     return substitute(LANGUAGE_PASSAGE_END, text, lambda m: "", counter, "language_passages_end")
 
 
+# babel's other names for a language, which Pandoc's reader doesn't know
+# (babelLangToBCP47 and polyglossiaLangToBCP47, Readers/LaTeX/Lang.hs, read
+# at 3.13), so a passage named by one had no language: each the name it
+# knows for the same language. babel takes language.dat's synonyms for
+# their language (francais is french's), and a name in capitals for its
+# own in lowercase (\bbl@fixname, read in babel.sty 26.13), so French is
+# french (measured with LuaLaTeX, TeX Live 2026: each sets French). The
+# rest are babel's other names for the languages the reader knows, as
+# its language files give them, not tried one by one.
+BABEL_SYNONYMS = {"francais": "french", "frenchb": "french", "patois": "french",
+                  "acadian": "french", "canadien": "french", "germanb": "german",
+                  "ngermanb": "ngerman", "usenglish": "american", "ukenglish": "british",
+                  "hungarian": "magyar", "portuges": "portuguese", "brazil": "portuguese",
+                  "brazilian": "portuguese", "bahasa": "indonesian", "bahasai": "indonesian",
+                  "indon": "indonesian", "bokmal": "norsk",
+                  "persian": "farsi"}
+# A language's name where babel's commands for a passage name it.
+BABEL_NAMED = re.compile(r"(\\foreignlanguage(?![A-Za-z@])\*?\s*(?:\[[^][{}]*\])?\s*\{\s*"
+                         r"|\\begin\s*\{\s*otherlanguage\*?\s*\}\s*(?:\[[^][{}]*\])?\s*\{\s*)"
+                         r"([A-Za-z]+)(?=\s*\})")
+
+
+def babel_names(text, counter):
+    """babel's language names in \\foreignlanguage and otherlanguage that
+    Pandoc's reader doesn't know written as the ones it knows for the same
+    language (BABEL_SYNONYMS), and a name in capitals in lowercase, counted
+    as babel_names."""
+    out, last = [], 0
+    for m in code_matches(BABEL_NAMED, text):
+        name = m.group(2)
+        known = BABEL_SYNONYMS.get(name.lower(), name.lower())
+        if known == name:
+            continue
+        out.append(text[last:m.start(2)] + known)
+        last = m.end(2)
+        counter["babel_names"] = counter.get("babel_names", 0) + 1
+    out.append(text[last:])
+    return "".join(out)
+
+
 # babel's commands for a passage in another language that Pandoc's reader
 # can't read (3.12.1, PANDOC-NOTES): \foreignlanguage with babel's options
 # (\foreignlanguage[date]{ngerman}{...}), or with words that hold a
@@ -4308,6 +4348,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     text = vbox_paragraphs(text, counter, environments, block_macros)
     text = inline_passages(text, counter, tags, environments, places, tag_environments,
                            macros=block_macros, aliases=language_aliases)
+    # After them, which write a passage's command with its name as written.
+    text = babel_names(text, counter)
     text = quotation_marks(text, counter, quotes)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row

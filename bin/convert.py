@@ -1363,6 +1363,9 @@ LATEX_READ_CHANGES = (
      "reader dropped with its words"),
     ("babel_options", "\\foreignlanguage's option(s) ([date]) left out, which stopped the "
      "reader"),
+    ("babel_names", "babel language name(s) in capitals or another of babel's names for the "
+     "language (francais) read as the name Pandoc's reader knows, which gave the passage no "
+     "language"),
     ("babel_environments", "otherlanguage* or babeltags' environment read as "
      "\\foreignlanguage, which the reader gave no language, printing otherlanguage*'s "
      "language's name"),

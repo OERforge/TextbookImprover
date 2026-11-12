@@ -935,6 +935,48 @@ def case_single(work):
     ]
 
 
+def case_babel_names(work):
+    """A passage named by another of babel's names for its language
+    (francais), or by its name in capitals (French), in \\foreignlanguage
+    or otherlanguage, which babel sets in that language and Pandoc's reader
+    gave none, is in it in the book's page, by the name the reader knows;
+    a name the reader knows, or one in a comment, left as written; the run
+    saying how many, and the author's file as it was."""
+    os.makedirs(work)
+    master = ("\\documentclass{article}\n\\usepackage[french,english]{babel}\n"
+              "\\babeltags{fr = francais}\n\\begin{document}\n"
+              "Un \\foreignlanguage{francais}{mot}, un \\foreignlanguage{French}{autre}, "
+              "\\textfr{trois}, and \\foreignlanguage{french}{quatre}.\n\n"
+              "% \\foreignlanguage{Francais}{commented}\n"
+              "\\begin{otherlanguage}{French}\nUne phrase.\n\\end{otherlanguage}\n\n"
+              "\\begin{otherlanguage*}{FRENCH}\nEncore une.\n\\end{otherlanguage*}\n\n"
+              "A \\foreignlanguage{USenglish}{color}.\n\\end{document}\n")
+    with open(os.path.join(work, "noms.tex"), "w", encoding="utf-8") as fh:
+        fh.write(master)
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    page = os.path.join(work, "html", "noms.html")
+    body = re.sub(r"\s+", " ", read(page)[read(page).find("<body"):]) \
+        if os.path.exists(page) else ""
+    said = result.stdout + result.stderr
+    return [
+        ("a passage babel names by another of its names for the language, or in capitals, "
+         "is in that language in the page, in \\foreignlanguage and babeltags' command, "
+         "and in otherlanguage and otherlanguage*",
+         lambda: '<span lang="fr">mot</span>, un <span lang="fr">autre</span>, '
+                 '<span lang="fr">trois</span>, and <span lang="fr">quatre</span>' in body
+         and '<div lang="fr"> <p>Une phrase.</p> </div>' in body
+         and re.search(r'lang="fr"[^>]*>\s*(?:<p>)?Encore une', body) is not None
+         and '<span lang="en-US">color</span>' in body),
+        ("the run says how many it read so, the names the reader knows and a comment's not "
+         "among them, and the author's file is as it was",
+         lambda: "6 babel language name(s) in capitals or another of babel's names for the "
+                 "language (francais) read as the name Pandoc's reader knows" in said
+         and read(work, "noms.tex") == master),
+    ]
+
+
 def case_language(work):
     """A LaTeX book's pages are in the language its preamble gives, babel's
     main language here, in a project in another."""
@@ -10518,6 +10560,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
           case_page_languages),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",
           case_babel_languages),
+         ("babel's other names for a language in a LaTeX book's pages", case_babel_names),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),

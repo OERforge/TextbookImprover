@@ -2803,11 +2803,29 @@ def book_babel_main(pieces):
         latexsource.COMMENT.sub("", found[0].group(1))) if found else [])
 
 
+def _key_spans(inner):
+    """(start, end) of each key of a comma list, commas inside braces kept;
+    inner with its comments blanked (_complete_metadata)."""
+    spans, depth, start = [], 0, 0
+    for i, ch in enumerate(inner):
+        depth += (ch == "{") - (ch == "}")
+        if ch == "," and depth == 0:
+            spans.append((start, i))
+            start = i + 1
+    spans.append((start, len(inner)))
+    return spans
+
+
 def _complete_metadata(text, m, language, claim):
     """(text, where the line after it begins, keys added): the book's own
     \\DocumentMetadata with tagging=on, and its language and the claimed
     standard when it names none, so a copy made for tagging is tagged: one
-    that only sets the PDF's version builds untagged."""
+    that only sets the PDF's version builds untagged. Its keys are read
+    without its comments, which LaTeX skips, a comma in one ending no key,
+    and its lines and comments are kept: tagging's value is made on where
+    it stands, and the keys added go after the last, before any comment on
+    its line, where they had been joined after it, the comment taking them
+    and the closing brace."""
     open_at = m.end()
     while open_at < len(text) and text[open_at].isspace():
         open_at += 1
@@ -2816,25 +2834,38 @@ def _complete_metadata(text, m, language, claim):
     close = latexsource.matching_brace(text, open_at)
     if close < 0:
         return text, None, []
-    parts = [p for p in _split(text[open_at + 1:close - 1]) if p.strip()]
-    names = {p.partition("=")[0].strip(): i for i, p in enumerate(parts)}
-    added = []
+    start = open_at + 1
+    inner = text[start:close - 1]
+    # Each comment made spaces of its length, so the keys are read without
+    # it and each place in masked is the same in inner.
+    masked = latexsource.COMMENT.sub(lambda c: " " * len(c.group()), inner)
+    names = {}
+    for a, b in _key_spans(masked):
+        key = masked[a:b]
+        if key.strip():
+            # The last of two the same, as LaTeX takes it.
+            names[key.partition("=")[0].strip()] = (a + len(key) - len(key.lstrip()),
+                                                    a + len(key.rstrip()))
+    added, retagged = [], None
     if "tagging" not in names:
-        parts.append("tagging=on")
         added.append("tagging=on")
-    elif parts[names["tagging"]].partition("=")[2].strip().strip("{}") != "on":
-        parts[names["tagging"]] = "tagging=on"
-        added.append("tagging=on")
+    elif masked[slice(*names["tagging"])].partition("=")[2].strip().strip("{}") != "on":
+        retagged = names["tagging"]
     if "lang" not in names and language:
-        parts.append("lang=%s" % language)
         added.append("lang=%s" % language)
     if "pdfstandard" not in names:
-        parts.append("pdfstandard=%s" % claim)
         added.append("pdfstandard=%s" % claim)
+    new = inner
     if added:
-        new = "{" + ", ".join(p.strip() for p in parts) + "}"
-        text = text[:open_at] + new + text[close:]
-        close = open_at + len(new)
+        at = len(masked.rstrip())
+        joint = "" if not masked.strip() else " " if masked.rstrip().endswith(",") else ", "
+        new = new[:at] + joint + ", ".join(added) + new[at:]
+    if retagged:
+        new = new[:retagged[0]] + "tagging=on" + new[retagged[1]:]
+        added.insert(0, "tagging=on")
+    if added:
+        text = text[:start] + new + text[close - 1:]
+        close = start + len(new) + 1
     line_end = text.find("\n", close)
     return text, (len(text) if line_end < 0 else line_end + 1), added
 

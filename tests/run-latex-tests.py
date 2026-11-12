@@ -1152,8 +1152,23 @@ def case_babel_main(work):
                                 r"\\TU/\S+ %s\b" % re.escape(wanted[1]), log) is not None),
                             log)
 
+    # A book's own \DocumentMetadata over lines with comments: one holding a
+    # comma, one after tagging=off, and one after the last key.
+    commented = tagged_copy(
+        "\\DocumentMetadata{\n  pdfversion=2.0, % for now, and 2.1 later\n"
+        "  tagging=off, % until it builds\n  lang=de-DE % the book's\n}\n"
+        "\\documentclass{article}\n\\usepackage[ngerman]{babel}\n" + body, "en")
     page = os.path.join(work, "french", "html", "book.html")
     return [
+        ("a book's own \\DocumentMetadata over lines is read without its comments and keeps "
+         "them: a comma in one ends no key, so its lang is the book's and none is added, "
+         "tagging=off is made on where it stands, and the keys it gets go before the comment "
+         "on its last key's line, which took them and its closing brace; and it builds, "
+         "babel's language the one its lang gives, \"Zucker\" hyphenated Zu-cker",
+         lambda: commented.startswith(
+             "\\DocumentMetadata{\n  pdfversion=2.0, % for now, and 2.1 later\n"
+             "  tagging=on, % until it builds\n  lang=de-DE, pdfstandard=ua-2 % the book's\n}\n")
+         and built(commented, ("german-germany", "Zu-cker"), "ngerman")),
         ("a tagged copy of a book in ngerman, given lang=de, names babel's main language "
          "the book's: main=ngerman passed before its class, its babel line as written",
          lambda: "\\DocumentMetadata{lang=de," in german

@@ -3746,6 +3746,22 @@ def case_display_style(work):
     with open(os.path.join(varied, "math-keep.csv"), "w", encoding="utf-8") as fh:
         fh.write("Kind,Page,Before\nequation,styled,\\frac{x\u20131}{2}\n")
     kept_said, kept_on, kept_off, _ = varied_run()
+    # A formula opening with \\displaystyle that texmath can't read, which
+    # the page's writer warns of and writes as its TeX.
+    unread = os.path.join(work, "unread")
+    os.makedirs(unread)
+    with open(os.path.join(unread, "unread.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Unread\n\nA formula, $\\displaystyle \\undefinedthing x$, here.\n")
+    with open(os.path.join(unread, "project.yaml"), "w") as fh:
+        fh.write("project:\n  title: Unread\n  identifier: org.example.unread\n"
+                 "  language: en-US\n  contents:\n    - unread\n")
+    with open(os.path.join(unread, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                          cwd=unread, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    unread_said = done.stdout + done.stderr
+    unread_page = read(unread, "html", "unread.html") \
+        if exists(unread, "html", "unread.html") else ""
     displayed = (r'<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML">'
                  r'<semantics><mstyle displaystyle="true"><mrow><mo>=</mo>'
                  r'<mo>(?:&#x222B;|∫)</mo><mfrac>.*?</mfrac>.*?</mrow></mstyle>'
@@ -3808,6 +3824,10 @@ def case_display_style(work):
          "any formula there is, in the picture's alt text on its page and in an EPUB",
          lambda: alt in areas and alt in areas_chapter and "<mstyle" not in areas
          and "The area \\displaystyle \\int_0^1 x\\,dx" in contents),
+        ("and one texmath can't read is warned of once, by the page's writer, which "
+         "writes its TeX",
+         lambda: unread_said.count("Could not convert TeX math") == 1
+         and re.search(r"\\displaystyle\s+\\undefinedthing\s+x", unread_page) is not None),
     ]
 
 

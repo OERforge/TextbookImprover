@@ -360,7 +360,9 @@ local function display_style(math_)
   if math_.mathtype ~= 'InlineMath' or not math_.text:match(DISPLAYED) then
     return nil
   end
-  local written = pandoc.write(
+  -- Silenced: a formula texmath can't read is warned of by the page's
+  -- writer, which writes it as it would have; warned of here, it was twice.
+  local _, written = pandoc.log.silence(pandoc.write,
     pandoc.Pandoc({ pandoc.Plain({ pandoc.Math('DisplayMath', math_.text) }) }), 'html5',
     { html_math_method = 'mathml', prefer_ascii = PANDOC_WRITER_OPTIONS.prefer_ascii })
   local open, body, annotation = written:match(

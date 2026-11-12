@@ -4,10 +4,15 @@ read: into Pandoc's JSON, the intermediate every target a deck has writes
 from (decks.py), so a PowerPoint deck becomes a page, a PDF, a reveal.js
 presentation, or Markdown as a Markdown deck does.
 
-Pandoc has a PowerPoint reader, which keeps too little to repair around:
-no speaker notes, no inline formatting or links, no lists a placeholder
-inherits, no equations, and nothing in a shape PowerPoint wraps in
-mc:AlternateContent, which every table holding an equation is. This one
+Pandoc has a PowerPoint reader, which before 3.14 kept too little to
+repair around: no speaker notes, no inline formatting or links, no lists
+a placeholder inherits, no equations, and nothing in a shape PowerPoint
+wraps in mc:AlternateContent, which every table holding an equation is.
+3.14's keeps those, but still loses equations and formatting in a
+table's cells and a slide's title, underline, strikethrough, a link's
+ScreenTip, the decorative mark, a table's header flags (its first row is
+the head whatever they say), the bullets a notes master gives, and the
+deck's title, and titles each picture with its shape's name. This one
 reads the deck with the standard library, as pptxparse.py does for the
 checks and the copy, and keeps:
 

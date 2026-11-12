@@ -478,6 +478,8 @@ Text with a note.[^a]
 
 ![A figure whose caption has [a linked word](https://example.org/caption) and [one within](#captions) in it.](assets/red.png)
 
+![A figure whose caption has ![a red square](assets/red.png) in it.](assets/red.png)
+
 [^a]: Note a, in the text.
 [^b]: Note b, in a caption.
 [^c]: Note c, in a long caption.
@@ -8002,6 +8004,16 @@ def checks(work, built):
          "by its text alone",
          lambda: os.path.exists(notes_path)
          and "A figure whose caption has a linked word and one within in it."
+         in [str(e.get("/T")) for e in elements(
+             pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
+             if kind(e) == "/TOCI"]),
+        # The writer's \\pandocbounded is fragile and goes to the list's
+        # file expanded, where LaTeX stopped; the entry's title had kept
+        # the \\includegraphics's options and file as text.
+        ("a picture in a figure's caption is in the list of figures, its entry titled "
+         "by the caption's words and the picture's alt text",
+         lambda: os.path.exists(notes_path)
+         and "A figure whose caption has a red square in it."
          in [str(e.get("/T")) for e in elements(
              pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
              if kind(e) == "/TOCI"]),

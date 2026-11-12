@@ -3578,6 +3578,22 @@ PDF_MACROS = r"""\ExplSyntaxOn
     \socket_if_exist:nT {hyp/link/GoTo/Contents}
       { \socket_assign_plug:nn {hyp/link/GoTo/Contents} {noop} }
   }
+% A picture in a caption, which goes to the list of figures' file with
+% it: Pandoc's writer sets one without a size in \pandocbounded, which
+% its template defines with \newcommand*, and puts \protect before it
+% only in a heading, so the file had the macro expanded and the run that
+% read it for \listoffigures stopped ("Missing control sequence
+% inserted"). It's made robust, and its entry's title, made plain, has
+% the picture's alt text in its place, as the writer's plain text of the
+% caption has the image's description: the alt key of the
+% \includegraphics in it, Pandoc's [keepaspectratio,alt={...}].
+\cs_if_exist:NT \pandocbounded { \MakeRobust \pandocbounded }
+\cs_new:Npn \__oer_purify_bounded:n #1
+  { \__oer_purify_graphic:w #1 [ ] { } \q_stop }
+\cs_new:Npn \__oer_purify_graphic:w #1 [ #2 ] #3 \q_stop
+  { \keyval_parse:nnn { \use_none:n } { \__oer_purify_alt:nn } {#2} }
+\cs_new:Npn \__oer_purify_alt:nn #1#2 { \str_if_eq:nnT {#1} {alt} {#2} }
+\text_declare_purify_equivalent:Nn \pandocbounded { \__oer_purify_bounded:n }
 \NewDocumentCommand \OERArtifactGraphics { }
   { \cs_if_exist:NT \tag_mc_begin:n { \setkeys{Gin}{artifact} } }
 % A picture's alt text, which latex-lab makes its figure's /Alt by making

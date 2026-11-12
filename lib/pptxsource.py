@@ -20,7 +20,10 @@ checks and the copy, and keeps:
 - its shapes in the shape tree's order, which is PowerPoint's reading
   order, a group's pieces in their places and a shape in
   mc:AlternateContent read from its Choice, as PowerPoint shows it; the
-  date, footer, slide number, and header placeholders left out;
+  date, footer, slide number, and header placeholders left out; a Two
+  Content or Comparison slide's shapes as Pandoc's two columns, where
+  the reading order takes the left column's before the right's, none
+  stands across the middle, and neither column is empty;
 - text with its runs' own bold, italic, underline, strikethrough, small
   capitals, superscripts, and subscripts, line breaks, and links, to an
   address (with its ScreenTip as the link's title) and to another slide;
@@ -140,6 +143,14 @@ TRUE = ("1", "true", "on")
 # rules make of the text, which a span leaves as it is.
 MINUS_MARK = "data-oer-minus"
 EQUATION_CLASS = "oer-equation"
+# The layouts whose slides are two columns, as Pandoc writes a deck's
+# columns (Two Content, and Comparison, a heading over each column): a
+# slide on one is read as Pandoc's columns. A shape counts as a column's
+# that ends no more than this share of the slide's width past its middle,
+# or begins no more than it before.
+TWO_COLUMNS = ("twoObj", "twoTxTwoObj")
+COLUMN_SLACK = 0.05
+LAYOUT_TYPE = re.compile(r'<p:sldLayout\b[^>]*?\stype="([^"]*)"')
 
 
 # --------------------------------------------------------------------------
@@ -955,9 +966,48 @@ class Reader:
             if shape.kind in ("sp", "cxnSp"):
                 out.extend(self.text_blocks(slide, shape))
 
+        pieces = []
         for shape in self.ordered(slide):
+            start = len(out)
             visit(shape)
-        return out
+            if len(out) > start:
+                pieces.append((shape, out[start:]))
+        return self.columns(slide, pieces) or out
+
+    def columns(self, slide, pieces):
+        """A Two Content or Comparison slide's content as Pandoc's columns,
+        a columns div of two column divs, each top-level shape in the
+        column it stands in (COLUMN_SLACK), as a deck written in Markdown
+        has them and Pandoc's PowerPoint writer makes such a slide of
+        them; or None where the slide's layout isn't one (TWO_COLUMNS), a
+        shape's place isn't known or it stands across the middle, a column
+        would be empty, or the reading order goes back to the left column
+        after the right, which columns would change. pieces: (shape,
+        blocks) in reading order."""
+        layout = self.text(slide.layout_part) if slide.layout_part else None
+        found = LAYOUT_TYPE.search(layout or "")
+        width = self.deck.width
+        if not found or found.group(1) not in TWO_COLUMNS or not width:
+            return None
+        middle, slack = width / 2, width * COLUMN_SLACK
+        left, right = [], []
+        for shape, blocks in pieces:
+            box = shape.box
+            if box is None:
+                return None
+            if box.x + box.cx <= middle + slack and not right:
+                left.extend(blocks)
+            elif box.x >= middle - slack:
+                right.extend(blocks)
+            else:
+                return None
+        if not left or not right:
+            return None
+        if not self.dry:
+            self.record.counts["columns"] += 1
+        return [{"t": "Div", "c": [attr(classes=["columns"]), [
+            {"t": "Div", "c": [attr(classes=["column"]), left]},
+            {"t": "Div", "c": [attr(classes=["column"]), right]}]]}]
 
     def notes(self, slide):
         """A slide's speaker notes, its notes slide's body as blocks, in a

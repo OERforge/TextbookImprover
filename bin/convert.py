@@ -2455,7 +2455,8 @@ def read_pptx_to_json(base, decks, env, work, paths):
         say(f"# {len(stems)} deck(s) read: {counts['slides']} slide(s), {counts['pictures']} "
             f"picture(s) and {counts['decorative']} marked decorative, {counts['tables']} "
             f"table(s), {counts['equations']} equation(s), {counts['lists']} list(s), "
-            f"{counts['links']} link(s), and speaker notes on {counts['notes']} slide(s)")
+            f"{counts['links']} link(s), {counts['columns']} slide(s) in two columns, and "
+            f"speaker notes on {counts['notes']} slide(s)")
     for line in pptxsource.loss_lines(records):
         say(line)
     return stems

@@ -3854,6 +3854,78 @@ def reader_sidecars(folder, path):
     return blue
 
 
+def case_reader_columns(work):
+    """A Two Content or Comparison slide read as Pandoc's columns, each
+    shape in the column it stands in, in reading order, as a deck written
+    in Markdown has them; not where a shape stands across the middle, where
+    the reading order goes back to the left column after the right, or on
+    another layout, two text boxes side by side on Title and Content."""
+    if not pandoc_ok():
+        return
+    import pptxsource
+    folder = os.path.join(work, "decks")
+    os.makedirs(folder)
+    left, right = (457200, 1600200, 5486400, 4525963), (6248400, 1600200, 5486400, 4525963)
+    head_left, head_right = (457200, 1600200, 5486400, 600000), (6248400, 1600200, 5486400, 600000)
+    low_left, low_right = (457200, 2300000, 5486400, 3800000), (6248400, 2300000, 5486400, 3800000)
+    across = (457200, 1600200, 11277600, 1000000)
+
+    def laid_out(kind, name):
+        return layout_xml().replace('type="obj"', 'type="%s"' % kind).replace(
+            'name="Title and Content"', 'name="%s"' % name)
+
+    def slide(heading, *boxes):
+        return {"shapes": [title(2, heading)] + [
+            textbox(3 + n, "Text %d" % n, [words], box) for n, (words, box) in enumerate(boxes)]}
+    two = deck(os.path.join(folder, "two.pptx"), [
+        slide("Two Sides", ("Left words", left), ("Right words", right)),
+        slide("Back Again", ("First right", right), ("Then left", left)),
+        slide("Across", ("Left words", left), ("Across the slide", across),
+              ("Right words", right))],
+        layout=laid_out("twoObj", "Two Content"))
+    compared = deck(os.path.join(folder, "compared.pptx"), [
+        slide("Compared", ("Before", head_left), ("Old way", low_left), ("After", head_right),
+              ("New way", low_right))], layout=laid_out("twoTxTwoObj", "Comparison"))
+    plain = deck(os.path.join(folder, "plain.pptx"), [
+        slide("Side by Side", ("Left words", left), ("Right words", right))])
+
+    def slides(path):
+        """[(title, its blocks as (kind, classes, texts))] of each slide."""
+        doc, record = pptxsource.read(path, folder, work, api_version=pptxsource.api_version())
+        out = []
+        for block in doc["blocks"]:
+            if block["t"] == "Header":
+                out.append((inline_text(block["c"][2]), []))
+            elif out and block["t"] == "Div":
+                out[-1][1].append(("Div", block["c"][0][1], [
+                    [inline_text(b["c"]) for b in column["c"][1]]
+                    for column in block["c"][1]]))
+            elif out:
+                out[-1][1].append((block["t"], [], inline_text(block["c"])))
+        return out, record
+    two_read, two_record = slides(two)
+    compared_read, _ = slides(compared)
+    plain_read, _ = slides(plain)
+    yield "a Two Content slide is Pandoc's columns, each text box in the column it stands in", \
+        two_read[0] == ("Two Sides", [("Div", ["columns"], [["Left words"], ["Right words"]])]), \
+        two_read
+    yield "and so is a Comparison slide, a heading and its text in each column, in reading order", \
+        compared_read == [("Compared", [("Div", ["columns"], [["Before", "Old way"],
+                                                              ["After", "New way"]])])], \
+        compared_read
+    yield "but not where its reading order goes back to the left column after the right, " \
+        "nor where a shape stands across the middle: those are read in order", \
+        two_read[1] == ("Back Again", [("Para", [], "First right"), ("Para", [], "Then left")]) \
+        and two_read[2] == ("Across", [("Para", [], "Left words"),
+                                       ("Para", [], "Across the slide"),
+                                       ("Para", [], "Right words")]), two_read
+    yield "nor on another layout, two text boxes side by side on Title and Content", \
+        plain_read == [("Side by Side", [("Para", [], "Left words"), ("Para", [], "Right words")])], \
+        plain_read
+    yield "and the slides in columns are counted", two_record.counts["columns"] == 1, \
+        two_record.counts
+
+
 def case_reader(work):
     """A PowerPoint deck read into the intermediate a deck written in
     Markdown has, as pptxsource.read() reads it, its equations through
@@ -5899,6 +5971,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("folders, archives, and tools", case_folders),
          ("no Pandoc", case_no_pandoc),
          ("a deck read for converting", case_reader),
+         ("a Two Content or Comparison slide read as columns", case_reader_columns),
          ("convert.py converting decks", case_converting),
          ("convert.py converting decks, their math report", case_converting_math),
          ("a display paragraph of two equations", case_display_paragraph),

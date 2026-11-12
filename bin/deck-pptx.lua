@@ -48,10 +48,11 @@
 --    PDF do, and no other. A caption that repeats the alt text, a formula
 --    in it as its text, as in the alt text, is recorded, for
 --    pptxtarget.py to mark decorative, as the page hides one from a
---    screen reader (aria-hidden); but not one with a note, whose mark the
---    writer writes in it, a link to the notes' slide, which the mark
---    would hide with the words, as a text box is marked whole: it's shown
---    and read, its words twice, as the page hides its words alone.
+--    screen reader (aria-hidden); but not one with a link of the author's
+--    or a note, whose mark the writer writes in it, a link to the notes'
+--    slide, which the mark would hide with the words, as a text box is
+--    marked whole: it's shown and read, its words twice, as the page shows
+--    one with a link whole and hides a note's words alone.
 -- 6. An image in a line of text, a list, or a table is written as its alt
 --    text: each is counted.
 -- 7. A table's header column isn't written: each table's first cell
@@ -191,20 +192,23 @@ local function is_shape(block)
   return block.t == 'Table' or is_picture(block)
 end
 
--- Whether a caption holds a note, which stringify leaves out of its text
--- and the writer writes in it as its mark, a link to the notes' slide.
-local function noted(inlines)
+-- Whether a caption holds a link: one of the author's, or a note, which
+-- stringify leaves out of its text and the writer writes in it as its
+-- mark, a link to the notes' slide.
+local function linked(inlines)
   local found = false
-  pandoc.Inlines(inlines):walk({ Note = function() found = true end })
+  local function seen() found = true end
+  pandoc.Inlines(inlines):walk({ Note = seen, Link = seen })
   return found
 end
 
 -- Whether a picture's caption repeats its alt text, for the caption to be
 -- marked decorative: its text, each formula as its text, the alt text,
--- and no note in it, whose mark the decorative mark would hide too.
+-- and no link in it, the author's or a note's mark (linked), which the
+-- decorative mark would hide too.
 local function repeats_alt(caption, alt)
   local own = squeezed(stringify(mathtext.texted(caption)))
-  return own ~= '' and own == alt and not noted(caption)
+  return own ~= '' and own == alt and not linked(caption)
 end
 
 -- An image the writer makes a picture of: titled to be found, its alt text

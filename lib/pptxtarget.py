@@ -22,8 +22,9 @@ writer's output:
   decorative mark and no description, in place of the title and file path
   the writer gives every picture (makePicElements); a caption that repeats
   its picture's alt text, as the deck's page hides one from a screen
-  reader, has the decorative mark too, but one with a note's mark in it,
-  which the mark would hide with the words (deck-pptx.lua);
+  reader, has the decorative mark too, but one with a link of the
+  author's or a note's mark in it, which the mark would hide with the
+  words (deck-pptx.lua);
 - each shape's id is its own on its slide, where the writer gives every
   picture 0, every caption 1, which the slide's shape tree has, and every
   table 6;

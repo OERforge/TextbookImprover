@@ -1330,6 +1330,53 @@ def case_noted_caption(work):
     ]
 
 
+def case_linked_caption(work):
+    """A figure's caption with a link of the author's in a deck's
+    PowerPoint file: not marked decorative where its words repeat the alt
+    text, since the mark would hide the link with them, and shown and read,
+    as the page shows it, a figure of two pictures' caption with one too;
+    one with no link is marked decorative, as before; and a figure of two
+    pictures' last picture's own caption with a link kept before the
+    figure's, where it gave way to it, its link lost."""
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; a PowerPoint caption with a link isn't checked")
+        return []
+    work = folder(work, PPTX, decks_given={"linked.md": LINKED})
+    result = convert(work, "--quick")
+    path = os.path.join(work, "slides", "linked.pptx")
+    deck = pptx_deck(path) if os.path.exists(path) else None
+
+    def caption(title):
+        """(text, marked decorative, links as (words, target)) of the
+        slide's caption, and its pictures' descriptions."""
+        slide = slide_titled(deck, title) if deck else None
+        if slide is None:
+            return None
+        return ([(s.text, s.decorative, [(link.text, link.target) for link in s.links])
+                 for s in slide.shapes if s.kind == "sp" and not s.is_title],
+                [s.descr for s in slide.shapes if s.kind == "pic"])
+    return [
+        ("the deck is converted", lambda: result.returncode == 0 and deck is not None),
+        ("a caption with a link whose words repeat the alt text is shown and read, its link "
+         "with it, not marked decorative",
+         lambda: caption("Linked Picture") == (
+             [("A rising line, from the source", False,
+               [("the source", "https://example.org/data")])],
+             ["A rising line, from the source"])),
+        ("and a figure of two pictures' caption with one too",
+         lambda: caption("Linked Pair (2)") == (
+             [("A square", False, [("square", "https://example.org/square")])], ["A square"])),
+        ("and one with no link is marked decorative, as before",
+         lambda: caption("Plain Picture") == ([("A rising line", True, [])], ["A rising line"])),
+        ("a figure of two pictures' last picture's own caption with a link is kept before the "
+         "figure's, its link with it",
+         lambda: caption("Owned Pair (2)") == (
+             [("A square\nTwo shapes", False, [("square", "https://example.org/own")])],
+             ["A square"])),
+    ]
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -3200,6 +3247,46 @@ Two shapes
 :::
 
 [^own]: Its own.
+"""
+
+# A deck of captions with links of the author's, for case_linked_caption:
+# the slides of NOTED, each note a link.
+LINKED = """\
+---
+title: Linked
+---
+
+# Linked Picture
+
+![A rising line, from [the source](https://example.org/data)](img/chart.png)
+
+# Plain Picture
+
+![A rising line](img/chart.png)
+
+# Linked Pair
+
+::: {.figure}
+![A circle](img/chart.png)
+
+![A square](img/chart.png)
+
+::: caption
+A [square](https://example.org/square)
+:::
+:::
+
+# Owned Pair
+
+::: {.figure}
+![A circle](img/chart.png)
+
+![A [square](https://example.org/own)](img/chart.png)
+
+::: caption
+Two shapes
+:::
+:::
 """
 
 # What Pandoc's PowerPoint writer does with a deck, as deck-pptx.lua and
@@ -5314,6 +5401,7 @@ CASES = [("the pieces", case_pieces),
          ("a deck's title with a formula", case_title_formula),
          ("a formula in a picture's alt text", case_alt_formula),
          ("a PowerPoint caption with a note", case_noted_caption),
+         ("a PowerPoint caption with a link", case_linked_caption),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),

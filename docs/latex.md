@@ -215,7 +215,7 @@ On GIAM, the run with an HTML target and this one takes about nine minutes. The 
 In the pages, the EPUB, and a PDF built from the pages:
 
 - **Index entries.** `\index` is dropped; the pages have no index.
-- **A bibliography in the book's own style, without BibTeX** or a `.bbl` a build of the book left, and **under biblatex**: Pandoc's citeproc makes the citations and the bibliography, in its own style (author and date), and a full citation is in BibTeX's plain style, all its authors named where biblatex's `maxnames` shortens the list with "et al."
+- **A bibliography in the book's own style, without BibTeX** or a `.bbl` a build of the book left, and **under biblatex**: Pandoc's citeproc makes the citations and the bibliography, in its own style (author and date), and a full citation is in BibTeX's plain style, all its authors named where biblatex's `maxnames` shortens the list with "et al." In the PDF from the pages (`pdf.from: pages`) and the `latex` target, each citation links to its entry in the bibliography, as on the pages.
 - **Macros defined in a package file beside the book.** The copy holds the `.tex` files the master reaches and no `.sty`, since Pandoc reading a drawing package's definitions (DraTex's) stopped it; a macro the book's own package defines is unknown to the reader, and its text is skipped.
 - **Manual formatting**, `\vspace` and `\newpage`, is dropped, and a tall rule drawn in a formula is left as TeX until the definitions file says what it means.
 

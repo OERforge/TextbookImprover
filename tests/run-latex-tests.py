@@ -10406,6 +10406,83 @@ Words.
 }
 
 
+CITED_BOOK = r"""\documentclass{book}
+\usepackage[style=authoryear]{biblatex}
+\usepackage{graphicx}
+\addbibresource{refs.bib}
+\begin{document}
+\chapter{One}
+As \textcite{k84} says.
+\begin{figure}
+\includegraphics{sq.png}
+\caption{A square, as drawn in \parencite[5]{lamport}.}
+\end{figure}
+\printbibliography
+\end{document}
+"""
+
+
+def case_cited_pdf(work):
+    """A biblatex book's PDF from its pages, with a list of figures: the
+    bibliography Pandoc's citeproc makes is a list of entries, each
+    citation a link to its entry, and a figure's caption holding one is
+    titled in the list by its words. The book's assembly gives every id
+    its page's prefix, so the writer, which makes an entry and a
+    citation's link only of an id beginning "ref-", wrote the entries as
+    bare paragraphs in the list, and LaTeX stopped."""
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    if why:
+        return [("a biblatex book's PDF from its pages is built", lambda: skip(why))]
+    book = os.path.join(work, "cited")
+    os.makedirs(os.path.join(book, "cfg"))
+    png(os.path.join(book, "sq.png"), (128, 128, 128))
+    for name, text in (("book.tex", CITED_BOOK), ("refs.bib", NAT_BIB),
+                       ("image-alt.csv", "Image,Alt\nsq.png,A gray square\n"),
+                       (os.path.join("cfg", "meta.md"), "---\nlof: true\n---\n"),
+                       ("project.yaml", "project:\n  title: Cited\n  identifier: "
+                        "org.example.cited\n  language: en-US\n"),
+                       ("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
+                        "      from: pages\n      metadata: cfg/meta.md\n")):
+        with open(os.path.join(book, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    convert(book)
+    path = os.path.join(book, "pdf", "org.example.cited.pdf")
+    found = {"entries": [], "links": [], "text": ""}
+    if os.path.exists(path):
+        import pikepdf
+        with pikepdf.open(path) as pdf:
+            def walk(element):
+                if isinstance(element, pikepdf.Array):
+                    for kid in element:
+                        walk(kid)
+                elif isinstance(element, pikepdf.Dictionary) and "/S" in element:
+                    if str(element.S) == "/TOCI":
+                        found["entries"].append(str(element.get("/T", "")))
+                    if element.get("/K") is not None:
+                        walk(element.K)
+            walk(pdf.Root.StructTreeRoot.K)
+            for page in pdf.pages:
+                for annot in page.get("/Annots", []):
+                    action = annot.get("/A", {})
+                    found["links"].append((str(action.get("/D", "")),
+                                           str(annot.get("/Contents", ""))))
+        if shutil.which("pdftotext"):
+            found["text"] = " ".join(subprocess.run(
+                ["pdftotext", path, "-"], capture_output=True, text=True).stdout.split())
+    return [
+        ("a biblatex book's PDF from its pages is built, its bibliography the entries "
+         "Pandoc's citeproc makes",
+         lambda: os.path.exists(path)
+         and ("Knuth, Donald E. 1984. The TeXbook. AW. Lamport, Leslie. 1994." in found["text"]
+              if shutil.which("pdftotext") else True)),
+        ("each citation links to its entry, described by its words",
+         lambda: ("cite.ref-page-book--k84", "1984") in found["links"]
+         and ("cite.ref-page-book--lamport", "Lamport 1994, 5") in found["links"]),
+        ("a caption holding a citation is titled in the list of figures by its words",
+         lambda: "A square, as drawn in (Lamport 1994, 5)." in found["entries"]),
+    ]
+
+
 def case_floats(work):
     """Floats, classes, and titles: a \\captionof in a paragraph after its
     headings, subtables, a \\caption* table with no table, two figures in
@@ -10589,6 +10666,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a book in parts, numbered as LaTeX numbers it", case_parts),
          ("a bibliography placed by its type", case_bibliography_place),
          ("a book's citations and its bibliography", case_bibliography),
+         ("a biblatex book's PDF from its pages, with a list of figures", case_cited_pdf),
          ("floats, classes, and titles as LaTeX has them", case_floats),
          ("a book set with packages tagging can't take", case_unsupported),
          ("no contents page", case_no_contents)]

@@ -3477,7 +3477,41 @@ local function counted(doc)
   return doc
 end
 
+-- A bibliography Pandoc's citeproc made (a LaTeX book's citations, with
+-- biblatex): the writer makes an entry a list item (\bibitem) only where
+-- its id begins "ref-", and a citation's link \citeproc, a \cite of it,
+-- only where its target does. The book's assembly gives every id its
+-- page's prefix (page-book--ref-knuth), so the entries were bare
+-- paragraphs in the template's CSLReferences list, which stopped LaTeX
+-- ("Something's wrong--perhaps a missing \item"). An entry's id is put
+-- back to begin "ref-", the page's prefix after it (ref-page-book--knuth),
+-- and every link to it the same.
+local function citation_entries(doc)
+  local renamed = {}
+  doc.blocks = doc.blocks:walk{ Div = function(div)
+    if div.classes:includes('csl-entry') then
+      local page, key = div.identifier:match('^(.-%-%-)ref%-(.+)$')
+      if page then
+        renamed[div.identifier] = 'ref-' .. page .. key
+        div.identifier = renamed[div.identifier]
+        return div
+      end
+    end
+  end }
+  if next(renamed) then
+    doc.blocks = doc.blocks:walk{ Link = function(link)
+      local id = link.target:match('^#(.+)$')
+      if id and renamed[id] then
+        link.target = '#' .. renamed[id]
+        return link
+      end
+    end }
+  end
+  return doc
+end
+
 return {
+  { Pandoc = citation_entries },
   { BulletList = headings_inside, OrderedList = headings_inside,
     DefinitionList = headings_inside, BlockQuote = headings_inside,
     Table = headings_inside, Figure = headings_inside, Note = headings_in_note },

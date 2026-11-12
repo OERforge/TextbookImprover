@@ -33,6 +33,9 @@
 -- those two: a page's note in a link was an anchor in an anchor. And two
 -- notes in a row get a comma between their marks, "1,2", not "12".
 --
+-- A code block on a page or in an EPUB takes keyboard focus, so it can be
+-- scrolled by the keys when it scrolls.
+--
 -- Copyright 2026 Robert Szarka
 --
 -- This program is free software: you can redistribute it and/or modify
@@ -525,6 +528,20 @@ local function hidden_caption(fig)
   return fig
 end
 
+-- A code block on a page and in an EPUB takes keyboard focus, so that one
+-- that scrolls, with a line too long for the page or one no space breaks,
+-- scrolls by the keys too (WCAG 2.1.1). Pandoc's stylesheets let a code
+-- block scroll, and the writer puts the attribute on the element that
+-- does: the div around highlighted code, or plain code's pre. Which scroll
+-- depends on the window, so every code block takes focus. A presentation's
+-- code is given it by oer-reveal.js, only where it scrolls.
+local function focusable_code(block)
+  if not (FORMAT:match('html') or FORMAT:match('epub')) then return nil end
+  if block.attributes.tabindex then return nil end
+  block.attributes.tabindex = '0'
+  return block
+end
+
 -- A source's own colors given what dark mode needs on a page and in an
 -- EPUB, whose stylesheets follow the reader's dark mode (own-colors.lua):
 -- a text color of its own a partner for it, a background of its own the
@@ -753,6 +770,7 @@ return {
   separate_notes,
   { Pandoc = display_styles },
   { Pandoc = own_colors },
+  { CodeBlock = focusable_code },
   { Pandoc = title_heading },
   { Meta = drop_title_block },
 }

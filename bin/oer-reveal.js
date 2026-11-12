@@ -38,6 +38,13 @@
  *    go from slide to slide. A slide's page starts at its top, and scrolls
  *    to a step or a link's place as it takes focus; the overview, which
  *    has no page view, is closed.
+ * 5. A code block that scrolls, as reveal.js's theme lets one taller than
+ *    400 pixels do, or one with a line too long for the slide, takes
+ *    keyboard focus, and while it has it the keys of a page's reading
+ *    scroll it, the left and right keys too where it scrolls sideways
+ *    (WCAG 2.1.1). Which scroll is known only once a slide is laid out:
+ *    each is found as the slides are fitted and the page view chosen, and
+ *    again as a slide is shown and as the window changes size.
  *
  * Copyright 2026 Robert Szarka
  *
@@ -123,14 +130,49 @@
     slide.classList.add('oer-scrolled');
   }
 
-  function fitAll() {
-    var height = deck.getConfig().height;
+  // A code block that scrolls takes focus (5); one that no longer does,
+  // in another window, gives back what it was given.
+  var CODE = 'pre, pre > code, div.sourceCode';
+  var SCROLLS = { auto: true, scroll: true };
+
+  function scrolls(element) {
+    var style = window.getComputedStyle(element);
+    return (SCROLLS[style.overflowY] === true && element.scrollHeight > element.clientHeight + 1)
+      || (SCROLLS[style.overflowX] === true && element.scrollWidth > element.clientWidth + 1);
+  }
+
+  function scrollers(slide) {
+    Array.prototype.forEach.call(slide.querySelectorAll(CODE), function (element) {
+      var given = element.hasAttribute('data-oer-scroller');
+      if (scrolls(element)) {
+        if (!given && !element.hasAttribute('tabindex')) {
+          element.setAttribute('tabindex', '0');
+          element.setAttribute('data-oer-scroller', '');
+        }
+      } else if (given) {
+        element.removeAttribute('tabindex');
+        element.removeAttribute('data-oer-scroller');
+      }
+    });
+  }
+
+  // Each slide shown for a moment, as reveal.js shows none but the
+  // current one and a slide it isn't showing is display: none, with no
+  // size to measure.
+  function measured(work) {
     deck.getSlides().forEach(function (slide) {
-      // A slide reveal.js isn't showing is display: none, and has no height.
       var shown = slide.style.display;
       slide.style.display = 'block';
-      fit(slide, height);
+      work(slide);
       slide.style.display = shown;
+    });
+  }
+
+  function fitAll() {
+    var height = deck.getConfig().height;
+    measured(function (slide) {
+      fit(slide, height);
+      scrollers(slide);
     });
     deck.layout();
   }
@@ -173,10 +215,21 @@
   // scrolls, where reveal.js would take them for going from slide to
   // slide; the left and right keys still do that.
   var PAGE_KEYS = { 32: true, 33: true, 34: true, 35: true, 36: true, 38: true, 40: true };
+  var SIDE_KEYS = { 37: true, 39: true };
+
+  // A code block that scrolls and has focus takes the page's keys, and
+  // the left and right keys where it scrolls sideways (5).
+  function inScroller(event) {
+    var element = document.activeElement;
+    if (!element || !element.hasAttribute('data-oer-scroller')) { return false; }
+    return PAGE_KEYS[event.keyCode] === true
+      || (SIDE_KEYS[event.keyCode] === true && element.scrollWidth > element.clientWidth + 1);
+  }
 
   function scrolling(event) {
-    return PAGE_KEYS[event.keyCode] === true && !deck.isOverview()
-      && (paged() || deck.getCurrentSlide().classList.contains('oer-scrolled'));
+    if (deck.isOverview()) { return false; }
+    return inScroller(event) || (PAGE_KEYS[event.keyCode] === true
+      && (paged() || deck.getCurrentSlide().classList.contains('oer-scrolled')));
   }
 
   function start() {
@@ -191,6 +244,7 @@
     if (progress) { progress.setAttribute('aria-hidden', 'true'); }
     deck.configure({ keyboardCondition: function (event) { return !scrolling(event); } });
     deck.on('slidechanged', function (event) {
+      scrollers(event.currentSlide);
       if (paged()) { window.scrollTo(0, 0); }
       if (!deck.isOverview()) { focus(title(event.currentSlide) || event.currentSlide, false); }
     });
@@ -199,7 +253,11 @@
     loaded().then(function () {
       fitAll();
       pageView();
-      window.addEventListener('resize', pageView);
+      measured(scrollers);
+      window.addEventListener('resize', function () {
+        pageView();
+        scrollers(deck.getCurrentSlide());
+      });
     });
   }
 

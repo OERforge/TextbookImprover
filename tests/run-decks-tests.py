@@ -4737,7 +4737,8 @@ targets:
 # slide two levels down, a block with no title, a footnote, a link to a
 # slide, a formula, notes, a slide in steps, a picture the deck has load
 # lazily, a slide too tall for its frame, with a footnote far from its
-# mark, and one too tall even at a quarter of its size.
+# mark, one too tall even at a quarter of its size, and a slide of code,
+# a short block and one taller than reveal.js's theme lets code be.
 PRESENTED = """---
 title: Presented
 author: A. Lecturer
@@ -4784,6 +4785,15 @@ Later.
 ![A big square](img/big.png)
 
 """ + "".join(f"Paragraph {n} under the picture, with words.\n\n" for n in range(1, 4)) + """
+## Some Code
+
+```
+short = 1
+```
+
+```
+""" + "".join(f"line_{n} = {n}\n" for n in range(1, 41)) + """```
+
 # Part Two
 
 ## A Bit Long
@@ -5004,6 +5014,27 @@ PLACE = """() => { const a = document.activeElement;
           getComputedStyle(a).outlineStyle, Reveal.getCurrentSlide().id]; }"""
 
 
+CODE_STATE = """() => Array.from(Reveal.getCurrentSlide().querySelectorAll('pre > code')).map(c =>
+  [c.textContent.split('\\n')[0], c.getAttribute('tabindex'), c.hasAttribute('data-oer-scroller'),
+   c.scrollHeight > c.clientHeight])"""
+
+
+def code_steps(page):
+    """Opened at Some Code: which of its code blocks take focus, then the
+    tall one focused and scrolled down with the keys, which stay on its
+    slide, and left, which it doesn't scroll sideways, to the slide
+    before."""
+    found = {"blocks": page.evaluate(CODE_STATE)}
+    page.focus("#some-code pre > code[data-oer-scroller]")
+    for name, key in (("down", "ArrowDown"), ("end", "End"), ("left", "ArrowLeft")):
+        page.keyboard.press(key)
+        page.wait_for_timeout(300)
+        found[name] = page.evaluate(
+            "() => [Reveal.getCurrentSlide().id, document.querySelector("
+            "'#some-code pre > code[data-oer-scroller]').scrollTop]")
+    return found
+
+
 def link_steps(page):
     """Opened at the Opening slide: its footnote's mark followed from the
     keyboard, the note's way back, and the link to the Steps slide."""
@@ -5132,6 +5163,7 @@ def case_revealjs(work):
     browsed = in_browser(path, presentation_steps) if tried else {}
     linked = in_browser(path + "#/opening", link_steps) if tried else {}
     scrolled = in_browser(path + "#/a-long-list", scroll_steps) if tried else {}
+    coded = in_browser(path + "#/some-code", code_steps) if tried else {}
     narrow = in_browser(path + "#/a-long-list", narrow_steps, 900, 506) if tried else {}
     noted = in_browser(path + "#/a-long-list", note_steps, 900, 506) if tried else {}
     topped = in_browser(os.path.join(out, "no-title.html#/long-first"), top_steps, 900, 506) \
@@ -5162,8 +5194,8 @@ def case_revealjs(work):
          "block with no title no heading",
          lambda: headings(page) == [
              (1, "Presented"), (2, "Agenda"), (2, "Part One"), (3, "Opening"), (4, "A Block"),
-             (3, "Steps"), (3, "A Picture"), (3, "A Big Picture"), (2, "Part Two"),
-             (3, "A Bit Long"), (3, "A Long List"), (3, "Too Long")]
+             (3, "Steps"), (3, "A Picture"), (3, "A Big Picture"), (3, "Some Code"),
+             (2, "Part Two"), (3, "A Bit Long"), (3, "A Long List"), (3, "Too Long")]
          and "oer-level" not in page and "Untitled block text." in page),
         ("a section's slides in one row with the rest, and reveal.js's own scroll view off",
          lambda: not re.search(r"<section>\s*<section", page)
@@ -5229,6 +5261,14 @@ def case_revealjs(work):
          == ["too-long", "too-long", "too-long", "too-long", "a-long-list"]
          and scrolled["down"][1] > 0 and scrolled["overview"][2] is True
          and scrolled["space"][2] is False),
+        ("code that scrolls takes keyboard focus, code that doesn't not, and focused, the up "
+         "and down keys and end scroll it on its slide, and the left key, which it can't scroll "
+         "sideways, goes to the slide before (WCAG 2.1.1)",
+         lambda: coded.get("blocks") == [["short = 1", None, False, False],
+                                         ["line_1 = 1", "0", True, True]]
+         and coded["down"][0] == "some-code" and coded["down"][1] > 0
+         and coded["end"][0] == "some-code" and coded["end"][1] > coded["down"][1]
+         and coded["left"][0] == "a-big-picture"),
         ("a fitted slide shown first is centered on its fitted height, though its fonts come "
          "after the page has loaded",
          lambda: isinstance(centered, list) and centered[0] == f"{(720 - centered[1]) / 2}px"),

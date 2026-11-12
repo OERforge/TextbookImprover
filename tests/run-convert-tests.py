@@ -2159,10 +2159,10 @@ def case_markdown_raw_code(work):
          and "&lt;td&gt;&lt;code&gt;&quot;block&quot;&lt;/code&gt;&lt;/td&gt;" in page),
         ("a raw <pre> is a code block, its lines and spaces as written, in a raw table's "
          "cell too, and one named in capitals",
-         lambda: "<pre><code>line one\n  &quot;two&quot; -- x</code></pre>" in page
+         lambda: '<pre tabindex="0"><code>line one\n  &quot;two&quot; -- x</code></pre>' in page
          and "    line one\n      \"two\" -- x" in markdown
-         and "<td><pre><code>cell &quot;pre&quot;\n  two</code></pre></td>" in page
-         and "<pre><code>upper &quot;pre&quot;</code></pre>" in page),
+         and '<td><pre tabindex="0"><code>cell &quot;pre&quot;\n  two</code></pre></td>' in page
+         and '<pre tabindex="0"><code>upper &quot;pre&quot;</code></pre>' in page),
         ("raw code over two lines is taken as written, its line break a space, on the page "
          "and in the Markdown target",
          lambda: '<code>first "q" second</code>' in page
@@ -6631,10 +6631,14 @@ def case_highlighting(work):
     """Highlighted code in bin/highlighting.theme's colors in a page, an
     EPUB, and a Word file (lib/highlighting.py), and page.css's color for
     each token after Pandoc's, clearing 4.5:1 on the backgrounds the
-    page's and the EPUB's own stylesheets give, light and dark."""
+    page's and the EPUB's own stylesheets give, light and dark. And each
+    code block, highlighted and plain, taking keyboard focus on the page
+    and in the EPUB, so one that scrolls scrolls by the keys too
+    (target-blocks.lua)."""
     os.makedirs(work)
     with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
-        fh.write("# Code\n\n```{.python .numberLines}\ntotal = 0  # a running sum\n```\n")
+        fh.write("# Code\n\n```{.python .numberLines}\ntotal = 0  # a running sum\n```\n\n"
+                 "```\nplain text\n```\n")
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Code\n  identifier: org.example.code\n  language: en-US\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
@@ -6704,6 +6708,11 @@ def case_highlighting(work):
              for page_bg, dark_bg in (backgrounds(page), backgrounds(sheet)))),
         ("a Word file's token styles are in the theme's colors",
          lambda: word_color("CommentTok") == comment and word_color("DecValTok") == number),
+        ("each code block takes keyboard focus on the page and in the EPUB, on the element "
+         "that scrolls: the div around highlighted code, plain code's pre (WCAG 2.1.1)",
+         lambda: all(re.search(r'<div class="sourceCode" id="cb1" tabindex="0">\s*<pre', text)
+                     and '<pre tabindex="0"><code>plain text</code></pre>' in text
+                     for text in (page, chapter))),
     ]
 
 

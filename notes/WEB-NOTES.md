@@ -80,6 +80,8 @@ default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src
 
 **reveal.js's right arrow goes past the slides of a vertical stack.** Pandoc's writer wraps a section's slides in a stack (PANDOC-NOTES, The HTML writer), and the right arrow went past them (reveal.js 6.0.2, 2026-10-12). `revealtarget.py`'s `flatten` takes the writer's stacks apart, so a section's slides are in one row.
 
+**reveal.js's theme lets a slide's code scroll, and nothing makes it focusable.** `white.css` sets `.reveal pre code` to `max-height: 400px; overflow: auto` and its `pre` to break words where `code` doesn't (`word-wrap: normal`), so a program of more than about 14 lines (the theme's 0.55em of 42 pixels, lines 1.2 apart), or a line too long for the slide, scrolls inside its slide (reveal.js 6.0.2, read 2026-11-12). axe-core 4.14.0's `scrollable-region-focusable` (WCAG 2.1.1) found two such blocks in a course's eight decks (BADM 338), a program of 17 lines and a line of 77 characters no space breaks, measured 2026-11-12. Which scroll is known only once a slide is laid out, so `oer-reveal.js` gives focus to those that do as the slides are fitted and as one is shown; on a page and in an EPUB, which have no script, every code block takes focus (`target-blocks.lua`), Pandoc's stylesheets letting a plain `pre` and highlighted code's `div.sourceCode` scroll.
+
 **reveal.js fades its back arrow to three tenths of its strength**, about 1.6:1 against white, too faint for a control (WCAG 1.4.11; reveal.js 6.0.2, 2026-10-12). `revealtarget.py` sets `controlsBackArrows` so the arrow back is as plain as the arrow on.
 
 ### Fades and reduced motion

@@ -863,22 +863,30 @@ Another, its hyphens in a brace group and a backslash in it,
 to a place a book's LaTeX names, ``\hyperlink{pre--and-post}{to it}``{=latex}, at
 ``\hypertarget{pre--and-post}{the place}``{=latex}.
 
+![A red square, its caption holding [a linked word](https://example.org/figure).](assets/red.png)
+
+![The same red square, after it.](assets/red.png)
+
 [^1]: The note, with [a link in it](https://example.org/note).
 """
 
 
 def build_ua1(work):
     """A one-chapter book claiming PDF/UA-1, its math as Office writes it,
-    which is the default: (the PDF's path, what the run said, the output
-    check's rows)."""
-    os.makedirs(work)
+    which is the default, with a list of figures: (the PDF's path, what
+    the run said, the output check's rows)."""
+    os.makedirs(os.path.join(work, "assets"))
+    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
     with open(os.path.join(work, "old.md"), "w", encoding="utf-8") as fh:
         fh.write(UA1_PAGE)
+    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nlof: true\n---\n")
     with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Old Standard\n  identifier: org.example.ua1\n"
-                 "  language: en-US\n")
+                 "  language: en-US\n  contents:\n    - old\n")
     with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n")
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n"
+                 "      metadata: meta.md\n")
     converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     report = os.path.join(work, "output-check.csv")
@@ -7813,6 +7821,18 @@ def checks(work, built):
          lambda: os.path.exists(ua1_path) and [
              contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
              if contents and "pre-" in contents] == ["Go to destination pre--and-post"]),
+        # The caption's link sets its own description for the links LaTeX
+        # makes after it, the next entry's line in the list of figures among
+        # them, unless \\OERLinkContentsReset clears it for the document.
+        ("its list of figures' lines, one for a caption holding a link and the next, are "
+         "described by hyperref's text, the link in the entry and the caption each by its "
+         "own words",
+         lambda: os.path.exists(ua1_path) and [
+             contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
+             if contents and contents.startswith("Go to destination figure")] == [
+             "Go to destination figure.0.1", "Go to destination figure.0.2"] and [
+             contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
+             if uri.endswith("/figure")] == ["a linked word"] * 2),
         # A one-page book whose heading is its title: no title page, and the
         # heading is its first, at level 1 (title_page: auto).
         ("a one-page book has no title page, and its title is its level-1 heading",

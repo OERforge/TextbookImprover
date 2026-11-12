@@ -624,6 +624,27 @@ class Entry(tuple):
         return self
 
 
+class _TooDeep(str):
+    """A group nested more than three levels deep, said once for all of
+    them when the walk ends (_say_too_deep): a book with a group of
+    exercises in each chapter's sections has one per chapter."""
+
+
+def _say_too_deep(problems):
+    deep = [p for p in problems if isinstance(p, _TooDeep)]
+    if not deep:
+        return
+    problems[:] = [p for p in problems if not isinstance(p, _TooDeep)]
+    titles = list(dict.fromkeys(str(t) for t in deep))
+    named = ", ".join(f"'{t}'" for t in titles[:3]) + (
+        f", and {len(titles) - 3} more" if len(titles) > 3 else "")
+    problems.append(
+        f"group {named} nests more than three levels deep; some LMSs "
+        "flatten this" if len(deep) == 1 else
+        f"{len(deep)} groups nest more than three levels deep ({named}); "
+        "some LMSs flatten this")
+
+
 def walk_contents(nodes, available, used, problems, depth=0,
                   suffix=".html", inherited=None):
     """Normalize the configured tree into (kind, ...) records.
@@ -673,9 +694,7 @@ def walk_contents(nodes, available, used, problems, depth=0,
             children = walk_contents(node["items"], available, used,
                                      problems, depth + 1, suffix, role)
             if depth >= 2:
-                problems.append(
-                    f"group '{node.get('title', '')}' nests more than three "
-                    "levels deep; some LMSs flatten this")
+                problems.append(_TooDeep(node.get("title", "")))
             out.append(Entry(("group", node.get("title", ""), children),
                              role=role, kind=kind))
             continue
@@ -695,6 +714,8 @@ def walk_contents(nodes, available, used, problems, depth=0,
             continue
         used.add(stem)
         out.append(Entry(("page", stem, node.get("title")), role=role, kind=kind))
+    if depth == 0:
+        _say_too_deep(problems)
     return out
 
 

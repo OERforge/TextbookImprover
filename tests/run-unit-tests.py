@@ -1816,6 +1816,28 @@ def check_one_file_chapters():
     ]
 
 
+def check_deep_groups():
+    """Groups nested more than three levels deep are said once, how many
+    and which, not once each: World History's chapters each hold a group
+    of assessments under a section."""
+    def deep(chapters):
+        problems = []
+        bookcontents.walk_contents(
+            [{"title": f"Chapter {i}", "items": [{"title": "Section",
+              "items": [{"title": "Assessments", "items": [f"p{i}"]}]}]}
+             for i in range(chapters)],
+            {f"p{i}" for i in range(chapters)}, set(), problems)
+        return problems
+    return [
+        ("one group too deep is named alone",
+         lambda: deep(1) == ["group 'Assessments' nests more than three "
+                             "levels deep; some LMSs flatten this"]),
+        ("seventeen are one warning, counted, the title named once",
+         lambda: deep(17) == ["17 groups nest more than three levels deep "
+                              "('Assessments'); some LMSs flatten this"]),
+    ]
+
+
 def check_output_names():
     """The names a target copies the files a page names under
     (names.output_path) are the names safe-media.lua writes into the page:
@@ -9680,6 +9702,7 @@ GROUPS = [
     ("an empty header cell a data cell", check_header_cells),
     ("highlighted code's colors", check_highlighting),
     ("one file per chapter", check_one_file_chapters),
+    ("groups nested too deep", check_deep_groups),
     ("a page's notes group", check_notes_groups),
     ("a title's and a moved note's language", check_notes_languages),
     ("a page's notes heading", check_notes_heading),

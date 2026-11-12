@@ -744,38 +744,37 @@ def line_length(said):
 # contents line, a cross-reference it makes. hyperref has a plug for that
 # ("Go to destination" and the destination's name, or the address), which
 # would overwrite the text-and-description /Contents pdf-target.lua gives a
-# text link. These plugs use hyperref's text only for a link that has none
-# of its own. An address keeps its hyphens and backticks, which
-# \pdfstringdef would join into dashes and inverted marks, as
-# pdf-target.lua's Link keeps a link's text.
+# text link. These plugs write hyperref's text only for a link that has
+# none of its own, made a string as hyperref's own plugs make it (purified,
+# then converted from Unicode), which never applies TeX's dashes and
+# quotation marks: an address's or a destination's "--" and "`" are kept,
+# in braces or not, as pdf-target.lua's Link keeps a link's text. As
+# \pdfstringdef made them, "--" in a brace group, or in a destination's
+# name, was a dash, and a backslash in an address ended its description.
 UA1_LINKS = r"""\ExplSyntaxOn
+\tl_new:N \l__oer_link_hyp_contents_tl
+\cs_new_protected:Npn \__oer_link_hyp_contents:nn #1#2
+  {
+    \tl_if_empty:NT \g__oer_link_contents_tl
+      {
+        \pdf_purify:nN {#2} \l__oer_link_hyp_contents_tl
+        \pdf_string_from_unicode:nVN { utf16/hex }
+          \l__oer_link_hyp_contents_tl \l__oer_link_hyp_contents_tl
+        \pdfannot_dict_put:nne {link/#1}{Contents}{\l__oer_link_hyp_contents_tl}
+      }
+  }
 \AddToHook{begindocument/end}
   {
     \socket_if_exist:nT {hyp/link/GoTo/Contents}
       {
         \socket_new_plug:nnn {hyp/link/GoTo/Contents}{oer}
-          {
-            \tl_if_empty:NT \g__oer_link_contents_tl
-              {
-                \pdfstringdef \l_tmpa_tl {Go~to~destination~#1}
-                \pdfannot_dict_put:nne {link/GoTo}{Contents}{(\l_tmpa_tl)}
-              }
-          }
+          { \__oer_link_hyp_contents:nn {GoTo} {Go~to~destination~#1} }
         \socket_assign_plug:nn {hyp/link/GoTo/Contents}{oer}
       }
     \socket_if_exist:nT {hyp/link/URI/Contents}
       {
         \socket_new_plug:nnn {hyp/link/URI/Contents}{oer}
-          {
-            \tl_if_empty:NT \g__oer_link_contents_tl
-              {
-                \tl_set:Nn \l_tmpb_tl {#1}
-                \tl_replace_all:Nnn \l_tmpb_tl { - } { - { } }
-                \tl_replace_all:Nnn \l_tmpb_tl { ` } { { } ` }
-                \exp_args:NNV \pdfstringdef \l_tmpa_tl \l_tmpb_tl
-                \pdfannot_dict_put:nne {link/URI}{Contents}{(\l_tmpa_tl)}
-              }
-          }
+          { \__oer_link_hyp_contents:nn {URI} {#1} }
         \socket_assign_plug:nn {hyp/link/URI/Contents}{oer}
       }
   }

@@ -858,6 +858,11 @@ formula, $a^2 + b^2 = c^2$, with a note.[^1] Its [flat]{lang=en-GB} too.
 
 An address LaTeX links on its own, \url{https://example.org/lang--en/q?`x}.
 
+Another, its hyphens in a brace group and a backslash in it,
+``\url{https://example.org/brace/{a--b}/c\string\d}``{=latex}, and a link LaTeX makes
+to a place a book's LaTeX names, ``\hyperlink{pre--and-post}{to it}``{=latex}, at
+``\hypertarget{pre--and-post}{the place}``{=latex}.
+
 [^1]: The note, with [a link in it](https://example.org/note).
 """
 
@@ -7797,6 +7802,17 @@ def checks(work, built):
          lambda: os.path.exists(ua1_path) and [
              contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
              if "lang" in uri] == ["https://example.org/lang--en/q?`x"]),
+        # \\pdfstringdef made them, with a replacement that kept a hyphen
+        # from the next but not in a brace group, and none in a name.
+        ("and so is one whose hyphens are in a brace group, with a backslash",
+         lambda: os.path.exists(ua1_path) and [
+             contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
+             if "brace" in uri] == ["https://example.org/brace/a--b/c\\d"]),
+        ("and a link LaTeX makes to a place named in the book's LaTeX is described by the "
+         "name as written",
+         lambda: os.path.exists(ua1_path) and [
+             contents for s, uri, contents in links(pypdf.PdfReader(ua1_path))
+             if contents and "pre-" in contents] == ["Go to destination pre--and-post"]),
         # A one-page book whose heading is its title: no title page, and the
         # heading is its first, at level 1 (title_page: auto).
         ("a one-page book has no title page, and its title is its level-1 heading",

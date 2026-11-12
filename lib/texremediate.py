@@ -644,7 +644,8 @@ def with_document_language(text, lang):
     return text[:inside] + "lang=%s" % lang + (", " if items else "") + text[inside:]
 
 
-def page_languages_block(master, outline, page_languages, reference, page_files=None):
+def page_languages_block(master, outline, page_languages, reference, page_files=None,
+                         only=None):
     """(block, marked, unmarked) for a copy: the lines for its preamble
     that tag, where it's built with LaTeX's tagging, each page of
     page_languages ({page: language}, the master's) in another language
@@ -666,7 +667,10 @@ def page_languages_block(master, outline, page_languages, reference, page_files=
     page of the master's own text (before its first \\include, or a part
     or chapter it sets between them) and "named" for a file an \\include
     names with a macro, a brace, a comment, or a parameter, which the
-    block can't name as LaTeX's hooks see it."""
+    block can't name as LaTeX's hooks see it. only: the names the master's
+    \\includeonly lets LaTeX read (latexsource.included_only), or None: a
+    file it leaves out is in neither list, since what LaTeX builds hasn't
+    it, and gets no line."""
     marks = language_marks(page_languages, reference)
     if not marks:
         return "", [], []
@@ -678,6 +682,10 @@ def page_languages_block(master, outline, page_languages, reference, page_files=
     for index, (argument, _) in enumerate(outline):
         key = included_file_key(argument)
         page = page_files.get(index)
+        if only is not None and latexsource.include_name(argument) not in only:
+            if page is not None:
+                reached.add(page)
+            continue
         if page is None or last[page] != index:
             # No page, or not the page: the later file of its name is.
             if key is not None:
@@ -1234,7 +1242,8 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
             block, marked, unmarked = "", [(stem, marks[stem])], []
         else:
             block, marked, unmarked = page_languages_block(
-                master, outline, page_languages, reference, page_files)
+                master, outline, page_languages, reference, page_files,
+                latexsource.included_only(latexsource.split_master(texts[master])[0]))
         if block:
             at = begin[0].start()
             texts[master] = texts[master][:at] + block + texts[master][at:]
@@ -1242,6 +1251,25 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         totals["languages_marked" if tagged_copy else "languages_untagged"] = marked
         totals["languages_unmarked"] = unmarked
         totals["languages_tagged"] = int(tagged_copy)
+    # The pages the master's \includeonly leaves out of what LaTeX builds
+    # from the copy, which the pages have: Pandoc's reader reads every
+    # \include whatever \includeonly says.
+    only = latexsource.included_only(latexsource.split_master(texts[master])[0]) \
+        if master not in written else None
+    if only is not None:
+        expanded = {name: originals[name] for name in files}
+        latexsource.expand_include_macros(expanded, files, {})
+        outline, _ = latexsource.book_outline(latexsource.split_master(expanded[master])[1])
+        left = []
+        for index, (argument, _) in enumerate(outline):
+            if latexsource.include_name(argument) in only:
+                continue
+            page = page_files.get(index) if page_files is not None else \
+                names.safe_stem(latexsource.include_stem(argument.strip()))
+            if page is not None and page not in left:
+                left.append(page)
+        if left:
+            totals["includeonly_left"] = left
     # The passages the book's own babel commands set the language of, as
     # the book has them now, in every copy as the pages' languages are
     # (2026-11-05: an author who runs TextbookImprover against their

@@ -9375,6 +9375,33 @@ def include_stem(path):
     return name[:-4] if name.endswith(".tex") else name
 
 
+INCLUDE_ONLY = re.compile(r"\\includeonly\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+
+
+def include_name(argument):
+    """An \\include's or an \\includeonly entry's name as LaTeX compares
+    them: without the spaces around it, its braces and quotes, or a .tex
+    it ends in (latex.ltx's \\includeonly and \\include, measured with
+    pdfLaTeX, TeX Live 2026: \\includeonly{ a ,{b},c.tex} lets in a, b,
+    and c), a folder as written (sub/d)."""
+    name = argument.strip().replace("{", "").replace("}", "").replace('"', "").strip()
+    return name[:-4] if name.endswith(".tex") else name
+
+
+def included_only(preamble):
+    """The names the last \\includeonly in the preamble's code lets LaTeX
+    read, as include_name gives them, an empty set for \\includeonly{};
+    None where there's none, or where an entry holds a macro or a
+    parameter, which the reading can't compare."""
+    found = code_matches(INCLUDE_ONLY, preamble)
+    if not found:
+        return None
+    entries = found[-1].group(1)
+    if "\\" in entries or "#" in entries:
+        return None
+    return {include_name(e) for e in entries.split(",") if include_name(e)}
+
+
 def cut_pages(doc, order, master_stem, front_role, split_levels=(), indices=None):
     """The whole book's document cut into pages at the markers: a list of
     (stem, role, blocks, own), own true for a page of the master's own

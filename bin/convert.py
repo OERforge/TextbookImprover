@@ -4767,6 +4767,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     warn_stand_ins(target.name, [counts], "the copy LaTeX builds")
     warn_own_contents(target.name, [counts], "the copy LaTeX builds")
     warn_page_languages(target.name, counts, "the PDF")
+    left = counts.get("includeonly_left") or []
+    if left:
+        say(f"WARNING: {target.name}: the master's \\includeonly leaves {len(left)} of the "
+            "pages out of the PDF LaTeX builds from the book's own files ("
+            + ", ".join(left[:6]) + (", ..." if len(left) > 6 else "") + "), which the "
+            "other targets have, since Pandoc's reader reads every \\include. Take "
+            "\\includeonly out of the master for a PDF of the whole book, or build it from "
+            "the pages (pdf.from: pages).")
     if counts.get("tag_babel_main_unknown"):
         say(f"{target.name}: {babel_main_said(counts)[2:]}.")
     # The book's PDF figures with their fonts embedded, in the copy LaTeX

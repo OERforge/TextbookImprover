@@ -1640,6 +1640,64 @@ def case_dotted_include(work):
     ]
 
 
+def case_include_only(work):
+    """A master's \\includeonly, which LaTeX's build reads and Pandoc's
+    reader doesn't: a French page it leaves out is not counted or tagged
+    in the copy, since LaTeX doesn't read its file, where one it lets in,
+    named with spaces and .tex as LaTeX allows, is; and the PDF from the
+    book's own files, which lacks the page, is warned of, the page named."""
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    chapters = {"ch1.tex": "\\chapter{One}\nWords of the first chapter.\n",
+                "ch2.tex": "\\chapter{Deux}\nLes mots du second.\n"}
+
+    def book(name, only, targets):
+        path = os.path.join(work, name)
+        os.makedirs(path)
+        files = dict(chapters, **{"book.tex": (
+            "\\documentclass{book}\n\\includeonly{%s}\n\\begin{document}\n"
+            "\\include{ch1}\n\\include{ch2}\n\\end{document}\n" % only)})
+        for file, text in files.items():
+            with open(os.path.join(path, file), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+            fh.write("source,language,found,drafted-by,reviewed\nch2,fr,,,\n")
+        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.only\n  title: Only\n"
+                     "  language: en-US\n")
+        with open(os.path.join(path, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n"
+                     "  copy:\n    format: source\n    tagging: \"on\"\n" + targets)
+        done = convert(path)
+        copy = os.path.join(path, "copy", "book.tex")
+        return (done.returncode, done.stdout + done.stderr,
+                read(copy) if os.path.exists(copy) else "", path)
+
+    status, said, copy, path = book("left-out", "ch1", "  pdf:\n    format: pdf\n")
+    let_status, let_said, let_copy, _ = book("let-in", " ch1 , ch2.tex", "")
+    pdf = os.path.join(path, "pdf", "org.example.only.pdf")
+
+    def pdf_words(file):
+        return subprocess.run(["pdftotext", file, "-"], capture_output=True,
+                              text=True).stdout if shutil.which("pdftotext") else ""
+    return [
+        ("a page \\includeonly leaves out, which the pages have, gets no line in the copy "
+         "and isn't counted as tagged, where one it lets in, named with spaces and .tex, is",
+         lambda: os.path.exists(os.path.join(path, "html", "ch2.html"))
+         and "\\TIQfilelanguage{/ch2.tex}" not in copy and "\\TIQfilelanguage" not in copy
+         and "(ch2 fr)" not in said
+         and let_status == 0 and "\\TIQfilelanguage{/ch2.tex}{fr}" in let_copy
+         and "(ch2 fr)" in let_said and "\\includeonly leaves" not in let_said),
+        ("the PDF from the book's own files, which lacks the page, is warned of, the page "
+         "named",
+         lambda: status == 0
+         and "WARNING: pdf: the master's \\includeonly leaves 1 of the pages out of the PDF "
+             "LaTeX builds from the book's own files (ch2)" in said
+         and os.path.exists(pdf) and "Words of the first" in pdf_words(pdf)
+         and "Les mots" not in pdf_words(pdf)
+         if not why else skip(why)),
+    ]
+
+
 def case_stop_line(work):
     """Where the reader stops on a book, the run names the author's line
     for the line of the reading's copy Pandoc names, where the two
@@ -10687,6 +10745,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
           case_babel_languages),
          ("babel's other names for a language in a LaTeX book's pages", case_babel_names),
          ("a file \\include-d with a dot in its name", case_dotted_include),
+         ("a master's \\includeonly", case_include_only),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),

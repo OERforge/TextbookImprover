@@ -480,6 +480,10 @@ Text with a note.[^a]
 
 ![A figure whose caption has ![a red square](assets/red.png) in it.](assets/red.png)
 
+![[]{#anchored}A figure whose caption opens with an anchor.](assets/red.png)
+
+![A figure whose caption has a [mot]{lang=fr} in French.](assets/red.png)
+
 [^a]: Note a, in the text.
 [^b]: Note b, in a caption.
 [^c]: Note c, in a long caption.
@@ -8014,6 +8018,24 @@ def checks(work, built):
          "by the caption's words and the picture's alt text",
          lambda: os.path.exists(notes_path)
          and "A figure whose caption has a red square in it."
+         in [str(e.get("/T")) for e in elements(
+             pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
+             if kind(e) == "/TOCI"]),
+        # The writer's \\phantomsection goes to the list's file, which
+        # LaTeX's expansion makes \\MakeLinkTarget[section]{}, and purify
+        # had kept "[section]".
+        ("an anchor in a caption leaves nothing in its entry's title",
+         lambda: os.path.exists(notes_path)
+         and "A figure whose caption opens with an anchor."
+         in [str(e.get("/T")) for e in elements(
+             pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
+             if kind(e) == "/TOCI"]),
+        # \\oerlang's words are babel's \\foreignlanguage, whose language
+        # purify had kept.
+        ("a passage in another language in a caption is its words alone in its entry's "
+         "title, without its language's name",
+         lambda: os.path.exists(notes_path)
+         and "A figure whose caption has a mot in French."
          in [str(e.get("/T")) for e in elements(
              pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
              if kind(e) == "/TOCI"]),

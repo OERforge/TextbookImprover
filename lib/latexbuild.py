@@ -3566,6 +3566,14 @@ PDF_MACROS = r"""\ExplSyntaxOn
 \text_declare_purify_equivalent:Nn \OERLinkContents { \use_none:n }
 \text_declare_purify_equivalent:Nn \OERLinkContentsReset { }
 \text_declare_purify_equivalent:Nn \citeproc { \use_ii:nn }
+% An anchor in a caption, which the writer writes as
+% \protect\phantomsection\label{id}, goes to the list's file without its
+% \protect, and purify expands \phantomsection to hyperref's
+% \MakeLinkTarget[section]{}, which it dropped, keeping
+% "[section]" as text at the start of the entry's title. A link target
+% is nothing there, its star and option with it.
+\cs_new:Npn \__oer_purify_target:w #1 # { \use_none:n }
+\text_declare_purify_equivalent:Nn \MakeLinkTarget { \__oer_purify_target:w }
 \AddToHook { package / hyperref / after }
   {
     \text_declare_purify_equivalent:Nn \href { \__oer_purify_href:w }
@@ -3761,6 +3769,11 @@ PDF_MACROS = r"""\ExplSyntaxOn
   }
   { \par }
 \text_declare_purify_equivalent:Nn \oerlang { \use_ii:nn }
+% babel's \foreignlanguage inside it, which purify drops, keeping its
+% arguments, so a caption's French word was "frenchmot" in its entry's
+% title in the list of figures: its words alone, an option before the
+% language taken with it, as polyglossia's and babel's [date] take one.
+\text_declare_purify_equivalent:Nn \foreignlanguage { \__oer_purify_href:w }
 \AddToHook { package / hyperref / after }
   { \pdfstringdefDisableCommands { \cs_set:Npn \oerlang #1#2 {#2} } }
 % A box (a div of class box), set off by a rule above it and one below,

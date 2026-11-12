@@ -179,6 +179,8 @@ class Emitter:
         # (formula_steps).
         self.formula_steps = 0
         self.merged_titles = 0
+        # The first such heading, as an example the unpacker can name.
+        self.merged_example = None
         self.kind_alone = 0
         self.title_alone = 0
         self.by_name = {p.name: p for p in pages}
@@ -485,6 +487,9 @@ class Emitter:
                         self.merged_titles += 1
                     self.convert_children(child, label, level, page)
                     _flatten_spans(label)
+                    if self.merged_example is None and \
+                            label.find('{*}span[@class="os-note-label"]') is not None:
+                        self.merged_example = _heading_words(label)
                     if child.get("id"):
                         label.append(E("span", {"id": child.get("id")}, ""))
                 detach(child)
@@ -1301,6 +1306,19 @@ def _area_title(child):
             and not (child[0].tail or "").strip():
         return child[0]
     return None
+
+
+def _heading_words(element):
+    """A heading's words on one line, a line break a space, for a message
+    to name it by."""
+    def words(part):
+        if isinstance(part.tag, str) and etree.QName(part).localname == "br":
+            yield " "
+        yield part.text or ""
+        for child in part:
+            yield from words(child)
+            yield child.tail or ""
+    return " ".join("".join(words(element)).split())
 
 
 def _merge_title(label):

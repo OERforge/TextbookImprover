@@ -153,8 +153,10 @@ def main():
     if one:
         print(f"{one} note(s) that baking headed by their kind and, under it, "
               "their own title are headed by one heading: "
-              f"{result.merged_titles} by both (\"Big Picture: A Global "
-              f"Culture?\"), {result.kind_alone} by their kind alone, their "
+              f"{result.merged_titles} by both"
+              + (f" (\"{result.merged_example}\")"
+                 if result.merged_example else "")
+              + f", {result.kind_alone} by their kind alone, their "
               f"title only repeating it, and {result.title_alone} by their "
               "title alone, which opens with their kind.")
     if result.exercises or result.exercises_missing:

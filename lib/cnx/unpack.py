@@ -52,6 +52,7 @@ class Result:
         self.boxes = 0
         self.formula_steps = 0
         self.merged_titles = 0
+        self.merged_example = None
         self.kind_alone = 0
         self.title_alone = 0
 
@@ -144,6 +145,7 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     result.boxes = emitter.boxed
     result.formula_steps = emitter.formula_steps
     result.merged_titles = emitter.merged_titles
+    result.merged_example = emitter.merged_example
     result.kind_alone = emitter.kind_alone
     result.title_alone = emitter.title_alone
     result.media = copy_media(asm, out, notes)

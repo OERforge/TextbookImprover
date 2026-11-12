@@ -411,11 +411,12 @@ def case_trade(work):
                            r'class="os-note-label">Link It Up</span>: Inner '
                            r'Posts</h4>', section, re.S)),
         ("the unpacker says how many notes are boxes, and how many baking "
-         "headed by two headings are headed by one, which way",
+         "headed by two headings are headed by one, which way, naming the "
+         "book's own first",
          lambda: "7 note(s) made boxes" in result.stdout
          and "6 note(s) that baking headed by their kind and, under it, their "
-         "own title are headed by one heading: 3 by both" in " ".join(
-             result.stdout.split())
+         "own title are headed by one heading: 3 by both (\"Link It Up: "
+         "Trading Posts\")" in " ".join(result.stdout.split())
          and "1 by their kind alone" in result.stdout
          and "2 by their title alone" in result.stdout),
         ("a character of the Symbol font, which Word writes in the private use area, is "

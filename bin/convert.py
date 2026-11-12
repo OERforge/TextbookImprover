@@ -2184,8 +2184,11 @@ def master_hint(order, header=None, kind="AsciiDoc", documents=False,
     hint["source"] = ("the LaTeX documents latex.main names" if documents
                       else f"the master {kind} file")
     if not contents_declared:
+        # An AsciiDoc master's order is its files', a LaTeX one's its
+        # pages' names already, which may hold a dot (week1.5).
         hint["contents"] = [n if isinstance(n, dict) else
-                            safe_stem(os.path.splitext(n)[0]) for n in order]
+                            safe_stem(n if kind == "LaTeX" else os.path.splitext(n)[0])
+                            for n in order]
     return hint
 
 

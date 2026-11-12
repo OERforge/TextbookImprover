@@ -671,9 +671,8 @@ def page_languages_block(master, outline, page_languages, reference, page_files=
     if not marks:
         return "", [], []
     if page_files is None or any(index >= len(outline) for index in page_files):
-        page_files = {index: names.safe_stem(
-            os.path.splitext(os.path.basename(argument.strip()))[0])
-            for index, (argument, _) in enumerate(outline)}
+        page_files = {index: names.safe_stem(latexsource.include_stem(argument.strip()))
+                      for index, (argument, _) in enumerate(outline)}
     last = {page: index for index, page in sorted(page_files.items())}
     lines, marked, unmarked, reached = [BOOK_LANGUAGE % reference], [], [], set()
     for index, (argument, _) in enumerate(outline):

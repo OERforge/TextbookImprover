@@ -1592,6 +1592,54 @@ LANGUAGES_FILES = {
 
 
 
+def case_dotted_include(work):
+    """A file whose name has a dot of its own, \\include{week1.5}, which
+    LaTeX reads as week1.5.tex, is a page of that name: it had been named
+    week1, the master's own, whose words it took, its language in
+    languages.csv not found; and so in the contents sample, and in the
+    copy's line tagging its file in its language."""
+    os.makedirs(work)
+    master = ("\\documentclass{book}\n\\begin{document}\nWords the master sets itself.\n\n"
+              "\\include{week1.5}\n\\end{document}\n")
+    files = {"week1.tex": master,
+             "week1.5.tex": "\\chapter{La demi-semaine}\nLes mots du fichier.\n"}
+    for name, text in files.items():
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    with open(os.path.join(work, "languages.csv"), "w", encoding="utf-8") as fh:
+        fh.write("source,language,found,drafted-by,reviewed\nweek1.5,fr,,,\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.week\n  title: A Week\n"
+                 "  language: en-US\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n"
+                 "  copy:\n    format: source\n    tagging: \"on\"\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+
+    def page(stem):
+        path = os.path.join(work, "html", stem + ".html")
+        return read(path) if os.path.exists(path) else ""
+    sample = read(work, "project-sample.yaml") \
+        if os.path.exists(os.path.join(work, "project-sample.yaml")) else ""
+    copy = read(work, "copy", "week1.tex") \
+        if os.path.exists(os.path.join(work, "copy", "week1.tex")) else ""
+    return [
+        ("a file \\include-d as week1.5 is the page week1.5, in French by languages.csv, "
+         "and the master's own words are its page week1, in English",
+         lambda: result.returncode == 0
+         and "Les mots du fichier." in page("week1.5")
+         and re.search(r'<html\b[^>]*\slang="fr"', page("week1.5"))
+         and "Words the master sets itself." in page("week1")
+         and "Les mots" not in page("week1")
+         and re.search(r'<html\b[^>]*\slang="en-US"', page("week1"))),
+        ("the contents sample names both pages, and the copy tags the file week1.5.tex in "
+         "French",
+         lambda: re.search(r"contents:\n  - week1\n  - week1\.5\n", sample) is not None
+         and "\\TIQfilelanguage{/week1.5.tex}{fr}" in copy),
+    ]
+
+
 def case_stop_line(work):
     """Where the reader stops on a book, the run names the author's line
     for the line of the reading's copy Pandoc names, where the two
@@ -10638,6 +10686,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a LaTeX book's passages babel sets the language of, in its copy and its PDF",
           case_babel_languages),
          ("babel's other names for a language in a LaTeX book's pages", case_babel_names),
+         ("a file \\include-d with a dot in its name", case_dotted_include),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),

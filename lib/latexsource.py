@@ -9364,6 +9364,17 @@ def take_divisions(node, found):
     return node
 
 
+def include_stem(path):
+    """The page name of a file the master \\include-s: the name as
+    written, without its folder or a .tex it ends in. \\include takes off
+    such a .tex and reads the name with .tex added (latex.ltx's
+    \\@strip@tex@ext and \\@include), so a name with a dot of its own
+    (week1.5) is week1.5.tex, where os.path.splitext took .5 for an
+    extension."""
+    name = os.path.basename(path)
+    return name[:-4] if name.endswith(".tex") else name
+
+
 def cut_pages(doc, order, master_stem, front_role, split_levels=(), indices=None):
     """The whole book's document cut into pages at the markers: a list of
     (stem, role, blocks, own), own true for a page of the master's own
@@ -9377,7 +9388,7 @@ def cut_pages(doc, order, master_stem, front_role, split_levels=(), indices=None
     with the role the division commands before it give it. A \\part set
     between two \\include-s had landed at the end of the chapter before,
     and titled its page. A master that \\include-s nothing is one page."""
-    taken = {master_stem} | {os.path.splitext(os.path.basename(p))[0] for p, _ in order}
+    taken = {master_stem} | {include_stem(p) for p, _ in order}
     pages = [[master_stem, front_role, [], True, None]]
     role, before_appendices, own, count = "main", "main", True, 0
     queue, at = lift_markers(doc["blocks"]), 0
@@ -9408,7 +9419,7 @@ def cut_pages(doc, order, master_stem, front_role, split_levels=(), indices=None
             if m:
                 if m.group(1) == MARKER:
                     path, file_role = order[int(m.group(2))]
-                    stem = os.path.splitext(os.path.basename(path))[0]
+                    stem = include_stem(path)
                     pages.append([stem, file_role, [], False, int(m.group(2))])
                     own = False
                 else:

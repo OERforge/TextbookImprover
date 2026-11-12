@@ -4926,7 +4926,8 @@ def resolve_graphic(base, name, dirs, counter=None):
     None. A name that differs from its file only in case is the file, as
     macOS and Windows find it, where the book was likely built (OpenIntro
     Statistics's solutions name GRE_intro.pdf, and the file is
-    gre_intro.pdf); LaTeX on Linux doesn't find it, so it's counted."""
+    gre_intro.pdf); LaTeX on Linux finds it only where kpathsea folds
+    case (texmf_casefold_search, on in TeX Live 2026), so it's counted."""
     name = name.strip()
     for exact in (True, False):
         for d in [""] + dirs:

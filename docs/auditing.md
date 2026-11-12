@@ -17,7 +17,7 @@ It depends on `lib/` and on Pandoc, to read a source. `pypdf` (for PDFs), epubch
 
 **An HTML page or an EPUB** goes through the [output check](checking.md) as it is, plus the validators when they're installed.
 
-**A PDF** gets the simple report: what the file states about itself, read with `pypdf`, and what that implies. Title, author, language, dates, producer, PDF version, size and SHA-256; XMP metadata and its fields; what the file *claims* (PDF/UA-1 or -2, PDF/A) as distinct from what it is; whether it's tagged and has a structure tree, with a count of tags by type; the bookmark outline; pages with no extractable text, which are scans; fonts and whether they're embedded; encryption. A claim is reported as a claim: "claims PDF/UA-2" is a fact about the file, and whether it *is* PDF/UA-2 is veraPDF's to say, which the audit runs when it finds it. Ace stays by hand.
+**A PDF** gets the simple report: what the file states about itself, read with `pypdf`, and what that implies. Title, author, language, dates, producer, PDF version, size and SHA-256; XMP metadata and its fields; what the file *claims* (PDF/UA-1 or -2, PDF/A) as distinct from what it is; whether it's tagged and has a structure tree, with a count of tags by type; the bookmark outline; pages with no extractable text, which are scans; fonts and whether they're embedded; encryption. A claim is reported as a claim: "claims PDF/UA-2" is a fact about the file, and whether it *is* PDF/UA-2 is veraPDF's to say, which the audit runs when it finds it. DAISY's Ace runs on each EPUB with `--wcag`, when it's installed.
 
 ## What a Markdown file's YAML means to the audit
 

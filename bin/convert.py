@@ -1445,7 +1445,7 @@ LATEX_READ_CHANGES = (
      "its fonts name and map to no text given the text their names give them, which PDF/UA "
      "requires"),
     ("graphics_case", "image named in a different case from its file found as macOS and "
-     "Windows find it (LaTeX on Linux doesn't)"),
+     "Windows find it (LaTeX on Linux may not)"),
     ("visual_title", "title set as large type read as the page's title, its "
      "sections under it"),
     ("boxes", "table of one column of prose, a box around a passage, read as a "

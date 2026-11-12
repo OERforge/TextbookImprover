@@ -2050,6 +2050,35 @@ def _core(xml, title, creator):
     return xml
 
 
+def slide_title(slide):
+    """A slide's title for the file's list of slide titles: the parse's
+    (pptxparse's Slide.title), but for a formula in it, which is its text
+    (math_text), where the parse runs its characters together ("The x2
+    law" for The $x^2$ law, a root's what is under it)."""
+    shape = slide.title_shape
+    if shape is None or not shape.math or shape.element is None:
+        return slide.title or ""
+    body = shape.element.find(pptxparse.q("p:txBody"))
+    if body is None:
+        return slide.title or ""
+    words = []
+
+    def walk(element):
+        if element.tag == M + "oMath":
+            words.append(math_text(element))
+        elif element.tag == pptxparse.q("a:t"):
+            words.append(element.text or "")
+        else:
+            if element.tag == pptxparse.q("a:br"):
+                words.append("\n")
+            for child in element:
+                walk(child)
+    for paragraph in body.findall(pptxparse.q("a:p")):
+        walk(paragraph)
+        words.append("\n")
+    return " ".join("".join(words).split())
+
+
 def app_properties(xml, titles, notes):
     """docProps/app.xml as the deck's, where the writer copies the
     reference document's: its slides' titles, the reference's other lists
@@ -2252,7 +2281,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
                                      counts, placeholders, notes)
     if "docProps/app.xml" in parts:
         texts["docProps/app.xml"] = app_properties(
-            text("docProps/app.xml"), [s.title or "" for s in deck.slides], len(notes_parts))
+            text("docProps/app.xml"), [slide_title(s) for s in deck.slides], len(notes_parts))
     _write(path, infos, parts, texts, added)
     return counts
 

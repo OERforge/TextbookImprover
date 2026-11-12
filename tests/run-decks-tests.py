@@ -1377,6 +1377,30 @@ def case_linked_caption(work):
     ]
 
 
+def case_titles_list(work):
+    """A PowerPoint file's list of its slides' titles (docProps/app.xml's
+    TitlesOfParts) with a formula in a title as its text, as the deck's
+    other titles have it, where the parse's title ran its characters
+    together ("The x2 law") and a root was what's under it."""
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; a PowerPoint file's list of slide titles isn't checked")
+        return []
+    work = folder(work, PPTX, decks_given={"titled.md": TITLED})
+    result = convert(work, "--quick")
+    path = os.path.join(work, "slides", "titled.pptx")
+    parts = pptx_parts(path) if os.path.exists(path) else {}
+    app = parts.get("docProps/app.xml", "")
+    return [
+        ("the deck is converted", lambda: result.returncode == 0 and bool(app)),
+        ("the file's list of slide titles has a formula in a title as its text, a script, a "
+         "root, and a fraction, and a title without one as it is",
+         lambda: "<vt:lpstr>Titled</vt:lpstr><vt:lpstr>The x\u00b2 law</vt:lpstr>"
+                 "<vt:lpstr>Why \u221ax grows</vt:lpstr><vt:lpstr>A a/b ratio</vt:lpstr>"
+                 "<vt:lpstr>Plain</vt:lpstr>" in app),
+    ]
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -3287,6 +3311,29 @@ A [square](https://example.org/square)
 Two shapes
 :::
 :::
+"""
+
+# A deck whose slides' titles hold formulas, for case_titles_list.
+TITLED = """\
+---
+title: Titled
+---
+
+# The $x^2$ law
+
+Text.
+
+# Why $\\sqrt{x}$ grows
+
+Text.
+
+# A $\\frac{a}{b}$ ratio
+
+Text.
+
+# Plain
+
+Text.
 """
 
 # What Pandoc's PowerPoint writer does with a deck, as deck-pptx.lua and
@@ -5402,6 +5449,7 @@ CASES = [("the pieces", case_pieces),
          ("a formula in a picture's alt text", case_alt_formula),
          ("a PowerPoint caption with a note", case_noted_caption),
          ("a PowerPoint caption with a link", case_linked_caption),
+         ("a PowerPoint file's list of slide titles", case_titles_list),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),

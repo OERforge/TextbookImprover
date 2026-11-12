@@ -1698,6 +1698,49 @@ def case_include_only(work):
     ]
 
 
+def case_opening_language(work):
+    """A language a hook at \\begin{document} selects, which LaTeX's text
+    opens in in place of babel's main one, wherever the hook is set: the
+    pages' language, and under csquotes' autostyle=true the quotations'
+    marks, where the default (tryonce) keeps the main language's, as
+    LaTeX sets them (measured with LuaLaTeX); a \\selectlanguage in a
+    comment, or \\foreignlanguage alone, selects nothing, and the last
+    selected wins."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    babel = "\\usepackage[english,french]{babel}\n"
+    preambles = [babel + "\\AtBeginDocument{\\selectlanguage{english}}\n",
+                 "\\AtBeginDocument{\\selectlanguage{english}}\n" + babel,
+                 babel + "\\AddToHook{begindocument/end}[mine]{\\selectlanguage{english}}\n",
+                 babel + "% \\AtBeginDocument{\\selectlanguage{english}}\n",
+                 babel + "\\AtBeginDocument{\\foreignlanguage{english}{x}}\n",
+                 babel + "\\AtBeginDocument{\\selectlanguage{english}\\selectlanguage{french}}\n"]
+    found = [latexsource.preamble_language(p) for p in preambles]
+    pages = {}
+    for name, options in (("tryonce", ""), ("autostyle", "[autostyle=true]")):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "mots.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\documentclass{article}\n" + babel + "\\usepackage%s{csquotes}\n"
+                     "\\AtBeginDocument{\\selectlanguage{english}}\n\\begin{document}\n"
+                     "A \\enquote{word} here.\n\\end{document}\n" % options)
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        convert(folder)
+        path = os.path.join(folder, "html", "mots.html")
+        pages[name] = read(path) if os.path.exists(path) else ""
+    return [
+        ("a \\selectlanguage in a hook at \\begin{document} is the book's language, before "
+         "babel is loaded too, the last of two, and not one in a comment or \\foreignlanguage",
+         lambda: found == ["en", "en", "en", "fr", "fr", "fr"]),
+        ("so the pages are in it, and under autostyle=true the quotations have its marks, "
+         "where tryonce keeps the main language's",
+         lambda: all(re.search(r'<html\b[^>]*\slang="en"', pages[n]) for n in pages)
+         and "A \u201cword\u201d here." in html_module.unescape(pages["autostyle"])
+         and "A \u00ab\u00a0word\u00a0\u00bb here." in html_module.unescape(pages["tryonce"])),
+    ]
+
+
 def case_stop_line(work):
     """Where the reader stops on a book, the run names the author's line
     for the line of the reading's copy Pandoc names, where the two
@@ -10746,6 +10789,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("babel's other names for a language in a LaTeX book's pages", case_babel_names),
          ("a file \\include-d with a dot in its name", case_dotted_include),
          ("a master's \\includeonly", case_include_only),
+         ("a language selected at \\begin{document}", case_opening_language),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),

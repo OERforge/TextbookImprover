@@ -709,9 +709,38 @@ def provided_main(preamble):
     return found
 
 
+# The hooks LaTeX runs at \\begin{document}, where a book can select the
+# language its text opens in: \\AtBeginDocument's and \\AddToHook's for
+# begindocument, its /before and /end too, each with its own label or none.
+BEGIN_DOCUMENT_HOOK = re.compile(r"\\AtBeginDocument\s*(?=\{)"
+                                 r"|\\AddToHook\s*\{\s*begindocument(?:/before|/end)?\s*\}"
+                                 r"\s*(?:\[[^]]*\])?\s*(?=\{)")
+
+
+def opening_language(preamble):
+    """The language the last \\selectlanguage in the preamble's hooks at
+    \\begin{document} (BEGIN_DOCUMENT_HOOK) selects, as its name, which
+    the document's text opens in, in place of babel's main language,
+    wherever the hook is set, before babel is loaded too (measured with
+    LuaLaTeX, babel 26.13: \\AtBeginDocument{\\selectlanguage{english}}
+    with babel's [english,french] sets english, and csquotes still takes
+    French's marks, its main language's); "" where there's none."""
+    found = ""
+    for m in code_matches(BEGIN_DOCUMENT_HOOK, preamble):
+        end = code_brace(preamble, m.end())
+        if end < 0:
+            continue
+        body = preamble[m.end():end]
+        selected = code_matches(SELECT_LANGUAGE, body)
+        if selected:
+            found = selected[-1].group(1)
+    return found
+
+
 def preamble_language(preamble):
     """The book's language, as the preamble declares it: \\DocumentMetadata's
-    lang, polyglossia's main language, or babel's main language: the one
+    lang, the one a hook at \\begin{document} selects (opening_language),
+    polyglossia's main language, or babel's main language: the one
     a \\babelprovide with main makes it (provided_main), its import='s tag
     or its name's; else the one main= names (none where the table doesn't
     know it, a name with a modifier among them: babel keeps main='s value
@@ -722,6 +751,9 @@ def preamble_language(preamble):
                   preamble)
     if m:
         return m.group(1)
+    opening = opening_language(preamble)
+    if opening in BABEL:
+        return BABEL[opening]
     m = re.search(r"\\set(?:default|main)language\s*(?:\[[^]]*\])?\s*\{(\w+)\}",
                   preamble)
     if m and m.group(1) in BABEL:
@@ -3752,7 +3784,14 @@ def quote_style(preamble):
     elif reset >= AUTOSTYLE["once"]:
         default = main or "english/american"
     if reset == AUTOSTYLE["true"]:
-        return {"main": main or "american", "variants": variants}
+        # Each quotation in the language around it, the text's from a hook
+        # at \\begin{document} that selects one (opening_language: babel's
+        # [english,french] and \\AtBeginDocument{\\selectlanguage{english}}
+        # set English's marks under autostyle=true, measured), where once and
+        # tryonce keep the main language's.
+        opening = opening_language(preamble)
+        return {"main": (quote_name(opening) if opening else None) or main or "american",
+                "variants": variants}
     marks = quote_marks(default, variants) or PANDOC_QUOTES
     return None if marks == PANDOC_QUOTES else {"marks": marks, "variants": variants}
 

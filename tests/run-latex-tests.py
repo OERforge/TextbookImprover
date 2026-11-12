@@ -2040,8 +2040,10 @@ def case_inline_breaks(work):
     inlines, which stopped it, read as LaTeX sets it: in a box's (\\mbox,
     \\hbox, \\underline, ulem's \\uline and \\sout), on one line, a blank
     line as a space and \\par as nothing; in a quotation's (\\enquote,
-    starred, \\foreignquote, \\hyphenquote), a quotation in each paragraph,
-    one inside another's too, but in a box's words as the box's, one
+    starred, \\foreignquote, \\hyphenquote), its words in each paragraph,
+    its opening mark in the first and its closing mark in the last, as
+    LaTeX sets them (measured, LuaLaTeX), one inside another's too, but in
+    a box's words as the box's, one
     quotation on its line, and a paragraph of what the reader reads as
     nothing, a vertical space or a page break, no quotation of its own, a
     brace in a comment, \\verb, verbatim, or inline code none of the
@@ -2086,6 +2088,22 @@ def case_inline_breaks(work):
     page = read(work, "html", "one.html") if os.path.exists(
         os.path.join(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
+    # An English book, whose marks are Pandoc's, so the reader would take
+    # an inner quotation in a split one's words for an outer one.
+    english = os.path.join(work, "english")
+    os.makedirs(english)
+    with open(os.path.join(english, "quotes.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\usepackage[english]{babel}\n"
+                 "\\usepackage{csquotes}\n\\begin{document}\n"
+                 "A \\enquote{one \\enquote{in} more\n\ntwo} end.\n\n"
+                 "Then \\enquote{plain} after.\n\\end{document}\n")
+    with open(os.path.join(english, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    english_run = convert(english)
+    english_said = english_run.stdout + english_run.stderr
+    english_page = os.path.join(english, "html", "quotes.html")
+    english_text = re.sub(r"\s+", " ", html_module.unescape(read(english_page))) \
+        if os.path.exists(english_page) else ""
 
     def paragraph(*parts):
         """Whether the page has a paragraph of parts (patterns), in order,
@@ -2112,20 +2130,24 @@ def case_inline_breaks(work):
          and paragraph("Four", underline[0] + "un\\.deux\\." + underline[1], "end\\.")
          and paragraph("Five", underline[0] + "un\\. deux\\." + underline[1], "end\\.")
          and paragraph("Six <del>un\\.deux\\.</del> end\\.")),
-        ("a quotation's words holding a paragraph break are a quotation in each paragraph, "
-         "starred, in another language, and inside another quotation too",
-         lambda: paragraph("Seven", opening + "un\\." + closing)
-         and paragraph(opening + "deux\\." + closing, "end\\.")
-         and paragraph("Eight", mark("\u201c") + "un\\." + mark("\u201d"))
-         and paragraph(mark("\u201c") + "deux\\." + mark("\u201d"), "end\\.")
-         and paragraph("Nine", opening + '<span lang="en">one</span>' + closing)
-         and paragraph(opening + '<span lang="en">two</span>' + closing,
-                       "end\\.")
-         and paragraph("Ten", mark("\u201c") + '<span lang="en">one</span>' + mark("\u201d"))
-         and paragraph("Eleven", opening + "a", mark("\u201c") + "b" + mark("\u201d")
-                       + closing)
-         and paragraph(opening + mark("\u201c") + "c" + mark("\u201d"), "d"
-                       + closing, "end\\.")),
+        ("a quotation's words holding a paragraph break are in each paragraph, its opening "
+         "mark in the first and its closing mark in the last, starred, in another language, "
+         "and inside another quotation too",
+         lambda: paragraph("Seven", opening + "un\\.")
+         and paragraph("deux\\." + closing, "end\\.")
+         and paragraph("Eight", mark("\u201c") + "un\\.")
+         and paragraph("deux\\." + mark("\u201d"), "end\\.")
+         and paragraph("Nine", opening + '<span lang="en">one</span>')
+         and paragraph('<span lang="en">two</span>' + closing, "end\\.")
+         and paragraph("Ten", mark("\u201c") + '<span lang="en">one</span>')
+         and paragraph('<span lang="en">two</span>' + mark("\u201d"), "end\\.")
+         and paragraph("Eleven", opening + "a", mark("\u201c") + "b")
+         and paragraph("c" + mark("\u201d"), "d" + closing, "end\\.")),
+        ("and in Pandoc's marks, English's, the inner quotation's its own, a quotation with "
+         "no break left to the reader, and none counted as given other marks",
+         lambda: "<p>A \u201cone \u2018in\u2019 more</p> <p>two\u201d end.</p> "
+                 "<p>Then \u201cplain\u201d after.</p>" in english_text
+         and "given the marks LaTeX sets" not in english_said),
         ("a blank line after \\\\ in a quotation is the reader's line break",
          lambda: paragraph("Twelve", opening + "vers<br />", "un" + closing,
                            "end\\.")),
@@ -2133,16 +2155,16 @@ def case_inline_breaks(work):
          "what the reader reads as nothing no quotation",
          lambda: paragraph("Thirteen", opening + "un(?:\u00a0|&#xA0;)deux"
                            + closing, "end\\.")
-         and paragraph("Fourteen", opening + "un\\." + closing)
-         and re.search(r"</p>\s*<p>\s*" + opening + "deux\\." + closing
+         and paragraph("Fourteen", opening + "un\\.")
+         and re.search(r"</p>\s*<p>\s*deux\." + closing
                        + r"\s*end\.\s*</p>", text) is not None
-         and paragraph("Sixteen", opening + "un\\." + closing)
-         and paragraph(opening + "deux\\." + closing, "end\\.")
+         and paragraph("Sixteen", opening + "un\\.")
+         and paragraph("deux\\." + closing, "end\\.")
          and not re.search("<p>" + opening + closing + "</p>", text)),
         ("a brace in a comment in the words isn't one of theirs, nor one in \\verb, verbatim, "
          "or inline code",
-         lambda: paragraph("Fifteen", opening + "un ?" + closing)
-         and paragraph(opening + "deux" + closing, "end\\.")
+         lambda: paragraph("Fifteen", opening + "un ?")
+         and paragraph("deux" + closing, "end\\.")
          and latexsource.code_brace("{a % }\nb} c", 0) == 9
          and latexsource.code_brace("{a \\verb|}| b} c", 0) == 14
          and latexsource.code_brace("{\\begin{verbatim}}\\end{verbatim}} c", 0) == 33
@@ -2151,8 +2173,10 @@ def case_inline_breaks(work):
         ("the run says what it read so",
          lambda: "7 paragraph break in a box's words (\\mbox, \\underline) read as LaTeX "
                  "sets it" in said
-         and "9 quotation's words holding a paragraph break (\\enquote) read as a "
-             "quotation in each paragraph" in said),
+         and "9 quotation's words holding a paragraph break (\\enquote) read in each "
+             "paragraph, which stopped the reader, its opening mark in the first and its "
+             "closing mark in the last, as LaTeX sets it" in said
+         and "11 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in said),
         ("and the author's files are as they were",
          lambda: all(read(work, name) == text for name, text in files.items())),
     ]
@@ -2164,7 +2188,9 @@ def case_inline_blocks(work):
     stopped it, read between the command around the words before it and
     around those after, as LaTeX sets a list: \\textbf's, \\emph's, \\href's,
     \\enquote's, and \\mbox's, without the command's formatting, which the
-    pages can't give a block, but a \\foreignlanguage's and a
+    pages can't give a block, a quotation's opening mark before the words
+    before it and its closing mark after those after, as LaTeX sets one
+    over a list (measured, LuaLaTeX), but a \\foreignlanguage's and a
     \\foreignquote's language, inside another command's words too, and a
     command's words whose environment is a formula's, or that is in one,
     as the reader read them; a call of one of the book's commands that
@@ -2258,8 +2284,7 @@ def case_inline_blocks(work):
                     "z\\.")
          and around("C", '<a href="https://example\\.org">x</a>', item % "i",
                     '<a href="https://example\\.org">y</a>', "z\\.")
-         and around("D", opening + "x" + closing, item % "i",
-                    opening + "y" + closing, "z\\.")
+         and around("D", opening + "x", item % "i", "y" + closing, "z\\.")
          and around("E", "x(?:\u00a0|&#xA0;)?",
                     r"(?:<div class=\"table-wrapper\"[^>]*>\s*)?<table.*?</table>(?:\s*</div>)?",
                     "(?:\u00a0|&#xA0;)?y",
@@ -2271,9 +2296,9 @@ def case_inline_blocks(work):
          lambda: around("G", '<strong><span lang="fr">a</span></strong>',
                         r'<div lang="fr">\s*' + item % "b" + r"\s*</div>",
                         '<strong><span lang="fr">c</span></strong>', "d\\.")
-         and around("H", opening + '<span lang="en">one</span>' + closing,
+         and around("H", opening + '<span lang="en">one</span>',
                     r'<div lang="en">\s*' + item % "two" + r"\s*</div>",
-                    opening + '<span lang="en">three</span>' + closing, "end\\.")),
+                    '<span lang="en">three</span>' + closing, "end\\.")),
         ("a formula's environment in the words, and a command in a formula, are as the reader "
          "read them",
          lambda: re.search(r"<p>\s*I <math .*?<munder><mtable>.*?</math> done\.</p>", text)
@@ -2286,8 +2311,8 @@ def case_inline_blocks(work):
          lambda: around("L", "<strong>a</strong>", item % "x", "<strong>b</strong>", "fin\\.")
          and latexsource.passage_pieces("un % a\n% b\n", [], latexsource.skip_spans(
              "un % a\n% b\n"), lambda piece: "{%s}" % piece) == "{un} % a\n% b\n"
-         and re.search(r"<p>\s*M " + opening + "un" + closing + r"\s*</p>\s*<p>\s*"
-                       + opening + "deux" + closing + r"\s*fin\.\s*</p>", text)
+         and re.search(r"<p>\s*M " + opening + "un" + r"\s*</p>\s*<p>\s*"
+                       + "deux" + closing + r"\s*fin\.\s*</p>", text)
          is not None),
         ("one of the book's commands that makes a block, through another of its commands "
          "too, is set apart as the environment it makes",

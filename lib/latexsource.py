@@ -2935,6 +2935,14 @@ def comment_head(words, last, stop, skipped):
         head = at = end
 
 
+# A quotation split at its paragraph breaks (inline_passages) marks each
+# piece with its number, as a comment the reader skips, so that
+# quotation_marks sets its opening mark in the first and its closing mark
+# in the last, as LaTeX sets the one quotation over its paragraphs.
+QUOTE_PIECE = "%%TIQ quotation %d piece\n"
+QUOTE_PIECE_MARK = re.compile(r"%TIQ quotation (\d+) piece\n")
+
+
 def passage_pieces(words, cuts, skipped, wrap, box=False):
     """words, cut at cuts, (start, end, what goes there) in order, each
     piece between them, but one of nothing but space, wrap(piece), the
@@ -3490,10 +3498,14 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
                 return code
         cuts = [(s, e, block(words[s:e])) for s, e in blocks]
 
-        def wrap(piece, head=head):
+        number = counter.get("_quotation_splits", 0)
+
+        def wrap(piece, head=head, number=number, quoted=m.re is QUOTATION):
             # What the reader reads as nothing, alone between paragraph
             # breaks, is left there, not made an empty passage or quotation.
-            return piece if NOTHING_READ.fullmatch(piece) else "%s{%s}" % (head, piece)
+            if NOTHING_READ.fullmatch(piece):
+                return piece
+            return "%s{%s%s}" % (head, QUOTE_PIECE % number if quoted else "", piece)
         # A paragraph break in a font command's, \textfrench's, or
         # \textcolor's words LaTeX stops on too (\text@command, \textfrench,
         # and \@textcolor aren't \long), so it's left to the reader, which
@@ -3522,6 +3534,8 @@ def inline_passages(text, counter, tags=None, environments=(), places=None,
         if keys:
             new = passage_pieces(words, cuts, skipped, wrap, m.re is LINE_BOX)
             keys += [renamed] if renamed else []
+            if m.re is QUOTATION:
+                counter["_quotation_splits"] = number + 1
         elif m.re is FOREIGN_LANGUAGE and m.group(2):
             new, keys = "%s{%s}" % (head, words), ["babel_options"]
         elif renamed:
@@ -3862,8 +3876,14 @@ def quotation_marks(text, counter, style):
     quotation's marks as “ ” whatever the page's language, where LaTeX sets
     « » in French. With autostyle, each in its language (language_regions),
     the innermost around it, or the main language's."""
+    split = {}
+    for m in QUOTE_PIECE_MARK.finditer(text):
+        split.setdefault(m.group(1), []).append(m.start())
     if not style:
-        return text
+        if not split:
+            return text
+        # A quotation split at its paragraph breaks, in Pandoc's marks.
+        style = {"marks": PANDOC_QUOTES, "variants": {}}
     spans = skip_spans(text)
     starts = [start for start, _ in spans]
     found = [m for m in QUOTATION.finditer(text) if not in_sorted_spans(m.start(), spans, starts)]
@@ -3875,7 +3895,7 @@ def quotation_marks(text, counter, style):
     # language_regions' order where two begin together.
     order = sorted(range(len(regions)), key=lambda k: regions[k][0])
     begun, waiting = [], 0
-    edits, open_quotes = [], []          # open_quotes: (close, inner)
+    edits, open_quotes, styled_count = [], [], 0   # open_quotes: (close, inner, written)
     for m in found:
         parsed = command_words(text, m)
         if not parsed:
@@ -3884,7 +3904,13 @@ def quotation_marks(text, counter, style):
         while open_quotes and open_quotes[-1][0] <= m.start():
             open_quotes.pop()
         inner = bool(m.group(2)) or bool(open_quotes and not open_quotes[-1][1])
-        open_quotes.append((close, inner))
+        # A piece of a quotation split at its paragraph breaks: its marks
+        # written, the opening one in the first piece and the closing one
+        # in the last, and so every quotation inside it, which the reader
+        # would otherwise take for an outer one.
+        piece = QUOTE_PIECE_MARK.match(text, start)
+        written = bool(piece) or any(w for _, _, w in open_quotes)
+        open_quotes.append((close, inner, written))
         if auto:
             name = style["main"]
             while waiting < len(order) and regions[order[waiting]][0] <= m.start():
@@ -3900,17 +3926,27 @@ def quotation_marks(text, counter, style):
         else:
             styled = style["marks"]
         marks = styled[2:] if inner else styled[:2]
-        if marks == (PANDOC_QUOTES[2:] if inner else PANDOC_QUOTES[:2]):
+        pandocs = marks == (PANDOC_QUOTES[2:] if inner else PANDOC_QUOTES[:2])
+        if pandocs and not written:
             continue
+        # Counted once, as a quotation whose marks aren't Pandoc's.
+        if not pandocs and not (piece and piece.start() != split[piece.group(1)][0]):
+            styled_count += 1
+        begins = start
+        if piece:
+            begins = piece.end()
+            others = split[piece.group(1)]
+            marks = (marks[0] if piece.start() == others[0] else "",
+                     marks[1] if piece.start() == others[-1] else "")
         opening = marks[0] + ("\\foreignlanguage{%s}{" % language if language else "")
         closing = ("}" if language else "") + marks[1]
-        edits += [(m.start(), start, opening), (close - 1, close, closing)]
+        edits += [(m.start(), begins, opening), (close - 1, close, closing)]
     pieces, last = [], 0
     for begin, end, new in sorted(edits):
         pieces += [text[last:begin], new]
         last = end
-    if edits:
-        counter["quotation_marks"] = counter.get("quotation_marks", 0) + len(edits) // 2
+    if styled_count:
+        counter["quotation_marks"] = counter.get("quotation_marks", 0) + styled_count
     return "".join(pieces) + text[last:]
 
 

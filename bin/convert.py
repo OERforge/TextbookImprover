@@ -1399,8 +1399,9 @@ LATEX_READ_CHANGES = (
     ("color_blocks", "list or another environment in \\textcolor's words read between "
      "\\textcolor around the words before it and after it, and colored too, as LaTeX colors "
      "it, where the reader made the words before it a paragraph of their own"),
-    ("quotation_paragraphs", "quotation's words holding a paragraph break (\\enquote) read as "
-     "a quotation in each paragraph, which stopped the reader"),
+    ("quotation_paragraphs", "quotation's words holding a paragraph break (\\enquote) read in "
+     "each paragraph, which stopped the reader, its opening mark in the first and its closing "
+     "mark in the last, as LaTeX sets it"),
     ("box_breaks", "paragraph break in a box's words (\\mbox, \\underline) read as LaTeX sets "
      "it, on one line, which stopped the reader"),
     ("inline_blocks", "list or another environment in an inline command's words (\\textbf, "

@@ -1348,6 +1348,10 @@ LATEX_READ_CHANGES = (
     ("layout_declared", "table tagged as a division of paragraphs read as a layout table"),
     ("longtable_head", "longtable's head of one row read as its header row"),
     ("repeated_head", "longtable's head repeated for later pages read once"),
+    ("deferred_notes", "note Pandoc's LaTeX writer defers out of a table's cell, a caption, or "
+     "a term (\\pandocfootnotemark) read as a note where its mark is"),
+    ("description_items", "description list with code before its first \\item "
+     "(\\tightlist) read with its terms, which were lost"),
     ("longtable_head_rows", "longtable's head of more than one row left to the census"),
     ("bounded", "\\pandocbounded image read as the image it holds"),
     ("highlighted_code", "block of code Pandoc highlighted read as the code it shows, "

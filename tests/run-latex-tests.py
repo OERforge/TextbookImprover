@@ -1741,6 +1741,87 @@ def case_opening_language(work):
     ]
 
 
+# What Pandoc 3.14's LaTeX template defines for the notes its writer
+# defers out of a table's cell, a caption, or a term, as it writes them.
+DEFERRED_NOTES_PREAMBLE = r"""\makeatletter
+\protected\def\pandocfootnotemark#1{\footnotemark{}%
+  \expandafter\xdef\csname pandoc@fn@#1\endcsname{%
+    \noexpand\pandoc@fnrestore
+    {\unexpanded\expandafter{\@thefnmark}}%
+    {\ifdefined\Hy@footnote@currentHref
+       \unexpanded\expandafter{\Hy@footnote@currentHref}\fi}}}
+\def\pandoc@fnrestore#1#2{%
+  \gdef\@thefnmark{#1}%
+  \ifdefined\Hy@footnote@currentHref\gdef\Hy@footnote@currentHref{#2}\fi}
+\newcommand\pandocfootnotetext[1]{%
+  \csname pandoc@fn@#1\endcsname\@footnotetext}
+\makeatother
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+"""
+
+
+def case_pandoc_written(work):
+    """A LaTeX book as Pandoc's LaTeX writer writes one: the notes it
+    defers from 3.14 on out of a table's cell, a caption, or a term
+    (\\pandocfootnotemark and \\pandocfootnotetext) read as notes where
+    their marks are, which readers before 3.14 lost, writing pandoc@fn@1
+    in the text; and a description list with \\tightlist, or other code,
+    before its first \\item read with its terms, which every Pandoc's
+    reader lost, but not code holding an environment, nor a description
+    in an environment's or a command's definition."""
+    os.makedirs(work)
+    book = ("\\documentclass{book}\n\\usepackage{longtable,booktabs}\n" + DEFERRED_NOTES_PREAMBLE
+            + "\\newenvironment{glossaire}{\\begin{description}}{\\end{description}}\n"
+            "\\begin{document}\n\\chapter{Written}\nText.\\footnote{Plain note.}\n\n"
+            "\\begin{longtable}[]{@{}l@{}}\n\\caption[A caption]{A caption\\pandocfootnotemark{1}}"
+            "\\tabularnewline\n\\toprule\\noalign{}\nHead \\\\\n\\midrule\\noalign{}\n\\endhead\n"
+            "cell\\pandocfootnotemark{2} \\\\\n\\bottomrule\\noalign{}\n\\end{longtable}\n"
+            "\\pandocfootnotetext{1}{Caption note.}\n\\pandocfootnotetext{2}{Cell note.}\n\n"
+            "\\begin{description}\n\\tightlist\n\\item[Apple\\pandocfootnotemark{1}]\nA fruit.\n"
+            "\\item[Bean]\nA seed.\n\\end{description}\n\\pandocfootnotetext{1}{Term note.}\n\n"
+            "\\begin{description}\\setlength{\\itemsep}{0pt} % close\n\\item[Corn] A grain.\n"
+            "\\end{description}\n\n"
+            "\\begin{description}\n\\begin{center}x\\end{center}\n\\item[Date] A fruit too.\n"
+            "\\end{description}\n\n"
+            "\\begin{glossaire}\\item[Elder] A tree.\\end{glossaire}\n\n"
+            "\\newcommand{\\stopgl}{\\end{description}}\n"
+            "\\newcommand{\\startgl}{\\begin{description}}\n"
+            "\\startgl\n\\item[Fig] A fruit as well.\n\\stopgl\n\\end{document}\n")
+    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write(book)
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.written\n  title: Written\n"
+                 "  language: en-US\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    result = convert(work)
+    said = result.stdout + result.stderr
+    path = os.path.join(work, "html", "book.html")
+    page = re.sub(r"\s+", " ", read(path)) if os.path.exists(path) else ""
+    notes = re.findall(r'<li id="fn\d+"><p>([^<]*)<a href="#fnref', page)
+    return [
+        ("a note Pandoc's writer defers out of a caption, a table's cell, or a term is a note "
+         "where its mark is, and its macro's name isn't in the text",
+         lambda: result.returncode == 0
+         and notes == ["Plain note.", "Caption note.", "Cell note.", "Term note."]
+         and "pandoc@fn" not in page and "pandocfootnote" not in page
+         and "3 note Pandoc's LaTeX writer defers out of a table's cell, a caption, or a "
+             "term (\\pandocfootnotemark) read as a note where its mark is" in said),
+        ("a description list with \\tightlist, or other code, before its first \\item has its "
+         "terms",
+         lambda: re.search(r"<dt>Apple<a [^>]*>.*?</a></dt> <dd> <p>A fruit\.</p> </dd> "
+                           r"<dt>Bean</dt>", page) is not None
+         and "<dt>Corn</dt>" in page
+         and "2 description list with code before its first \\item (\\tightlist) read with "
+             "its terms" in said),
+        ("but not one whose code holds an environment, nor one in an environment's or a "
+         "command's definition, whose terms the reader keeps",
+         lambda: "<dt>Date</dt>" not in page and "A fruit too." in page
+         and "<dt>Elder</dt>" in page and "<dt>Fig</dt>" in page),
+    ]
+
+
 def case_stop_line(work):
     """Where the reader stops on a book, the run names the author's line
     for the line of the reading's copy Pandoc names, where the two
@@ -10815,6 +10896,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("a file \\include-d with a dot in its name", case_dotted_include),
          ("a master's \\includeonly", case_include_only),
          ("a language selected at \\begin{document}", case_opening_language),
+         ("a LaTeX book as Pandoc's LaTeX writer writes one", case_pandoc_written),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),

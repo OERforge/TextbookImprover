@@ -1092,6 +1092,83 @@ def one_row_head(body):
         r"\\\\", re.sub(r"%[^\n]*", "", body[:head.start()]))) == 1
 
 
+DESCRIPTION_BEGIN = re.compile(r"\\begin\s*\{description\}(?:\s*\[[^\]]*\])?")
+
+
+def description_items(text, counter):
+    """A description list with code before its first \\item, as Pandoc's
+    LaTeX writer writes \\tightlist in every tight list, that code moved
+    before the environment. Pandoc's reader skips blocks before an
+    itemize's or an enumerate's \\item but not a description's (item and
+    descItem, Readers/LaTeX.hs, read at 3.14), so the environment was read
+    as a div of its definitions and every term was lost (measured with
+    3.13 and 3.14: \\tightlist, \\setlength, and \\relax alike). Code
+    that holds an environment or an unbalanced brace is left, as it may
+    be a definition's."""
+    spans = skip_spans(text)
+    out, last = [], 0
+    for m in DESCRIPTION_BEGIN.finditer(text):
+        if in_spans(m.start(), spans) or m.start() < last:
+            continue
+        item = ITEM.search(text, m.end())
+        if not item:
+            continue
+        before = text[m.end():item.start()]
+        code = re.sub(r"(?<!\\)%[^\n]*", "", before)
+        if not code.strip() or "\\begin" in code or "\\end" in code \
+                or code.count("{") != code.count("}"):
+            continue
+        out.append(text[last:m.start()] + before.strip() + "\n" + m.group(0) + "\n")
+        last = item.start()
+        counter["description_items"] = counter.get("description_items", 0) + 1
+    out.append(text[last:])
+    return "".join(out)
+
+
+DEFERRED_MARK = re.compile(r"\\pandocfootnotemark\s*\{\s*(\d+)\s*\}")
+DEFERRED_TEXT = re.compile(r"\\pandocfootnotetext\s*\{\s*(\d+)\s*\}\s*(?=\{)")
+
+
+def deferred_notes(text, counter):
+    """A note Pandoc's LaTeX writer defers, from 3.14 on, out of a table's
+    cell, a caption, or a definition's term, \\pandocfootnotemark{n} where
+    it stands and \\pandocfootnotetext{n}{...} after the block, made a
+    \\footnote where its mark is: Pandoc's readers before 3.14 lose the
+    note and write the macro's own name (pandoc@fn@1) in the text, and
+    3.14's reads it so. Each mark takes the first text of its number not
+    taken, as Pandoc writes a mark's text after it; a mark with none is
+    left."""
+    spans = skip_spans(text)
+    texts = []
+    for m in DEFERRED_TEXT.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        end = code_brace(text, m.end())
+        if end > 0:
+            texts.append((m.group(1), m.start(), m.end(), end))
+    if not texts:
+        return text
+    edits, used = [], set()
+    for m in DEFERRED_MARK.finditer(text):
+        if in_spans(m.start(), spans):
+            continue
+        found = next((t for t in texts if t[0] == m.group(1) and t[1] not in used), None)
+        if not found:
+            continue
+        number, start, opens, end = found
+        used.add(start)
+        edits.append((m.start(), m.end(), "\\footnote" + text[opens:end]))
+        stop = end + 1 if text[end:end + 1] == "\n" else end
+        edits.append((start, stop, ""))
+    out, last = [], 0
+    for start, end, new in sorted(edits):
+        out.append(text[last:start] + new)
+        last = end
+    out.append(text[last:])
+    counter["deferred_notes"] = counter.get("deferred_notes", 0) + len(edits) // 2
+    return "".join(out)
+
+
 def longtable_heads(text, counter):
     """A longtable whose head is one row, the rows before \\endhead or
     \\endfirsthead, wrapped as a table declared to have a header row: the
@@ -4415,6 +4492,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     # a page keeps, so a whole one stands for them.
     text = declare_headers(text, counter)
     text = longtable_heads(text, counter)
+    text = deferred_notes(text, counter)
+    text = description_items(text, counter)
     text = unwrap(text, "pandocbounded", counter, "bounded")
     text = substitute(MULTICOLUMN_EDGE, text,
                       lambda m: m.group(1) + re.sub(r"@\{[^{}]*\}", "", m.group(2)) + "}",

@@ -1145,29 +1145,124 @@ def keep_captions(xml):
 
 
 # Pandoc's writer gives a table cell's paragraphs the column's alignment,
-# and a table inside that cell its own besides: withParaProp
-# (Writers/Docx/Types.hs, 3.12 and 3.12.1) adds the inner property before
-# the outer, so a nested table's cell has two w:jc, the first its own, where
-# the schema allows one (CT_PPrBase). GIAM's tables in tables had 113. A
-# workaround pending Pandoc.
-def single_alignment(xml):
-    """Keep only the first w:jc of each paragraph's properties; returns
-    (xml, count of those taken out)."""
+# and a table inside that cell its own besides, so a nested table's cell has
+# two w:jc where the schema allows one (CT_PPrBase). GIAM's tables in tables
+# had 113. Through 3.13, withParaProp (Writers/Docx/Types.hs) adds the inner
+# property before the outer, so the first is the cell's own. From 3.14 the
+# properties are a set (EnvProps' otherElements), written in the elements'
+# order, not the order they were added in: "center" before "right" whichever
+# is the cell's (measured 2026-11-12), and two alike are one. There the
+# cell's own is worked out from the table: every paragraph in a cell, a
+# table's in it too, has that cell's alignment, so it's what they all share
+# beyond what the cell is inside; where that leaves two, as in a cell
+# holding nothing but a table whose columns are all aligned one way, the
+# other cells of its column say. A workaround pending Pandoc.
+SET_PROPERTIES_PANDOC = (3, 14)
+PPR = r"<w:pPr>(?:(?!</?w:pPr\b).)*</w:pPr>"
+JC = r"<w:jc\b[^>]*/>"
+
+
+def single_alignment(xml, by_order=None):
+    """Keep one w:jc in each paragraph's properties, the one of the cell
+    the paragraph is in; returns (xml, count of those taken out). by_order
+    says the first is the cell's own (Pandoc through 3.13), and is asked of
+    the Pandoc on the path when it isn't given."""
+    if by_order is None:
+        by_order = pandoc_version() < SET_PROPERTIES_PANDOC
+    keep = {} if by_order else own_alignments(xml)
     count = 0
 
     def one(m):
+        wanted = keep.get(m.start())
+        found = re.findall(JC, m.group(0))
+        if len(found) < 2:
+            return m.group(0)
+        if wanted is None or not any(jc_value(j) == wanted for j in found):
+            wanted = jc_value(found[0])
         seen = []
 
         def jc(j):
             nonlocal count
-            if seen:
-                count += 1
-                return ""
-            seen.append(j)
-            return j.group(0)
-        return re.sub(r"<w:jc\b[^>]*/>", jc, m.group(0))
-    xml = re.sub(r"<w:pPr>(?:(?!</?w:pPr\b).)*</w:pPr>", one, xml, flags=re.S)
+            if not seen and jc_value(j.group(0)) == wanted:
+                seen.append(j)
+                return j.group(0)
+            count += 1
+            return ""
+        return re.sub(JC, jc, m.group(0))
+    xml = re.sub(PPR, one, xml, flags=re.S)
     return xml, count
+
+
+def jc_value(jc):
+    """A w:jc element's value."""
+    m = re.search(r'w:val="([^"]*)"', jc)
+    return m.group(1) if m else ""
+
+
+def own_alignments(xml):
+    """{a paragraph's properties' offset: its cell's own alignment} for the
+    paragraphs with more than one w:jc, where the tables say which is the
+    cell's (single_alignment's comment). A cell with none of its own takes
+    the nearest cell's around it."""
+    token = re.compile(r"<w:tbl>|</w:tbl>|<w:tr\b[^>]*>|<w:tc>|</w:tc>|" + PPR, re.S)
+    top, stack = [], []          # a table is a list of rows, a row a list of
+    for m in token.finditer(xml):   # cells, a cell a list of paragraphs and tables
+        text = m.group(0)
+        if text == "<w:tbl>":
+            table = []
+            (stack[-1][-1][-1] if stack and stack[-1] and stack[-1][-1] else top).append(table)
+            stack.append(table)
+        elif text == "</w:tbl>":
+            if stack:
+                stack.pop()
+        elif text.startswith("<w:tr"):
+            if stack:
+                stack[-1].append([])
+        elif text == "<w:tc>":
+            if stack and stack[-1]:
+                stack[-1][-1].append([])
+        elif text == "</w:tc>":
+            pass
+        elif stack and stack[-1] and stack[-1][-1]:
+            values = [jc_value(j) for j in re.findall(JC, text)]
+            stack[-1][-1][-1].append((m.start(), values))
+    keep = {}
+
+    def values_in(cell):
+        for item in cell:
+            if isinstance(item, tuple):
+                if item[1]:
+                    yield set(item[1])
+            else:
+                for row in item:
+                    for inner in row:
+                        yield from values_in(inner)
+
+    def shared(cell, around):
+        sets = [v - around for v in values_in(cell)]
+        return set.intersection(*sets) if sets else set()
+
+    def resolve(table, around, nearest):
+        candidates = [[shared(cell, around) for cell in row] for row in table]
+        for r, row in enumerate(table):
+            for c, cell in enumerate(row):
+                own = candidates[r][c]
+                if len(own) > 1:
+                    column = [other[c] for other in candidates if c < len(other) and other[c]]
+                    narrowed = set.intersection(*column)
+                    if narrowed:
+                        own = narrowed
+                mine = next(iter(own)) if len(own) == 1 else None
+                for item in cell:
+                    if isinstance(item, tuple):
+                        if len(item[1]) > 1 and (mine or nearest):
+                            keep[item[0]] = mine or nearest
+                    else:
+                        resolve(item, around | ({mine} if mine else set()), mine or nearest)
+
+    for table in top:
+        resolve(table, set(), None)
+    return keep
 
 
 # Pandoc writes \bar as an accent whose character is an overline (U+203E),

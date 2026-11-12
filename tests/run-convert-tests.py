@@ -2306,6 +2306,9 @@ def case_note_in_link(work):
     pairs = read(work, "html", "pairs.html") if exists(work, "html", "pairs.html") else ""
     pairs_md = read(work, "md", "pairs.md") if exists(work, "md", "pairs.md") else ""
     pairs_tex = read(work, "latex", "pairs.tex") if exists(work, "latex", "pairs.tex") else ""
+    # A caption's note's mark, its text given after: \footnotemark{} through
+    # Pandoc 3.13, \pandocfootnotemark{n} from 3.14.
+    deferred = r"\\(?:footnotemark\{\}|pandocfootnotemark\{\d+\})"
     titled = read(work, "html", "titled.html") if exists(work, "html", "titled.html") else ""
     epub_files = {}
     epubs = glob.glob(os.path.join(work, "epub", "*.epub"))
@@ -2383,9 +2386,9 @@ def case_note_in_link(work):
                            r"\\protect\\hypertarget\{oer-note-comma-1\}\{\}"
                            r"\{\\textsuperscript\{,\}\}\\footnote\{[^}]*\}\}\{Sets\}\}", pairs_tex)
          and re.search(r"\\caption\[A\s+gray\s+square\]\{\\OERCaptionNotes\{\d+\}A\s+gray\s+"
-                       r"square\\footnotemark\{\}\{\\textsuperscript\{,\}\}\\footnotemark", pairs_tex)
-         and re.search(r"\\caption\[Plans\]\{Plans\\footnotemark\{\}\{\\textsuperscript\{,\}\}"
-                       r"\\footnotemark", pairs_tex)),
+                       r"square" + deferred + r"\{\\textsuperscript\{,\}\}" + deferred, pairs_tex)
+         and re.search(r"\\caption\[Plans\]\{Plans" + deferred + r"\{\\textsuperscript\{,\}\}"
+                       + deferred, pairs_tex)),
         ("and the Markdown target keeps them as the author wrote them, with no comma",
          lambda: re.search(r"\[both\[\^1\]\s+notes\[\^2\]\]\(https://example\.edu/\)", pairs_md)
          and re.search(r"side\s+by\s+side\.\[\^3\]\[\^4\]", pairs_md)

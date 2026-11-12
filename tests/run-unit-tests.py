@@ -1599,6 +1599,61 @@ def check_math_paragraphs():
     return checks
 
 
+def check_single_alignment():
+    """A paragraph of a table in an aligned table's cell has two w:jc as
+    Pandoc writes it. Through 3.13 the first is its cell's own; from 3.14
+    they're in the elements' order, and the cell's own is what the tables
+    say."""
+    import docxtarget
+
+    def para(text, *values):
+        return ('<w:p><w:pPr><w:pStyle w:val="Compact" />%s</w:pPr><w:r><w:t>%s</w:t></w:r></w:p>'
+                % ("".join('<w:jc w:val="%s" />' % v for v in values), text))
+
+    def table(*rows):
+        return "<w:tbl>%s</w:tbl>" % "".join(
+            "<w:tr>%s</w:tr>" % "".join("<w:tc><w:tcPr />%s</w:tc>" % cell for cell in row)
+            for row in rows)
+
+    def kept(xml, **how):
+        out, n = docxtarget.single_alignment(xml, **how)
+        return ({re.sub(r"<[^>]+>", "", p): re.findall(r'<w:jc w:val="(\w+)"', p)
+                 for p in re.findall(r"<w:p>.*?</w:p>", out, re.S)}, n)
+    # A table whose cells are right, unaligned, and left, in a centered cell.
+    ordered = table([table([para("r", "right", "center"), para("plain", "center"),
+                            para("l", "left", "center")]) + "<w:p />"])
+    as_set = table([table([para("r", "center", "right"), para("plain", "center"),
+                           para("l", "center", "left")]) + "<w:p />"])
+    # A cell holding only a table whose one column is centered: the cell
+    # under it says its column is right.
+    column = table([table([para("u", "center", "right")]) + "<w:p />"],
+                   [para("below", "right")])
+    # Three deep: right, then center, then left and unaligned.
+    deep = table([para("o", "right") + table([para("m", "center", "right") + table(
+        [para("l", "center", "left", "right"), para("plain", "center", "right")])])])
+    # Nothing to say which: a centered cell holding only a table whose one
+    # column is right.
+    unknown = table([table([para("u", "center", "right")]) + "<w:p />"])
+    want = {"r": ["right"], "plain": ["center"], "l": ["left"]}
+    return [
+        ("by order, as Pandoc writes through 3.13, a nested table's cell keeps its first "
+         "alignment, its own",
+         lambda: kept(ordered, by_order=True) == (want, 2)),
+        ("as a set, as Pandoc writes from 3.14, it keeps the one the cell around it "
+         "doesn't share, and a cell with none of its own the cell's around it",
+         lambda: kept(as_set, by_order=False) == (want, 2)),
+        ("where a cell holds only a table aligned one way, the cells of its column say "
+         "which alignment is theirs",
+         lambda: kept(column, by_order=False) == ({"u": ["center"], "below": ["right"]}, 1)),
+        ("and three deep, each cell keeps its own",
+         lambda: kept(deep, by_order=False) == (
+             {"o": ["right"], "m": ["center"], "l": ["left"], "plain": ["center"]}, 4)),
+        ("where nothing says, one alignment is still all a paragraph has",
+         lambda: kept(unknown, by_order=False)[1] == 1
+         and len(kept(unknown, by_order=False)[0]["u"]) == 1),
+    ]
+
+
 def check_bar_accents():
     """Pandoc's \\bar, an accent of the overline, is the macron's in a
     docx target's file, and reading a Word file the macron's is the
@@ -9771,6 +9826,7 @@ GROUPS = [
     ("text in a Word equation", check_word_equation_text),
     ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("Pandoc's bar accent, written and read", check_bar_accents),
+    ("a nested table's cell's one alignment in Word", check_single_alignment),
     ("a Word display paragraph of several equations", check_math_paragraphs),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),

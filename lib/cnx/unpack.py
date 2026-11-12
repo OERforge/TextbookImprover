@@ -18,7 +18,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import csv
 import os
 
 import sidecars
@@ -180,7 +179,7 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     result.notes = notes
     with open(os.path.join(out, "unpack-report.csv"), "w", newline="",
               encoding=sidecars.CSV_ENCODING) as fh:
-        writer = csv.writer(fh)
+        writer = sidecars.csv_writer(fh)
         writer.writerow(["Where", "Check", "Detail"])
         writer.writerows(notes)
     return result

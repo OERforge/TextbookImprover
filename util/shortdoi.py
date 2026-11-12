@@ -46,7 +46,6 @@ it can be.
 """
 
 import argparse
-import csv
 import io
 import json
 import os
@@ -134,7 +133,7 @@ def main():
               + ("a run without --dry-run writes" if args.dry_run else "written")
               + " as UTF-8 with the shortDOIs.", file=sys.stderr)
     with sidecars.opened(args.sidecar) as fh:
-        rows = list(csv.reader(sidecars.csv_lines(fh)))
+        rows = list(sidecars.csv_rows(fh))
     if not rows:
         sys.exit(f"{args.sidecar}: empty.")
 
@@ -210,7 +209,7 @@ def main():
               + (f"; {len(failed)} lookup(s) failed" if failed else "") + ".")
         return 1 if failed else 0
     out = io.StringIO()
-    csv.writer(out, lineterminator="\n").writerows(rows)
+    sidecars.csv_writer(out, lineterminator="\n").writerows(rows)
     problem = write_in_place(args.sidecar, (sidecars.BOM + out.getvalue()).encode("utf-8"),
                              original)
     if problem:

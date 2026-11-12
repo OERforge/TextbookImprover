@@ -33,7 +33,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import csv
 import datetime
 import hashlib
 import json
@@ -529,7 +528,7 @@ def now():
 
 def write_csv(path, findings):
     with open(path, "w", newline="", encoding=sidecars.CSV_ENCODING) as fh:
-        writer = csv.writer(fh)
+        writer = sidecars.csv_writer(fh)
         writer.writerow(COLUMNS)
         for f in findings:
             writer.writerow(upgrade(f).row())
@@ -538,7 +537,7 @@ def write_csv(path, findings):
 def read_csv(path):
     """Findings back from a CSV, ours or an older three-column one."""
     with open(path, newline="", encoding=sidecars.CSV_ENCODING) as fh:
-        reader = csv.reader(fh)
+        reader = sidecars.csv_rows(fh)
         header = next(reader, None) or []
         out = []
         for row in reader:

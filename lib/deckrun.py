@@ -191,7 +191,7 @@ def write_rows(path, columns, rows):
             os.remove(path)
         return False
     with open(path, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        writer = csv.writer(fh)
+        writer = sidecars.csv_writer(fh)
         writer.writerow(columns)
         writer.writerows(rows)
     return True

@@ -6627,6 +6627,33 @@ def case_alt_shared(work):
     ]
 
 
+def case_formula_cells(work):
+    """A report's cell a spreadsheet would take for a formula, alt text
+    that is a minus sign, written with an apostrophe before it, and a
+    sidecar's cell written so, as a run writes one and as a person types
+    one in Excel, read without it (lib/sidecars.py's guarded and
+    unguarded, figures-and-tables.lua's unguarded)."""
+    os.makedirs(work)
+    for name in ("dash", "cold"):
+        solid_png(os.path.join(work, name + ".png"))
+    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Formula cells\n\n![-](dash.png)\n\n![](cold.png)\n")
+    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8-sig") as fh:
+        fh.write("Image,Alt\ncold.png,'-40 degrees on a thermometer\n")
+    result = convert(work, fixtures=())
+    page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
+    report = read(work, "image-alt-missing.csv") if exists(work, "image-alt-missing.csv") else ""
+    return [
+        ("a report's cell that begins with a minus sign has an apostrophe before it, so a "
+         "spreadsheet doesn't take it for a formula",
+         lambda: result.returncode == 0 and "\ndash.png,,page,says nothing (punctuation only),'-,"
+         in report),
+        ("a sidecar's cell with the apostrophe before its minus sign is read without it",
+         lambda: '<img src="cold.png" alt="-40 degrees on a thermometer" />' in page
+         and '<img src="dash.png" alt="-" />' in page),
+    ]
+
+
 def case_highlighting(work):
     """Highlighted code in bin/highlighting.theme's colors in a page, an
     EPUB, and a Word file (lib/highlighting.py), and page.css's color for
@@ -10245,6 +10272,7 @@ CASES = [
     ("fidelity.csv for an EPUB target", case_fidelity_epub),
     ("a report's quotation cut between characters", case_cut_characters),
     ("highlighted code's colors in a page, an EPUB, and a Word file", case_highlighting),
+    ("a report's and a sidecar's cells a spreadsheet would take for formulas", case_formula_cells),
     ("alt text that says nothing, in a book", case_alt_text),
     ("alt text that is a credit, or another image's, in a book", case_alt_shared),
     ("a hand-written page", case_hand_written),

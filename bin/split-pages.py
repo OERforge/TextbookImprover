@@ -79,7 +79,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import copy
-import csv
 import json
 import os
 import re
@@ -287,7 +286,7 @@ def previous_pages(report):
     if not report or not os.path.exists(report):
         return []
     with open(report, encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        return [row.get("name", "") for row in csv.DictReader(fh)
+        return [row.get("name", "") for row in sidecars.dict_rows(fh)
                 if row.get("name")]
 
 
@@ -702,7 +701,7 @@ def main():
     if args.new:
         if new_rows:
             with open(args.new, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-                writer = csv.writer(fh)
+                writer = sidecars.csv_writer(fh)
                 writer.writerow(SIDECAR_COLUMNS)
                 writer.writerows(new_rows)
             print(f"Wrote {args.new} ({len(new_rows)} page(s) named by "
@@ -714,7 +713,7 @@ def main():
     if args.report:
         if report_rows:
             with open(args.report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-                writer = csv.writer(fh)
+                writer = sidecars.csv_writer(fh)
                 writer.writerow(REPORT_COLUMNS)
                 writer.writerows(report_rows)
         elif os.path.exists(args.report):

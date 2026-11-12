@@ -537,6 +537,24 @@ end
 
 -- Minimal RFC 4180 parser. Character-at-a-time rather than line-at-a-time
 -- because a quoted field may itself contain a newline.
+-- A cell without the apostrophe a run's CSV puts before one a spreadsheet
+-- would take for a formula, as lib/sidecars.py's unguarded() takes it off:
+-- one that begins with =, +, -, @, a tab, a line end, or the full-width
+-- forms of the first four.
+local FORMULA_STARTS = { ['='] = true, ['+'] = true, ['-'] = true, ['@'] = true,
+                         ['\t'] = true, ['\r'] = true, ['\n'] = true }
+local FULL_WIDTH_STARTS = { ['\239\188\157'] = true, ['\239\188\139'] = true,
+                            ['\239\188\141'] = true, ['\239\188\160'] = true }
+-- After any apostrophes of its own, as the run gives such a cell one
+-- more.
+local function unguarded(cell)
+  local rest = cell:match("^'+(.*)$")
+  if rest and (FORMULA_STARTS[rest:sub(1, 1)] or FULL_WIDTH_STARTS[rest:sub(1, 3)]) then
+    return cell:sub(2)
+  end
+  return cell
+end
+
 local function parse_csv(text)
   text = text:gsub('\r\n', '\n'):gsub('\r', '\n')
   -- Excel's UTF-8 byte-order mark, at the start of the file and at the
@@ -551,7 +569,7 @@ local function parse_csv(text)
   local i, n = 1, #text
 
   local function end_field()
-    row[#row + 1] = table.concat(field)
+    row[#row + 1] = unguarded(table.concat(field))
     field = {}
   end
   local function end_row()

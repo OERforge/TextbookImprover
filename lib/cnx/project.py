@@ -36,7 +36,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import csv
 import os
 import re
 import shutil
@@ -483,14 +482,14 @@ def write_captions(out, tables, report=None):
     if rows:
         with open(os.path.join(out, "table-captions.csv"), "w", newline="",
                   encoding=sidecars.CSV_ENCODING) as fh:
-            writer = csv.writer(fh)
+            writer = sidecars.csv_writer(fh)
             writer.writerow(["Label", "Description", "Source", "Excerpt",
                              "Drafted by", "Reviewed"])
             writer.writerows(rows)
     if summaries:
         with open(os.path.join(out, "cnx-table-summaries.csv"), "w",
                   newline="", encoding=sidecars.CSV_ENCODING) as fh:
-            writer = csv.writer(fh)
+            writer = sidecars.csv_writer(fh)
             writer.writerow(["Page", "Label", "Caption", "Summary", "Reads out"])
             writer.writerows(summaries)
     return prefilled, len(summaries), empty, read_out

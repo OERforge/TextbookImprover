@@ -59,6 +59,70 @@ CSV_ENCODING = "utf-8-sig"
 BOM = "\ufeff"
 
 
+# A spreadsheet takes a cell that begins with one of these for a formula,
+# and runs it: Excel and LibreOffice Calc both, as they open a CSV. So
+# every CSV a run writes for a person (csv_writer) puts an apostrophe
+# before such a cell's text, as OWASP's page on CSV injection advises,
+# alt text that starts with a minus sign and a formula's TeX among them;
+# and every reader of a sidecar, a report, or rows taken from one into a
+# sidecar takes the apostrophe off again (unguarded), so a value reads
+# back as it was; a cell that begins with apostrophes of its own before
+# such a character is given one more, so it reads back as it was too. A
+# cell a person writes with no apostrophe reads as written. figures-and-tables.lua takes it off as it reads a sidecar too;
+# math-repair.lua is given rows Python has read. The full-width signs are
+# there because a spreadsheet may take them for their ASCII forms.
+FORMULA_STARTS = "=+-@\t\r\n＝＋－＠"
+GUARD = "'"
+
+
+def _formula_like(cell):
+    """Whether cell, after any apostrophes it begins with, begins as a
+    formula does: such a cell is given one more apostrophe, so that one
+    that begins with an apostrophe of its own reads back as it was."""
+    rest = cell.lstrip(GUARD)
+    return rest[:1] != "" and rest[0] in FORMULA_STARTS
+
+
+def guarded(cell):
+    """cell with an apostrophe before it where a spreadsheet would take
+    it for a formula, and as it is otherwise, a number or None too."""
+    if isinstance(cell, str) and _formula_like(cell):
+        return GUARD + cell
+    return cell
+
+
+def unguarded(cell):
+    """A cell read back without the apostrophe guarded() put before it."""
+    if isinstance(cell, str) and cell[:1] == GUARD and _formula_like(cell):
+        return cell[1:]
+    return cell
+
+
+class _GuardedWriter:
+    """A csv.writer whose cells are guarded()."""
+
+    def __init__(self, writer):
+        self._writer = writer
+
+    def writerow(self, row):
+        return self._writer.writerow([guarded(cell) for cell in row])
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+    @property
+    def dialect(self):
+        return self._writer.dialect
+
+
+def csv_writer(fh, **options):
+    """csv.writer(fh, **options) for a CSV a person may open in a
+    spreadsheet: a report, a sample, or a sidecar a tool writes, each
+    cell guarded() against being taken for a formula."""
+    return _GuardedWriter(csv.writer(fh, **options))
+
+
 def csv_lines(fh):
     """A CSV file's lines, for csv.reader or csv.DictReader, each without
     a byte-order mark at its start."""
@@ -66,17 +130,25 @@ def csv_lines(fh):
         yield line.lstrip(BOM)
 
 
+def csv_rows(fh):
+    """A sidecar's or a report's rows, as csv.reader reads them through
+    csv_lines, each cell unguarded()."""
+    for row in csv.reader(csv_lines(fh)):
+        yield [unguarded(cell) for cell in row]
+
+
 def dict_rows(fh):
     """A sidecar's rows as csv.DictReader reads them, through csv_lines,
-    but a header row repeated partway, as appending a report leaves one:
-    a row whose first value is its first column's name, which the other
-    readers, the filter's among them, skip too."""
+    each value unguarded(), but a header row repeated partway, as
+    appending a report leaves one: a row whose first value is its first
+    column's name, which the other readers, the filter's among them, skip
+    too."""
     reader = csv.DictReader(csv_lines(fh))
     for row in reader:
         first = (reader.fieldnames or [""])[0]
         if first.strip() and (row.get(first) or "").strip().lower() == first.strip().lower():
             continue
-        yield row
+        yield {key: unguarded(value) for key, value in row.items()}
 
 
 def pandoc_uri(path):
@@ -867,7 +939,7 @@ def text(path):
 
 def opened(path):
     """A sidecar's text (text) as a file to read, for csv.reader through
-    csv_lines or dict_rows: every sidecar is read so, not with open."""
+    csv_rows or dict_rows: every sidecar is read so, not with open."""
     return io.StringIO(text(path), newline="")
 
 
@@ -921,7 +993,7 @@ def math_keep_rows(path):
     rows = []
     if path and os.path.exists(path):
         with opened(path) as fh:
-            for row in csv.reader(csv_lines(fh)):
+            for row in csv_rows(fh):
                 if row and row[0].strip().lower() == "kind":
                     continue
                 if len(row) >= 3 and row[2]:

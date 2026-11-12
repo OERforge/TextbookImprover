@@ -3146,6 +3146,72 @@ def check_report_rows():
     ]
 
 
+def check_formula_cells():
+    """A CSV a run writes for a person puts an apostrophe before a cell a
+    spreadsheet would take for a formula, as OWASP advises, and a reader
+    takes it off: lib/sidecars.py's guarded, unguarded, csv_writer,
+    csv_rows, and dict_rows, figures-and-tables.lua's unguarded, which
+    reads a sidecar itself, and convert.py's write_report and
+    findings.read_csv on what they write."""
+    import io
+    import sidecars
+    import findings as findings_lib
+    cells = ["=SUM(A1:A3)", "+1", "-40 degrees", "@user", "\tindented", "\rreturn",
+             "\nnewline", "＝full", "＋full", "－full", "＠full",
+             "'-x", "''=y", "'tis", "'", "plain", "", "3 - 2"]
+    guarded = [sidecars.guarded(c) for c in cells]
+    out = io.StringIO()
+    sidecars.csv_writer(out, lineterminator="\n").writerows([cells, [1, None]])
+    raw = list(csv.reader(io.StringIO(out.getvalue())))
+    read = list(sidecars.csv_rows(io.StringIO(out.getvalue())))
+    keyed = list(sidecars.dict_rows(io.StringIO("Image,Alt\na.png,'-40\nb.png,-3\n")))
+    # The filter's own reader, run by Pandoc's Lua on each guarded cell
+    # that holds no line end, a tab written as \t.
+    lua = ("local src = io.open(%r):read('a')\n"
+           "local f = load(src:match('(local FORMULA_STARTS.-\\nend\\n)') .. 'return unguarded')()\n"
+           "for line in io.lines() do io.write(f((line:gsub('\\\\t', '\\t'))), '\\n') end\n"
+           % os.path.join(ROOT, "bin", "figures-and-tables.lua"))
+    work = tempfile.mkdtemp(prefix="formula-cells-")
+    script = os.path.join(work, "unguard.lua")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write(lua)
+    plain = [g for g in guarded if "\r" not in g and "\n" not in g]
+    took = subprocess.run(["pandoc", "lua", script],
+                          input="\n".join(g.replace("\t", "\\t") for g in plain) + "\n",
+                          capture_output=True, text=True, encoding="utf-8")
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert")
+    convert.say = lambda text: None
+    rows_file, report = os.path.join(work, "rows.csv"), os.path.join(work, "math-repaired.csv")
+    with open(rows_file, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, lineterminator="\n").writerow(["minus", "page", "= 0.450 – 0.050",
+                                                      "= 0.450 − 0.050"])
+    convert.write_report(rows_file, report, "Kind,Page,Before,After", "math repair(s)")
+    with open(report, encoding="utf-8-sig", newline="") as fh:
+        written = list(csv.reader(fh))
+    found = os.path.join(work, "found.csv")
+    findings_lib.write_csv(found, [findings_lib.Finding("page.html", "a-check", "-1 below")])
+    back = findings_lib.read_csv(found)
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a cell that begins with =, +, -, @, a tab, a line end, or a full-width sign is given an "
+         "apostrophe, as is one that begins so after apostrophes of its own; others, numbers, and "
+         "None aren't",
+         lambda: guarded[:11] == ["'" + c for c in cells[:11]]
+         and guarded[11:13] == ["''-x", "'" * 3 + "=y"] and guarded[13:] == cells[13:]
+         and sidecars.guarded(5) == 5 and sidecars.guarded(None) is None),
+        ("csv_writer writes them so, and csv_rows and dict_rows read each back as it was",
+         lambda: raw[0] == guarded and raw[1] == ["1", ""] and read[0] == cells
+         and [r["Alt"] for r in keyed] == ["-40", "-3"]),
+        ("figures-and-tables.lua's reader takes the apostrophe off as Python's does",
+         lambda: took.returncode == 0
+         and took.stdout.split("\n")[:-1] == [sidecars.unguarded(g) for g in plain]),
+        ("a report written by write_report has the apostrophe in the file, and a findings CSV "
+         "reads back as written",
+         lambda: written[1][2:] == ["'= 0.450 – 0.050", "'= 0.450 − 0.050"]
+         and back[0].detail == "-1 below"),
+    ]
+
+
 def check_pdf_summary():
     """The output check's summary gives a PDF's repeated finding once,
     counted, and a single one with its detail."""
@@ -9764,6 +9830,7 @@ def check_run_all():
 
 GROUPS = [
     ("a report's rows", check_report_rows),
+    ("cells a spreadsheet would take for formulas, written and read", check_formula_cells),
     ("alt text's rules, and their findings", check_alt_text_rules),
     ("a PDF read without pypdf's warnings", check_pdf_read_quietly),
     ("the PDF findings in the output check's summary", check_pdf_summary),

@@ -75,7 +75,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import argparse
-import csv
 import json
 import os
 import sys
@@ -114,7 +113,7 @@ def has_review_columns(path):
         return True
     rows = False
     with sidecars.opened(path) as handle:
-        for raw in csv.reader(sidecars.csv_lines(handle)):
+        for raw in sidecars.csv_rows(handle):
             if not raw or not raw[0].strip():
                 continue
             if raw[0].strip().lower() == "key":
@@ -136,7 +135,7 @@ def read_sidecar(path, warn):
         return rows
     unknown = set()
     with sidecars.opened(path) as handle:
-        reader = csv.reader(sidecars.csv_lines(handle))
+        reader = sidecars.csv_rows(handle)
         for raw in reader:
             if not raw or not raw[0].strip():
                 continue
@@ -460,7 +459,7 @@ def decide(info, row):
 
 def write_csv(path, columns, rows):
     with open(path, "w", newline="", encoding=sidecars.CSV_ENCODING) as handle:
-        writer = csv.writer(handle)
+        writer = sidecars.csv_writer(handle)
         writer.writerow(columns)
         for row in rows:
             writer.writerow([row.get(c, "") for c in columns])

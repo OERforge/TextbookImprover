@@ -56,7 +56,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import collections
-import csv
 import os
 import re
 import zipfile
@@ -451,7 +450,7 @@ def read_rows(path):
     if not path or not os.path.exists(path):
         return rows, problems
     with sidecars.opened(path) as fh:
-        for row in csv.reader(sidecars.csv_lines(fh)):
+        for row in sidecars.csv_rows(fh):
             if not row or not row[0].strip() or row[0].strip().lower() == "source":
                 continue
             source = row[0].strip()

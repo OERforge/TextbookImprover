@@ -52,7 +52,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import csv
 import os
 import sys
 import zipfile
@@ -65,6 +64,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 from tablecensus import (q, all_tables, classify,  # noqa: E402
                          guess_table, nearby_label, book_files)
+import sidecars  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def census(items, verbose=False):
     """items: (path, book) pairs, as book_files gives them."""
     import xml.etree.ElementTree as ET
 
-    out = csv.writer(sys.stdout)
+    out = sidecars.csv_writer(sys.stdout)
     out.writerow(["Source", "Label", "Kind", "Guess", "Rows", "Columns",
                   "Depth", "Evidence", "Book"])
     tally = Counter()

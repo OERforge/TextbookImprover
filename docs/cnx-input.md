@@ -244,15 +244,16 @@ Measured with the bank's 19,258 exercises for the 26 books that embed them, fetc
 
 ## Compared with OpenStax's Word files
 
-OpenStax's Word files are their baked book cut into pages, the nearest thing to an answer key for what baking should produce. `util/cnx-compare-word.py` compares the pages with them word for word, page by page, leaving formulas out (Word has them as Office Math or pictures) and reading a table's caption after the table, where Word has it. Every page's name matches its Word file's. Where the words differ, it's for one of these reasons: the source has been corrected since the Word files were made (OpenStax's errata); a deliberate difference above; Word runs together words a table's cells or a code listing keep apart; or Word lost something (a sentence after a formula, an embedded video's description).
+OpenStax's Word files are their baked book cut into pages, the nearest thing to an answer key for what baking should produce. `util/cnx-compare-word.py` compares the pages with them word for word, page by page, leaving formulas out (Word has them as Office Math or pictures) reading a table's caption after the table, where Word has it, numbered code with its lines' numbers, which Word has as text, and a frame's link to the online book as Word's "Access multimedia content". Every page's name matches its Word file's. Where the words differ, it's for one of these reasons: the source has been corrected since the Word files were made (OpenStax's errata); a deliberate difference above; Word runs together words a table's cells or a code listing keep apart; or Word lost something (a sentence after a formula, an embedded video's description).
 
 | Book | Pages | Below 98% alike |
 | --- | --- | --- |
-| *Principles of Economics 3e* | 419 | 10 |
+| *Principles of Economics 3e* | 419 | 12 |
 | *Introductory Business Statistics 2e* | 169 | 13 |
 | *Introduction to Sociology 3e* | 243 | 31 |
 | *Principles of Marketing*, with its 662 exercises from the bank | 311 | 2 |
 | *Foundations of Information Systems*, *Principles of Data Science*, with their 410 and 136 exercises from the bank | 132, 112 | 33 and 15, none of them a page of exercises or an answer key: a footnote's number, which the Word files count through the chapter and these pages through the page, until `convert.py` numbers them through the chapter; and words Word runs together in a table's cells or code |
+| *Introduction to Python Programming*, with its 607 exercises from the bank | 131 | 42: words Word runs together in code (`break` and `else` on two lines as "breakelse"), a program's lines Word has twice (an example run whose input is in bold, the lines 1.1 has a reader add, 7.4's output of `help()`), and the preface's mission statement, worded otherwise |
 
 ## Compared with cookbook's own baking
 

@@ -17,8 +17,11 @@ how much and where. Names on one side only are listed first. With
 Math is left out on both sides unless --math is given: the Word file
 has it as Office Math, whose brackets and spacing aren't text, or as a
 picture, and the page as MathML, so the two never read alike. The Word
-file's title paragraph and "OpenStax" byline are skipped too, and a
-table's caption is read after the table, where the Word file has it. A "slim"
+file's title paragraph and "OpenStax" byline are skipped too, a
+table's caption is read after the table, where the Word file has it,
+numbered code is read with its lines' numbers, which the Word file has
+as text, and a frame's link to the online book is read as the Word
+file's "Access multimedia content". A "slim"
 Word file, its word/document.xml alone, is read as well as a whole one.
 
 Needs lxml. Copyright 2026 Robert Szarka
@@ -95,6 +98,7 @@ def word_tokens(path, math=False):
 
 
 MATHML = "http://www.w3.org/1998/Math/MathML"
+FRAME_LINK = " (in the online book at openstax.org)"
 
 
 def html_tokens(path, math=False):
@@ -122,6 +126,21 @@ def html_tokens(path, math=False):
                          "' os-abstract ')]"):
         for number, li in enumerate(ol.xpath("./li"), 1):
             li.text = f"{number} " + (li.text or "")
+    # Numbered code has its numbers drawn beside it here (Pandoc's
+    # numberLines); OpenStax's Word files have each line's number as text
+    # before it, so they're read with theirs.
+    for pre in body.xpath(".//pre[contains(concat(' ', @class, ' '), "
+                          "' numberLines ')]"):
+        lines = "".join(pre.itertext()).split("\n")
+        for child in list(pre):
+            pre.remove(child)
+        pre.text = "\n".join(f"{n} {line}" for n, line in enumerate(lines, 1))
+    # A frame of the book's repository (a code runner) is a link to its
+    # page in the online book here, named by the frame; the Word files
+    # have a link "Access multimedia content" in its place.
+    for a in body.xpath(".//a[@href]"):
+        if len(a) == 0 and (a.text or "").endswith(FRAME_LINK):
+            a.text = "Access multimedia content"
     # A note's kind and its own title are one heading here, a colon
     # between them ("Big Picture: A Global Culture?"), and two in the Word
     # files, so they're read without the colon. A note headed by its kind

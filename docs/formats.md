@@ -34,6 +34,8 @@ LaTeX as an input is new, and every path from it is rated NEEDS MORE TESTING, th
 
 A hyperlink's ScreenTip becomes the link's title, which the HTML and EPUB targets write as a tooltip and the Markdown and AsciiDoc targets keep. Pandoc 3.11's reader drops ScreenTips, so the pipeline recovers them itself. Pandoc 3.12's reader and writer handle them, with the change this project contributed ([pandoc#11890](https://github.com/jgm/pandoc/pull/11890)); the pipeline's own recovery is then a no-op, and stays for older versions.
 
+A display paragraph of more than one equation, which PowerPoint shows one under another (it wasn't tried in Word), is read as a display formula for each, where Pandoc's reader reads the paragraph whole as one formula, its equations run together (`{a = 1}{b = 2}`). A paragraph holding anything else between its equations is read as the reader reads it.
+
 Two repairs change what reading a Word file means, and each is a setting, decided once for the book and applied both to what the conversion reads and to a `source` target's copy, so the book and the author's file agree ([settings](conversion-settings.md)):
 
 - **`word.tracked_deletions`.** Text deleted with Word's tracked changes is dropped on reading by default (`accept`), as Word's Accept All Changes and Pandoc drop it, and the run names each file that has any, since a before-and-after example loses its "before". `strike` keeps it as ordinary struck-through text, which reaches HTML as `<del>`.

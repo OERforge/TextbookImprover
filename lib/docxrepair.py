@@ -1584,10 +1584,42 @@ def bar_accents(xml):
     return MACRON_ACCENT.subn("\\g<1>\u203e\\g<2>", xml)
 
 
+# A display paragraph of Office math (m:oMathPara), its properties, and
+# each equation in it.
+MATH_PARAGRAPH = re.compile(r"<m:oMathPara\b([^>]*)>(.*?)</m:oMathPara>", re.S)
+MATH_PARAGRAPH_PROPERTIES = re.compile(r"<m:oMathParaPr\b[^>]*(?:/>|>.*?</m:oMathParaPr>)", re.S)
+EQUATION = re.compile(r"<m:oMath\b[^>]*(?:/>|>.*?</m:oMath>)", re.S)
+
+
+def math_paragraphs(xml):
+    """Each display paragraph of more than one equation made a display
+    paragraph for each, as PowerPoint shows them, one under another
+    (OFFICE-NOTES; not tried in Word): Pandoc's Word reader reads the
+    paragraph whole as one formula, its equations run together ({a = 1}
+    {b = 2}, measured on 3.12.1 and 3.13), where each of its own is a
+    display formula of its own. A paragraph holding anything else between
+    its equations is left. Returns (xml, count)."""
+    count = 0
+
+    def split(match):
+        nonlocal count
+        inner = match.group(2)
+        properties = MATH_PARAGRAPH_PROPERTIES.search(inner)
+        equations = EQUATION.findall(inner)
+        rest = EQUATION.sub("", MATH_PARAGRAPH_PROPERTIES.sub("", inner, count=1))
+        if len(equations) < 2 or rest.strip():
+            return match.group(0)
+        count += 1
+        given = properties.group(0) if properties else ""
+        return "".join("<m:oMathPara%s>%s%s</m:oMathPara>" % (match.group(1), given, equation)
+                       for equation in equations)
+    return MATH_PARAGRAPH.sub(split, xml), count
+
+
 def repaired_copy(source, destination, headings="keep", deletions="accept", notes=None):
     """Write a copy of the .docx with the repairs applied to
-    word/document.xml and word/footnotes.xml, the bar accents to
-    word/endnotes.xml too, and every other part byte for byte, after the book's word.headings and word.tracked_deletions
+    word/document.xml and word/footnotes.xml, the bar accents and the
+    display paragraphs of several equations to word/endnotes.xml too, and every other part byte for byte, after the book's word.headings and word.tracked_deletions
     (lib/wordrepairs.py). Returns how many bookmarks moved; a heading
     setting that can't apply to the file is appended to notes."""
     import wordrepairs
@@ -1632,6 +1664,7 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
                 text, _ = keep_unlinked_bookmarks(text)
                 text, _ = join_continuations(text, blank)
                 text, _ = bar_accents(text)
+                text, _ = math_paragraphs(text)
                 data = text.encode("utf-8")
             elif info.filename == "word/footnotes.xml":
                 text = data.decode("utf-8")
@@ -1641,8 +1674,10 @@ def repaired_copy(source, destination, headings="keep", deletions="accept", note
                 if blank:
                     text, _ = join_continuations(text, blank)
                 text, _ = bar_accents(text)
+                text, _ = math_paragraphs(text)
                 data = text.encode("utf-8")
             elif info.filename == "word/endnotes.xml":
-                data = bar_accents(data.decode("utf-8"))[0].encode("utf-8")
+                data = math_paragraphs(bar_accents(data.decode("utf-8"))[0])[0].encode(
+                    "utf-8")
             zout.writestr(info, data)
     return moved

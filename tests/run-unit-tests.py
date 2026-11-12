@@ -1522,6 +1522,83 @@ def check_equation_bars():
     ]
 
 
+def check_math_paragraphs():
+    """A Word display paragraph of more than one equation read as a display
+    paragraph for each, in the body, the footnotes, and the endnotes, its
+    properties with each, so Pandoc's reader reads each as a display
+    formula of its own, where it ran them together; one of one equation,
+    and one holding anything else between its equations, as they were."""
+    import zipfile
+    import docxrepair
+    W = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+         'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"')
+
+    def equation(left, right):
+        return ("<m:oMath><m:r><m:t>%s</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>%s</m:t>"
+                "</m:r></m:oMath>" % (left, right))
+    props = '<m:oMathParaPr><m:jc m:val="left"/></m:oMathParaPr>'
+    two = "<m:oMathPara>%s%s%s</m:oMathPara>" % (props, equation("a", "1"), equation("b", "2"))
+    split, count = docxrepair.math_paragraphs("<w:p>%s</w:p>" % two)
+    one = "<w:p><m:oMathPara>%s</m:oMathPara></w:p>" % equation("c", "3")
+    between = ('<w:p><m:oMathPara>%s<w:bookmarkStart w:id="1" w:name="x"/>%s</m:oMathPara></w:p>'
+               % (equation("d", "4"), equation("e", "5")))
+    # A conversion's copy of a Word file, and what Pandoc reads of it.
+    folder = tempfile.mkdtemp()
+    source, copy = os.path.join(folder, "math.docx"), os.path.join(folder, "copy.docx")
+    body = '<w:document %s><w:body><w:p>%s</w:p></w:body></w:document>' % (W, two)
+    note = '<w:footnotes %s><w:footnote w:id="1"><w:p>%s</w:p></w:footnote></w:footnotes>' % (W, two)
+    endnote = '<w:endnotes %s><w:endnote w:id="1"><w:p>%s</w:p></w:endnote></w:endnotes>' % (W, two)
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("[Content_Types].xml",
+                   '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxml'
+                   'formats.org/package/2006/content-types"><Default Extension="rels" Content'
+                   'Type="application/vnd.openxmlformats-package.relationships+xml"/><Default '
+                   'Extension="xml" ContentType="application/xml"/><Override PartName="/word/'
+                   'document.xml" ContentType="application/vnd.openxmlformats-officedocument.'
+                   'wordprocessingml.document.main+xml"/></Types>')
+        z.writestr("_rels/.rels",
+                   '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.'
+                   'openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type='
+                   '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/office'
+                   'Document" Target="word/document.xml"/></Relationships>')
+        z.writestr("word/document.xml", body)
+        z.writestr("word/footnotes.xml", note)
+        z.writestr("word/endnotes.xml", endnote)
+    docxrepair.repaired_copy(source, copy)
+    with zipfile.ZipFile(copy) as z:
+        copied = {n: z.read(n).decode("utf-8") for n in z.namelist()}
+
+    def formulas(path):
+        done = subprocess.run(["pandoc", path, "-t", "json"], capture_output=True, text=True)
+        found = re.findall(r'"t":"DisplayMath"},"([^"]*)"', done.stdout)
+        return found if done.returncode == 0 else None
+    pandoc = shutil.which("pandoc")
+    read_before, read_after = (formulas(source), formulas(copy)) if pandoc else (None, None)
+    shutil.rmtree(folder)
+    each = ("<m:oMathPara>%s%s</m:oMathPara><m:oMathPara>%s%s</m:oMathPara>"
+            % (props, equation("a", "1"), props, equation("b", "2")))
+    checks = [
+        ("a display paragraph of two equations is a display paragraph for each, its "
+         "properties with each",
+         lambda: split == "<w:p>%s</w:p>" % each and count == 1),
+        ("one of one equation, and one with a bookmark between its equations, are as they were",
+         lambda: docxrepair.math_paragraphs(one) == (one, 0)
+         and docxrepair.math_paragraphs(between) == (between, 0)),
+        ("the reading's copy of a Word file has them so in its body, its footnotes, and its "
+         "endnotes",
+         lambda: all(each in copied[name] for name in (
+             "word/document.xml", "word/footnotes.xml", "word/endnotes.xml"))),
+    ]
+    if pandoc:
+        checks.append(("so Pandoc's reader reads each equation as a display formula of its "
+                       "own, where it ran them together",
+                       lambda: read_before == ["{a = 1}{b = 2}"]
+                       and read_after == ["a = 1", "b = 2"]))
+    else:
+        print("  skip  no pandoc: what its reader makes of the copy isn't checked")
+    return checks
+
+
 def check_bar_accents():
     """Pandoc's \\bar, an accent of the overline, is the macron's in a
     docx target's file, and reading a Word file the macron's is the
@@ -9694,6 +9771,7 @@ GROUPS = [
     ("text in a Word equation", check_word_equation_text),
     ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("Pandoc's bar accent, written and read", check_bar_accents),
+    ("a Word display paragraph of several equations", check_math_paragraphs),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),
     ("the content prefix", check_content_prefix),

@@ -3612,13 +3612,19 @@ PDF_MACROS = r"""\ExplSyntaxOn
 % inserted"). It's made robust, and its entry's title, made plain, has
 % the picture's alt text in its place, as the writer's plain text of the
 % caption has the image's description: the alt key of the
-% \includegraphics in it, Pandoc's [keepaspectratio,alt={...}].
+% \includegraphics in it, Pandoc's [keepaspectratio,alt={...}]. A picture
+% with none, or an empty one, is nothing there, and the space after it
+% goes with it, which left two between the words around it: the next
+% token is read as an argument, which skips a space and gives the token
+% back (a group's braces aside, which purify drops anyway).
 \cs_if_exist:NT \pandocbounded { \MakeRobust \pandocbounded }
 \cs_new:Npn \__oer_purify_bounded:n #1
   { \__oer_purify_graphic:w #1 [ ] { } \q_stop }
 \cs_new:Npn \__oer_purify_graphic:w #1 [ #2 ] #3 \q_stop
-  { \keyval_parse:nnn { \use_none:n } { \__oer_purify_alt:nn } {#2} }
-\cs_new:Npn \__oer_purify_alt:nn #1#2 { \str_if_eq:nnT {#1} {alt} {#2} }
+  { \__oer_purify_alt:w #2 , alt= { } \q_stop }
+\cs_new:Npn \__oer_purify_alt:w #1 alt= #2 #3 \q_stop
+  { \tl_if_blank:nTF {#2} { \__oer_purify_no_space:w } {#2} }
+\cs_new:Npn \__oer_purify_no_space:w #1 {#1}
 \text_declare_purify_equivalent:Nn \pandocbounded { \__oer_purify_bounded:n }
 \NewDocumentCommand \OERArtifactGraphics { }
   { \cs_if_exist:NT \tag_mc_begin:n { \setkeys{Gin}{artifact} } }

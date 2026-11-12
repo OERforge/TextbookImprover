@@ -480,6 +480,8 @@ Text with a note.[^a]
 
 ![A figure whose caption has ![a red square](assets/red.png) in it.](assets/red.png)
 
+![A figure whose caption has ![](assets/red.png) a picture without words.](assets/red.png)
+
 ![[]{#anchored}A figure whose caption opens with an anchor.](assets/red.png)
 
 ![A figure whose caption has a [mot]{lang=fr} in French.](assets/red.png)
@@ -8068,6 +8070,14 @@ def checks(work, built):
          "by the caption's words and the picture's alt text",
          lambda: os.path.exists(notes_path)
          and "A figure whose caption has a red square in it."
+         in [str(e.get("/T")) for e in elements(
+             pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
+             if kind(e) == "/TOCI"]),
+        # A picture with no alt text had left the spaces on both its sides.
+        ("and a picture without alt text is nothing in its entry's title, one space "
+         "between the words around it",
+         lambda: os.path.exists(notes_path)
+         and "A figure whose caption has a picture without words."
          in [str(e.get("/T")) for e in elements(
              pypdf.PdfReader(notes_path).trailer["/Root"]["/StructTreeRoot"])
              if kind(e) == "/TOCI"]),

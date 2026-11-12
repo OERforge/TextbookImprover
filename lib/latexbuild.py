@@ -1011,7 +1011,13 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
 % no-break space not one, two thirds of the line, as the blank macros
 % below draw it while TeX breaks the paragraph: a column less than three
 % times as wide as those words put the blank on the line after them
-% (oerfit.paragraph measures a paragraph so). Otherwise, no narrower than
+% (oerfit.paragraph measures a paragraph so). Where the words don't fit
+% beside the blanks at their least but do beside their columns held at
+% it, a column of blanks is held at its least, as a column of words is at
+% its longest word, and the columns of words share the rest (given its
+% share by its blanks' whole length, a column of blanks took the line
+% from the words, which wrapped onto more lines than they need).
+% Otherwise, no narrower than
 % its longest piece TeX can't break, a formula whole and a blank's three
 % underscores at most, the rest of the line shared among them in
 % proportion to how much wider each would be as one line; where even
@@ -1939,15 +1945,16 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       local maths = (all - applied - 2 * (k - 1) * sep) / f0
       local spaced, narrow = 2 * (k - 1) * sep0, 2 * (k - 1) * 0.25 * size
-      local function shared(total, f, least)
+      local function shared(total, f, least, most)
         local out, base, want = {}, 0, 0
+        most = most or nat
         for _, j in ipairs(info.words) do
           out[j] = f * (least[j] or 0) / f0
           base = base + out[j]
-          want = want + math.max(0, f * (nat[j] or 0) / f0 - out[j])
+          want = want + math.max(0, f * (most[j] or 0) / f0 - out[j])
         end
         for _, j in ipairs(info.words) do
-          local more = math.max(0, f * (nat[j] or 0) / f0 - out[j])
+          local more = math.max(0, f * (most[j] or 0) / f0 - out[j])
           if want > 0 then
             out[j] = math.floor(out[j] + (total - base) * more / want)
           else
@@ -1963,6 +1970,18 @@ FIT_MACROS = r"""% Something too wide for its line, which TeX can't break:
       end
       if low < natural and maths + low + spaced <= line then
         return { narrow = 0, factor = 1, columns = 1, center = 0, widths = shared(line - maths - spaced, 1, lows) }
+      end
+      local held, most, holding = {}, {}, longest
+      for _, j in ipairs(info.words) do
+        held[j], most[j] = long[j], nat[j]
+        if lows[j] and lows[j] < (nat[j] or 0) then
+          held[j] = math.max(long[j] or 0, lows[j])
+          most[j] = held[j]
+          holding = holding + (held[j] - (long[j] or 0)) / f0
+        end
+      end
+      if holding > longest and maths + holding + spaced <= line then
+        return { narrow = 0, factor = 1, columns = 1, center = 0, widths = shared(line - maths - spaced, 1, held, most) }
       end
       if maths + longest + spaced <= line then
         return { narrow = 0, factor = 1, columns = 1, center = 0, widths = shared(line - maths - spaced, 1, long) }

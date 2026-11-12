@@ -1611,6 +1611,11 @@ FIT_ONE = (
     "as wide as the label:\n\n<table><thead><tr><th>Item</th><th>Answer</th></tr></thead>"
     "<tbody><tr><td>Labelcol lorem ipsum dolor sit amet consectetur adipiscing elit sed</td>"
     "<td>Labelsig: " + "_" * 66 + "</td></tr></tbody></table>\n\n"
+    "A table whose columns have no widths, words that don't fit the line beside a long blank "
+    "even at its least:\n\n<table><thead><tr><th>Item</th><th>Answer</th></tr></thead>"
+    "<tbody><tr><td>Heldcol lorem ipsum dolor sit amet consectetur adipiscing elit sed do "
+    "eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam</td>"
+    "<td>Heldsig: " + "_" * 66 + "</td></tr></tbody></table>\n\n"
     "A table whose columns have no widths, a label and its formula in the first column, "
     "pairs of numbers with fractions in the others, as Precalculus 2e's Table 2 of section "
     "4.4 has them, which the counts give more of the line than the label:\n\n<table><tbody><tr>"
@@ -6771,6 +6776,15 @@ def fit_checks(fit_path, fit_said, fit_source, fit_third):
          lambda: at("Labelsig", 1) and blank_at(fit_path, "Labelsig") is not None
          and at_edge(66, "Labelsig") and within("Labelsig")
          and "Labelcol" in line_of("Labelcol") and "sed" not in line_of("Labelcol")),
+        # Where the words don't fit beside the blank at its least, the
+        # column of the blank took its share of the line by the blank's
+        # whole length, the words on four lines, the first ending at
+        # "consectetur" and the last "veniam" alone.
+        ("and where the words don't fit beside a blank at its least, the blank's column is "
+         "held at its least, its blank on its label's line, and the words take the rest",
+         lambda: at("Heldsig", 1) and blank_at(fit_path, "Heldsig") is not None
+         and within("Heldsig") and "adipiscing" in line_of("Heldcol")
+         and "enim" in line_of("veniam") and "Heldcol" not in line_of("veniam")),
         # FIT_MACROS' measure of a paragraph's least, run by texlua on nodes
         # a character wide: a blank three underscores, or three times the
         # words that share its line, before it and joined to it as far as a

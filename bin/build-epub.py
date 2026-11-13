@@ -1017,15 +1017,37 @@ def mark_mathml(opf, texts):
     return re.sub(r'<item [^>]*href="text/[^"]+\.xhtml"[^>]*/>', fix, opf)
 
 
+# A link's color in an EPUB, light and dark (WCAG 1.4.6). Pandoc's
+# epub.css sets none, nor does page.css, so a reading system's own is
+# used: Chromium's in dark mode, #9e9eff, is 6.36:1 on the #232629
+# epub.css gives the page there, under AAA's 7:1 (on 591 links of an
+# economics draft, axe-core's color-contrast-enhanced). #0000ee is 9.4:1
+# on white and #b4b4ff 7.9:1 on #232629, for visited links too, which a
+# browser would color apart. A page needn't: Pandoc's stylesheet gives
+# its links the text's color, or the book's linkcolor, which this would
+# override. :where() gives the rule no weight, so a source's own colors
+# win, among them page.css's text for a cell with its own background in
+# dark mode. A reading system without light-dark() keeps the first.
+EPUB_LINKS = """
+/* A link's color, light and dark, from build-epub.py */
+:where(a:link, a:visited) {
+  color: #0000ee;
+  color: light-dark(#0000ee, #b4b4ff);
+}
+"""
+
+
 def stylesheet(work):
-    """Pandoc's EPUB stylesheet followed by ours. --css replaces the
-    default rather than adding to it."""
+    """Pandoc's EPUB stylesheet followed by ours, and an EPUB's link
+    colors (EPUB_LINKS). --css replaces the default rather than adding to
+    it."""
     path = os.path.join(work, "book.css")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(pandoc_default("--print-default-data-file=epub.css"))
         fh.write("\n\n/* From TextbookImprover's page.css */\n")
         with open(PAGE_CSS, encoding="utf-8") as page_css:
             fh.write(page_css.read())
+        fh.write(EPUB_LINKS)
     return path
 
 

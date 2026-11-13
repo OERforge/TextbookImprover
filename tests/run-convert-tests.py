@@ -6870,6 +6870,9 @@ one, a <span style="background-color:yellow">highlight</span>, and a <span
 style="background-color:yellow">highlight with <span style="color:#1a237e">a word</span></span>.</p>
 <table><tr><th style="background-color:#00ccff">Head</th><th>Plain</th></tr>
 <tr><td><span style="color:#c00">red</span></td><td style="background-color:#fdd">pink</td></tr></table>
+<p>And <a href="https://example.org/plain">a link</a>, and <span
+style="background-color:yellow">a highlight with <a href="https://example.org/lit">a link
+in it</a></span>.</p>
 </body></html>
 """
 OWN_COLORS_MD = """---
@@ -6898,6 +6901,15 @@ OWN_COLORS_JS = """() => {
     /color/.test(el.getAttribute('style'))).map(el => [el.textContent.trim(),
     Math.round(ratio(rgb(getComputedStyle(el).color), under(el)) * 100) / 100]);
 }"""
+
+
+# Each of the fixture's links, drawn: its text, its contrast on what it
+# sits on, and its color.
+OWN_LINKS_JS = OWN_COLORS_JS.replace(
+    "document.querySelectorAll('body [style]')].filter(el =>\n"
+    "    /color/.test(el.getAttribute('style')))",
+    "document.querySelectorAll('a[href^=\"https://example.org/\"]')]").replace(
+    "* 100) / 100]);", "* 100) / 100, getComputedStyle(el).color]);")
 
 
 def case_own_colors(work):
@@ -6956,7 +6968,7 @@ def case_own_colors(work):
         m = flat(markup)
         return ('<span style="color: #2e7d32; color: light-dark(#2e7d32, #509e52)">green' in m
                 and '<span class="own-background" style="background-color: yellow">highlight' in m)
-    drawn = {}
+    drawn, linked = {}, {}
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -6974,6 +6986,7 @@ def case_own_colors(work):
                         if where:
                             view.goto("file://" + where)
                             drawn[(name, scheme)] = view.evaluate(OWN_COLORS_JS)
+                            linked[(name, scheme)] = view.evaluate(OWN_LINKS_JS)
                     view.close()
                 browser.close()
         except Exception as exc:
@@ -6987,6 +7000,18 @@ def case_own_colors(work):
         for k, text, r in low:
             print(f"        {k}: {text!r} at {r}:1")
         return len(drawn) == 8 and all(len(words) >= 2 for words in drawn.values()) and not low
+    def links_readable():
+        """The HTML chapter's two links in an EPUB, light and dark: each at
+        7:1 or more (build-epub.py's EPUB_LINKS), the one in a highlight
+        in its light text in dark mode too; and a page's, which take the
+        text's color, at 7:1 or more too."""
+        got = {k: v for k, v in linked.items() if k[0] in ("page", "chapter")}
+        low = [(k, text, r) for k, links in got.items() for text, r, _ in links if r < 7]
+        for k, text, r in low:
+            print(f"        {k}: {text!r} at {r}:1")
+        dark = [color for text, r, color in linked.get(("chapter", "dark"), [])]
+        return (len(got) == 4 and all(len(links) == 2 for links in got.values()) and not low
+                and dark == ["rgb(180, 180, 255)", "rgb(26, 26, 26)"])
     checks = [
         ("the book is converted", lambda: run.returncode == 0 or print(run.stderr[-2000:])),
         ("a text color of the source's own gets a partner for dark mode, black the dark "
@@ -7002,6 +7027,9 @@ def case_own_colors(work):
         checks.append(("drawn in Chromium, each colored word reads at 4.5:1 or more on what it "
                        "sits on, in light mode and in dark, on a page and in an EPUB's chapter",
                        readable))
+        checks.append(("drawn so, an EPUB's links read at 7:1 or more, light and dark, a link "
+                       "in a highlight keeping its light text in dark mode, and a page's too "
+                       "(WCAG 1.4.6)", links_readable))
     return checks
 
 

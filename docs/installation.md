@@ -337,12 +337,12 @@ The run finds it through `VERAPDF` or as `verapdf` on the path. veraPDF chooses 
 
 veraPDF has profiles for the parts of [WCAG 2.2](https://www.w3.org/TR/WCAG22/) a program can check in a PDF, but its release can't check their own rules. They need two more of veraPDF's modules, `wcag-validation` and `wcag-algorithms`, and the libraries those use, and veraPDF looks for the modules when it's given such a profile and quietly does without them ([`GFCosDocument`](https://github.com/veraPDF/veraPDF-validation/blob/v1.30.3/validation-model/src/main/java/org/verapdf/gf/model/impl/cos/GFCosDocument.java#L451-L470)): it checks the PDF/UA rules in the profile and passes the rest without checking them. There's nothing to build, though. veraPDF publishes the modules on Maven Central, as it does its other parts, and its launcher loads whatever `CLASSPATH_PREFIX` names ahead of its own jar, so veraPDF's installation stays as it is. With them, `--wcag` adds the profile's checks to the output check and the audit; [Checking the output](checking.md#verapdfs-wcag-22-checks) says what they check, how they're reported, and why what they find is information, not a verdict.
 
-The jars below are for veraPDF 1.30.3, the version on the first line of `"$VERAPDF" --version`. If it names an earlier one, upgrade veraPDF first, which the commands [above](#optional-verapdf) do when they're run again. The jars go in a folder of their own, with the two machine profiles, one for PDF 2.0, which a PDF/UA-2 build is, and one for PDF 1.x, which a PDF/UA-1 build is; about 5.7 MB in all:
+The jars below are for veraPDF 1.30.4, the version on the first line of `"$VERAPDF" --version`. If it names an earlier one, upgrade veraPDF first, which the commands [above](#optional-verapdf) do when they're run again. The jars go in a folder of their own, with the two machine profiles, one for PDF 2.0, which a PDF/UA-2 build is, and one for PDF 1.x, which a PDF/UA-1 build is; about 5.7 MB in all:
 
 ```bash
 mkdir -p ~/tools/verapdf-wcag && cd ~/tools/verapdf-wcag
 for jar in \
-    org/verapdf/wcag-validation/1.30.3/wcag-validation-1.30.3.jar \
+    org/verapdf/wcag-validation/1.30.4/wcag-validation-1.30.4.jar \
     org/verapdf/wcag-algorithms/1.30.3/wcag-algorithms-1.30.3.jar \
     org/apache/pdfbox/pdfbox/3.0.4/pdfbox-3.0.4.jar \
     org/apache/pdfbox/pdfbox-io/3.0.4/pdfbox-io-3.0.4.jar \
@@ -375,12 +375,12 @@ python3 $T/bin/check-output.py --wcag
 
 ```
 Output check: 0 page(s), nothing found.
-  veraPDF 1.30.3 loaded its WCAG modules from /home/you/tools/verapdf-wcag (wcag-validation 1.30.3, wcag-algorithms 1.30.3), so its WCAG 2.2 machine checks run on PDF 2.0 and PDF 1.x files alike; veraPDF's WCAG checks are experimental and may be wrong.
+  veraPDF 1.30.4 loaded its WCAG modules from /home/you/tools/verapdf-wcag (wcag-validation 1.30.4, wcag-algorithms 1.30.3), so its WCAG 2.2 machine checks run on PDF 2.0 and PDF 1.x files alike; veraPDF's WCAG checks are experimental and may be wrong.
 ```
 
 If they didn't, a warning says what it found: no folder, a module's jar or a profile missing from it, or modules veraPDF didn't load, which veraPDF itself never says. With one profile of the two, the line says the checks run on a PDF 2.0 file and not a PDF 1.x file, or the other way round, and a warning names the profile missing; the loop above downloads it.
 
-Another veraPDF needs other jars, since `wcag-validation` must be veraPDF's own version: for veraPDF 1._x_._y_, `wcag-validation` 1._x_._y_ and the newest `wcag-algorithms` whose version starts 1._x_ ([its versions](https://repo1.maven.org/maven2/org/verapdf/wcag-algorithms/)), the rest at the versions in `wcag-algorithms`'s POM file and PDFBox's, and the profiles from the profiles repository's branch for that release (`rel/1.30` for 1.30). Nothing more. veraPDF's own jar has what else the modules use (its parser and validation model, and Jackson), and the POM files' other entries, test tools and a coverage plugin, aren't needed at all; a second copy of veraPDF's own, which a tool that gathers a module's dependencies would add (Maven's `dependency:copy-dependencies`, say), would be loaded ahead of it. Empty the folder before filling it with another version's jars: Java loads one of two copies of a class, and [which one it doesn't specify](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/classpath.html), so `--wcag` warns of a module there twice.
+Another veraPDF needs other jars, since `wcag-validation` must be veraPDF's own version: for veraPDF 1._x_._y_, `wcag-validation` 1._x_._y_ and the newest `wcag-algorithms` whose version starts 1._x_ ([its versions](https://repo1.maven.org/maven2/org/verapdf/wcag-algorithms/)), which isn't always 1._x_._y_ (for 1.30.4 it's 1.30.3, which its POM's range `[1.30.0,1.31.0)` takes), the rest at the versions in `wcag-algorithms`'s POM file and PDFBox's, and the profiles from the profiles repository's branch for that release (`rel/1.30` for 1.30). Nothing more. veraPDF's own jar has what else the modules use (its parser and validation model, and Jackson), and the POM files' other entries, test tools and a coverage plugin, aren't needed at all; a second copy of veraPDF's own, which a tool that gathers a module's dependencies would add (Maven's `dependency:copy-dependencies`, say), would be loaded ahead of it. Empty the folder before filling it with another version's jars: Java loads one of two copies of a class, and [which one it doesn't specify](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/classpath.html), so `--wcag` warns of a module there twice.
 
 To run the profile by hand, as `--wcag` does:
 

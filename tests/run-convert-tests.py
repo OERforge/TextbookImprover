@@ -3827,11 +3827,12 @@ def case_display_style(work):
          "another sum's are its scripts",
          lambda: sums.count('<semantics><mstyle displaystyle="true"><mrow><munderover>') == 1
          and sums.count("<mstyle") == 1 and sums.count("<msubsup><mo>&#x2211;</mo>") == 1),
-        ("but one in a heading keeps its TeX, in text style, where the writer reads text "
-         "from it, the EPUB's contents; and one in a picture's description is its text, as "
-         "any formula there is, in the picture's alt text on its page and in an EPUB",
+        ("but one in a heading keeps its TeX, in text style, which the EPUB's contents "
+         "give as its text, as any heading's formula; and one in a picture's description is "
+         "its text, as any formula there is, in the picture's alt text on its page and in an "
+         "EPUB",
          lambda: alt in areas and alt in areas_chapter and "<mstyle" not in areas
-         and "The area \\displaystyle \\int_0^1 x\\,dx" in contents),
+         and re.search(r"<text>The area \u222b[^<\\\\$]*dx</text>", contents) is not None),
         ("and one texmath can't read is warned of once, by the page's writer, which "
          "writes its TeX",
          lambda: unread_said.count("Could not convert TeX math") == 1

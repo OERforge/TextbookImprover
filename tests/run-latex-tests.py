@@ -9328,7 +9328,28 @@ def case_customized(work):
         opf = next((t for n, t in texts.items() if n.endswith(".opf")), "")
         return holder and linking and all(
             re.search(r'href="%s#page-ch_one--fig:panels"' % re.escape(os.path.basename(holder[0])), t)
-            for t in linking) and re.search(r'properties="nav mathml"', opf)
+            for t in linking)
+
+    def epub_contents():
+        """The appendix's entry in the EPUB's contents, in the navigation
+        document and toc.ncx alike, has its heading's formula as text, not
+        its MathML or its TeX, and the package declares no MathML there."""
+        import zipfile
+        path = os.path.join(work, "epub", "org.example.custom.epub")
+        if not os.path.exists(path):
+            return False
+        with zipfile.ZipFile(path) as z:
+            texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                     if n.endswith(("nav.xhtml", "toc.ncx", ".opf"))}
+        nav = next((t for n, t in texts.items() if n.endswith("nav.xhtml")), "")
+        ncx = next((t for n, t in texts.items() if n.endswith("toc.ncx")), "")
+        opf = next((t for n, t in texts.items() if n.endswith(".opf")), "")
+        entry = re.search(r">(Tables of [^<]*)</a>", nav)
+        label = re.search(r"<text>(Tables of [^<]*)</text>", ncx)
+        return bool(entry and label) and "<math" not in nav \
+            and not any(c in entry.group(1) + label.group(1) for c in "\\$") \
+            and entry.group(1) == label.group(1) \
+            and re.search(r'properties="nav"', opf) is not None
 
     def epub_titles():
         """Each of the EPUB's chapter files is titled by its heading's text, a
@@ -9525,8 +9546,10 @@ def case_customized(work):
         ("and every link in it has its target: a label in a heading's braces is a label "
          "LaTeX finds", lambda: "Hyper reference" not in said
          if pdf else skip(pdf_why)),
-        ("in the EPUB, a link to a figure in another chapter's file names the file, and "
-         "a formula in a heading has the navigation document declare MathML", epub_links),
+        ("in the EPUB, a link to a figure in another chapter's file names the file",
+         epub_links),
+        ("and the EPUB's contents give a heading's formula as its text, in the navigation "
+         "document and toc.ncx alike, the package declaring no MathML there", epub_contents),
         ("and each chapter file's title is its heading's text, a formula's as text", epub_titles),
         ("a brace a style file never closes stops the run, which names the file and line",
          lambda: stopped.returncode != 0

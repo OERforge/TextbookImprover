@@ -469,6 +469,75 @@ def link_across_chapters(path):
     return fixed
 
 
+# A heading's formula in the book's contents: the writer copies a
+# heading's inlines into the navigation document, a formula as its MathML
+# with its TeX as an annotation, and its text into toc.ncx, a formula as
+# its TeX. Reading systems show the contents as text, and Thorium, Calibre,
+# and SumatraPDF showed the TeX in both (Rob, 2026-11-12), so each formula
+# the pages noted (title-formulas.lua) is its text there, as a PDF's
+# bookmark has it: x² + y² = r².
+NAV_MATH = re.compile(r"<math\b.*?</math>", re.S)
+NAV_TEX = re.compile(r'<annotation encoding="application/x-tex">(.*?)</annotation>', re.S)
+NCX_LABEL = re.compile(r"(<navLabel>\s*<text>)(.*?)(</text>)", re.S)
+
+
+def contents_formulas_as_text(path, texts):
+    """The navigation document's and toc.ncx's formulas as their text,
+    where texts (a heading formula's TeX to its text) has it; a formula it
+    hasn't is left as it was. Returns how many were made text."""
+    if not texts:
+        return 0
+    made = 0
+
+    def nav_formula(match):
+        nonlocal made
+        found = NAV_TEX.search(match.group(0))
+        key = html_unescape(found.group(1)) if found else None
+        if key not in texts:
+            return match.group(0)
+        made += 1
+        return html_escape(texts[key], quote=False)
+
+    # The longest TeX first, so that a formula holding another's TeX is
+    # replaced whole.
+    keys = sorted(texts, key=len, reverse=True)
+
+    def ncx_label(match):
+        nonlocal made
+        label = html_unescape(match.group(2))
+        for key in keys:
+            if key and key in label:
+                made += label.count(key)
+                label = label.replace(key, texts[key])
+        return match.group(1) + html_escape(label, quote=False) + match.group(3)
+
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        found = {n: archive.read(n).decode("utf-8") for n in names
+                 if n.endswith(("nav.xhtml", "toc.ncx"))}
+    changed = {}
+    for name, text in found.items():
+        new = NAV_MATH.sub(nav_formula, text) if name.endswith("nav.xhtml") \
+            else NCX_LABEL.sub(ncx_label, text)
+        if new != text:
+            changed[name] = new
+    if not changed:
+        return 0
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename in changed:
+                data = changed[info.filename].encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return made
+
+
 # The empty span target-blocks.lua puts between two notes in a row in a
 # heading, which page.css draws a comma in after a note's mark: the
 # writer copies the heading's words, notes left out, into the navigation
@@ -561,6 +630,12 @@ class EpubAssembly(Assembly):
             kind = section_type(dict(first["c"][1][2]).get("epub:type"))
         if kind:
             self.page_types[page_id(stem)] = kind
+
+    def add_single_page(self, stem, title_override):
+        # A book of one page: its headings' formulas noted too, which its
+        # chapter files' titles and the contents take (they had none).
+        super().add_single_page(stem, title_override)
+        self.formula_texts.update(formula_texts(load_page(self.base, stem).get("meta", {})))
 
     def divisions(self):
         """heading id -> (body epub:type, the section's epub:type or "")
@@ -1062,6 +1137,9 @@ def build(base, name, resolved, keep, intermediates=None):
         if result.returncode != 0:
             sys.exit(f"pandoc failed building {out_path}.")
         retitle_chapters(out_path, assembly.formula_texts)
+        # Before the links are fixed, which declares MathML in the
+        # navigation document where it still holds a formula's.
+        contents_formulas_as_text(out_path, assembly.formula_texts)
         if numbering != "page" or placement != "page":
             arrange_epub_notes(out_path, assembly, numbering, placement)
         link_across_chapters(out_path)

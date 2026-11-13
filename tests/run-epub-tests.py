@@ -846,6 +846,39 @@ def case_one_page_notes(work):
     ]
 
 
+def case_one_page_formulas(work):
+    """A book of one page whose headings hold formulas: its chapter files'
+    titles and its contents, the navigation document's and toc.ncx's, give
+    each formula as its text (title-formulas.lua's), where the titles had
+    the TeX and the contents its MathML and its TeX; and the package
+    declares no MathML in the navigation document, which holds none."""
+    folder = os.path.join(work, "formulas")
+    os.makedirs(folder)
+    markdown_page(folder, "book", "# The law $x^2$\n\nText.\n\n"
+                                  "## The sum $x^2 + y_1$\n\nMore.\n")
+    run(["pandoc", "-f", "json", "-t", "json", "book.filtered.json", "-o",
+         "book.filtered.json", "--lua-filter", os.path.join(BIN, "title-formulas.lua")],
+        folder, dict(os.environ))
+    write_config(folder, "    - book\n")
+    built = Built(folder)
+    with zipfile.ZipFile(os.path.join(folder, "epub", "org.example.fixtures.epub")) as z:
+        ncx = z.read("EPUB/toc.ncx").decode("utf-8") \
+            if "EPUB/toc.ncx" in z.namelist() else ""
+    labels = re.findall(r"<text>([^<]*)</text>", ncx)
+    return [
+        ("a one-page book's chapter file is titled by its heading, a formula as its text",
+         lambda: built.status == 0 and "The law x\u00b2" in built.titles()),
+        ("its contents give each heading's formula as its text, in the navigation "
+         "document and toc.ncx alike",
+         lambda: [t for _, t in built.nav_entries()][-2:]
+         == ["The law x\u00b2", "The sum x\u00b2 + y\u2081"]
+         and "The law x\u00b2" in labels and "The sum x\u00b2 + y\u2081" in labels
+         and "<math" not in built.files.get("EPUB/nav.xhtml", "x<math")),
+        ("and the package declares no MathML in the navigation document",
+         lambda: re.search(r'href="nav.xhtml"[^>]*properties="nav"', built.opf) is not None),
+    ]
+
+
 def case_svg_ids(work):
     """A picture in SVG whose ids repeat, as a Desmos graph's do: the
     EPUB's copy has each repeat renamed, the first left as it is, and is
@@ -908,6 +941,7 @@ CASES = [
     ("divisions and landmarks", case_divisions),
     ("types declared in contents", case_declared_types),
     ("a one-page book's notes", case_one_page_notes),
+    ("a one-page book's formulas in its titles and contents", case_one_page_formulas),
     ("an SVG picture's repeated ids", case_svg_ids),
 ]
 

@@ -369,7 +369,7 @@ Measured on 3.11 by writing each case with Pandoc's `asciidoc` writer and readin
 
 **Chapter files are titled by file name**: the template's `<title>$pagetitle$</title>` is filled with `ch002.xhtml` by the writer's own variables (`Writers/EPUB.hs`), and `title-meta` is empty in a chapter. Read from the source and measured. Our assembler rewrites each `<title>` from the chapter's heading after the archive exists.
 
-**The navigation document's entries are the headings' inlines, a formula as MathML**, its TeX annotation and all, inside the entry's `<a>`, and epubcheck 5.2.1 passes such a book (measured with 3.13, 2026-11-06, a numbered book whose headings hold formulas, since 2026-11-06 the number before the heading's own words).
+**The navigation document's entries are the headings' inlines, a formula as MathML**, its TeX annotation and all, inside the entry's `<a>`, and epubcheck 5.2.1 passes such a book (measured with 3.13, 2026-11-06, a numbered book whose headings hold formulas, since 2026-11-06 the number before the heading's own words). `toc.ncx`'s label is the heading's `stringifyInlines`, a formula its TeX (`mkNavPoint`, `Writers/EPUB.hs`, read at 3.14). Neither can be given another title: the entries are made from the heading alone. Thorium, Calibre, and SumatraPDF each showed such an entry as its TeX (Rob, 2026-11-12), so `build-epub.py` gives both the formula's text afterwards (`contents_formulas_as_text`).
 
 **Accessibility metadata is read from document metadata** (`accessModes`, `accessModeSufficient`, `accessibilityFeatures`, `accessibilityHazards`, `accessibilitySummary`) since 3.1.12; `--epub-metadata` drops `schema:` properties. Measured on 3.11.
 

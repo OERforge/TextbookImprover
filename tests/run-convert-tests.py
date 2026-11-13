@@ -32,6 +32,7 @@ import argparse
 import csv
 import html as html_lib
 import glob
+import io
 import json
 import os
 import re
@@ -10205,6 +10206,188 @@ def case_include_all_html(work):
          and "includeallhtml" not in usage.stdout),
     ]
 
+def case_own_files(work):
+    """A book's own template, stylesheet, and Word reference document,
+    kept in a folder beside its configuration: html.template on every
+    page an html target writes (its pages, its contents, its Notes page),
+    a partial beside it read, as one beside pdf.template is,
+    html.css after TextbookImprover's stylesheet in each page's head,
+    docx.reference_doc's styles in each Word file, epub.css last in the
+    EPUB's stylesheet, and pdf.template the latex target's master, with
+    the run's font line still added before its fonts partial. A target
+    that names none has none of them. A template in Pandoc's user data
+    folder or in a folder PANDOC_DATA_DIRS names is read by no target,
+    nor an init.lua there run, and the run says so. A file that doesn't
+    exist stops the run, and so does one beside the sources with a
+    source's extension, which the run would read as a page."""
+    pandoc = shutil.which("pandoc")
+    if not pandoc:
+        return []
+    # Pandoc's own, as the documentation says to start from them; an empty
+    # data folder, so that nothing on this machine is read.
+    empty = os.path.join(work, "empty")
+    os.makedirs(empty, exist_ok=True)
+
+    def default(*argument):
+        return subprocess.run([pandoc, "--data-dir", empty, *argument],
+                              capture_output=True, check=True).stdout
+
+    html5 = default("-D", "html5").decode().replace(
+        "<body>", "<body><p>OWN-HTML-TEMPLATE</p>\n${own-part.html()}", 1)
+    latex = default("-D", "latex").decode().replace(
+        "\\begin{document}", "\\begin{document}\n% OWN-LATEX-TEMPLATE\n${own-part.latex()}", 1)
+    reference = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(default("--print-default-data-file",
+                                            "reference.docx"))) as old, \
+            zipfile.ZipFile(reference, "w", zipfile.ZIP_DEFLATED) as new:
+        for item in old.infolist():
+            data = old.read(item.filename)
+            if item.filename == "word/styles.xml":
+                data = data.replace(b"</w:styles>", b'<w:style w:type="paragraph" '
+                                    b'w:customStyle="1" w:styleId="OwnMarker">'
+                                    b'<w:name w:val="Own Marker"/></w:style></w:styles>')
+            new.writestr(item, data)
+    own_files = {"templates/page.html": html5.encode(),
+                 "templates/own-part.html": b"<p>OWN-HTML-PARTIAL</p>\n",
+                 "templates/book.latex": latex.encode(),
+                 "templates/own-part.latex": b"% OWN-LATEX-PARTIAL\n",
+                 "templates/page.css": b"p { color: rebeccapurple; } /* OWN-HTML-CSS */\n",
+                 "templates/epub.css": b"p { color: teal; } /* OWN-EPUB-CSS */\n",
+                 "templates/reference.docx": reference.getvalue()}
+
+    def book(name, config, files=None, env=None):
+        folder = os.path.join(work, name)
+        for path, data in dict({
+                "ch1.md": b"# Chapter One\n\nOpening.[^1]\n\n[^1]: A note.\n",
+                "ch2.md": b"# Chapter Two\n\nTwo.\n",
+                "project.yaml": b"project:\n  identifier: org.example.own\n"
+                                b"  title: Own Files\n  contents:\n    - generate: toc\n"
+                                b"    - title: Part\n      items: [ch1, ch2]\n",
+                "conversion.yaml": config.encode()}, **(files or {})).items():
+            os.makedirs(os.path.dirname(os.path.join(folder, path)), exist_ok=True)
+            with open(os.path.join(folder, path), "wb") as fh:
+                fh.write(data)
+        result = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, **(env or {})))
+        return folder, result
+
+    own, result = book("own", "defaults:\n  notes:\n    placement: book\n"
+                       "targets:\n  html:\n    format: html\n"
+                       "    html:\n      template: templates/page.html\n"
+                       "      css: templates/page.css\n"
+                       "  plain:\n    format: html\n"
+                       "  word:\n    format: docx\n"
+                       "    docx:\n      reference_doc: templates/reference.docx\n"
+                       "  epub:\n    format: epub3\n    epub:\n      css: templates/epub.css\n"
+                       "  tex:\n    format: latex\n"
+                       "    pdf:\n      template: templates/book.latex\n", own_files)
+
+    def pages(target):
+        return {name: read(own, target, name)
+                for name in ("ch1.html", "ch2.html", "toc.html", "notes.html")
+                if exists(own, target, name)}
+
+    def own_css_last(text):
+        at = text.find("OWN-HTML-CSS")
+        return 0 < text.find("From the book's html.css") < at < text.find("</style>", at)
+
+    def styles(name):
+        with zipfile.ZipFile(os.path.join(own, "word", name)) as z:
+            return z.read("word/styles.xml").decode("utf-8")
+
+    def epub_css():
+        found = glob.glob(os.path.join(own, "epub", "*.epub"))
+        if not found:
+            return ""
+        with zipfile.ZipFile(found[0]) as z:
+            return "".join(z.read(n).decode("utf-8") for n in z.namelist()
+                           if n.endswith(".css"))
+
+    def master():
+        found = [p for p in glob.glob(os.path.join(own, "tex", "*.tex"))
+                 if "\\begin{document}" in read(p)]
+        return read(found[0]) if len(found) == 1 else ""
+
+    # Pandoc's folders, each with a template that would mark a page and an
+    # init.lua that would stop Pandoc, were either read.
+    marked = html5.replace("OWN-HTML-TEMPLATE", "PANDOC-FOLDER-TEMPLATE").encode()
+    user = os.path.join(work, "xdg")
+    dirs = os.path.join(work, "dirs")
+    for folder in (os.path.join(user, "pandoc"), dirs):
+        os.makedirs(os.path.join(folder, "templates"), exist_ok=True)
+        with open(os.path.join(folder, "templates", "default.html5"), "wb") as fh:
+            fh.write(marked)
+        with open(os.path.join(folder, "init.lua"), "w", encoding="utf-8") as fh:
+            fh.write('error("PANDOC-FOLDER-INIT")\n')
+    folders, kept_out = book("folders", "targets:\n  html:\n    format: html\n"
+                             "  epub:\n    format: epub3\n",
+                             env={"XDG_DATA_HOME": user, "PANDOC_DATA_DIRS": dirs})
+    said = kept_out.stdout + kept_out.stderr
+
+    def anywhere(folder, word):
+        for root, _, names in os.walk(folder):
+            for name in names:
+                with open(os.path.join(root, name), "rb") as fh:
+                    data = fh.read()
+                if word.encode() in data:
+                    return True
+                if name.endswith(".epub"):
+                    with zipfile.ZipFile(os.path.join(root, name)) as z:
+                        if any(word.encode() in z.read(n) for n in z.namelist()):
+                            return True
+        return False
+
+    _, missing = book("missing", "targets:\n  html:\n    format: html\n"
+                      "    html:\n      css: templates/none.css\n")
+    beside, sources = book("beside", "targets:\n  html:\n    format: html\n"
+                           "    html:\n      template: page.html\n",
+                           {"page.html": html5.encode()})
+    return [
+        ("a book's own files convert", lambda: result.returncode == 0),
+        ("html.template is every page's an html target writes: its pages, its "
+         "contents, and its Notes page",
+         lambda: len(pages("html")) == 4
+         and all("OWN-HTML-TEMPLATE" in t and "OWN-HTML-PARTIAL" in t
+                 for t in pages("html").values())),
+        ("html.css is in each page's head, after TextbookImprover's stylesheet",
+         lambda: all(own_css_last(t) for t in pages("html").values())),
+        ("a target that names neither has neither",
+         lambda: len(pages("plain")) == 4
+         and not any("OWN-" in t for t in pages("plain").values())),
+        ("docx.reference_doc's styles are each Word file's",
+         lambda: all("Own Marker" in styles(n) for n in ("ch1.docx", "ch2.docx"))),
+        ("epub.css is last in the EPUB's stylesheet",
+         lambda: "OWN-EPUB-CSS" in epub_css()
+         and epub_css().rstrip().endswith("/* OWN-EPUB-CSS */")),
+        ("pdf.template is the latex target's master, with the font line added "
+         "before its fonts partial",
+         lambda: "OWN-LATEX-TEMPLATE" in master() and "oerfonts" in master()),
+        ("a partial beside either template is read, as Pandoc reads one beside a "
+         "template",
+         lambda: "OWN-LATEX-PARTIAL" in master()
+         and all("OWN-HTML-PARTIAL" in t for t in pages("html").values())),
+        ("with Pandoc's folders holding a template and an init.lua, the book "
+         "converts, as though they were empty",
+         lambda: kept_out.returncode == 0
+         and exists(folders, "html", "ch1.html")
+         and not anywhere(folders, "PANDOC-FOLDER-TEMPLATE")),
+        ("and the run says what it left out, and where to name a template instead",
+         lambda: "PANDOC_DATA_DIRS is set" in said
+         and "default.html5 isn't read" in said and "html.template" in said
+         and "init.lua isn't run" in said),
+        ("a file that doesn't exist stops the run",
+         lambda: missing.returncode != 0
+         and "html.css is templates/none.css for target html, which doesn't exist"
+         in missing.stdout + missing.stderr),
+        ("and so does one beside the sources that the run would read as a page",
+         lambda: sources.returncode != 0
+         and "which is beside the book's sources" in sources.stdout + sources.stderr
+         and not exists(beside, "html")),
+    ]
+
+
 CASES = [
     ("a bare directory", case_bare),
     ("the output check, with --quick and without", case_quick),
@@ -10240,6 +10423,7 @@ CASES = [
     ("a table of one cell, a layout table whatever its source", case_one_cell_tables),
     ("a menu for pages posted as a site", case_menu),
     ("the footer on every page of every format", case_page_footer),
+    ("a book's own template, stylesheet, and reference document", case_own_files),
     ("raw HTML in a Markdown source", case_markdown_html),
     ("raw code in a Markdown source, as written", case_markdown_raw_code),
     ("a note in a link's text, after the link", case_note_in_link),

@@ -165,6 +165,21 @@ def main(args):
                          + "Try pandoc --help for more information.\n")
         return 6
     out = ["--math-method=mathml" if arg == "--mathml" else arg for arg in args]
+    # The run's own --data-dir, an empty folder (lib/pandocrun.py), out:
+    # Pandoc takes the last one given, and 3.9's functions come from this
+    # one's.
+    kept, skip = [], False
+    for at, arg in enumerate(out):
+        if arg == "--":
+            kept.extend(out[at:])
+            break
+        if skip:
+            skip = False
+        elif arg == "--data-dir":
+            skip = True
+        elif not arg.startswith("--data-dir="):
+            kept.append(arg)
+    out = kept
     # 3.9's default, before the rest, which a -- may end the options of.
     plain = [] if any(g in MATH for g in given) else ["--math-method=plain"]
     os.execv(real, [real, "--data-dir=" + DATA] + plain + out)

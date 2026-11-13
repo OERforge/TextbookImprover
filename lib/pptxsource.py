@@ -104,6 +104,7 @@ from xml.etree import ElementTree as ET
 import decks as decklib
 import docxrepair
 import pptxcheck
+import pandocrun
 import pptxparse
 import pptxremediate
 import pptxtitle
@@ -1238,7 +1239,7 @@ def read_tex(equations, work, pandoc="pandoc", env=None):
         stub = os.path.join(folder, "equations.docx")
         stub_docx(stub, equations)
         try:
-            result = subprocess.run([pandoc, "-f", "docx", "-t", "json", stub],
+            result = subprocess.run([*pandocrun.command(pandoc), "-f", "docx", "-t", "json", stub],
                                     capture_output=True, text=True, env=env)
         except OSError:
             return [None] * len(equations)
@@ -1344,7 +1345,7 @@ def read(path, base, work, alts=None, tables=None, titles=None, orders=None, pan
 def api_version(pandoc="pandoc"):
     """The version of Pandoc's types the installed Pandoc writes, or None."""
     try:
-        result = subprocess.run([pandoc, "-f", "markdown", "-t", "json"], input="",
+        result = subprocess.run([*pandocrun.command(pandoc), "-f", "markdown", "-t", "json"], input="",
                                 capture_output=True, text=True)
         return json.loads(result.stdout)["pandoc-api-version"]
     except (OSError, ValueError, KeyError):

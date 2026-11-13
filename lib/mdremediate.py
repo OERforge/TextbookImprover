@@ -44,6 +44,7 @@ from collections import Counter
 from urllib.parse import unquote
 
 import sidecars
+import pandocrun
 from names import case_match
 
 ESC = re.compile(r"\\([^A-Za-z0-9\s])")
@@ -60,7 +61,7 @@ def escape_inline(text):
 
 def read(text):
     """Pandoc's reading of Markdown, as the conversion reads it."""
-    result = subprocess.run(["pandoc", "-f", "markdown", "-t", "json"], input=text,
+    result = subprocess.run([*pandocrun.PANDOC, "-f", "markdown", "-t", "json"], input=text,
                             capture_output=True, text=True)
     return json.loads(result.stdout) if result.returncode == 0 else {"blocks": []}
 

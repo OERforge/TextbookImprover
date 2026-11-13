@@ -39,6 +39,7 @@ import zipfile
 from urllib.parse import unquote
 
 import alttext
+import pandocrun
 from findings import Finding
 
 EXTERNAL = ("http://", "https://", "mailto:", "tel:", "#", "//")
@@ -47,7 +48,7 @@ EXTERNAL = ("http://", "https://", "mailto:", "tel:", "#", "//")
 def read(path, kind):
     """Pandoc's JSON of a source, with no filter."""
     reader = "docx" if kind == "source-docx" else "markdown"
-    result = subprocess.run(["pandoc", "-f", reader, "-t", "json", path],
+    result = subprocess.run([*pandocrun.PANDOC, "-f", reader, "-t", "json", path],
                             capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip()[:300])

@@ -97,6 +97,7 @@ from lxml import html as lxml_html
 
 from epubsource import sniff
 import pandocversion
+import pandocrun
 
 from .cnxml import E, append_text, code_lines
 from .mathml import MATHML
@@ -836,7 +837,7 @@ def _through_pandoc(pandoc, formulas):
     def run(texs):
         source = "\n\n".join(f"\\({tex}\\)" for tex in texs)
         try:
-            done = subprocess.run([pandoc, "-f", "latex", "-t", "html",
+            done = subprocess.run([*pandocrun.command(pandoc), "-f", "latex", "-t", "html",
                                    *pandocversion.mathml(pandoc)], input=source,
                                   capture_output=True, text=True, timeout=120)
         except (OSError, subprocess.SubprocessError):

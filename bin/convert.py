@@ -97,6 +97,7 @@ try:
     import notes as notes_lib
     import pagefooter
     import pandocversion
+    import pandocrun
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
@@ -1066,6 +1067,60 @@ def resolve_path(base, name):
     return name if os.path.isabs(name) else os.path.join(base, name)
 
 
+# A book's own template, stylesheet, or Word reference document, kept with
+# its configuration, in place of what a run would otherwise take from
+# Pandoc's data folders, which it doesn't read (lib/pandocrun.py).
+OWN_FILES = ("html.template", "html.css", "docx.reference_doc", "epub.css",
+             "pdf.template")
+
+
+def own_file(target, setting, base):
+    """The absolute path of the file one of a target's OWN_FILES settings
+    names, or None when it's empty. A file that doesn't exist stops the
+    run, and so does one beside the book's sources, or in its pass-through
+    folder, with a source's extension, which the run would read as a page
+    (or a deck) of the book."""
+    name = str(target[setting] or "").strip()
+    if not name:
+        return None
+    path = os.path.abspath(resolve_path(base, name))
+    if not os.path.isfile(path):
+        die(f"{setting} is {name} for target {target.name}, which doesn't exist "
+            f"(looked at {path}). Nothing was converted.")
+    folders = {os.path.abspath(base)}
+    if PASSTHROUGH:
+        folders.add(os.path.abspath(os.path.join(base, PASSTHROUGH)))
+    if os.path.dirname(path) in folders and path.lower().endswith(
+            SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS):
+        die(f"{setting} is {name} for target {target.name}, which is beside the book's "
+            "sources, where a run reads it as one of them. Move it into a folder of its "
+            "own, such as templates/, and name it there. Nothing was converted.")
+    return path
+
+
+def html_template(target, base):
+    """Pandoc's --template for a standalone page of an html target: the
+    book's own (html.template), or nothing, for Pandoc's."""
+    path = own_file(target, "html.template", base)
+    return ["--template", path] if path else []
+
+
+def page_header(target, base, work, shared):
+    """The <style> a page of an html target has in its head: the run's
+    (shared, page.css alone), or, where html.css names a stylesheet, one
+    of the target's own with that stylesheet after page.css."""
+    own = own_file(target, "html.css", base)
+    if not own:
+        return shared
+    path = os.path.join(work, f"head-{target.name}.html")
+    with open(path, "w", encoding="utf-8") as fh, \
+            open(PAGE_CSS, encoding="utf-8") as css, \
+            open(own, encoding="utf-8") as book_css:
+        fh.write("<style>\n" + css.read() + "\n/* From the book's html.css */\n"
+                 + book_css.read() + "</style>\n")
+    return path
+
+
 def check_sidecar(path, setting, default, base):
     """A sidecar the config names but the filter cannot read is almost
     always a wrong path rather than a deliberately empty one, and the run
@@ -1535,7 +1590,7 @@ def stop_alone(base, prep, master, place, env):
                 continue
             with open(probe, "w", encoding="utf-8") as fh:
                 fh.write(head + latexsource.read_text(copied) + "\n\\end{document}\n")
-            done = run(["pandoc", "-f", "latex", "-t", "json", os.path.basename(probe),
+            done = run([*pandocrun.PANDOC, "-f", "latex", "-t", "json", os.path.basename(probe),
                         "-o", os.devnull, "--lua-filter=" + LATEX_FILTER], env=env,
                        cwd=prep["copy"], check=False, capture=True)
             if not done.returncode:
@@ -1600,7 +1655,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
         for key, n in prep["counts"].items():
             counts[key] = counts.get(key, 0) + n
         out = os.path.join(work, f"latex-book-{index}.json")
-        done = run(["pandoc", "-f", "latex", "-t", "json",
+        done = run([*pandocrun.PANDOC, "-f", "latex", "-t", "json",
                     os.path.relpath(prep["master"], prep["copy"]), "-o", out,
                     "--lua-filter=" + LATEX_FILTER], env=env, cwd=prep["copy"], check=False,
                    capture=True)
@@ -1959,7 +2014,7 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
         stem = safe_stem(os.path.splitext(name)[0])
         fixed = adoc_root_index_text(os.path.join(base, name))
         if fixed is None:
-            run(["pandoc", "-f", "asciidoc", "-t", "json", name,
+            run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", name,
                  "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
@@ -1968,7 +2023,7 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
             # where its includes are found as they would be from the file.
             folder = os.path.join(base, os.path.dirname(name))
             done = subprocess.run(
-                ["pandoc", "-f", "asciidoc", "-t", "json",
+                [*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json",
                  "-o", os.path.join(base, stem + ".json"),
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
@@ -2413,7 +2468,7 @@ def read_markdown_to_json(base, docs, env, decks=False):
         # cartridge's, the EPUB's, an LMS's. "01 BigPicture.md" is the
         # page 01-BigPicture.
         stem = safe_stem(os.path.basename(name)[:-3])
-        run(["pandoc", "-f", MARKDOWN_READER, "-t", "json", name,
+        run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
              "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=base)
@@ -2589,7 +2644,7 @@ def read_html_to_json(base, docs, env, work):
             say(f"{name}: " + "; ".join(f"{n} formula(s) {said[k]}"
                                         for k, n in counts.items() if n))
         DISPLAY_STYLE_KEPT[stem] = display_style_marked(repaired)
-        run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
+        run([*pandocrun.PANDOC, "-f", "html+raw_html+epub_html_exts", "-t", "json",
              repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,
              "--lua-filter=" + HTML_SOURCE_FILTER,
@@ -2640,7 +2695,7 @@ def read_to_json(base, docs, env, work):
         if moved and TRACE:
             say(f"# {name}: {moved} bookmark(s) moved into the paragraphs "
                 "they precede")
-        run(["pandoc", "-f", "docx", "-t", "json", repaired,
+        run([*pandocrun.PANDOC, "-f", "docx", "-t", "json", repaired,
              "-o", stem + ".json",
              "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
             env=env, cwd=base)
@@ -2765,7 +2820,7 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
             ".html") else os.path.relpath(hand_path(base, stem), base)
         # raw_html, or the reader fetches every <iframe> over the network
         # to read it into the page (Readers/HTML.hs, pIframe).
-        run(["pandoc", "-f", "html+raw_html", "-t", "json", source,
+        run([*pandocrun.PANDOC, "-f", "html+raw_html", "-t", "json", source,
              "-o", target, "--lua-filter=" + HTML_RAW_FILTER],
             env=env, cwd=base)
         out.append(target)
@@ -2786,7 +2841,7 @@ def read_variants(base, target, work, env):
         if name.endswith(".docx"):
             repaired = os.path.join(out_dir, name)
             docxrepair.repaired_copy(path, repaired, WORD_HEADINGS, WORD_DELETIONS)
-            run(["pandoc", "-f", "docx", "-t", "json", repaired, "-o", out,
+            run([*pandocrun.PANDOC, "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
                 env=env, cwd=base)
             docxrepair.apply_screentips(repaired, os.path.join(base, out)
@@ -2805,7 +2860,7 @@ def read_variants(base, target, work, env):
                                           if not os.path.isabs(out) else out)
             portable_media_paths(out, base, name)
         elif name.endswith((".adoc", ".asciidoc")):
-            run(["pandoc", "-f", "asciidoc", "-t", "json", path, "-o", out,
+            run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
@@ -2814,13 +2869,13 @@ def read_variants(base, target, work, env):
             repaired = os.path.join(out_dir, name)
             htmlrepair.repaired_copy(path, repaired)
             DISPLAY_STYLE_VARIANTS[path] = display_style_marked(repaired)
-            run(["pandoc", "-f", "html+raw_html+epub_html_exts", "-t", "json",
+            run([*pandocrun.PANDOC, "-f", "html+raw_html+epub_html_exts", "-t", "json",
                  repaired, "-o", out, "--lua-filter=" + HTML_RAW_FILTER,
                  "--lua-filter=" + HTML_SOURCE_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             portable_media_paths(out, base, name)
         else:
-            run(["pandoc", "-f", MARKDOWN_READER, "-t", "json", path, "-o", out,
+            run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
             settle_markdown(out, base, name, DECK_RUN, report=False)
@@ -3018,7 +3073,7 @@ def render_fragment(source, out):
     filters. Author its images with explicit alt text."""
     if not source:
         return None
-    run(["pandoc", "-f", "markdown-implicit_figures", "-t", "html5",
+    run([*pandocrun.PANDOC, "-f", "markdown-implicit_figures", "-t", "html5",
          "--ascii", source, "-o", out] + pandocversion.mathml())
     return out
 
@@ -3371,7 +3426,7 @@ def filter_pages(base, stems, target, env, raw=None):
                 os.remove(old)
         out = os.path.join(pages_dir, stem + INTERMEDIATE)
         source = (raw or {}).get(stem) or os.path.join(base, stem + ".json")
-        run(["pandoc", "-f", "json", "-t", "json", source, "-o", out,
+        run([*pandocrun.PANDOC, "-f", "json", "-t", "json", source, "-o", out,
              "--lua-filter=" + FIGURE_FILTER,
              "--lua-filter=" + MATH_FILTER,
              "--lua-filter=" + TITLE_FILTER], env=env, cwd=base)
@@ -5166,7 +5221,7 @@ def deck_pptxs(target, stems, names, base, language, work):
     from collections import Counter
     import decks as decklib
     import pptxtarget
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+    version = subprocess.run(pandocrun.VERSION, capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < PPTX_PANDOC:
         die(f"Pandoc {version} is too old for target {target.name}'s PowerPoint files; "
@@ -5453,7 +5508,7 @@ def deck_presentations(target, stems, base, language):
     import concurrent.futures
     import decks as decklib
     import revealtarget
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+    version = subprocess.run(pandocrun.VERSION, capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < REVEALJS_PANDOC:
         die(f"Pandoc {version} is too old for target {target.name}'s presentations; "
@@ -5639,8 +5694,10 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
             if os.path.exists(found):
                 os.remove(found)
-            run(["pandoc", "-f", "json", "-t", "docx", page, "-o", out,
+            reference = own_file(target, "docx.reference_doc", base)
+            run([*pandocrun.PANDOC, "-f", "json", "-t", "docx", page, "-o", out,
                  "--lua-filter=" + TARGET_FILTER] + highlighting.ARGS
+                + (["--reference-doc", reference] if reference else [])
                 + downsample.resource_args(DOWNSAMPLED.get(target.name)),
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
@@ -5656,7 +5713,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
             if os.path.exists(found):
                 os.remove(found)
-            run(["pandoc", "-f", "json", "-t", "asciidoc", page, "-o", out,
+            run([*pandocrun.PANDOC, "-f", "json", "-t", "asciidoc", page, "-o", out,
                  "--standalone", "--wrap=none",
                  "--lua-filter=" + TARGET_FILTER] + lowered + [
                  "--lua-filter=" + MARKDOWN_FILTER],
@@ -5680,7 +5737,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
         found = os.path.join(work, f"fidelity-{target.name}-{stem}.tsv")
         if os.path.exists(found):
             os.remove(found)
-        run(["pandoc", "-f", "json",
+        run([*pandocrun.PANDOC, "-f", "json",
              "-t", "markdown-simple_tables-multiline_tables-raw_html",
              page, "-o", out,
              "--standalone", "--wrap=none", "--markdown-headings=atx",
@@ -5828,12 +5885,13 @@ def render_html(target, pages, base, fragments, language, env):
     for page in pages:
         stem = os.path.basename(page)[:-len(INTERMEDIATE)]
         out = os.path.join(target.output_dir, stem + ".html")
-        command = ["pandoc", "-f", "json", "-t", "html5", page, "-o", out,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "html5", page, "-o", out,
                    "--standalone", "--ascii", *pandocversion.mathml(), *deck,
                    *highlighting.ARGS,
                    "--lua-filter=" + TARGET_FILTER,
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
-                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
+                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
+                   *html_template(target, base)]
         run(command, env=env, cwd=base)
         # The notes' heading, which Pandoc's writer doesn't write, and
         # each empty header cell a data cell (lib/headercells.py).
@@ -5910,14 +5968,14 @@ def add_menu(target, tree, titles, written, hand, work, others=None):
     from bookcontents import toc_blocks, flatten_pages
     others = others or {}
     api = json.loads(subprocess.run(
-        ["pandoc", "-f", "markdown", "-t", "json"], input="",
+        [*pandocrun.PANDOC, "-f", "markdown", "-t", "json"], input="",
         capture_output=True, text=True, check=True).stdout)["pandoc-api-version"]
     doc = {"pandoc-api-version": api, "meta": {},
            "blocks": toc_blocks(tree, titles, lambda s: s + ".html", others)}
     source = os.path.join(work, f"{target.name}-menu.json")
     with open(source, "w", encoding="utf-8") as fh:
         json.dump(doc, fh)
-    listing = subprocess.run(["pandoc", "-f", "json", "-t", "html5", source,
+    listing = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "html5", source,
                               "--ascii"] + pandocversion.mathml(), capture_output=True,
                              text=True, check=True).stdout
     order = [stem for stem in flatten_pages(tree)]
@@ -6123,10 +6181,10 @@ def metadata_title(base, setting):
     if not os.path.isfile(path):
         return ""
     if path.lower().endswith((".yaml", ".yml")):
-        command = ["pandoc", "-f", "markdown", "-t", "json", "--metadata-file", path]
+        command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json", "--metadata-file", path]
         stdin = ""
     else:
-        command = ["pandoc", "-f", "markdown", "-t", "json", path]
+        command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json", path]
         stdin = None
     result = subprocess.run(command, input=stdin, capture_output=True,
                             text=True, cwd=base)
@@ -6254,9 +6312,10 @@ def write_generated(target, tree, titles, api, base, work, fragments,
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         out = os.path.join(target.output_dir, name + ".html")
-        command = ["pandoc", "-f", "json", "-t", "html5", source, "-o", out,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "html5", source, "-o", out,
                    "--standalone", "--ascii", *pandocversion.mathml(),
-                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}"]
+                   "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
+                   *html_template(target, base)]
         run(command, env=with_fragments(env, fragments), cwd=base)
         written.append(out)
     return written
@@ -6294,7 +6353,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
     if placement == "book":
         source = os.path.join(work, "notes.json")
         api = json.loads(subprocess.run(
-            ["pandoc", "-f", "markdown", "-t", "json"], input="",
+            [*pandocrun.PANDOC, "-f", "markdown", "-t", "json"], input="",
             capture_output=True, text=True, check=True).stdout)["pandoc-api-version"]
         words = [{"t": "Str", "c": w} for w in (heading or "Notes").split()]
         with open(source, "w", encoding="utf-8") as fh:
@@ -6306,10 +6365,11 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
                     item for i, w in enumerate(words) for item in ([{"t": "Space"}] if i else [])
                     + [w]]]}]}, fh)
         out = os.path.join(target.output_dir, "notes.html")
-        command = ["pandoc", "-f", "json", "-t", "html5", source,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "html5", source,
                    "-o", out, "--standalone", "--ascii", *pandocversion.mathml(),
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
-                   "-M", "pagetitle=" + (heading or "Notes")]
+                   "-M", "pagetitle=" + (heading or "Notes"),
+                   *html_template(target, base)]
         run(command, env=with_fragments(env, fragments), cwd=base)
         with open(out, encoding="utf-8") as fh:
             notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
@@ -6728,6 +6788,9 @@ def main():
                      HEADER_FILTER, PAGE_CSS):
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
+    # What of Pandoc's data folders a run leaves alone (lib/pandocrun.py).
+    for line in pandocrun.notices():
+        say(line)
 
     unpack_archives(base, check_only=args.check_only,
                     linked_documents=args.linked_documents)
@@ -6798,7 +6861,7 @@ def main():
                "source needs none.") if converting else ""
         if shutil.which("pandoc") is None:
             die("pandoc not found. Version 3.9 or later is required." + why)
-        version = subprocess.run(["pandoc", "--version"], capture_output=True,
+        version = subprocess.run(pandocrun.VERSION, capture_output=True,
                                  text=True).stdout.split()[1]
         if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
             die(f"Pandoc {version} is too old; 3.9 or later is required." + why)
@@ -6806,6 +6869,8 @@ def main():
     PASSTHROUGH = str(project.get("passthrough", "_pt") or "").strip("/")
     for target in targets:
         target.variants = variant_sources(base, target.name)
+        for setting in OWN_FILES:
+            own_file(target, setting, base)
     language = project["language"]
     first = targets[0]        # sidecars and reports are book-level settings,
     global WORD_HEADINGS, WORD_DELETIONS, LATEX_MAIN, LATEX_MACROS
@@ -7155,9 +7220,13 @@ def main():
                 rendered = [p for p in pages_by_dir[target.pages_dir]
                             if os.path.basename(p)[:-len(INTERMEDIATE)]
                             not in hand_stems]
+                # Its pages' stylesheet: page.css, then the book's own
+                # (html.css), where it has one.
+                tenv = dict(renv, HEADER_INCLUDES_FILE=page_header(
+                    target, base, work, css_header))
                 written[target.name] = render_html(
                     target, rendered, base, fragments[target.name], language,
-                    renv)
+                    tenv)
                 written[target.name] += copy_hand_pages(
                     base, hand, target.output_dir, target.variants)
                 tree, titles, api = book_tree(
@@ -7169,10 +7238,10 @@ def main():
                 others = other_languages(pages_by_dir[target.pages_dir], language)
                 written[target.name] += write_generated(
                     target, tree, titles, api, base, work,
-                    fragments[target.name], language, renv, others)
+                    fragments[target.name], language, tenv, others)
                 for path in arrange_notes(target, rendered, base, work,
                                           fragments[target.name], language,
-                                          renv, tree, titles, others):
+                                          tenv, tree, titles, others):
                     if path not in written[target.name]:
                         written[target.name].append(path)
                 if target["menu"] == "on":

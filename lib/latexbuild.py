@@ -27,6 +27,8 @@ import subprocess
 import sys
 import tempfile
 
+import pandocrun
+
 ENGINE = "lualatex"
 # The oldest LaTeX release a tagged build is taken to. The tagging project
 # describes 2025-11-01 as usable in production for documents that keep to
@@ -618,27 +620,47 @@ STATIC_FONTS = r"""\ifdefined\directlua
 FONTS_PARTIAL = "$fonts.latex()$"
 
 
-def book_template(work, warn=None):
-    """The path of Pandoc's own LaTeX template with STATIC_FONTS read before
-    its fonts (FONTS_PARTIAL), written in the folder work, for --template:
-    the same template but for that, its partials Pandoc's own. None where
-    the template hasn't the line, or Pandoc can't give it, which a warning
-    says (warn, which prints to stderr by default): the build then takes
-    Pandoc's template as it is."""
+def book_template(work, warn=None, source=None):
+    """The path of Pandoc's own LaTeX template, or the one source names (a
+    book's own, pdf.template), with STATIC_FONTS read before its fonts
+    (FONTS_PARTIAL), written in the folder work, for --template: the same
+    template but for that, its partials Pandoc's own, or a book's own
+    where the .latex files beside it have them. Where the template
+    hasn't the line, or Pandoc can't give its own, a warning says so (warn,
+    which prints to stderr by default), and it's None for Pandoc's, the
+    build then taking Pandoc's template as it is, and source itself for a
+    book's own."""
     warn = warn or (lambda line: print(line, file=sys.stderr))
-    done = subprocess.run(["pandoc", "-D", "latex"], capture_output=True, text=True)
-    lines = done.stdout.split("\n") if done.returncode == 0 else []
+    if source:
+        with open(source, encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+    else:
+        done = subprocess.run([*pandocrun.PANDOC, "-D", "latex"], capture_output=True,
+                              text=True)
+        lines = done.stdout.split("\n") if done.returncode == 0 else []
     if FONTS_PARTIAL not in lines:
-        warn("WARNING: Pandoc's LaTeX template has no " + FONTS_PARTIAL + " line to read "
+        warn("WARNING: " + ("The LaTeX template pdf.template names (" + source + ")"
+                            if source else "Pandoc's LaTeX template")
+             + " has no " + FONTS_PARTIAL + " line to read "
              "TextbookImprover's font setting before, so a face with a STAT table that "
              "isn't a variable font, as Noto Sans 2.008's regular and bold are, is embedded "
              "without its hinting, as luaotfload embeds a variable font, and Acrobat may "
              "say it can't extract it.")
-        return None
+        return source
     at = lines.index(FONTS_PARTIAL)
     # Pandoc's template language takes a dollar sign as $$.
     lines[at:at] = STATIC_FONTS.replace("$", "$$").rstrip("\n").split("\n")
     path = os.path.join(work, "book.latex")
+    if source:
+        # A book's own, in a folder of its own with the .latex files beside
+        # it, which Pandoc looks for a partial among before its own.
+        folder = os.path.join(work, "template")
+        os.makedirs(folder, exist_ok=True)
+        here = os.path.dirname(os.path.abspath(source))
+        for name in sorted(os.listdir(here)):
+            if name.endswith(".latex") and os.path.isfile(os.path.join(here, name)):
+                shutil.copyfile(os.path.join(here, name), os.path.join(folder, name))
+        path = os.path.join(folder, os.path.basename(source))
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
     return path

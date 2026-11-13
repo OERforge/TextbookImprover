@@ -331,6 +331,38 @@ A book's own `pdf.metadata` file changes this page as it does the default, a set
 
 Only the criterion's own words are normative, and they don't say what space-and-a-half is measured from. The technique, one of the criterion's [sufficient techniques](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html#techniques), measures from the type's size, and W3C says of a sufficient technique that [using it meets the criterion](https://www.w3.org/WAI/WCAG22/Understanding/understanding-techniques). Its explanation of the criterion measures from single spacing instead, "the default spacing for the font", which LaTeX makes 1.2 times the type's size, so that space-and-a-half is 1.8 times the type's size and paragraphs 3 times it apart. That reading needs `linestretch: 1.5`, and in `header-includes`, `\setlength{\parskip}{1.2em plus 2pt}` and `\SetSinglespace{1.5}`, and made *Introduction to Sociology 3e* 1,408 pages in Latin Modern.
 
+### A book's own template and stylesheet
+
+A run reads none of Pandoc's data folders: not its user data folder (`~/.local/share/pandoc`, or `~/.pandoc`), and not the folders Pandoc 3.14's `PANDOC_DATA_DIRS` names. A template, stylesheet, reference document, or `init.lua` kept there would change a book on one machine and not on another, so every call to Pandoc names an empty folder of its own as its data folder, and the variable is taken out of the run's environment. Where one of those folders holds a file a setting below would take, the run says so, and names the setting.
+
+A book's own files are named in `conversion.yaml` instead, kept with its configuration, where a copy of the book's folder carries them:
+
+```yaml
+# in conversion.yaml
+targets:
+  html:
+    format: html
+    html:
+      template: templates/page.html   # in place of Pandoc's HTML template
+      css: templates/page.css         # after TextbookImprover's stylesheet
+  word:
+    format: docx
+    docx:
+      reference_doc: templates/reference.docx
+  epub:
+    format: epub3
+    epub:
+      css: templates/epub.css         # last in the EPUB's stylesheet
+  pdf:
+    format: pdf
+    pdf:
+      template: templates/book.latex  # the PDF's, and a latex target's master
+```
+
+Each is a path relative to the book's folder, or an absolute one. A file that doesn't exist stops the run. So does a template or reference document beside the book's sources with a source's extension (`page.html` or `reference.docx` at the top of the folder, or in its pass-through folder), since the run would read it as a page of the book: put it in a folder of its own, such as `templates/`.
+
+Start a template from Pandoc's own, as the Pandoc in use prints it: `pandoc -D html5` or `pandoc -D latex`. Keep the variables it fills and the partials it names, since the run puts its stylesheet, a page's header and footer, its menu, the PDF's tagging, and the fonts through them. A partial the template names is read from beside it before Pandoc's own. The run adds its font setting before a LaTeX template's `$fonts.latex()$` line, as it does to Pandoc's, and warns where there's no such line. Most changes to a PDF are smaller in its `pdf.metadata` file ([The PDF's page](#the-pdfs-page)) than in a template of the book's own. Start a Word reference document from Pandoc's too, so that every style Pandoc uses is in it: `pandoc -o custom-reference.docx --print-default-data-file reference.docx`, and change its styles in Word. A deck's look has its own setting, `slides.reference_doc`.
+
 ### Headings that skip a level
 
 ```yaml

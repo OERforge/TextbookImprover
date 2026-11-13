@@ -1688,6 +1688,46 @@ def check_suites_data_dirs():
     ]
 
 
+def check_runs_data_dirs():
+    """A run reads none of Pandoc's data folders: every Pandoc a script
+    starts comes from lib/pandocrun.py's command, which names an empty
+    --data-dir, and that module takes PANDOC_DATA_DIRS out of the
+    environment, so a template a person or a package keeps there can't
+    change a book."""
+    bare = re.compile(r'\[\s*"pandoc"|\(\s*\["pandoc"|"pandoc"\]\s*\+|\[\s*pandoc\s*,')
+    found = []
+    for folder in ("bin", "lib", "util"):
+        for dirpath, _, names in os.walk(os.path.join(ROOT, folder)):
+            for name in names:
+                if not name.endswith(".py") or name == "pandocrun.py":
+                    continue
+                path = os.path.join(dirpath, name)
+                with open(path, encoding="utf-8") as handle:
+                    for number, line in enumerate(handle, 1):
+                        if bare.search(line) and not line.lstrip().startswith("#"):
+                            found.append(f"{os.path.relpath(path, ROOT)}:{number}")
+    work = scratch()
+    script = (
+        "import os, sys\n"
+        "os.environ['PANDOC_DATA_DIRS'] = sys.argv[1]\n"
+        "sys.path.insert(0, sys.argv[2])\n"
+        "import pandocrun\n"
+        "print(os.environ.get('PANDOC_DATA_DIRS', 'gone'))\n"
+        "print(pandocrun.PANDOC[1], os.path.isdir(pandocrun.PANDOC[2]),\n"
+        "      os.listdir(pandocrun.PANDOC[2]))\n")
+    done = subprocess.run([sys.executable, "-c", script, work, os.path.join(ROOT, "lib")],
+                          capture_output=True, text=True)
+    lines = done.stdout.splitlines()
+    return [
+        ("every Pandoc a script starts is lib/pandocrun.py's%s"
+         % (": not " + ", ".join(found[:8]) if found else ""), lambda: not found),
+        ("which takes PANDOC_DATA_DIRS out of the environment",
+         lambda: lines[:1] == ["gone"] or fail(done.stdout + done.stderr)),
+        ("and names an empty --data-dir",
+         lambda: lines[1:2] == ["--data-dir True []"] or fail(done.stdout + done.stderr)),
+    ]
+
+
 def check_bar_accents():
     """Pandoc's \\bar, an accent of the overline, is the macron's in a
     docx target's file, and reading a Word file the macron's is the
@@ -9929,6 +9969,7 @@ GROUPS = [
     ("Pandoc's bar accent, written and read", check_bar_accents),
     ("a nested table's cell's one alignment in Word", check_single_alignment),
     ("the suites and PANDOC_DATA_DIRS", check_suites_data_dirs),
+    ("a run and Pandoc's data folders", check_runs_data_dirs),
     ("a Word display paragraph of several equations", check_math_paragraphs),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),

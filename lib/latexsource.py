@@ -72,6 +72,7 @@ import subprocess
 
 from names import case_match
 import pandocversion
+import pandocrun
 
 # A page marker, a paragraph of its own the reader keeps as text, put
 # before each \include in the copy and cut at afterwards; and one after
@@ -6899,7 +6900,7 @@ def pdf_title(preamble):
     if title.startswith("{"):
         title = title[1:-1]
     try:
-        done = subprocess.run(["pandoc", "-f", "latex", "-t", "plain", "--wrap=none"],
+        done = subprocess.run([*pandocrun.PANDOC, "-f", "latex", "-t", "plain", "--wrap=none"],
                               input=title, capture_output=True, text=True, timeout=60)
         text = done.stdout if done.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
@@ -9107,7 +9108,7 @@ def cite_with_citeproc(doc_path, setup, env, cwd):
     place(doc["blocks"])
     with open(doc_path, "w", encoding="utf-8") as fh:
         json.dump(doc, fh)
-    command = ["pandoc", "-f", "json", "-t", "json", "--citeproc", doc_path, "-o", doc_path,
+    command = [*pandocrun.PANDOC, "-f", "json", "-t", "json", "--citeproc", doc_path, "-o", doc_path,
                "-M", "link-citations=true"] + [x for path in setup["citeproc"]
                                                 for x in ("--bibliography", path)]
     if not changed[0]:
@@ -9917,13 +9918,13 @@ def probe(copy, preamble, macros, filter_path, extra=""):
     path = os.path.join(copy, "TextbookImproverProbe.tex")
     write_text(path, head + extra + "\n\\begin{document}\n" + body
                + "\n\\end{document}\n")
-    read = subprocess.run(["pandoc", "-f", "latex", "-t", "json",
+    read = subprocess.run([*pandocrun.PANDOC, "-f", "latex", "-t", "json",
                            "TextbookImproverProbe.tex",
                            "--lua-filter=" + filter_path],
                           cwd=copy, capture_output=True, text=True)
     if read.returncode != 0:
         return set()
-    html = subprocess.run(["pandoc", "-f", "json", "-t", "html", *pandocversion.mathml()],
+    html = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "html", *pandocversion.mathml()],
                           input=read.stdout,
                           capture_output=True, text=True).stdout
     parts = re.split(PROBE_MARK + r"(\d+)", html)

@@ -36,6 +36,8 @@ import functools
 import re
 import subprocess
 
+import pandocrun
+
 # The Pandoc whose --math-method says how math is written (3.11), and
 # whose --mathml is deprecated.
 MATH_METHOD = (3, 11)
@@ -47,7 +49,7 @@ def version(pandoc="pandoc"):
     PATH, by default), as a tuple of up to three numbers; () when there's
     none."""
     try:
-        words = subprocess.run([pandoc, "--version"], capture_output=True,
+        words = subprocess.run(pandocrun.version(pandoc), capture_output=True,
                                text=True).stdout.split()
     except OSError:
         return ()

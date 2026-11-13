@@ -41,6 +41,8 @@ import re
 from collections import Counter, OrderedDict
 
 import pandocversion
+
+import pandocrun
 import sidecars
 import wcag
 
@@ -614,7 +616,7 @@ def render_html(markdown_path, html_path, css_path=None):
     import subprocess
     import sys
     import tempfile
-    command = ["pandoc", "-f", REPORT_READER, os.path.abspath(markdown_path),
+    command = [*pandocrun.PANDOC, "-f", REPORT_READER, os.path.abspath(markdown_path),
                "-t", "html5", *pandocversion.mathml(), "-o", os.path.abspath(html_path),
                "--standalone", "--sandbox", "--metadata", "lang=en",
                "--metadata", "pagetitle=Audit"]
@@ -648,7 +650,7 @@ def render_docx(markdown_path, docx_path, compat_tool=None):
     import subprocess
     import sys
     try:
-        subprocess.run(["pandoc", "-f", REPORT_READER, os.path.abspath(markdown_path),
+        subprocess.run([*pandocrun.PANDOC, "-f", REPORT_READER, os.path.abspath(markdown_path),
                         "-t", "docx", "--sandbox", "-o", os.path.abspath(docx_path),
                         "--metadata", "lang=en"], check=True, capture_output=True,
                        text=True)

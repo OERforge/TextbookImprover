@@ -56,6 +56,7 @@ from urllib.parse import unquote
 import downsample
 import highlighting
 import latexbuild
+import pandocrun
 
 # The intermediate's record of the slide level, which also says the page
 # is a deck. target-blocks.lua takes it out of everything a target
@@ -969,7 +970,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         defaults = os.path.join(work, "deck-defaults.yaml")
         with open(defaults, "w", encoding="utf-8") as fh:
             json.dump({"variables": {"oer-macros": macros}}, fh)
-        command = ["pandoc", "-f", "json", "-t", "beamer", "-s", source, "-o", tex,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "beamer", "-s", source, "-o", tex,
                    "--template", template, "--slide-level", str(level),
                    "--extract-media", os.path.join(work, "media"),
                    *downsample.resource_args((env or os.environ).get("DOWNSAMPLED")),

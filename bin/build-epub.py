@@ -69,6 +69,7 @@ import highlighting  # noqa: E402
 import languages  # noqa: E402
 import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
+import pandocrun
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page, formula_texts,
@@ -172,7 +173,7 @@ def book_metadata(project, resolved, found, base):
 # --------------------------------------------------------------------------
 
 def pandoc_default(argument):
-    return subprocess.run(["pandoc", argument], capture_output=True,
+    return subprocess.run([*pandocrun.PANDOC, argument], capture_output=True,
                           text=True, check=True).stdout
 
 
@@ -1037,10 +1038,23 @@ EPUB_LINKS = """
 """
 
 
-def stylesheet(work):
-    """Pandoc's EPUB stylesheet followed by ours, and an EPUB's link
-    colors (EPUB_LINKS). --css replaces the default rather than adding to
-    it."""
+def own_css(base, resolved):
+    """The absolute path of the stylesheet epub.css names, or None; a path
+    that doesn't exist stops the build."""
+    setting = str(resolved["epub.css"] or "").strip()
+    if not setting:
+        return None
+    path = os.path.abspath(os.path.join(base, setting))
+    if not os.path.isfile(path):
+        sys.exit(f"epub.css is set to {setting}, which does not exist "
+                 f"(looked at {path}).")
+    return path
+
+
+def stylesheet(work, own=None):
+    """Pandoc's EPUB stylesheet followed by ours, an EPUB's link colors
+    (EPUB_LINKS), and last the book's own (epub.css), so its rules win.
+    --css replaces the default rather than adding to it."""
     path = os.path.join(work, "book.css")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(pandoc_default("--print-default-data-file=epub.css"))
@@ -1048,6 +1062,10 @@ def stylesheet(work):
         with open(PAGE_CSS, encoding="utf-8") as page_css:
             fh.write(page_css.read())
         fh.write(EPUB_LINKS)
+        if own:
+            fh.write("\n\n/* From the book's epub.css */\n")
+            with open(own, encoding="utf-8") as book_css:
+                fh.write(book_css.read())
     return path
 
 
@@ -1114,6 +1132,7 @@ def build(base, name, resolved, keep, intermediates=None):
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, output_name(resolved, project, name))
     toc_depth = int(resolved["epub.toc_depth"])
+    own = own_css(base, resolved)
 
     work = tempfile.mkdtemp(prefix="build-epub-")
     try:
@@ -1121,10 +1140,10 @@ def build(base, name, resolved, keep, intermediates=None):
         with open(book_json, "w", encoding="utf-8") as fh:
             json.dump(document, fh)
         command = [
-            "pandoc", "-f", "json", "-t", "epub3", book_json,
+            *pandocrun.PANDOC, "-f", "json", "-t", "epub3", book_json,
             "-o", os.path.abspath(out_path), *highlighting.ARGS,
             "--template", chapter_template(work),
-            "--css", stylesheet(work),
+            "--css", stylesheet(work, own),
             # One file per page: split at every level a page heading uses.
             f"--split-level={assembly.depth}",
             f"--toc-depth={toc_depth}",

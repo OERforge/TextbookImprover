@@ -758,6 +758,63 @@ keys:
           source) keeps; left empty, the target writes nothing, and the run
           says why.
 
+  html:
+    stage: render
+    description: >
+      Settings read only by an html target: a book's own page template and
+      stylesheet. A run reads none of Pandoc's data folders, so a template
+      kept in Pandoc's user data folder isn't used; these are where a book
+      gives its own, a file kept with its configuration.
+    keys:
+
+      template:
+        type: path
+        default: ""
+        description: >
+          A Pandoc template for every page of the target, in place of
+          Pandoc's own HTML template, as an absolute path or one relative to
+          the folder converted. Start from Pandoc's own, which pandoc -D
+          html5 prints for the Pandoc in use, and keep the variables it
+          fills (header-includes, include-before, include-after, lang, dir,
+          pagetitle, and the rest): the run puts its stylesheet, a page's
+          header and footer, and its menu and pager through them. A partial
+          it names is read from beside it, before Pandoc's own. Left
+          empty, the pages use Pandoc's template. A path that doesn't exist
+          stops the run.
+
+      css:
+        type: path
+        default: ""
+        description: >
+          A stylesheet put into every page of the target after
+          TextbookImprover's own, so that a rule in it wins, as an absolute
+          path or one relative to the folder converted. It's written into
+          each page's head, as TextbookImprover's is, so a url() in it is
+          read from the page's folder. Left empty, the pages have
+          TextbookImprover's stylesheet alone. A path that doesn't exist
+          stops the run.
+
+  docx:
+    stage: render
+    description: >
+      Settings read only by a docx target.
+    keys:
+
+      reference_doc:
+        type: path
+        default: ""
+        description: >
+          A Word file whose styles the target's Word files take, as
+          Pandoc's reference-doc option takes it: its paragraph and
+          character styles, its page size and margins, and its headers and
+          footers, as an absolute path or one relative to the folder
+          converted. Start from Pandoc's own, which pandoc -o
+          custom-reference.docx --print-default-data-file reference.docx
+          writes, so that every style Pandoc uses is there. The
+          compatibility setting the target writes afterward
+          (compatibility_mode) still applies. Left empty, the Word files
+          take Pandoc's styles. A path that doesn't exist stops the run.
+
   epub:
     stage: package
     description: >
@@ -785,6 +842,18 @@ keys:
           An image for the cover page, JPEG or PNG, as an absolute path
           or one relative to the content directory. Left empty the book
           has no cover page. A path that doesn't exist stops the build.
+
+      css:
+        type: path
+        default: ""
+        description: >
+          A stylesheet added to the EPUB after the one it has (Pandoc's
+          EPUB stylesheet, TextbookImprover's page stylesheet, and the link
+          colors), so that a rule in it wins, as an absolute path or one
+          relative to the folder converted. It's part of the EPUB's one
+          stylesheet, so a url() in it names a file inside the EPUB.
+          Left empty, the EPUB has that stylesheet alone. A path that
+          doesn't exist stops the build.
 
       cover_alt:
         type: string
@@ -865,6 +934,25 @@ keys:
           LaTeX book's own layout) and over what project.yaml says; what
           it leaves out comes from those and from these settings. A path
           that doesn't exist stops the build.
+
+      template:
+        type: path
+        default: ""
+        description: >
+          A Pandoc LaTeX template the PDF is built on, and the latex
+          target's master written with, in place of Pandoc's own, as an
+          absolute path or one relative to the folder converted. Start from
+          Pandoc's own, which pandoc -D latex prints for the Pandoc in use,
+          and keep its partials and the variables it fills: tagging, the
+          fonts, and the metadata reach the PDF through them. The run adds
+          its font setting before the template's $fonts.latex()$ line, as
+          it does to Pandoc's, and says so where the line isn't there. A
+          partial it names is read from the .latex files beside it, before
+          Pandoc's own. Most
+          changes are smaller in the metadata file (header-includes and
+          Pandoc's variables) than in a template of the book's own. Left
+          empty, the PDF is built on Pandoc's template. A path that doesn't
+          exist stops the build.
 
       figures:
         type: enum

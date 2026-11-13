@@ -69,6 +69,7 @@ import zipfile
 
 import docxtarget
 import languages
+import pandocrun
 import sidecars
 
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -733,7 +734,7 @@ def equation_texs(parts, name):
         with zipfile.ZipFile(path, "w") as z:
             for filename, data in parts.items():
                 z.writestr(filename, probe.encode("utf-8") if filename == "word/document.xml" else data)
-        result = subprocess.run(["pandoc", "-f", "docx", "-t", "json", path],
+        result = subprocess.run([*pandocrun.PANDOC, "-f", "docx", "-t", "json", path],
                                 capture_output=True, text=True)
     finally:
         os.remove(path)
@@ -1198,7 +1199,7 @@ def equations_for(texs):
     handle, path = tempfile.mkstemp(suffix=".docx")
     os.close(handle)
     try:
-        result = subprocess.run(["pandoc", "-f", "markdown", "-t", "docx", "-o", path],
+        result = subprocess.run([*pandocrun.PANDOC, "-f", "markdown", "-t", "docx", "-o", path],
                                 input=source, text=True, capture_output=True)
         if result.returncode != 0:
             return {}

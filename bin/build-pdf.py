@@ -59,6 +59,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 try:
     import downsample
     import oerconfig
+    import pandocrun
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
@@ -900,6 +901,19 @@ def meta_bool(value):
     return {"t": "MetaBool", "c": bool(value)}
 
 
+def own_template(base, resolved):
+    """The absolute path of the LaTeX template pdf.template names, or None;
+    a path that doesn't exist stops the build."""
+    setting = str(resolved["pdf.template"] or "").strip()
+    if not setting:
+        return None
+    path = os.path.abspath(os.path.join(base, setting))
+    if not os.path.isfile(path):
+        sys.exit(f"pdf.template is set to {setting}, which does not exist "
+                 f"(looked at {path}).")
+    return path
+
+
 def metadata_file(base, setting):
     """The metadata of the file pdf.metadata names, as Pandoc reads it."""
     # Whole, since Pandoc runs in the book's folder: a path relative to a
@@ -910,11 +924,11 @@ def metadata_file(base, setting):
         sys.exit(f"pdf.metadata is set to {setting}, which does not exist "
                  f"(looked at {path}).")
     if path.lower().endswith((".yaml", ".yml")):
-        command = ["pandoc", "-f", "markdown", "-t", "json",
+        command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json",
                    "--metadata-file", path]
         stdin = ""
     else:
-        command = ["pandoc", "-f", "markdown", "-t", "json", path]
+        command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json", path]
         stdin = None
     result = subprocess.run(command, input=stdin, capture_output=True,
                             text=True, cwd=base)
@@ -1503,7 +1517,7 @@ def measure_page(document, filters, environment, base):
         source = os.path.join(work, "measure.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(probe, fh)
-        latex = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", source,
+        latex = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", source,
                                 "-o", os.path.join(work, "measure.tex")] + filters,
                                cwd=base, env=environment, capture_output=True, text=True)
         if latex.returncode:
@@ -1757,14 +1771,17 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         environment = dict(os.environ, TARGET_NAME=name,
                            TITLE_BLOCK=str(resolved["title_block"]),
                            **label_prefixes(resolved))
+        # Pandoc's template, or the book's own (pdf.template), with the font
+        # setting read before its faces (latexbuild.STATIC_FONTS), for the
+        # LaTeX the PDF is made from; a book's own is measured with too.
+        own = own_template(base, resolved)
+        template = latexbuild.book_template(work, source=own)
         measures, why = given_measures() if os.environ.get("OER_MEASURES") \
-            else measure_page(document, filters, environment, base)
+            else measure_page(document, filters + (["--template", template] if own else []),
+                              environment, base)
         environment["OER_MEASURES"] = measures or "none"
         if not measures and why:
             print(unmeasured_warning(why), file=sys.stderr)
-        # Pandoc's template with the font setting read before its faces
-        # (latexbuild.STATIC_FONTS), for the LaTeX the PDF is made from.
-        template = latexbuild.book_template(work)
         filters = filters + (["--template", template] if template else [])
         # What the filter records of the headings' formulas (bookmark_said).
         record_path = os.path.join(work, "pdf-record.json")
@@ -1773,7 +1790,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             # The LaTeX as the PDF was made from it, for reading when
             # something needs explaining; not needed to build. What
             # Pandoc said is said by the build after it, when there's one.
-            kept = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s",
+            kept = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s",
                                    book_json, "-o",
                                    os.path.join(os.path.abspath(out_dir),
                                                 "book.tex")] + filters,
@@ -1788,7 +1805,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         if latex_only:
             print(os.path.abspath(os.path.join(out_dir, "book.tex")))
             return 0
-        command = ["pandoc", "-f", "json", "-t", "pdf", book_json,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "pdf", book_json,
                    "-o", os.path.abspath(out_path),
                    f"--pdf-engine={ENGINE}"] + filters
         # images.downsample and images.compress: smaller copies, which
@@ -1920,11 +1937,12 @@ def write_latex(base, name, resolved, project, document, out_dir):
         environment["OER_MEASURES"] = measures or "none"
         if why:
             print(unmeasured_warning(why), file=sys.stderr)
-        # Pandoc's template with the font setting read before its faces
-        # (latexbuild.STATIC_FONTS), as the PDF target's is.
-        template = latexbuild.book_template(work)
+        # Pandoc's template, or the book's own (pdf.template), with the font
+        # setting read before its faces (latexbuild.STATIC_FONTS), as the
+        # PDF target's is.
+        template = latexbuild.book_template(work, source=own_template(base, resolved))
         record_path = os.path.join(work, "pdf-record.json")
-        done = subprocess.run(["pandoc", "-f", "json", "-t", "latex", "-s", book_json]
+        done = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", book_json]
                               + filters + (["--template", template] if template else []),
                               cwd=base, env=dict(environment, OER_PDF_RECORD=record_path),
                               capture_output=True, text=True)

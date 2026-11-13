@@ -64,6 +64,7 @@ import zipfile
 from collections import Counter, OrderedDict
 
 import alttext
+import pandocrun
 import findings as fl
 import pptxcheck
 import pptxfonts
@@ -339,7 +340,7 @@ def tex_pandoc_problem():
             problem = "Pandoc isn't on the PATH"
         else:
             try:
-                version = subprocess.run(["pandoc", "--version"], capture_output=True,
+                version = subprocess.run(pandocrun.VERSION, capture_output=True,
                                          text=True).stdout.split()[1]
             except (OSError, IndexError):
                 version = ""
@@ -517,7 +518,7 @@ def minus_signs(path, alts, tables, titles, orders, keep, dname, api, repair=Tru
                    MATH_KEEP=files["keep"], MATH_KEPT=files["kept"], MATH_REPAIRED=files["rows"],
                    MATH_PLACES="", MATH_MINUS_PLACES="")
         try:
-            result = subprocess.run(["pandoc", "-f", "json", "-t", "json", source,
+            result = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "json", source,
                                      "--lua-filter=" + MATH_FILTER],
                                     capture_output=True, text=True, env=env)
             filtered = json.loads(result.stdout) if result.returncode == 0 else None

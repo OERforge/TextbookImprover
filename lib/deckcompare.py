@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import tempfile
 
+import pandocrun
 import pptxsource
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -269,7 +270,7 @@ def read(path, work, pandoc="pandoc", alts=None, tables=None, titles=None, order
         source = os.path.join(folder, "deck.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
-        result = subprocess.run([pandoc, "-f", "json", "-t", "json", source,
+        result = subprocess.run([*pandocrun.command(pandoc), "-f", "json", "-t", "json", source,
                                  "--lua-filter=" + MATH_FILTER], capture_output=True, text=True,
                                 env=dict(os.environ, MATH_REPAIR_EQUATIONS="true",
                                          MATH_FROM_TEXT="true", MATH_MINUS_IN_TEXT="true"))

@@ -60,6 +60,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import pandocrun  # noqa: E402
 try:
     import yaml
     from names import safe_stem
@@ -80,7 +81,7 @@ RAW_PATH = re.compile(r"""(\b(?:src|href)\s*=\s*["'])(/[^/"'][^"']*|/)(["'])""",
 
 
 def pandoc(arguments, text):
-    result = subprocess.run(["pandoc"] + arguments, input=text,
+    result = subprocess.run(pandocrun.PANDOC + arguments, input=text,
                             capture_output=True, text=True)
     if result.returncode != 0:
         sys.exit("pandoc failed: " + result.stderr.strip())

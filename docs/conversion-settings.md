@@ -212,6 +212,26 @@ How large a 16:9 deck's PowerPoint slides are: widescreen is PowerPoint's Widesc
 
 A PowerPoint file whose look a deck's PowerPoint file takes, as Pandoc's reference-doc option takes it: its slide size, its slide master and layouts, its fonts, its colors, and its default table style, the layouts named as Pandoc's manual says (Title Slide, Title and Content, Section Header, Two Content, Comparison, Content with Caption, Blank), as an absolute path or one relative to the folder converted. A default table style whose header row has too little contrast is warned of. Left empty, the look is Pandoc's own, its slides the shape aspect_ratio says at the size size says, its tables PowerPoint's Light Style 1 - Accent 1. A path that doesn't exist stops the run. A PowerPoint deck's pptx target is written only on one: it rebuilds each deck on the template, losing the deck's design, which its copy (format: source) keeps; left empty, the target writes nothing, and the run says why.
 
+## html
+
+Settings read only by an html target: a book's own page template and stylesheet. A run reads none of Pandoc's data folders, so a template kept in Pandoc's user data folder isn't used; these are where a book gives its own, a file kept with its configuration.
+
+**`html.template`**—`path`; default `""` (empty)
+
+A Pandoc template for every page of the target, in place of Pandoc's own HTML template, as an absolute path or one relative to the folder converted. Start from Pandoc's own, which pandoc -D html5 prints for the Pandoc in use, and keep the variables it fills (header-includes, include-before, include-after, lang, dir, pagetitle, and the rest): the run puts its stylesheet, a page's header and footer, and its menu and pager through them. A partial it names is read from beside it, before Pandoc's own. Left empty, the pages use Pandoc's template. A path that doesn't exist stops the run.
+
+**`html.css`**—`path`; default `""` (empty)
+
+A stylesheet put into every page of the target after TextbookImprover's own, so that a rule in it wins, as an absolute path or one relative to the folder converted. It's written into each page's head, as TextbookImprover's is, so a url() in it is read from the page's folder. Left empty, the pages have TextbookImprover's stylesheet alone. A path that doesn't exist stops the run.
+
+## docx
+
+Settings read only by a docx target.
+
+**`docx.reference_doc`**—`path`; default `""` (empty)
+
+A Word file whose styles the target's Word files take, as Pandoc's reference-doc option takes it: its paragraph and character styles, its page size and margins, and its headers and footers, as an absolute path or one relative to the folder converted. Start from Pandoc's own, which pandoc -o custom-reference.docx --print-default-data-file reference.docx writes, so that every style Pandoc uses is there. The compatibility setting the target writes afterward (compatibility_mode) still applies. Left empty, the Word files take Pandoc's styles. A path that doesn't exist stops the run.
+
 ## epub
 
 Settings read only by an epub3 target. One EPUB holds the whole book: every page in project.contents, in that order, with each group a heading over its pages and the table of contents built from the same tree the cartridge organization uses.
@@ -223,6 +243,10 @@ How many levels the table of contents shows. A group at the top of project.conte
 **`epub.cover_image`**—`path`; default `""` (empty)
 
 An image for the cover page, JPEG or PNG, as an absolute path or one relative to the content directory. Left empty the book has no cover page. A path that doesn't exist stops the build.
+
+**`epub.css`**—`path`; default `""` (empty)
+
+A stylesheet added to the EPUB after the one it has (Pandoc's EPUB stylesheet, TextbookImprover's page stylesheet, and the link colors), so that a rule in it wins, as an absolute path or one relative to the folder converted. It's part of the EPUB's one stylesheet, so a url() in it names a file inside the EPUB. Left empty, the EPUB has that stylesheet alone. A path that doesn't exist stops the build.
 
 **`epub.cover_alt`**—`string`; default `""` (empty)
 
@@ -247,6 +271,10 @@ The standards the PDF declares, as Pandoc's pdfstandard variable takes them: ua-
 **`pdf.metadata`**—`path`; default `""` (empty)
 
 A YAML file, or a Markdown file that opens with a YAML block, whose metadata goes to Pandoc's LaTeX writer: documentclass, classoption, header-includes, include-before, fonts, geometry, and the rest of Pandoc's LaTeX variables, and ragged-right, TextbookImprover's own. A book written for a Pandoc PDF build names the file that held its YAML (a _preamble.md, say), and its settings carry over. What it sets wins, a field at a time, over the PDF target's default page (bin/pdf-layout.yaml, or a LaTeX book's own layout) and over what project.yaml says; what it leaves out comes from those and from these settings. A path that doesn't exist stops the build.
+
+**`pdf.template`**—`path`; default `""` (empty)
+
+A Pandoc LaTeX template the PDF is built on, and the latex target's master written with, in place of Pandoc's own, as an absolute path or one relative to the folder converted. Start from Pandoc's own, which pandoc -D latex prints for the Pandoc in use, and keep its partials and the variables it fills: tagging, the fonts, and the metadata reach the PDF through them. The run adds its font setting before the template's $fonts.latex()$ line, as it does to Pandoc's, and says so where the line isn't there. A partial it names is read from the .latex files beside it, before Pandoc's own. Most changes are smaller in the metadata file (header-includes and Pandoc's variables) than in a template of the book's own. Left empty, the PDF is built on Pandoc's template. A path that doesn't exist stops the build.
 
 **`pdf.figures`**—one of `in_place`, `section`, `float`; default `in_place`
 

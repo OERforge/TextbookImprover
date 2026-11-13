@@ -46,6 +46,8 @@ import subprocess
 
 import pandocversion
 
+import pandocrun
+
 THEME = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                       os.pardir, "bin", "highlighting.theme"))
 
@@ -68,7 +70,7 @@ def page_css():
     can't be."""
     if not _PAGE_CSS:
         try:
-            done = subprocess.run(["pandoc", "-f", "markdown", "-t", "html5", "--standalone",
+            done = subprocess.run([*pandocrun.PANDOC, "-f", "markdown", "-t", "html5", "--standalone",
                                    "--metadata", "title=code"] + ARGS + pandocversion.mathml(),
                                   input="```python\nx = 1\n```\n", capture_output=True,
                                   text=True)

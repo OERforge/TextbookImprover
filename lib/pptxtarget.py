@@ -149,6 +149,7 @@ from collections import Counter
 from urllib.parse import unquote
 
 import decks
+import pandocrun
 import docxtarget
 import downsample
 import highlighting
@@ -251,7 +252,7 @@ def reference_doc(ratio, out, size="widescreen"):
     32. Its tables take a style of PowerPoint's own whose text has the
     contrast PowerPoint's checker asks for (TABLE_STYLE), where Pandoc's
     reference document's default has 4.0:1 in a table's header row."""
-    data = subprocess.run(["pandoc", "--print-default-data-file", "reference.pptx"],
+    data = subprocess.run([*pandocrun.PANDOC, "--print-default-data-file", "reference.pptx"],
                           capture_output=True, check=True).stdout
     width, height, kind, name = slide_size(ratio, size)
     with zipfile.ZipFile(io.BytesIO(data)) as zin:
@@ -494,7 +495,7 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
             with open(source, "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
         record_path, log_path = os.path.join(work, "record.json"), os.path.join(work, "log.json")
-        command = ["pandoc", "-f", "json", "-t", "pptx", source, "-o", out,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "pptx", source, "-o", out,
                    "--reference-doc", reference, "--slide-level", str(level),
                    "--log", log_path] + highlighting.ARGS + downsample.resource_args(
                        (env or os.environ).get("DOWNSAMPLED"))

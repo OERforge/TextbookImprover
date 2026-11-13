@@ -60,6 +60,8 @@ import subprocess
 
 import pandocversion
 
+import pandocrun
+
 # A link's target with a scheme, which a page that isn't the book's own
 # HTML can follow: a relative one names a file the target doesn't carry.
 ABSOLUTE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
@@ -102,7 +104,7 @@ def _pandoc(arguments, text):
     frame (<iframe>) names and puts what it got in the footer, a request
     a run on someone else's settings mustn't make. Sandboxed, the fetch
     is refused, and the frame left out."""
-    result = subprocess.run(["pandoc"] + arguments + ["--sandbox"], input=text,
+    result = subprocess.run(pandocrun.PANDOC + arguments + ["--sandbox"], input=text,
                             capture_output=True, text=True, check=True)
     return result.stdout
 

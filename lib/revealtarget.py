@@ -94,6 +94,7 @@ import tempfile
 import headercells
 import highlighting
 import pandocversion
+import pandocrun
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
@@ -404,7 +405,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         with open(script, "w", encoding="utf-8") as fh:
             fh.write("<script>\n" + js + "</script>\n")
         width, height = frame(shape)
-        command = ["pandoc", "-f", "json", "-t", "revealjs", "-s", intermediate, "-o", out,
+        command = [*pandocrun.PANDOC, "-f", "json", "-t", "revealjs", "-s", intermediate, "-o", out,
                    *pandocversion.mathml(), "--slide-level", str(level),
                    "--reference-location=section",
                    "-V", f"revealjs-url={REVEALJS_URL}", "-V", f"theme={THEME}",

@@ -7454,7 +7454,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-numbered", "-ams", "-doctoc")
+                "-measured", "-numbered", "-ams", "-doctoc", "-own")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7538,6 +7538,43 @@ def build_doc_toc(work):
     return os.path.join(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
 
 
+def build_own_template(work):
+    """One page on a LaTeX template of the book's own (pdf.template),
+    Pandoc's with a paragraph of its own after \\begin{document}, kept in
+    a folder beside the configuration: (the PDF's path, what the run
+    said)."""
+    os.makedirs(os.path.join(work, "templates"))
+    template = subprocess.run(["pandoc", "--data-dir", os.path.join(work, "templates"),
+                               "-D", "latex"], capture_output=True, text=True,
+                              check=True).stdout
+    with open(os.path.join(work, "templates", "book.latex"), "w", encoding="utf-8") as fh:
+        fh.write(template.replace("\\begin{document}",
+                                  "\\begin{document}\nA template of its own.\\par", 1))
+    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\nA page.\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: Own\n  identifier: org.example.own\n"
+                 "  language: en-US\n  contents:\n    - one\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n"
+                 "    pdf:\n      template: templates/book.latex\n")
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return os.path.join(work, "pdf", "org.example.own.pdf"), converted.stdout + converted.stderr
+
+
+def own_template_checks(own_path, own_said):
+    """The checks of the book on a template of its own (build_own_template)."""
+    return [
+        ("a PDF is built on the template pdf.template names, the run's font line "
+         "added before its fonts partial, as to Pandoc's",
+         lambda: os.path.exists(own_path) and "wasn't built" not in own_said
+         and page_holding(own_path, "A template of its own.") is not None
+         and "has no $fonts.latex()$ line" not in own_said),
+    ]
+
+
 def doc_toc_checks(doc_toc_path, doc_toc_said):
     """The checks of DOC_TOC_PAGE's book: the document command wrapped as
     its code takes its argument, as the wrapper of one argument before it
@@ -7601,6 +7638,7 @@ BUILDS = {
     "-numbered": build_note_numbers,
     "-ams": build_ams,
     "-doctoc": build_doc_toc,
+    "-own": build_own_template,
 }
 
 # The longest builds, started first when they run side by side, in this
@@ -7657,6 +7695,7 @@ def checks(work, built):
     numbered_path, numbered_source = built["-numbered"]
     ams_path, ams_said = built["-ams"]
     doc_toc_path, doc_toc_said = built["-doctoc"]
+    own_path, own_said = built["-own"]
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -8655,6 +8694,7 @@ def checks(work, built):
                            latex_color(theme["Comment"]["text-color"])} <= fill_colors(reader)))
     items += ams_checks(ams_path, ams_said)
     items += doc_toc_checks(doc_toc_path, doc_toc_said)
+    items += own_template_checks(own_path, own_said)
     return items
 
 

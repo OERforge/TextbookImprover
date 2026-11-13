@@ -3371,7 +3371,8 @@ def case_page_languages(work):
         ("a document that \\include-s nothing is in its page's language whole, its "
          "\\DocumentMetadata's, in its PDF and its copy, and from \\begin{document} in its "
          "copy without tagging",
-         lambda: pdf_check("notes", "org.example.languages.pdf", [("H1", "es"), ("P", "es")])
+         lambda: skip(why) if why else
+         pdf_check("notes", "org.example.languages.pdf", [("H1", "es"), ("P", "es")])
          and "1 page(s) tagged in their own language as LaTeX reads them (notes es)"
              in notes_said
          and read(work, "notes", "copy", "notes.tex").startswith(
@@ -6712,7 +6713,7 @@ def case_class_contents(work):
          loaded_classes),
         ("a memoir book's tagged copy is warned of too, its entries run together and its dot "
          "leaders read as text",
-         lambda: memoir_done.returncode == 0
+         lambda: ran(memoir_done)
          and "WARNING: tagged: " + warning % ("the copy", "memoir") in memoir_said
          and "its dot leaders are read as text" in memoir_said
          and "amsbook's lists" not in memoir_said and "unnumbered sections" not in memoir_said),

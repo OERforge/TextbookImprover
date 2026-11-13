@@ -302,7 +302,7 @@ These are for books unpacked from OpenStax's CNXML ([A CNXML book as the source]
 
 #### Noto Sans Math
 
-OpenStax sets each book in one of a few designs, and the two it calls cardboard and corn use Noto Sans: 24 books, its math books, *Introduction to Python Programming*, and its business books among them. Such a book names Noto Sans Math for its formulas, whose letters are Noto Sans's ([Typefaces](cnx-input.md#typefaces)). LaTeX sets a formula by a math font's table of measurements, which Noto Sans Math has in its version 3.000, and TeX Live doesn't have it for LuaLaTeX, nor do Debian's and Ubuntu's `fonts-noto-core`, whose copy is version 2.001. Without it the formulas are set in Latin Modern Math, and the run warns, with these steps. On Ubuntu:
+OpenStax sets each book in one of four designs, and the two it calls cardboard and corn use Noto Sans: 24 books, its math books, *Introduction to Python Programming*, and its business books among them. Such a book names Noto Sans Math for its formulas, whose letters are Noto Sans's ([Typefaces](cnx-input.md#typefaces)). LaTeX sets a formula by a math font's table of measurements, which Noto Sans Math has in its version 3.000, and TeX Live doesn't have it for LuaLaTeX, nor do Debian's and Ubuntu's `fonts-noto-core`, whose copy is version 2.001. Without it the formulas are set in Latin Modern Math, and the run warns, with these steps. On Ubuntu:
 
 ```bash
 cd ~/Downloads

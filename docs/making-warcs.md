@@ -120,7 +120,7 @@ docker run -v "$PWD/crawls:/crawls/" -it webrecorder/browsertrix-crawler \
 
 The WACZ is written to `crawls/collections/cs168/cs168.wacz`. `--scopeType prefix` keeps the crawl to URLs that begin with the starting one; `--limit 20` stops it after twenty pages, which is a sensible first try.
 
-The crawler's options are from its documentation, and I couldn't run Docker where these instructions were written: if one of them has been renamed, `docker run webrecorder/browsertrix-crawler crawl --help` lists the current ones.
+The crawler's options are from its documentation, and the command wasn't run for these instructions: if one of them has been renamed, `docker run webrecorder/browsertrix-crawler crawl --help` lists the current ones.
 
 ## What a WARC gave that a save didn't
 

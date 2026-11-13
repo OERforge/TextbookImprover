@@ -19,13 +19,13 @@ python3 $T/bin/convert.py
 | --- | --- |
 | `not-in-navigation` | A file in the spine that no navigation entry names. It's listed at the end of `contents`. |
 | `looks-like-contents` | A page that links to most of the book, which is usually the book's own table of contents. `generate: toc` in `contents` writes one from the book as it now is; the entry carries a comment saying so. |
-| `image-is-not-an-image` | A file the pages show as an image whose bytes aren't one. One exporter packaged a web server's `403 Forbidden` page under each of 120 image names and declared them `text/html`; the pictures aren't in that EPUB at all and have to come from the book's site. Converting such a book stops at the media gate, which names each one in `media-unresolved.csv` as an HTML page where an image should be. |
+| `image-is-not-an-image` | A file the pages show as an image whose bytes aren't one. One exporter packaged a web server's `403 Forbidden` page under each of 120 image names and declared them `text/html`; the pictures aren't in that EPUB at all and have to come from the book's site. Converting such a book stops early, where the run checks that every image a page shows is on disk and is an image (the media gate), and `media-unresolved.csv` names each one as an HTML page where an image should be. |
 | `entries-inside-pages` | Navigation entries that point inside a page already named. A book that arrives as one long file has nothing else. Set `pages.split_level` and the page is cut at its headings. |
 | `not-linear`, `missing-from-archive` | The spine marks the file as outside the reading order; the manifest names a file the archive doesn't have. |
 
 ## A book that is one file
 
-Two of the three EPUBs this was built against hold the whole book in one content document. `contents` then names one page, and that's right: set `pages.split_level` in `conversion.yaml` and the declared page stands for its pieces, grouped under it in reading order exactly as the guess would arrange them. (That holds for any declared page the split cuts, not only one from an EPUB; `contents` that already names the pieces is left as declared.) Links into the file from the book's other pages, its own contents page included, follow their targets to the pieces they moved to.
+Two of the three EPUBs the unpacker was built against hold the whole book in one content document (a content document is one of the XHTML files an EPUB keeps its text in). `contents` then names one page, and that's right: set `pages.split_level` in `conversion.yaml` and the declared page stands for its pieces, grouped under it in reading order exactly as the guess would arrange them. (That holds for any declared page the split cuts, not only one from an EPUB; `contents` that already names the pieces is left as declared.) Links into the file from the book's other pages, its own contents page included, follow their targets to the pieces they moved to.
 
 ## Why not Pandoc's EPUB reader
 

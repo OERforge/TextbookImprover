@@ -9,7 +9,7 @@ defaults:
     split_level: 2       # one page per heading of level 2 or shallower
 ```
 
-The cut happens on the filtered intermediate, after the filter has done its work and before anything is rendered, so the pieces carry everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced while the sidecar keys and the reports still name the source file, which is the file you'd open to fix something. Everything downstream, the HTML render, the packager, and the EPUB assembler, sees ordinary pages.
+The cut happens on the filtered intermediate (the page as Pandoc read it, after the filter has done its work and before any output is written), so the pieces carry everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced while the sidecar keys and the reports still name the source file, which is the file you'd open to fix something. Everything downstream, the HTML render, the packager, and the EPUB assembler, sees ordinary pages.
 
 ## What a piece is
 
@@ -76,7 +76,7 @@ The `notes` page is back matter to the packager's guess and to the EPUB; list it
 
 ## Headings that aren't headings
 
-The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader reads `Heading 1` through `Heading 9`. A book whose top level is styled `Title` (one text in reach uses `Title` for its modules and `Heading 1` for their sections, and its own TOC field says so: `Title,1,Heading 1,2,...`) loses that level on the way in: the first `Title` paragraph becomes the document's metadata title and the rest become plain paragraphs. The result is a flat list of sections with no modules over them, and every module's *Introduction* colliding with every other's. The fix is in the source: restyle `Title` to `Heading 1` and shift the rest down. [`util/restyle-headings.py`](utilities.md#repairing-heading-styles-in-the-source) does that from a map, or from what the TOC field declares, and drops the empty `Title` paragraphs Word leaves behind. `pandoc -f docx+styles` shows what was being lost, as `Div` blocks with `custom-style="Title"`.
+The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader reads `Heading 1` through `Heading 9`. A book whose top level is styled `Title` (one book in the test corpus uses `Title` for its modules and `Heading 1` for their sections, and its own TOC field says so: `Title,1,Heading 1,2,...`) loses that level on the way in: the first `Title` paragraph becomes the document's metadata title and the rest become plain paragraphs. The result is a flat list of sections with no modules over them, and every module's *Introduction* colliding with every other's. The fix is in the source: restyle `Title` to `Heading 1` and shift the rest down. [`util/restyle-headings.py`](utilities.md#repairing-heading-styles-in-the-source) does that from a map, or from what the TOC field declares, and drops the empty `Title` paragraphs Word leaves behind. `pandoc -f docx+styles` shows what was being lost, as `Div` blocks with `custom-style="Title"`.
 
 ## Adopting the pages as sources
 
@@ -95,4 +95,4 @@ A table caption keyed on its position (`chapter-3#table-2`) rather than its labe
 
 ## Splitting your source files
 
-Nothing here changes a source file. But once a format round-trips (Markdown, once it's an input as well as an output), the same step can produce split sources rather than split pages: the pieces are Pandoc documents, and any writer can render them. DOCX may stay the exception, since a Pandoc round trip discards what Pandoc doesn't model.
+Nothing here changes a source file. To have the book's sources themselves split, write the pieces out and adopt them: a `markdown` target writes each piece as a Markdown file, and `adopt-pages.py` ([above](#adopting-the-pages-as-sources)) makes a book directory of them, as it does of an HTML target's pages. Word is the exception. A Word file Pandoc writes holds what Pandoc's reader kept of the author's and no more, so a `docx` target's pieces aren't the author's file cut in parts ([Word output](formats.md#word-output)).

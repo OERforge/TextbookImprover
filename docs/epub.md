@@ -19,7 +19,7 @@ The book's own details come from `project.yaml`, or from `conversion.yaml`'s own
 
 ## What goes in, and in what order
 
-The assembler reads the filtered intermediates `convert.py` writes (`<page>.filtered.json`), not the HTML pages. The intermediate is the page after the filter has done its work and before any writer has rendered it, so everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced (captions, `scope` on header cells, the scroll wrapper, replaced alt text, MathML) arrives in the EPUB as it does in the HTML. Reading the HTML back would lose some of it: Pandoc's HTML reader keeps a cell's `scope` attribute but not the element, so a row header would come back as a `<td>`.
+The assembler, `build-epub.py`, reads the filtered intermediates `convert.py` writes (`<page>.filtered.json`), not the HTML pages. The intermediate is the page after the filter has done its work and before any writer has rendered it, so everything the [remediation](architecture.md#what-conversion-does-to-your-pages) produced (captions, `scope` on header cells, the wrapper that lets a wide table scroll, replaced alt text, MathML) arrives in the EPUB as it does in the HTML. Reading the HTML back would lose some of it: Pandoc's HTML reader keeps a cell's `scope` attribute but not the element, so a row header would come back as a `<td>`.
 
 Order and structure come from `project.contents`, exactly as for the cartridge. A group becomes a heading over its pages; a page becomes a heading at its depth; the page's own headings continue below it. So the table of contents shows ranks, not files: with
 
@@ -59,7 +59,7 @@ The assembler computes them from the build instead:
 - `accessMode` is `textual`, plus `visual` when the book has images.
 - `accessModeSufficient` is `textual` only when every image has alternative text or is marked decorative; otherwise `textual,visual`, meaning a reader needs both.
 - `accessibilityFeature` always includes `structuralNavigation`, `tableOfContents`, and `readingOrder`; `alternativeText` is added when the images are all described, and `MathML` when there are equations.
-- `accessibilityHazard` is `none`, since nothing that flashes, moves, or sounds comes out of a Word file.
+- `accessibilityHazard` is always `none`. It was written for Word files, out of which nothing that flashes, moves, or sounds comes, and nothing checks it for another source: an EPUB makes a video in a frame a link to it, but a book whose own pages hold an animated image would want the claim looked at.
 - `accessibilitySummary` is derived from the same counts unless `epub.accessibility_summary` is set, and then that text is used as written.
 
 So the claims change as the sidecars are filled in. A book whose `image-alt-missing.csv` still has rows says so in its summary and withholds `alternativeText`; supply the text through `image-alt.csv`, rebuild, and the EPUB starts claiming it. The run prints what it claimed.
@@ -70,7 +70,7 @@ So the claims change as the sidecars are filled in. A book whose `image-alt-miss
   epub:
     format: epub3
     epub:
-      cover_image: cover.png       # absolute, or relative to the content directory
+      cover_image: cover.png       # absolute, or relative to the book's directory
       cover_alt: Cover of Principles of Marketing, third edition
 ```
 

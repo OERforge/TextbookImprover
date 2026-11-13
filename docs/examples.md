@@ -1,8 +1,8 @@
 # Worked examples
 
-Three real books taken from the files their publishers offer to a finished result, one command at a time, with what each command prints. They follow [A first conversion](first-run.md) on real books, so read that first; the settings it explains aren't explained again here. The output below is from running these steps as written. Your numbers may differ if a publisher has changed its files since.
+Three real books taken from the files their publishers offer to a finished result, one command at a time, with what each command prints. They follow [A first run](first-run.md) on real books, so read that first; the settings it explains aren't explained again here. The output below is from running these steps as written. Your numbers may differ if a publisher has changed its files since.
 
-The examples use `T` for the directory you cloned this repository into:
+The examples use `T` for the directory you unpacked or cloned TextbookImprover into:
 
 ```bash
 T=/path/to/TextbookImprover
@@ -116,7 +116,7 @@ Open `project-sample.yaml`, and near the top set the book's identifier and title
   title: Introductory Business Statistics 2e
 ```
 
-The identifier is how an LMS recognizes a later import as the same course, so choose one you'll keep; [A first conversion](first-run.md) says more. Then rename the file and run again:
+The identifier is how an LMS recognizes a later import as the same course, so choose one you'll keep; [A first run](first-run.md) says more. Then rename the file and run again:
 
 ```bash
 mv project-sample.yaml project.yaml
@@ -599,4 +599,4 @@ Output check: 11 page(s), 1 EPUB(s), and 1 PDF(s), 479 finding(s):
   giam-3.2.pdf: 9 pdf-figure-alt-is-file-name: a figure's alternative text in the PDF is a file name, which is what LaTeX writes when an image has none
 ```
 
-It differs from the `tagged` copy in one way: every table's headers are declared as the pages have them, the census's guesses included, where the copy, which goes back to the author, declares only what a person decided. The run with the other targets takes about nine minutes. The output check finds what veraPDF can't, the placeholders LaTeX gave the 195 figures, so the PDF is done when `image-alt.csv` is. With `pdf.from: pages` the PDF is made from the pages through Pandoc instead, as for a book from any other source: 324 pages, also passing PDF/UA-2, with the bibliography but without the index ([LaTeX sources](latex.md#the-pdf-target)).
+It differs from the `tagged` copy in one way: every table's headers are declared as the pages have them, the run's own guesses included (the output calls the guesser the census), where the copy, which goes back to the author, declares only what a person decided. The run with the other targets takes about nine minutes. The output check finds what veraPDF can't, the placeholders LaTeX gave the 195 figures, so the PDF is done when `image-alt.csv` is. With `pdf.from: pages` the PDF is made from the pages through Pandoc instead, as for a book from any other source: 324 pages, also passing PDF/UA-2, with the bibliography but without the index ([LaTeX sources](latex.md#the-pdf-target)).

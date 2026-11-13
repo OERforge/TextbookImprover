@@ -106,6 +106,11 @@ fi
 
 set -u
 
+# Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
+# init.lua, and its other data files; each suite drops it too, for when
+# it's run by itself.
+unset PANDOC_DATA_DIRS
+
 usage () {
   echo "usage: bash tests/run-all.sh [-j N]   (N things at once; default half the processors)"
 }

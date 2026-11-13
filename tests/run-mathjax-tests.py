@@ -22,6 +22,11 @@ import subprocess
 import sys
 import tempfile
 
+# Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
+# init.lua, and its other data files, and --data-dir doesn't stop it. The
+# suites check TextbookImprover, not what a machine has put there.
+os.environ.pop("PANDOC_DATA_DIRS", None)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))

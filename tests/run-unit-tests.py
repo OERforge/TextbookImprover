@@ -53,6 +53,11 @@ import tempfile
 import sys
 import zipfile
 
+# Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
+# init.lua, and its other data files, and --data-dir doesn't stop it. The
+# suites check TextbookImprover, not what a machine has put there.
+os.environ.pop("PANDOC_DATA_DIRS", None)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
@@ -1651,6 +1656,35 @@ def check_single_alignment():
         ("where nothing says, one alignment is still all a paragraph has",
          lambda: kept(unknown, by_order=False)[1] == 1
          and len(kept(unknown, by_order=False)[0]["u"]) == 1),
+    ]
+
+
+def check_suites_data_dirs():
+    """Pandoc 3.14 reads templates, init.lua, and its other data files from
+    the folders PANDOC_DATA_DIRS names, whatever --data-dir says, so a suite
+    that kept the variable would check the machine's files with the
+    project's. Each drops it before anything runs."""
+    tests = os.path.dirname(os.path.abspath(__file__))
+    drop = 'os.environ.pop("PANDOC_DATA_DIRS", None)\n'
+    suites = sorted(name for name in os.listdir(tests)
+                    if name.startswith("run-") and name.endswith(".py"))
+
+    def early(name):
+        with open(os.path.join(tests, name), encoding="utf-8") as handle:
+            text = handle.read()
+        return (text.count(drop) == 1 and "\nHERE = " in text
+                and text.index(drop) < text.index("\nHERE = "))
+
+    def run_all():
+        with open(os.path.join(tests, "run-all.sh"), encoding="utf-8") as handle:
+            return "\nunset PANDOC_DATA_DIRS\n" in handle.read()
+
+    late = [name for name in suites if not early(name)]
+    return [
+        ("every suite drops PANDOC_DATA_DIRS before it runs anything%s"
+         % (": not " + ", ".join(late) if late else ""),
+         lambda: len(suites) > 15 and not late),
+        ("and run-all.sh unsets it", run_all),
     ]
 
 
@@ -9894,6 +9928,7 @@ GROUPS = [
     ("a bar in a Word equation and in a deck's", check_equation_bars),
     ("Pandoc's bar accent, written and read", check_bar_accents),
     ("a nested table's cell's one alignment in Word", check_single_alignment),
+    ("the suites and PANDOC_DATA_DIRS", check_suites_data_dirs),
     ("a Word display paragraph of several equations", check_math_paragraphs),
     ("a bare link's replacement in a source copy", check_link_replacements),
     ("the archive's name", check_archive_name),

@@ -99,13 +99,20 @@ def unguarded(cell):
 
 
 class _GuardedWriter:
-    """A csv.writer whose cells are guarded()."""
+    """A csv.writer whose cells are guarded(), and whose row holding a
+    line's end in a cell is quoted whole: where the line terminator is a
+    line feed alone, an older Python's writer (3.9.25, measured) leaves a
+    cell's carriage return unquoted, and no reader takes the row back."""
 
-    def __init__(self, writer):
-        self._writer = writer
+    def __init__(self, fh, options):
+        self._writer = csv.writer(fh, **options)
+        self._quoted = csv.writer(fh, **dict(options, quoting=csv.QUOTE_ALL))
 
     def writerow(self, row):
-        return self._writer.writerow([guarded(cell) for cell in row])
+        row = [guarded(cell) for cell in row]
+        if any(isinstance(cell, str) and ("\r" in cell or "\n" in cell) for cell in row):
+            return self._quoted.writerow(row)
+        return self._writer.writerow(row)
 
     def writerows(self, rows):
         for row in rows:
@@ -120,7 +127,7 @@ def csv_writer(fh, **options):
     """csv.writer(fh, **options) for a CSV a person may open in a
     spreadsheet: a report, a sample, or a sidecar a tool writes, each
     cell guarded() against being taken for a formula."""
-    return _GuardedWriter(csv.writer(fh, **options))
+    return _GuardedWriter(fh, options)
 
 
 def csv_lines(fh):

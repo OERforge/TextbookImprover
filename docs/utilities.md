@@ -87,12 +87,7 @@ It reads neither `math-keep.csv` nor the `fonts` settings, so a copy that keeps 
 
 ## Repairing tracked deletions in the source
 
-Some authors use Word's tracked-deletion mark as *content* — a
-before-and-after table showing which words to cut from a sentence. That is
-revision history carrying meaning, and anything that resolves revisions
-destroys it: Word's own "Accept All Changes", most converters, and Pandoc,
-which accepts changes by default. A before-and-after example then shows two
-identical sentences.
+Some authors use Word's tracked-deletion mark as *content* — a before-and-after table showing which words to cut from a sentence. That is revision history carrying meaning, and anything that resolves revisions destroys it: Word's own "Accept All Changes", most converters, and Pandoc, which accepts changes by default. A before-and-after example then shows two identical sentences.
 
 ```bash
 # Scan a directory. --check writes nothing, so -o is not needed.
@@ -104,21 +99,13 @@ python3 $T/util/untrack-deletions.py BC-14.docx -o BC-14-fixed.docx
 
 The same repair, decided once for a whole book, is `word.tracked_deletions: strike`, which applies it to what the conversion reads and to a `source` target's copy; by default a run names each file with tracked deletions ([Word](formats.md#word)).
 
-Each `<w:del>` becomes ordinary runs with `<w:strike/>`, so the appearance
-is unchanged in Word but the meaning no longer depends on a revision being
-left unresolved. Only `word/document.xml` is touched; every other part of
-the package is copied through byte for byte. Strikethrough reaches the HTML
-as `<del>`.
+Each `<w:del>` becomes ordinary runs with `<w:strike/>`, so the appearance is unchanged in Word but the meaning no longer depends on a revision being left unresolved. Only `word/document.xml` is touched; every other part of the package is copied through byte for byte. Strikethrough reaches the HTML as `<del>`.
 
-`--track-changes=all` on the Pandoc call is the non-destructive
-alternative, but it only fixes this pipeline, leaves the document fragile
-for every other consumer, and emits `<span class="deletion">` needing CSS.
+`--track-changes=all` on the Pandoc call is the non-destructive alternative, but it only fixes this pipeline, leaves the document fragile for every other consumer, and emits `<span class="deletion">` needing CSS.
 
 ## Files that aren't documents
 
-A glob of `*.docx` picks up things that aren't documents, and both
-`convert.py` and `untrack-deletions.py` skip them by name with a message
-rather than failing:
+A glob of `*.docx` picks up things that aren't documents, and both `convert.py` and `untrack-deletions.py` skip them by name with a message rather than failing:
 
 | What | Why it appears |
 |---|---|

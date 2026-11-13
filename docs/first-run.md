@@ -16,17 +16,14 @@ Whichever you use, the result goes to `project-sample.yaml` for review (to `pack
 
 ## Quick start
 
-There's no example configuration to copy. The schema is the only
-description of the settings, so the file you start from is generated from
-it and can't fall out of date.
+There's no example configuration to copy. The schema is the only description of the settings, so the file you start from is generated from it and can't fall out of date.
 
 ```bash
 T=/path/to/tools                       # where you cloned this
 cd /path/to/your/docx/files
 ```
 
-**1. Convert.** No configuration is needed for a first run: every setting
-has a documented default.
+**1. Convert.** No configuration is needed for a first run: every setting has a documented default.
 
 ```bash
 python3 $T/bin/convert.py
@@ -34,8 +31,7 @@ python3 $T/bin/convert.py
 
 You get one page per `.docx`, in `html/`, with their images, and a set of `*-missing.csv` reports naming what still needs a person. The run then stops, because the cartridge's manifest (`imsmanifest.xml`, the file that lists a cartridge's pages and their order) needs two things only you can supply, and writes `project-sample.yaml`.
 
-**2. Fill in the two required settings and rename.** Open
-`project-sample.yaml`, set `identifier` and `title` near the top, then:
+**2. Fill in the two required settings and rename.** Open `project-sample.yaml`, set `identifier` and `title` near the top, then:
 
 ```bash
 mv project-sample.yaml project.yaml
@@ -43,9 +39,7 @@ mv project-sample.yaml project.yaml
 
 Every project setting is in that file at its current value with a sentence explaining it, so this is also how you find out what can be configured. Edit the line that's already there rather than adding another: the file is complete, so a second line for a setting would contradict the first, and the tools refuse a file that sets one twice rather than choose. Delete any line you're happy to leave at its default; a setting the file leaves out takes its default, and the next sample lists it again. A sample is written from your own file's values, so renaming one over a `project.yaml` you already have never loses anything you had set; that's asserted by a test, not by care. The run also prints the commands that write the other two samples, [below](#changing-how-conversion-or-packaging-works).
 
-`identifier` is worth a moment's thought. Brightspace matches on it when
-re-importing, so changing it later duplicates a course rather than
-updating it.
+`identifier` is worth a moment's thought. Brightspace matches on it when re-importing, so changing it later duplicates a course rather than updating it.
 
 **3. Run again.**
 
@@ -56,19 +50,14 @@ python3 $T/bin/convert.py --zip      # ... and the .imscc archive
 
 ### Changing how conversion or packaging works
 
-Everything above uses the conversion and packaging defaults. To change
-any of them (the page language, an attribution footer, caption label
-words, the alt text length limit, the cartridge's version), generate the
-file's sample:
+Everything above uses the conversion and packaging defaults. To change any of them (the page language, an attribution footer, caption label words, the alt text length limit, the cartridge's version), generate the file's sample:
 
 ```bash
 python3 $T/bin/read-conversion-config.py -d . --init   # conversion-sample.yaml
 python3 $T/bin/build-cartridge.py -d . --init          # packaging-sample.yaml
 ```
 
-Each holds every setting with a line of documentation above it, at the
-value your file already gives it or else the default. Rename it to
-`conversion.yaml` or `packaging.yaml` and edit it.
+Each holds every setting with a line of documentation above it, at the value your file already gives it or else the default. Rename it to `conversion.yaml` or `packaging.yaml` and edit it.
 
 ### Where settings live
 
@@ -133,10 +122,7 @@ python3 $T/bin/convert.py --zip
 
 Steps 4 and 5 are the loop you will spend the most time in, and [Sidecars and reports](sidecars.md) says what each report wants and which sidecar its rows go in. Everything else is done once per book. A page left out of `contents` later on is placed in the chapter its name gives with `--include-all-html`.
 
-The sample written in step 2 is complete: every project setting appears at
-its current value with a comment explaining it, so renaming it over your
-own `project.yaml` never loses anything you had set. That is asserted by a test,
-not by care — see [Testing](testing.md).
+The sample written in step 2 is complete: every project setting appears at its current value with a comment explaining it, so renaming it over your own `project.yaml` never loses anything you had set. That is asserted by a test, not by care — see [Testing](testing.md).
 
 ## What a run creates
 
@@ -163,9 +149,7 @@ In the listing, `html/` is the directory of the `html` target, the one a run has
 
 The sources can be Word (`.docx`), Markdown (`.md`), AsciiDoc (`.adoc`), or HTML (`.html`) files, one page each, in any mix, or a LaTeX book ([Formats](formats.md)). An `.html` file beside the sources is a source like the others. A page you finished by hand and want left as it is goes in the pass-through directory, `_pt/`: it's copied into `html/` as it stands, with the files it links, and appears in the EPUB and the cartridge like any other page ([HTML sources](html.md)). A file named `<page>.<target>.md` (or `.docx`, `.html`) replaces that page for that target alone; see [Editions](configuration.md#editions).
 
-A page's name is its source's name made safe for a link: `01 BigPicture.md`
-is the page `01-BigPicture`. The names of pages cut from a source are the
-source's name and the heading's; `page-names.csv` renames them.
+A page's name is its source's name made safe for a link: `01 BigPicture.md` is the page `01-BigPicture`. The names of pages cut from a source are the source's name and the heading's; `page-names.csv` renames them.
 
 The intermediates are in Pandoc's own document format, as JSON, which keeps everything Pandoc read (version 0.1 kept a page as Markdown between its steps, which lost some of it). The first is the source as Pandoc read it; the second is what the filter made of it, and it's what every output format is written from, so a table that looks wrong on the page can be checked there before suspecting the step that writes the page. Neither is meant to be read directly, but neither is opaque:
 
@@ -184,9 +168,7 @@ An `.md` file with the same name as a `.docx` is what version 0.1 left behind; t
 | 0 | Everything ran. Reports may still list outstanding work. |
 | 1 | The run stopped: no source present, unresolved media, a missing required config value, or a referenced file not on disk. Or a target that writes a book, an EPUB, a PDF, or a LaTeX master, wasn't written for want of the book's title, which the run says, while the other targets were. |
 
-A non-zero exit on a first run is normal — nothing names the book yet, so
-the manifest step writes `project-sample.yaml` and stops. The HTML is
-already written by that point.
+A non-zero exit on a first run is normal — nothing names the book yet, so the manifest step writes `project-sample.yaml` and stops. The HTML is already written by that point.
 
 ## Next
 

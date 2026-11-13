@@ -40,70 +40,14 @@ A folder that Google Drive, OneDrive, or Dropbox syncs, reached from WSL under `
 
 ## Known limits
 
-- **Header row text can't be invented.** A table whose cells hold nothing
-  that could be a header—a grid of measurements—is reported as
-  `needs-source` in `table-headers-report.csv`, not fixed. Add the header in
-  the source (in Word, or as `<th>` cells in an HTML page), where it benefits
-  every downstream format. Where the header text is
-  there and only unmarked, a value in `table-headers.csv` is enough.
+- **Header row text can't be invented.** A table whose cells hold nothing that could be a header—a grid of measurements—is reported as `needs-source` in `table-headers-report.csv`, not fixed. Add the header in the source (in Word, or as `<th>` cells in an HTML page), where it benefits every downstream format. Where the header text is there and only unmarked, a value in `table-headers.csv` is enough.
 - **Equation images stay images.** A formula that's a picture is read by its alt text, however good. Where that alt text spells a name out a letter at a time ("upper C u s t o m e r", as alt text written in MathSpeak does), the conversion joins the letters again, which is a mitigation. The real fix is writing the formula as an equation in the source (a Word equation, TeX math in LaTeX or Markdown, MathML in an HTML page), which converts to MathML.
 - **Identical files in different media directories are separate files.** Each page gets its own copy of an image from its Word file. Keeping one copy for all would mean the packager rewriting the pages' references, and it's built never to change a page ([Building the cartridge](packaging.md)).
-- **Cross-page links aren't rewritten** for the LMS's internal link
-  format, so links between sections may not resolve after import.
-- **Strikethrough conveys meaning visually.** A screen reader may not
-  announce `<del>`, so a before-and-after table should say so in its
-  column heading or caption.
-- **Complex tables are reported, not fixed.** A table with stacked column
-  headers, or with a header row and a header column, needs `headers`/`id`
-  associations that no current setting can express. See the [roadmap](../ROADMAP.md).
-- **Word's "Mark as layout table" doesn't mark anything.** Word's
-  Accessibility Checker flags a table with no header row and offers
-  "Mark as layout table" as the fix. Taking that offer removes the
-  table's `w:tblStyle` reference and resets `w:tblLook`, and writes no
-  record of the claim: no `w:tblCaption`, no `w:tblDescription`, no
-  element in any namespace, nothing in `settings.xml`. So the conversion
-  can't see the declaration, can't honor it, and can't warn about it.
-  What it can do is lose the evidence: a header row whose shading came
-  from the table style rather than from direct formatting stops looking
-  like a header row, and the table converts as though it never had one.
-  If a table genuinely presents data with nothing to relate—a grid of
-  measurements laid out to fit the page—it needs no header cells to
-  conform, and the useful thing to add is a caption, not a layout
-  marking. A table that only lines things up, with no data in it at
-  all, is a layout table by a row of `table-headers.csv` saying
-  `layout` ([Sidecars](sidecars.md)), which every target honors; a
-  remediated copy of the Word file can't hold it either. A box of one
-  cell with no caption is a layout table already.
-- **Two PAC errors on a tagged PDF are the validator's, not the file's.**
-  [PAC](https://pac.pdf-accessibility.org), the PDF Accessibility Checker,
-  is a free Windows program from axes4 that checks a PDF against
-  PDF/UA-1. The two are worth recognizing rather than chasing. *Table header cell has no
-  associated subcells* is raised because `latex-lab` sets `Scope` through
-  an attribute class and PAC doesn't resolve `/ClassMap` references:
-  rewriting the same value as an inline `/A` dictionary makes PAC pass
-  with no change to the content, veraPDF never raises it, and
-  [tagging-project discussion #930](https://github.com/latex3/tagging-project/discussions/930)
-  has the maintainers declining to change the implementation, since the
-  class is what makes `TH-both` expressible for a cell that heads both a
-  row and a column. *Invalid use of a TR structure element* is raised
-  because PAC rejects `Artifact` as a child of `Table`, which is how a
-  repeated `longtable` header row is represented; ISO 32000-2 Annex L,
-  Table L.2 permits it, so the file conforms, and
-  [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583)
-  says the same. It has been reported to PAC; there's no public ticket to
-  watch. A PDF this pipeline makes takes that empty repeated head out of
-  the table (`pdf.repair_captions`), so it may not show the second error
-  at all.
-- **One package, from one target.** The configuration is shaped for
-  several packages, each holding several targets, and the tools resolve
-  them correctly, but the packager builds from the first `html` target's
-  pages alone: a package whose `includes` name another target, an EPUB
-  or a PDF beside the pages, or decks, is on the roadmap.
-- **`cartridge-files.txt` can't build a prefixed package.** `zip -@`
-  names each member after the path it read, so it can't place files under
-  a directory. Use `--zip`; the file list says so in its header when a
-  prefix is in effect.
-- **`util/compare-output.py` matches tables by position**, so inserting one
-  table reports every later table on that page as changed. It also flags a
-  `.docx` and its `.json` intermediate as a duplicated filename, which is
-  noise rather than a finding.
+- **Cross-page links aren't rewritten** for the LMS's internal link format, so links between sections may not resolve after import.
+- **Strikethrough conveys meaning visually.** A screen reader may not announce `<del>`, so a before-and-after table should say so in its column heading or caption.
+- **Complex tables are reported, not fixed.** A table with stacked column headers, or with a header row and a header column, needs `headers`/`id` associations that no current setting can express. See the [roadmap](../ROADMAP.md).
+- **Word's "Mark as layout table" doesn't mark anything.** Word's Accessibility Checker flags a table with no header row and offers "Mark as layout table" as the fix. Taking that offer removes the table's `w:tblStyle` reference and resets `w:tblLook`, and writes no record of the claim: no `w:tblCaption`, no `w:tblDescription`, no element in any namespace, nothing in `settings.xml`. So the conversion can't see the declaration, can't honor it, and can't warn about it. What it can do is lose the evidence: a header row whose shading came from the table style rather than from direct formatting stops looking like a header row, and the table converts as though it never had one. If a table genuinely presents data with nothing to relate—a grid of measurements laid out to fit the page—it needs no header cells to conform, and the useful thing to add is a caption, not a layout marking. A table that only lines things up, with no data in it at all, is a layout table by a row of `table-headers.csv` saying `layout` ([Sidecars](sidecars.md)), which every target honors; a remediated copy of the Word file can't hold it either. A box of one cell with no caption is a layout table already.
+- **Two PAC errors on a tagged PDF are the validator's, not the file's.** [PAC](https://pac.pdf-accessibility.org), the PDF Accessibility Checker, is a free Windows program from axes4 that checks a PDF against PDF/UA-1. The two are worth recognizing rather than chasing. *Table header cell has no associated subcells* is raised because `latex-lab` sets `Scope` through an attribute class and PAC doesn't resolve `/ClassMap` references: rewriting the same value as an inline `/A` dictionary makes PAC pass with no change to the content, veraPDF never raises it, and [tagging-project discussion #930](https://github.com/latex3/tagging-project/discussions/930) has the maintainers declining to change the implementation, since the class is what makes `TH-both` expressible for a cell that heads both a row and a column. *Invalid use of a TR structure element* is raised because PAC rejects `Artifact` as a child of `Table`, which is how a repeated `longtable` header row is represented; ISO 32000-2 Annex L, Table L.2 permits it, so the file conforms, and [tagging-project issue #1583](https://github.com/latex3/tagging-project/issues/1583) says the same. It has been reported to PAC; there's no public ticket to watch. A PDF this pipeline makes takes that empty repeated head out of the table (`pdf.repair_captions`), so it may not show the second error at all.
+- **One package, from one target.** The configuration is shaped for several packages, each holding several targets, and the tools resolve them correctly, but the packager builds from the first `html` target's pages alone: a package whose `includes` name another target, an EPUB or a PDF beside the pages, or decks, is on the roadmap.
+- **`cartridge-files.txt` can't build a prefixed package.** `zip -@` names each member after the path it read, so it can't place files under a directory. Use `--zip`; the file list says so in its header when a prefix is in effect.
+- **`util/compare-output.py` matches tables by position**, so inserting one table reports every later table on that page as changed. It also flags a `.docx` and its `.json` intermediate as a duplicated filename, which is noise rather than a finding.

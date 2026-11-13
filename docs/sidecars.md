@@ -70,8 +70,7 @@ Where the project declares no language, the book's is `en`, the default. When ev
 
 ## Reports
 
-Each run writes only the reports that have something in them, and deletes
-the others. A report existing at all means there's work outstanding.
+Each run writes only the reports that have something in them, and deletes the others. A report existing at all means there's work outstanding.
 
 | Report | Fix it by |
 |---|---|
@@ -112,17 +111,9 @@ The sidecars hold your corrections. Each is plain CSV, read afresh each run, and
 
 The run can't tell whose a file is on Windows, so there it rewrites another user's sidecar it may write, which then belongs to whoever ran the conversion (not tried here). On Linux, a rewritten sidecar keeps its user attributes, its access control list, and its SELinux label, so a colleague given a shared sidecar keeps it (tried here), but not an attribute that describes the file's old contents, as integrity measurement's do; on macOS a file's own access control list isn't kept (not tried here).
 
-**Where to keep them.** By default they sit in the book's own directory,
-next to the reports that name what still needs filling in. That is the
-convenient default and it keeps two books' decisions apart, but it isn't
-where they belong long-term. The book's directory also holds the
-generated HTML, the extracted media, and the intermediates: it's the
-directory you delete to rebuild from scratch, and the one you replace
-wholesale when the publisher reissues the source. These files are the
-only things in it that no script can reproduce.
+**Where to keep them.** By default they sit in the book's own directory, next to the reports that name what still needs filling in. That is the convenient default and it keeps two books' decisions apart, but it isn't where they belong long-term. The book's directory also holds the generated HTML, the extracted media, and the intermediates: it's the directory you delete to rebuild from scratch, and the one you replace wholesale when the publisher reissues the source. These files are the only things in it that no script can reproduce.
 
-So once you have spent real time on them, move them somewhere you can put
-under version control and point the configuration at them:
+So once you have spent real time on them, move them somewhere you can put under version control and point the configuration at them:
 
 ```yaml
 defaults:
@@ -132,32 +123,9 @@ defaults:
     table_headers: ../corrections/ibs2e/table-headers.csv
 ```
 
-An absolute path works too. A relative one resolves against the book's
-directory, not against the tools. A path that doesn't exist stops the
-run rather than converting the book and discarding every correction in
-the file, which is what happened before v0.2 when an absolute path was
-given.
+An absolute path works too. A relative one resolves against the book's directory, not against the tools. A path that doesn't exist stops the run rather than converting the book and discarding every correction in the file, which is what happened before v0.2 when an absolute path was given.
 
-`table-headers.csv` says where each data table's headers are, or that a
-table is a layout table, and is the one sidecar the run helps you write.
-Its `headers` column takes `first-row`, `first-column`, `both`, `none`, or
-`layout`; `matrix` and `grid` are accepted for `both` and `none`. The key is a hash of the table's content
-and shape, so a row survives anything the pipeline does to the table and
-detaches only when the source table itself changes. You never type a key:
-the first run writes `table-headers-new.csv` with a prefilled row for every
-data table—the guess in `headers`, the source file and first cells beside
-it so you can find the table—and you rename that file, or paste its rows
-in on later runs when tables have been added. A row whose key matches no
-table, because the table's text or shape changed or it's gone, isn't
-silently dropped: the run warns and goes on, the row goes to
-`table-headers-unmatched.csv`, the table's row as it is now to
-`table-headers-new.csv`, and `table-headers-sample.csv` is the sidecar
-without the unmatched rows, to adopt once you've looked. This happens
-whenever a table is edited in its source, as when a Word file converted
-once is edited in Word and converted again. Values this version does
-not act on yet (`manual`, `list`) are accepted and kept, so a book can
-start carrying them. The value in effect—the sidecar's where one was declared, the guess
-otherwise—is applied when the page is built.
+`table-headers.csv` says where each data table's headers are, or that a table is a layout table, and is the one sidecar the run helps you write. Its `headers` column takes `first-row`, `first-column`, `both`, `none`, or `layout`; `matrix` and `grid` are accepted for `both` and `none`. The key is a hash of the table's content and shape, so a row survives anything the pipeline does to the table and detaches only when the source table itself changes. You never type a key: the first run writes `table-headers-new.csv` with a prefilled row for every data table—the guess in `headers`, the source file and first cells beside it so you can find the table—and you rename that file, or paste its rows in on later runs when tables have been added. A row whose key matches no table, because the table's text or shape changed or it's gone, isn't silently dropped: the run warns and goes on, the row goes to `table-headers-unmatched.csv`, the table's row as it is now to `table-headers-new.csv`, and `table-headers-sample.csv` is the sidecar without the unmatched rows, to adopt once you've looked. This happens whenever a table is edited in its source, as when a Word file converted once is edited in Word and converted again. Values this version does not act on yet (`manual`, `list`) are accepted and kept, so a book can start carrying them. The value in effect—the sidecar's where one was declared, the guess otherwise—is applied when the page is built.
 
 The guess is `none` only with evidence that a table has no headers: every filled cell is a number or an amount, the cells are a list laid out in columns, reading in order down each one, or a note on the rows above it runs across the table before its last row (below), which no column could head, and nothing marks a header row. Where no rule recognizes a table's headers and nothing shows it has none, the guess is `unknown`, the reason says so, and the table is converted as the source marks it, so the report sends a person to look rather than claiming to know. Across the nine books in the test corpus, 20 of 1,045 data tables are `unknown`: payoff matrices, tables laid on their side, and formula glossaries, among others.
 
@@ -167,12 +135,7 @@ A Word table can declare its own headers too, with the bookmarks [Freedom Scient
 
 An HTML source's tables are in the same sidecar, the same report, and the same new-rows file. The key is computed the same way from the table as Pandoc reads it. A table whose page marks its header cells with `<th>` says so itself, and the report names `source` as the supplier; the sidecar outranks that as it outranks the guess. A row of the table's head that is one cell across it is its title or a band, not a header row. The rest are guessed from what survives reading, which is the cells' text and their bold. Their merged title rows and grouping bands are inferred as a Word table's are (`caption-rows`, `split-at`), captions for the parts can be written in `part-captions` as for a Word table, and a table the page already groups counts as banded without being told: a `<tbody>` headed by one cell across the table, or, in a table with no `<thead>`, `<tbody>`s that each open with a row of `<th>` like the others but for the group's name in its first cell, a group's own header row, which heads its part.
 
-What a banded table becomes is `tables.bands`, per target. `split`, the default for HTML, EPUB, and PDF, makes one table per band with the band in each part's caption; that's what NVDA handles fully, tested in Chrome and Firefox: it reads a part's caption on arrival. NVDA announces only the header of the dimension that changed (the row header moving down, the column header moving across), and of HTML's grouped forms it names a group for a data cell only when the group's heading is a column of its own spanning its rows, and then only moving down; a band as a row of its own, with or without `headers` ids, it names only on the band's own cell. `column`, never the default, keeps one table and gives the bands a column of their own at its left, each spanning its rows: the form NVDA names with the row header on every data cell moving down, for trying in HTML before anything relies on it, since NVDA announced the column header inconsistently in it and no other screen reader has been tried. Only a table whose parts share their column headers takes it; any other is split. `group`, the default for Markdown, AsciiDoc, and DOCX, keeps the author's one table with a body per band, so a Markdown or AsciiDoc target's output reads back as the table it was, and splits again for HTML. A table whose groups each open with a header row of their own reads back as it was too, written as HTML in either, and splits again for HTML into the same parts. A header row above the first band, marked as such or not, heads every part, and a row of several cells named in `split-at`, a group's own header row with the group's name in its corner, heads its part, the corner's words in the part's caption. What a split repeats keeps its ids in one place, which a link to them names: the table's own id on the first part, the others numbered from 2 (`costs-2`); a header row's, and those of its cells, on the first part's copy, the table's caption's on the first part's caption, and a corner's on its row. A part laid out on fewer columns than the table, each of its cells across two (*Foundations of Information Systems*' normal forms), loses the columns no cell of it begins in, which HTML doesn't allow, each cell spanning one fewer. A band heads the rows under it, so a merged row with nothing but bands under it to the table's end, a note across a table's foot, stays a row of the table, and a merged first row right over another band is the table's title, which the guess makes a caption row, unless a band stands right over another further down, which makes the pair at the top a group of groups too. Nor is a note on the rows above it a band: a merged row that ends as a sentence does, right after a row of the table's cells, in a table that ends with such a row, as *Prealgebra 2e*'s Table 3.1 closes each pair of its cases, stays a row of the table, and since no cell of a note's row could head it, the guess gives a table with one before its last row no header column: a guess of `both` is `first-row`; one of `first-column` is `first-row` where the source marks a header row, as a `<thead>`, a Word table's first row its table look formats, or a row marked to repeat does, and `none` where nothing does; and one of `unknown` is `none` where nothing marks a header row and none is below a data row. A table that opens with such a sentence is one of bands, as a self-test closed by its total's line is, and a line at a table's foot that says where it comes from ("Adapted from …") is no note, nor a row a note comes before. A band right over another names a group of groups: both go into the caption of the part below ("Table 3.2: Part Two: Group B"), or into its body's head in `group`. A row named in `split-at` that heads no rows of its own is named in the run's output, and the table isn't split there, and so is a `part-captions` that gives more or fewer captions than the table has parts. A table's foot, an HTML table's `<tfoot>`, comes after its last part, or stays at the foot of the table kept whole, and the guess makes none of its rows a band. A band at the end of the table's head, where Pandoc's Word reader puts a first row Word's table look formats (Word's default), heads the first part alone. A merged first row over a header row every part shares, in the table's head or with nothing marking the header row and the first band right under it, is the table's title, which the guess makes a caption row; where a band below has a header row of its own, the header row again or one reading as a header row over its rows, or rows with their cells elsewhere, it's the first band, and from the head it takes the header row under it to the first part. Any other band above a header row in the head stays in every part's head with it. A status of `needs-source` in
-the report means no cell of the table could serve as a header, so no value
-can help and headers have to be written in the source, in Word or as an HTML
-page's `<th>` cells; that's the one thing the
-old `table-headers-missing.csv` reported, and it's now a row in the report
-rather than a file.
+What a banded table becomes is `tables.bands`, per target. `split`, the default for HTML, EPUB, and PDF, makes one table per band with the band in each part's caption; that's what NVDA handles fully, tested in Chrome and Firefox: it reads a part's caption on arrival. NVDA announces only the header of the dimension that changed (the row header moving down, the column header moving across), and of HTML's grouped forms it names a group for a data cell only when the group's heading is a column of its own spanning its rows, and then only moving down; a band as a row of its own, with or without `headers` ids, it names only on the band's own cell. `column`, never the default, keeps one table and gives the bands a column of their own at its left, each spanning its rows: the form NVDA names with the row header on every data cell moving down, for trying in HTML before anything relies on it, since NVDA announced the column header inconsistently in it and no other screen reader has been tried. Only a table whose parts share their column headers takes it; any other is split. `group`, the default for Markdown, AsciiDoc, and DOCX, keeps the author's one table with a body per band, so a Markdown or AsciiDoc target's output reads back as the table it was, and splits again for HTML. A table whose groups each open with a header row of their own reads back as it was too, written as HTML in either, and splits again for HTML into the same parts. A header row above the first band, marked as such or not, heads every part, and a row of several cells named in `split-at`, a group's own header row with the group's name in its corner, heads its part, the corner's words in the part's caption. What a split repeats keeps its ids in one place, which a link to them names: the table's own id on the first part, the others numbered from 2 (`costs-2`); a header row's, and those of its cells, on the first part's copy, the table's caption's on the first part's caption, and a corner's on its row. A part laid out on fewer columns than the table, each of its cells across two (*Foundations of Information Systems*' normal forms), loses the columns no cell of it begins in, which HTML doesn't allow, each cell spanning one fewer. A band heads the rows under it, so a merged row with nothing but bands under it to the table's end, a note across a table's foot, stays a row of the table, and a merged first row right over another band is the table's title, which the guess makes a caption row, unless a band stands right over another further down, which makes the pair at the top a group of groups too. Nor is a note on the rows above it a band: a merged row that ends as a sentence does, right after a row of the table's cells, in a table that ends with such a row, as *Prealgebra 2e*'s Table 3.1 closes each pair of its cases, stays a row of the table, and since no cell of a note's row could head it, the guess gives a table with one before its last row no header column: a guess of `both` is `first-row`; one of `first-column` is `first-row` where the source marks a header row, as a `<thead>`, a Word table's first row its table look formats, or a row marked to repeat does, and `none` where nothing does; and one of `unknown` is `none` where nothing marks a header row and none is below a data row. A table that opens with such a sentence is one of bands, as a self-test closed by its total's line is, and a line at a table's foot that says where it comes from ("Adapted from …") is no note, nor a row a note comes before. A band right over another names a group of groups: both go into the caption of the part below ("Table 3.2: Part Two: Group B"), or into its body's head in `group`. A row named in `split-at` that heads no rows of its own is named in the run's output, and the table isn't split there, and so is a `part-captions` that gives more or fewer captions than the table has parts. A table's foot, an HTML table's `<tfoot>`, comes after its last part, or stays at the foot of the table kept whole, and the guess makes none of its rows a band. A band at the end of the table's head, where Pandoc's Word reader puts a first row Word's table look formats (Word's default), heads the first part alone. A merged first row over a header row every part shares, in the table's head or with nothing marking the header row and the first band right under it, is the table's title, which the guess makes a caption row; where a band below has a header row of its own, the header row again or one reading as a header row over its rows, or rows with their cells elsewhere, it's the first band, and from the head it takes the header row under it to the first part. Any other band above a header row in the head stays in every part's head with it. A status of `needs-source` in the report means no cell of the table could serve as a header, so no value can help and headers have to be written in the source, in Word or as an HTML page's `<th>` cells; that's the one thing the old `table-headers-missing.csv` reported, and it's now a row in the report rather than a file.
 
 `image-alt.csv` keys on the image path. A page's picture in the book's own `media/` folder, as the CNX unpacker writes one, is keyed under its page's name, as a Word file's media are, and by its path as Pandoc's reader writes it, a space as `%20` (`3-2-add-integers/media/my%20pic.png`); `image-alt-missing.csv` gives it so, and the pages and a source's copy both take that row. A row whose path doesn't match exactly still applies when it differs only by extension, because conversion renames Word's extracted media by content type, but only when no other file in that directory shares the name: `images/logo.png` and `images/logo.svg` are two images, and a row for one doesn't describe the other. Four states for the `Alt` column:
 
@@ -183,46 +146,23 @@ rather than a file.
 | `[decorative]` | Emit `alt=""` so assistive technology skips it |
 | *(no row)* | Unreviewed; reported if absent, over the length limit, or saying nothing about the image |
 
-A blank cell deliberately doesn't mean decorative. "I checked this and it
-is fine" and "this image carries no meaning" are different decisions.
+A blank cell deliberately doesn't mean decorative. "I checked this and it is fine" and "this image carries no meaning" are different decisions.
 
 Alt text that says nothing about its image is reported as a missing one is, by the rules a deck's pictures are judged by ([Slides](slides.md#whats-checked), `lib/alttext.py`), with the reason in the `Reason` column: a file name or extension (`chart.png`), punctuation alone, a word such as "image" or "picture", a camera's or tool's name for a file (`IMG_2041`), a shape's default name (`Picture 3`), a clip-art id, a description Office generated ("Description automatically generated", which Office asks a person to review), a web page's title copied with the picture (`Marketing Mix Explained | Quizlet`), a credit in place of a description (`By Jane Roe - Own work, CC BY-SA 4.0`), or a pattern the project lists in `images.alt_placeholders`. So is alt text no other rule names that a different image of the book has too (`shared with 1 other image`), case and closing punctuation aside, or, in a folder of decks written in Markdown, of the deck: images are told apart by their files' content, so the same picture in two pages' files isn't named, and the alt text a row of `image-alt.csv` gives is what's compared, so describing one of two images anew settles the other. A row with a blank `Alt` says the alt text was reviewed and stands, and the image isn't reported again.
 
-`table-captions.csv` keys on the table's label, such as `Table 2.1`,
-whether the label is a paragraph beside the table or the table's own
-caption: an HTML page's `<caption>Table 2.1</caption>`, a Markdown
-table's `Table: Table 2.1`, or a Word paragraph in a caption style beside
-the table, which Pandoc reads as its caption. A label that says nothing
-more is reported for a description either way. A table the source never
-labeled has no such key, so it's reported under a positional one
-instead:
+`table-captions.csv` keys on the table's label, such as `Table 2.1`, whether the label is a paragraph beside the table or the table's own caption: an HTML page's `<caption>Table 2.1</caption>`, a Markdown table's `Table: Table 2.1`, or a Word paragraph in a caption style beside the table, which Pandoc reads as its caption. A label that says nothing more is reported for a description either way. A table the source never labeled has no such key, so it's reported under a positional one instead:
 
 ```
 BC-08#table-1,Comparison of chart types and when to use each
 ```
 
-That is page stem, then which table it's on the page. The key is stable
-as long as no table is inserted or removed above it on that page — the
-trade for being able to caption a table the source never named. Labeled
-tables are unaffected and keep their label as the key.
+That is page stem, then which table it's on the page. The key is stable as long as no table is inserted or removed above it on that page — the trade for being able to caption a table the source never named. Labeled tables are unaffected and keep their label as the key.
 
 A `source` target writes each description into a Markdown file's copy as the table's `Table:` line, except for a table written in HTML in the file, and every table after it there, which get theirs in the pages, the EPUB, and the PDF but not in the copy ([Formats](formats.md#source)).
 
-One alt per image file. If the same image appears twice on a page with
-different alt text, you get a warning and the first entry wins.
+One alt per image file. If the same image appears twice on a page with different alt text, you get a warning and the first entry wins.
 
-A PowerPoint deck's rows are in the same `image-alt.csv`, with the same
-four states, keyed differently: a picture on its image's content
-(`media/` and the first 16 characters of its SHA-256), so one row covers
-every copy of it in every deck, and any other object on its deck, slide,
-and shape (`deck/slide-N/shape-M`), as is a copy of a picture cropped to
-show another part of its image than the image's other copies show. Its
-tables are in `table-headers.csv` as a book's are, its untitled slides,
-and slides titled as an earlier one is, get titles from
-`slide-titles.csv`, its slides a reading order from `reading-order.csv`,
-and its bare links and the equations it keeps as they were are in
-`bare-links.csv` and `math-keep.csv`, as a book's are
-([Slides](slides.md#the-reports-and-the-sidecars)).
+A PowerPoint deck's rows are in the same `image-alt.csv`, with the same four states, keyed differently: a picture on its image's content (`media/` and the first 16 characters of its SHA-256), so one row covers every copy of it in every deck, and any other object on its deck, slide, and shape (`deck/slide-N/shape-M`), as is a copy of a picture cropped to show another part of its image than the image's other copies show. Its tables are in `table-headers.csv` as a book's are, its untitled slides, and slides titled as an earlier one is, get titles from `slide-titles.csv`, its slides a reading order from `reading-order.csv`, and its bare links and the equations it keeps as they were are in `bare-links.csv` and `math-keep.csv`, as a book's are ([Slides](slides.md#the-reports-and-the-sidecars)).
 
 #### A sidecar that isn't UTF-8
 

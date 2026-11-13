@@ -5,10 +5,7 @@ bash tests/run-all.sh          # the suites side by side, on half the processors
 bash tests/run-all.sh -j 1     # one thing at a time
 ```
 
-Twenty-one suites and a check that the settings pages are current, each
-independent, all runnable without network access or a corpus of real
-documents. `run-all.sh` runs every one even if another
-failed, and exits non-zero if any did.
+Twenty-one suites and a check that the settings pages are current, each independent, all runnable without network access or a corpus of real documents. `run-all.sh` runs every one even if another failed, and exits non-zero if any did.
 
 `run-all.sh` runs the suites side by side, and `-j` says how many things run at once in the whole run: by default half the processors the run may use, which leaves the rest of the machine room. The suites that do one thing at a time run in turn, in the order `run-all.sh` lists them, as one of the run's workers, so the portability test is still first. Beside them, from the start, run the convert, EPUB, LaTeX, and decks suites, whose cases are each a process of its own, and the PDF suite, which builds its books side by side, the longest first. A case or a book holds one of the other workers while it runs: `run-all.sh` makes a folder with a file for each of them and names it in `OER_TEST_SLOTS`, and a case or a build holds a lock on one of the files (`flock`, in `tests/parallel.py`), waiting while every one is held. The system drops such a lock when the process holding it ends, however it ends, so a suite that's stopped takes no worker with it. When the suites run in turn are done, `run-all.sh` adds a file for their worker, which a waiting case finds. Each suite's output is printed whole, in `run-all.sh`'s order, the one being waited for as it comes; a case's lines are printed whole too, in its suite's order; and the PDF suite is last, since it builds every book before it checks any. `-j 1` runs every suite in turn, each one's cases one after another in the suite's own process, printing as it goes. A suite run by itself takes `-j` as its own count, of cases or of books, and shares it with nothing. A LaTeX case's TeX runs can take a few hundred megabytes each, so on a machine short of memory a smaller `-j` is the way to go.
 
@@ -52,49 +49,21 @@ The suites take `PANDOC_DATA_DIRS` out of their environment, each one and `run-a
 
 ### Why these and not others
 
-Every filter bug fixed in v0.2 was silent. Alt text applied to the wrong
-image; two `<h1>` elements on a page; a caption that stopped being found; a
-ten-row table reduced to one empty cell. Nothing raised an error and
-nothing in the reports showed it.
+Every filter bug fixed in v0.2 was silent. Alt text applied to the wrong image; two `<h1>` elements on a page; a caption that stopped being found; a ten-row table reduced to one empty cell. Nothing raised an error and nothing in the reports showed it.
 
-They were found by converting a whole book with two versions of the
-pipeline and comparing — which works only while the previous version is
-still installed and a corpus is on hand. The fixtures assert the same
-things against six documents of about 37 KB each, so the check outlives
-the version it was written for.
+They were found by converting a whole book with two versions of the pipeline and comparing — which works only while the previous version is still installed and a corpus is on hand. The fixtures assert the same things against six documents of about 37 KB each, so the check outlives the version it was written for.
 
-Some cases pin behavior that's about to change rather than behavior
-that's right — a merged title row becoming a spanning header, a table
-with no header signal having its first row promoted anyway. Those are
-what the filter does with no declaration in reach, which is how those
-cases run; what a declaration does instead is pinned separately, in the
-cases that run the pre-pass the way `convert.py` does.
+Some cases pin behavior that's about to change rather than behavior that's right — a merged title row becoming a spanning header, a table with no header signal having its first row promoted anyway. Those are what the filter does with no declaration in reach, which is how those cases run; what a declaration does instead is pinned separately, in the cases that run the pre-pass the way `convert.py` does.
 
-The configuration fixtures serve a second purpose: they're the
-conformance contract for the merge rules. If those rules are ever
-reimplemented — in JavaScript for a web front end, or in a separate
-repository — the fixtures say whether the new implementation agrees with
-this one.
+The configuration fixtures serve a second purpose: they're the conformance contract for the merge rules. If those rules are ever reimplemented — in JavaScript for a web front end, or in a separate repository — the fixtures say whether the new implementation agrees with this one.
 
 ### Why a portability suite
 
-One line of `lib/oerconfig.py` was valid Python 3.12 and a syntax error on
-everything older, because PEP 701 lifted the rule that an f-string
-replacement field can't span lines. It compiled on the machine it was
-written on and broke three of the four suites on the machine that ran
-them.
+One line of `lib/oerconfig.py` was valid Python 3.12 and a syntax error on everything older, because PEP 701 lifted the rule that an f-string replacement field can't span lines. It compiled on the machine it was written on and broke three of the four suites on the machine that ran them.
 
-Nothing caught it, and nothing could: a syntax error is invisible to an
-interpreter new enough to accept the syntax. `py_compile` passes, every
-test passes, and the file is unusable elsewhere. So that suite checks the
-source rather than the interpreter, and runs first — a file that doesn't
-parse makes every other result meaningless on someone else's machine.
+Nothing caught it, and nothing could: a syntax error is invisible to an interpreter new enough to accept the syntax. `py_compile` passes, every test passes, and the file is unusable elsewhere. So that suite checks the source rather than the interpreter, and runs first — a file that doesn't parse makes every other result meaningless on someone else's machine.
 
-It compiles with Python 3.9 when one is installed, which is the
-authority, and scans for the known-newer constructs otherwise; any
-interpreter newer than 3.9 accepts some of them, so only 3.9 itself will
-do. Either way it reads each file's syntax tree for an annotation written
-`X | Y`, which 3.9 compiles and then fails on when the definition runs.
+It compiles with Python 3.9 when one is installed, which is the authority, and scans for the known-newer constructs otherwise; any interpreter newer than 3.9 accepts some of them, so only 3.9 itself will do. Either way it reads each file's syntax tree for an annotation written `X | Y`, which 3.9 compiles and then fails on when the definition runs.
 
 ### Running as Pandoc 3.9 would
 
@@ -116,34 +85,16 @@ Before a release, run the suites under it as well as with the latest Pandoc. Und
 
 ### Extending them
 
-The `.docx` fixtures under `tests/fixtures/` are committed, so the tests
-need only Pandoc. `tests/make-filter-fixtures.py` rebuilds them and is the
-only thing that needs `python-docx`.
+The `.docx` fixtures under `tests/fixtures/` are committed, so the tests need only Pandoc. `tests/make-filter-fixtures.py` rebuilds them and is the only thing that needs `python-docx`.
 
-Two things about Word are worth knowing before adding a fixture, because
-both cost time to discover:
+Two things about Word are worth knowing before adding a fixture, because both cost time to discover:
 
-- Pandoc takes the document title and author from paragraphs styled
-  **Title** and **Author**, consuming them out of the body. Not from
-  `docProps/core.xml`, which it doesn't read — a natural assumption, and
-  wrong.
-- Word declares most embedded images as `application/octet-stream` rather
-  than by type. `python-docx` sets the content type from the file
-  extension, so producing the real-world case means rewriting
-  `[Content_Types].xml` after saving.
+- Pandoc takes the document title and author from paragraphs styled **Title** and **Author**, consuming them out of the body. Not from `docProps/core.xml`, which it doesn't read — a natural assumption, and wrong.
+- Word declares most embedded images as `application/octet-stream` rather than by type. `python-docx` sets the content type from the file extension, so producing the real-world case means rewriting `[Content_Types].xml` after saving.
 
-A new assertion should be checked by breaking the thing it protects. The
-configuration and filter suites' checks were each verified that way, and doing so found two
-assertions of mine that passed whether the code was right or not. One was
-simply badly written. The other looked fine and was worse: it claimed to
-check that two documents with identically named images get distinct
-sidecar keys, but in the two-step pipeline Pandoc has already qualified
-those paths, so the keys were distinct for a reason that had nothing to do
-with the code being tested. Only a single-pass conversion reaches the code
-in question, which is why there's now a case for it.
+A new assertion should be checked by breaking the thing it protects. The configuration and filter suites' checks were each verified that way, and doing so found two assertions of mine that passed whether the code was right or not. One was simply badly written. The other looked fine and was worse: it claimed to check that two documents with identically named images get distinct sidecar keys, but in the two-step pipeline Pandoc has already qualified those paths, so the keys were distinct for a reason that had nothing to do with the code being tested. Only a single-pass conversion reaches the code in question, which is why there's now a case for it.
 
-For comparing two whole conversion runs — which is still the right tool
-for a pipeline change — see `util/compare-output.py`.
+For comparing two whole conversion runs — which is still the right tool for a pipeline change — see `util/compare-output.py`.
 
 ## House style
 

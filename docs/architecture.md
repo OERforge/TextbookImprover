@@ -4,15 +4,7 @@ The pieces, what each one does to a page, and how to run the central filter on i
 
 ## The pieces
 
-The project is a box of tools that happen to work together. Conversion
-turns source documents into accessible pages; packaging assembles pages
-into something an LMS can import; the audit says what is wrong with a
-file and changes nothing. Each is useful alone: remediating a folder of
-documents needs nothing from the cartridge side, building a cartridge
-from pages this project never converted needs nothing from the
-conversion side, and auditing a PDF needs neither. The rule that keeps
-it so: a `bin/` script depends on `lib/` and on external programs, never
-on another `bin/` script.
+The project is a box of tools that happen to work together. Conversion turns source documents into accessible pages; packaging assembles pages into something an LMS can import; the audit says what is wrong with a file and changes nothing. Each is useful alone: remediating a folder of documents needs nothing from the cartridge side, building a cartridge from pages this project never converted needs nothing from the conversion side, and auditing a PDF needs neither. The rule that keeps it so: a `bin/` script depends on `lib/` and on external programs, never on another `bin/` script.
 
 **`bin/` — conversion**
 
@@ -117,18 +109,11 @@ on another `bin/` script.
 | `validate-manifest.py` | Checks a manifest against the Common Cartridge 1.1 schemas. Run automatically. |
 | `schema-packaging.yaml` | Declares every packaging setting. |
 
-**`schemas/cc11/`** holds the IMS Common Cartridge 1.1 schemas, unmodified
-and redistributed under their own terms. See the README there.
+**`schemas/cc11/`** holds the IMS Common Cartridge 1.1 schemas, unmodified and redistributed under their own terms. See the README there.
 
-**`vendor/reveal.js/`** holds what a `revealjs` target's presentations load
-of reveal.js 6.0.2, unmodified and redistributed under its MIT license and
-its theme's font's SIL Open Font License. See the README there, which
-says how it's updated.
+**`vendor/reveal.js/`** holds what a `revealjs` target's presentations load of reveal.js 6.0.2, unmodified and redistributed under its MIT license and its theme's font's SIL Open Font License. See the README there, which says how it's updated.
 
-**`vendor/axe-core/`** holds axe-core 4.14.0's `axe.min.js`, which `--wcag`
-runs on pages, unmodified and redistributed under the Mozilla Public
-License 2.0. See the README there, which says where its source is and
-how it's updated.
+**`vendor/axe-core/`** holds axe-core 4.14.0's `axe.min.js`, which `--wcag` runs on pages, unmodified and redistributed under the Mozilla Public License 2.0. See the README there, which says where its source is and how it's updated.
 
 **`lib/` — shared**
 
@@ -160,134 +145,31 @@ how it's updated.
 | `slim-corpus.py` | A copy of a Word corpus with each file's document part alone, for the census. |
 | `make-import-tests.py` | Three cartridges differing in one way each, to see what an LMS does on re-import. |
 
-**`tests/`** holds the test suites, the small books and decks they convert,
-and `run-all.sh`, which runs them all. See [Testing](testing.md).
+**`tests/`** holds the test suites, the small books and decks they convert, and `run-all.sh`, which runs them all. See [Testing](testing.md).
 
 ## What conversion does to your pages
 
 Pandoc turns a source into a page; the filter and the steps around it then make these changes to each page. Most were first needed for Word files, which the examples show, and each is made to a page from any kind of source it applies to.
 
-- **Layout tables become figures.** Word positions images with a one-cell
-  table and puts the caption in a paragraph underneath. That produces a
-  `<table>` with no header and no caption, which fails WCAG 1.3.1. These
-  become `<figure>` / `<figcaption>`, and cross-reference anchors move onto
-  the figure so existing links still resolve.
-- **Data tables get a real `<caption>`**, `scope="col"` on header cells, and
-  a focusable scroll wrapper. Pandoc's own stylesheet sets `display: block`
-  on tables, which strips the table role from the accessibility tree; the
-  wrapper restores it.
-- **An empty header cell becomes a data cell.** Pandoc's HTML writer makes
-  every cell of a head row a `<th>`, and every cell of a header column, so
-  a table whose rows are labeled down its first column has an empty `<th>`
-  at its top left, a header that heads nothing (axe-core's
-  empty-table-header). A page, an EPUB's chapters, and a presentation have
-  it written as a `<td>`, as W3C's tables tutorial codes an empty corner
-  (`lib/headercells.py`), and `page.css` draws it as Pandoc's stylesheets
-  draw a header cell.
-- **A merged title row becomes the caption.** Word has no caption feature
-  for tables, so authors put the title in a merged first row, and Pandoc
-  makes it a header cell spanning the table. The run recognizes the shape,
-  writes `caption-rows=1` into the table's prefilled sidecar row so the
-  decision is visible and reversible, and folds the row into the caption:
-  after the label if there's one, so "Table 2.14" becomes "Table 2.14
-  Number of hours my classmates spent playing video games on weekends".
-  Equations in the row stay equations. `caption-rows=N,M` in the sidecar
-  does the same for any rows a person names.
-- **A table with grouping bands becomes one table per band.** A merged row
-  partway down a table—"Example B", "Higher Income Countries", "Year 2"
- —labels the rows beneath it, and no header markup expresses that in
-  every format. The run infers `split-at` for those rows, writes it into
-  the prefilled sidecar row, and splits there: each part gets the band as
-  its caption, composed onto the table's own ("Table 17.4: Year 2", or
-  after a space where the table's own ends a sentence), a
-  copy of the header row where the table had one marked, and the header
-  declaration applied on its own. Where the bands each sit over their own
-  header row, as in the cost tables of Economics 3e, each part keeps its
-  own. `part-captions` in the sidecar overrides the composed captions.
-  A band heads the rows under it: a merged row with nothing but bands
-  under it to the table's end, a note across a table's foot, stays a row
-  of the table, whether inferred or named in `split-at` (where the run
-  names it), as does a header row named there right over another band.
-  A merged first row right over another band is the table's title,
-  inferred as `caption-rows=1`; a band right over another names a group
-  of groups, both going into the caption of the part below ("Table 3.2:
-  Part Two: Group B"), and where a table has such a pair partway down, a
-  pair at its top is one too. A table's foot comes after its last part,
-  and no row of it is inferred as a band. Nor is a note on the rows
-  above it: a merged row that ends as a sentence does, right after a row
-  of the table's cells, in a table that ends with one, as
-  *Prealgebra 2e*'s Table 3.1 closes each pair of its cases, but not in
-  a table that opens with such a sentence, a table of bands, and not a
-  line at the foot that says where the table comes from; and since no
-  cell of a note's row could head it, the guess gives a table with a
-  note before its last row no header column: `both` is `first-row`;
-  `first-column` is `first-row` where the source marks a header row and
-  `none` where nothing does; and `unknown` is `none` where nothing marks
-  a header row and none is below a data row. A band at the
-  end of the table's head, where Pandoc's Word reader puts a first row
-  Word's table look formats (Word's default), heads the first part
-  alone. A merged first row over a header row every part shares, in the
-  head or with nothing marking the header row and the first band right
-  under it, is the table's title, inferred as `caption-rows=1`; over a
-  header row of the first part's own, it's the first band, and from the
-  head it takes that row to the first part with it. Any other band above
-  a header row in the head stays in every part's head with it.
-- **Tables get the headers they were declared to have.** `table-headers.csv`
-  says, per table, whether the headers are in the first row, the first
-  column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a
-  table it doesn't cover the run guesses from the file. A header row is
-  marked up as `<th scope="col">` whether or not Word marked it to repeat;
-  a header column becomes `<th scope="row">` on the first cell of every
-  body row, which is what lets a screen reader say which country a figure
-  belongs to; a table declared to have no headers gets none, however Word
-  formatted it.
-- **Captions are found above or below the table.** Either `**Table 2.1:
-  Message Transmission Mediums**` on one line, or a bare `**Table 7.1**`
-  followed by `*Sample Code of Conduct*`. Prose that merely mentions a
-  table isn't consumed, nor is a sentence that merely *begins* with the
-  label word: "Table 48.1 provides an example of..." continues with a
-  lowercase verb, where a caption continues with a capital or a colon.
-  Which side a book captions on is measured across the whole document
-  first, because two adjacent tables with one label between them are
-  genuinely ambiguous and only the document's own habit resolves it.
-  Which words introduce a caption is configurable: some books label their
-  tables `Figure 1.1`, and an unrecognized label means no caption at all.
+- **Layout tables become figures.** Word positions images with a one-cell table and puts the caption in a paragraph underneath. That produces a `<table>` with no header and no caption, which fails WCAG 1.3.1. These become `<figure>` / `<figcaption>`, and cross-reference anchors move onto the figure so existing links still resolve.
+- **Data tables get a real `<caption>`**, `scope="col"` on header cells, and a focusable scroll wrapper. Pandoc's own stylesheet sets `display: block` on tables, which strips the table role from the accessibility tree; the wrapper restores it.
+- **An empty header cell becomes a data cell.** Pandoc's HTML writer makes every cell of a head row a `<th>`, and every cell of a header column, so a table whose rows are labeled down its first column has an empty `<th>` at its top left, a header that heads nothing (axe-core's empty-table-header). A page, an EPUB's chapters, and a presentation have it written as a `<td>`, as W3C's tables tutorial codes an empty corner (`lib/headercells.py`), and `page.css` draws it as Pandoc's stylesheets draw a header cell.
+- **A merged title row becomes the caption.** Word has no caption feature for tables, so authors put the title in a merged first row, and Pandoc makes it a header cell spanning the table. The run recognizes the shape, writes `caption-rows=1` into the table's prefilled sidecar row so the decision is visible and reversible, and folds the row into the caption: after the label if there's one, so "Table 2.14" becomes "Table 2.14 Number of hours my classmates spent playing video games on weekends". Equations in the row stay equations. `caption-rows=N,M` in the sidecar does the same for any rows a person names.
+- **A table with grouping bands becomes one table per band.** A merged row partway down a table—"Example B", "Higher Income Countries", "Year 2" —labels the rows beneath it, and no header markup expresses that in every format. The run infers `split-at` for those rows, writes it into the prefilled sidecar row, and splits there: each part gets the band as its caption, composed onto the table's own ("Table 17.4: Year 2", or after a space where the table's own ends a sentence), a copy of the header row where the table had one marked, and the header declaration applied on its own. Where the bands each sit over their own header row, as in the cost tables of Economics 3e, each part keeps its own. `part-captions` in the sidecar overrides the composed captions. A band heads the rows under it: a merged row with nothing but bands under it to the table's end, a note across a table's foot, stays a row of the table, whether inferred or named in `split-at` (where the run names it), as does a header row named there right over another band. A merged first row right over another band is the table's title, inferred as `caption-rows=1`; a band right over another names a group of groups, both going into the caption of the part below ("Table 3.2: Part Two: Group B"), and where a table has such a pair partway down, a pair at its top is one too. A table's foot comes after its last part, and no row of it is inferred as a band. Nor is a note on the rows above it: a merged row that ends as a sentence does, right after a row of the table's cells, in a table that ends with one, as *Prealgebra 2e*'s Table 3.1 closes each pair of its cases, but not in a table that opens with such a sentence, a table of bands, and not a line at the foot that says where the table comes from; and since no cell of a note's row could head it, the guess gives a table with a note before its last row no header column: `both` is `first-row`; `first-column` is `first-row` where the source marks a header row and `none` where nothing does; and `unknown` is `none` where nothing marks a header row and none is below a data row. A band at the end of the table's head, where Pandoc's Word reader puts a first row Word's table look formats (Word's default), heads the first part alone. A merged first row over a header row every part shares, in the head or with nothing marking the header row and the first band right under it, is the table's title, inferred as `caption-rows=1`; over a header row of the first part's own, it's the first band, and from the head it takes that row to the first part with it. Any other band above a header row in the head stays in every part's head with it.
+- **Tables get the headers they were declared to have.** `table-headers.csv` says, per table, whether the headers are in the first row, the first column, both, or nowhere (see [Sidecar files](sidecars.md#sidecar-files)), and for a table it doesn't cover the run guesses from the file. A header row is marked up as `<th scope="col">` whether or not Word marked it to repeat; a header column becomes `<th scope="row">` on the first cell of every body row, which is what lets a screen reader say which country a figure belongs to; a table declared to have no headers gets none, however Word formatted it.
+- **Captions are found above or below the table.** Either `**Table 2.1: Message Transmission Mediums**` on one line, or a bare `**Table 7.1**` followed by `*Sample Code of Conduct*`. Prose that merely mentions a table isn't consumed, nor is a sentence that merely *begins* with the label word: "Table 48.1 provides an example of..." continues with a lowercase verb, where a caption continues with a capital or a colon. Which side a book captions on is measured across the whole document first, because two adjacent tables with one label between them are genuinely ambiguous and only the document's own habit resolves it. Which words introduce a caption is configurable: some books label their tables `Figure 1.1`, and an unrecognized label means no caption at all.
 - **White space with nothing to show is only white space.** An editor leaves a subscript holding just the space typed after it (`<sub> </sub>`) and an empty table cell holding a no-break space (`<td>&nbsp;</td>`). Pandoc's HTML reader makes the first a space, an empty subscript, and a space, which a Word file showed as two spaces and a tagged PDF as a span with nothing in it; the second was a space character in a PDF's text, a row of such cells a run of spaces. veraPDF's WCAG 2.2 profile, which [PDF4WCAG](https://pdf4wcag.com/) runs, reports the one as a redundant span and the other as spaces used for formatting: *Instrumental Analysis* had 12 such subscripts and 11 rows of nine such cells. Emphasis, bold, a subscript, a superscript, small capitals, or a span with no attributes holding nothing but white space is that white space, and a table's cell holding nothing but white space is empty; the two spaces such a mark leaves side by side are one, inside another mark or not, as are those a link with no text leaves when it's dropped and a space at a mark's edge beside another, but no mark is emptied to make them one. An underline or a strikeout goes only when it holds nothing at all, since it draws its line under a space, and a span with an id stays, an anchor.
-- **Media files are renamed to match their real content type.** Word stores
-  images with whatever extension the DOCX declares, often `.so` from a
-  content type of `application/octet-stream`.
-- **Equation images** whose alt text is written in MathSpeak, a set of
-  rules for speaking a formula in words, which spells a name out a letter
-  at a time, get the letters joined again, so a screen reader says
-  "Customer Lifetime Value" rather than "upper C u s t o m e r".
-- **Caption contrast** is set to `#555`, which measures 7.33:1 against
-  Pandoc's `#fdfdfd` background. The widely quoted `#767676` is only
-  4.47:1 there, because it's computed against pure white. In dark mode,
-  which Pandoc 3.12's stylesheet follows with a `#1a1a1a` background,
-  captions are `#b6b6b6` (8.58:1), and a focused table's outline is the
-  text's own color.
+- **Media files are renamed to match their real content type.** Word stores images with whatever extension the DOCX declares, often `.so` from a content type of `application/octet-stream`.
+- **Equation images** whose alt text is written in MathSpeak, a set of rules for speaking a formula in words, which spells a name out a letter at a time, get the letters joined again, so a screen reader says "Customer Lifetime Value" rather than "upper C u s t o m e r".
+- **Caption contrast** is set to `#555`, which measures 7.33:1 against Pandoc's `#fdfdfd` background. The widely quoted `#767676` is only 4.47:1 there, because it's computed against pure white. In dark mode, which Pandoc 3.12's stylesheet follows with a `#1a1a1a` background, captions are `#b6b6b6` (8.58:1), and a focused table's outline is the text's own color.
 - **Highlighted code** is in colors that clear 4.5:1, `highlighting.theme`'s: Pandoc's pygments style, its comments, numbers, attributes, preprocessor lines, special strings, errors, and line numbers darkened. Pandoc's stylesheet leaves them as they are in dark mode, where a variable's `#19177c` is 1.21:1, so `page.css` gives each kind of token a lighter color there.
-- **The leading H1 becomes the page title**, giving a meaningful `<title>`
-  instead of a filename slug, and one H1 rather than two.
+- **The leading H1 becomes the page title**, giving a meaningful `<title>` instead of a filename slug, and one H1 rather than two.
 
-Conversion stops before writing any HTML if an image reference can't be
-resolved, and writes `media-unresolved.csv` naming each one with what it
-was detected as. The commonest cause is EMF/WMF: Word's vector formats,
-used for equations, SmartArt and pasted Office charts, which no browser
-renders. Replace them in Word (right-click, Save as Picture, PNG) or
-convert them with `libreoffice --headless --convert-to png`. A dead image link is invisible in the output — Pandoc emits
-`<embed>` rather than `<img>` for an extension it doesn't recognize — so
-failing loudly is better than shipping a cartridge that looks fine.
+Conversion stops before writing any HTML if an image reference can't be resolved, and writes `media-unresolved.csv` naming each one with what it was detected as. The commonest cause is EMF/WMF: Word's vector formats, used for equations, SmartArt and pasted Office charts, which no browser renders. Replace them in Word (right-click, Save as Picture, PNG) or convert them with `libreoffice --headless --convert-to png`. A dead image link is invisible in the output — Pandoc emits `<embed>` rather than `<img>` for an extension it doesn't recognize — so failing loudly is better than shipping a cartridge that looks fine.
 
 ## Running the Pandoc filter on its own
 
-`figures-and-tables.lua` is an ordinary Pandoc filter and works outside
-`convert.py`, with two things missing that `convert.py` does before it
-runs: the repair of the `.docx` (so bookmarks between blocks and
-bookmarks only other files link to are lost that way) and the
-table-headers pre-pass. Everything configurable is read from the
-environment, which is how `convert.py` passes settings from
-`conversion.yaml`:
+`figures-and-tables.lua` is an ordinary Pandoc filter and works outside `convert.py`, with two things missing that `convert.py` does before it runs: the repair of the `.docx` (so bookmarks between blocks and bookmarks only other files link to are lost that way) and the table-headers pre-pass. Everything configurable is read from the environment, which is how `convert.py` passes settings from `conversion.yaml`:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -307,10 +189,7 @@ environment, which is how `convert.py` passes settings from
 
 These are the ones most useful by hand; the filter reads a dozen more, which `grep getenv bin/figures-and-tables.lua` lists with their defaults.
 
-The `*_MISSING`, `SPACER_LOG`, and `IDS_RENAMED` files are appended to,
-not truncated, and carry no header row — `convert.py` collects them across
-a whole run, sorts and deduplicates, then writes the header. Point them at
-a temporary file if you're running the filter yourself.
+The `*_MISSING`, `SPACER_LOG`, and `IDS_RENAMED` files are appended to, not truncated, and carry no header row — `convert.py` collects them across a whole run, sorts and deduplicates, then writes the header. Point them at a temporary file if you're running the filter yourself.
 
 ```bash
 TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
@@ -318,7 +197,4 @@ TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
     --lua-filter=figures-and-tables.lua -o page.html
 ```
 
-There's also one toggle near the top of the filter that isn't exposed
-through the config, because no book has yet needed it to differ:
-`NORMALIZE_MATH_ALT`, which joins the spelled-out letters of an equation image's alt text. Responsive
-images used to sit beside it and are now the `images.responsive` setting.
+There's also one toggle near the top of the filter that isn't exposed through the config, because no book has yet needed it to differ: `NORMALIZE_MATH_ALT`, which joins the spelled-out letters of an equation image's alt text. Responsive images used to sit beside it and are now the `images.responsive` setting.

@@ -443,5 +443,5 @@ def remove_from(path):
     with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         count = remove(pdf)
         if count:
-            pdf.save(path)
+            pdf.save(path, deterministic_id=True)
     return count

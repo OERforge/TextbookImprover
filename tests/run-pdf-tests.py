@@ -7454,7 +7454,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-numbered", "-ams", "-doctoc", "-own")
+                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7564,6 +7564,51 @@ def build_own_template(work):
     return os.path.join(work, "pdf", "org.example.own.pdf"), converted.stdout + converted.stderr
 
 
+def build_twice(work):
+    """One small book, with a picture that has no description, a formula,
+    and a captioned table, built in two folders and two time zones with
+    SOURCE_DATE_EPOCH set: (the first PDF's path, the second's, what both
+    runs said)."""
+    paths, said = [], ""
+    for folder, zone in (("first", "UTC"), (os.path.join("second", "deeper"), "Pacific/Kiritimati")):
+        book = os.path.join(work, folder)
+        os.makedirs(os.path.join(book, "assets"))
+        png(os.path.join(book, "assets", "red.png"), (200, 0, 0))
+        with open(os.path.join(book, "one.md"), "w", encoding="utf-8") as fh:
+            fh.write("# One\n\nA page, a picture with no description, a formula, $x^2$, "
+                     "and a table, whose caption the PDF's repair retags.\n\n"
+                     "![](assets/red.png)\n\n| Name | Value |\n|------|-------|\n"
+                     "| a    | 1     |\n\n: Two columns\n")
+        with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: Twice\n  identifier: org.example.twice\n"
+                     "  language: en-US\n  contents:\n    - one\n")
+        with open(os.path.join(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n  pdf:\n    format: pdf\n")
+        converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                                   cwd=book, capture_output=True, text=True,
+                                   stdin=subprocess.DEVNULL,
+                                   env=dict(os.environ, SOURCE_DATE_EPOCH="1700000000", TZ=zone))
+        paths.append(os.path.join(book, "pdf", "org.example.twice.pdf"))
+        said += converted.stdout + converted.stderr
+    return paths[0], paths[1], said
+
+
+def twice_checks(first, second, said):
+    """The check of the book built twice (build_twice)."""
+    def same():
+        with open(first, "rb") as one, open(second, "rb") as two:
+            return one.read() == two.read()
+
+    return [
+        ("a book built twice with SOURCE_DATE_EPOCH set, in two folders and two time "
+         "zones, is the same PDF byte for byte, a picture with no description, the "
+         "tagging's namespace, the PDF's dates, and the ID its repair saves it with "
+         "among what's the same",
+         lambda: os.path.exists(first) and os.path.exists(second)
+         and "wasn't built" not in said and same()),
+    ]
+
+
 def own_template_checks(own_path, own_said):
     """The checks of the book on a template of its own (build_own_template)."""
     return [
@@ -7639,6 +7684,7 @@ BUILDS = {
     "-ams": build_ams,
     "-doctoc": build_doc_toc,
     "-own": build_own_template,
+    "-twice": build_twice,
 }
 
 # The longest builds, started first when they run side by side, in this
@@ -7696,6 +7742,7 @@ def checks(work, built):
     ams_path, ams_said = built["-ams"]
     doc_toc_path, doc_toc_said = built["-doctoc"]
     own_path, own_said = built["-own"]
+    twice_first, twice_second, twice_said = built["-twice"]
 
     def page_text(path):
         return "".join(page.extract_text() or "" for page in pypdf.PdfReader(path).pages) \
@@ -8695,6 +8742,7 @@ def checks(work, built):
     items += ams_checks(ams_path, ams_said)
     items += doc_toc_checks(doc_toc_path, doc_toc_said)
     items += own_template_checks(own_path, own_said)
+    items += twice_checks(twice_first, twice_second, twice_said)
     return items
 
 

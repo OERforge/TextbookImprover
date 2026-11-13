@@ -1668,6 +1668,158 @@ def bookmark_said(stderr, record_path, where="the PDF's bookmarks"):
                     + ". The headings set them as formulas.")
 
 
+# A PDF's LaTeX run here, not by Pandoc (-t pdf), so that nothing in the
+# PDF depends on the run: Pandoc's -t pdf copies the images into a folder
+# with a random name, which is then the alt text LaTeX gives an image
+# that has none, and LuaTeX's random numbers, which name tagpdf's
+# namespace, can only be seeded before it reads the file. What Pandoc
+# does around LaTeX is done the same way (its PDF.hs, 3.14): SVGs made
+# PDF with rsvg-convert, other pictures LaTeX can't read made PNG, LaTeX
+# run again while its log asks for it or a contents file is new, and its
+# log's warnings and missing characters said as Pandoc says them.
+LATEX_READS = (".png", ".jpg", ".jpeg", ".pdf", ".eps")
+LATEX_JOB = "input"
+LATEX_RUNS = 4
+
+
+def latex_images(document, base, out_dir, dpi=96):
+    """document with each local picture LaTeX can't read pointed at a copy
+    it can, made under out_dir at the picture's own relative path (an SVG
+    a PDF, anything else a PNG), or document itself where there's none;
+    None where a picture isn't a local file, which only Pandoc's own
+    route fetches, or where one couldn't be converted."""
+    todo, remote = [], []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("t") == "Image":
+                src = value["c"][2][0]
+                if "://" in src or src.startswith("data:"):
+                    remote.append(src)
+                elif not src.lower().endswith(LATEX_READS):
+                    todo.append(value["c"][2])
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+    walk(document["blocks"])
+    if remote:
+        return None
+    if not todo:
+        return document
+    copy = json.loads(json.dumps(document))
+    todo.clear()
+    walk(copy["blocks"])
+    for target in todo:
+        src = target[0]
+        stem, ext = os.path.splitext(src)
+        new = stem + (".pdf" if ext.lower() == ".svg" else ".png")
+        out = os.path.join(out_dir, new)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        try:
+            if ext.lower() == ".svg":
+                subprocess.run(["rsvg-convert", "-f", "pdf", "-a", "--dpi-x", str(dpi),
+                                "--dpi-y", str(dpi), "-o", out, os.path.join(base, src)],
+                               capture_output=True, check=True)
+            else:
+                from PIL import Image
+                with Image.open(os.path.join(base, src)) as picture:
+                    clear = picture.mode in ("RGBA", "LA", "PA") or "transparency" in picture.info
+                    picture.convert("RGBA" if clear else "RGB").save(out, "PNG")
+        except Exception:               # the converter's absence or the file's fault alike
+            return None
+        target[0] = new
+    return copy
+
+
+def latex_seed(project, name):
+    """A seed for LuaTeX's random numbers that a book keeps from one build
+    to the next: from its identifier, or the target's name without one."""
+    import zlib
+    return zlib.crc32(str((project or {}).get("identifier") or name).encode("utf-8")) % (1 << 28)
+
+
+def pandoc_warnings(log):
+    """LaTeX's warnings and missing characters, from its log, as the lines
+    Pandoc's -t pdf writes for them (latexWarnings and
+    missingCharacterWarnings in its PDF.hs)."""
+    import textwrap
+    lines, held = [], None
+    for line in log.split("\n"):
+        if held is None:
+            if line.startswith("LaTeX Warning:"):
+                held = line
+        elif line == "":
+            wrapped = textwrap.wrap(" ".join(held.split()), 60, break_long_words=False,
+                                    break_on_hyphens=False)
+            lines.append("[WARNING] [makePDF] " + "\n  ".join(wrapped))
+            held = None
+        else:
+            held += line
+    for line in log.split("\n"):
+        if line.startswith("Missing character:"):
+            text = "".join(c if ord(c) < 128 else f"{c} (U+{ord(c):04X})" for c in line[19:])
+            lines.append("[WARNING] Missing character: " + text)
+    return "".join(line + "\n" for line in lines)
+
+
+def pdf_via_latex(book_json, filters, searched, out_path, base, work, environment, seed):
+    """Build out_path from book_json as Pandoc's -t pdf would, with LaTeX
+    run here. Returns (the run as subprocess gives one, with what Pandoc
+    would have written to stderr; what LaTeX's last run said; the LaTeX it
+    read)."""
+    tex_dir = os.path.join(work, "latex")
+    os.makedirs(tex_dir, exist_ok=True)
+    tex = os.path.join(tex_dir, LATEX_JOB + ".tex")
+    wrote = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", book_json,
+                            "-o", tex] + filters, cwd=base, capture_output=True, text=True,
+                           env=environment)
+    if wrote.returncode:
+        return wrote, "", ""
+    with open(tex, encoding="utf-8") as fh:
+        source = fh.read()
+    env = dict(environment)
+    env["TEXINPUTS"] = os.pathsep.join([tex_dir] + [d for d in searched if d]
+                                       + [environment.get("TEXINPUTS", "")])
+    env["TEXMFOUTPUT"] = tex_dir
+    if env.get("SOURCE_DATE_EPOCH"):
+        # LaTeX writes the PDF's dates in local time, with the zone's offset.
+        env["TZ"] = "UTC"
+    command = [ENGINE, "-halt-on-error", "-interaction", "nonstopmode", "-jobname", LATEX_JOB,
+               "-output-directory", tex_dir, f"\\setrandomseed {seed} \\input{{{tex}}}"]
+    log_path = os.path.join(tex_dir, LATEX_JOB + ".log")
+    said, log, code = "", "", 1
+    for run in range(1, LATEX_RUNS + 1):
+        done = subprocess.run(command, cwd=base, capture_output=True, env=env)
+        code = done.returncode
+        said = done.stdout.decode("utf-8", "replace")
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as fh:
+                log = fh.read()
+        except OSError:
+            log = ""
+        again = any("Warning:" in line and "Rerun" in line for line in log.split("\n")) \
+            or (run < 3 and os.path.exists(os.path.join(tex_dir, LATEX_JOB + ".toc")))
+        if not again:
+            break
+    made = os.path.join(tex_dir, LATEX_JOB + ".pdf")
+    stderr = wrote.stderr
+    if code or not os.path.exists(made):
+        lines = (log or said).split("\n")
+        start = next((i for i, line in enumerate(lines) if line.startswith("!")), None)
+        if start is None:
+            message = log or said
+        else:
+            end = next((i for i in range(start, len(lines)) if lines[i].startswith("l.")),
+                       len(lines) - 1)
+            message = "\n".join(lines[start:end + 1]) + "\n"
+        return subprocess.CompletedProcess(command, code or 43, "",
+                                           stderr + "Error producing PDF.\n" + message), said, source
+    shutil.copyfile(made, out_path)
+    return subprocess.CompletedProcess(command, 0, "", stderr + pandoc_warnings(log)), said, source
+
+
 def build(base, name, resolved, keep, intermediates=None, latex_only=False,
           as_latex=False):
     project = resolved.project
@@ -1816,16 +1968,32 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 plan, base, [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
-        command += downsample.resource_args(scaled)
-        # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
-        # which names the lines it couldn't fit (overfull_lines).
-        log_path = os.path.join(work, "pandoc-log.json")
-        command += ["--log", log_path]
-        # Run in the content directory: image paths in the intermediates
-        # are relative to it.
-        result = subprocess.run(command, cwd=base, capture_output=True,
-                                text=True, env=environment)
-        said, source = latex_said(log_path)
+        # LaTeX run here (pdf_via_latex), unless a picture is one only
+        # Pandoc's own route fetches, or OER_PDF_VIA=pandoc asks for that
+        # route, which is there to compare the two.
+        images_dir = os.path.join(work, "images")
+        for_latex = None if os.environ.get("OER_PDF_VIA") == "pandoc" \
+            else latex_images(document, base, images_dir)
+        if for_latex is not None:
+            latex_json = book_json
+            if for_latex is not document:
+                latex_json = os.path.join(work, "latex.json")
+                with open(latex_json, "w", encoding="utf-8") as fh:
+                    json.dump(for_latex, fh)
+            result, said, source = pdf_via_latex(
+                latex_json, filters, [scaled, images_dir], os.path.abspath(out_path), base, work,
+                environment, latex_seed(project, name))
+        else:
+            command += downsample.resource_args(scaled)
+            # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
+            # which names the lines it couldn't fit (overfull_lines).
+            log_path = os.path.join(work, "pandoc-log.json")
+            command += ["--log", log_path]
+            # Run in the content directory: image paths in the intermediates
+            # are relative to it.
+            result = subprocess.run(command, cwd=base, capture_output=True,
+                                    text=True, env=environment)
+            said, source = latex_said(log_path)
         # The PDF's own pages, which the last line counts beside the book's.
         printed = latexbuild.pages_written(said)
         # The default's faces given way to Latin Modern (default_faces),

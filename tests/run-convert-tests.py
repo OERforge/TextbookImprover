@@ -4126,10 +4126,11 @@ def case_pdf_capacity(work):
     """A book that outgrows one of TeX's tables, and one whose macro calls
     itself without end: the PDF target names each for what it is. The
     LuaLaTeX here answers the release probe and fails a build as LuaTeX
-    does, its log in LuaTeX's words; the real thing takes Pandoc's four
-    LaTeX runs a build (it reruns while there's a .toc, which the pages'
-    LaTeX always has, whatever the exit status), about eight seconds a run
-    for the strings."""
+    does, its log in LuaTeX's words and named after the job when the
+    command names one, as build-pdf.py's does; the real thing takes four
+    LaTeX runs a build (it's run again while there's a .toc, which the
+    pages' LaTeX always has, whatever the exit status, as Pandoc runs
+    it), about eight seconds a run for the strings."""
     said = {}
     for name, log in CAPACITY_LOGS.items():
         book = os.path.join(work, name)
@@ -4150,11 +4151,14 @@ def case_pdf_capacity(work):
             fh.write("#!/bin/sh\n"
                      "case \"$*\" in *OERFMT*) echo 'OERFMT:2026-06-01'; exit 0 ;; esac\n"
                      "out=.\n"
+                     "job=\n"
                      "while [ $# -gt 1 ]; do\n"
                      "  [ \"$1\" = -output-directory ] && out=\"$2\"\n"
+                     "  [ \"$1\" = -jobname ] && job=\"$2\"\n"
                      "  shift\n"
                      "done\n"
                      "name=${1##*/}\n"
+                     "[ -n \"$job\" ] && name=\"$job.tex\"\n"
                      "printf '%s\\n' " + " ".join("'%s'" % line for line in log.splitlines())
                      + " > \"$out/${name%.tex}.log\"\n"
                      "exit 1\n")

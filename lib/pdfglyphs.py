@@ -237,7 +237,7 @@ def map_glyph_names(path):
             except Exception:  # noqa: BLE001 -- a font pikepdf can't read as one
                 continue
         if added:
-            pdf.save(path)
+            pdf.save(path, deterministic_id=True)
     return added
 
 

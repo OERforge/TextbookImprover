@@ -138,5 +138,5 @@ def retag(path, captioned):
                         continue
                 kept.append(kid)
             table.K = pikepdf.Array(kept)
-        pdf.save(path)
+        pdf.save(path, deterministic_id=True)
     return counts

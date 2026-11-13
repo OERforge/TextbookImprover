@@ -896,7 +896,7 @@ def tidy(path):
                                     for n in notes):
                 counts["untied_marks"] += 1
         if bins or counts["ghost_refs"]:
-            pdf.save(path)
+            pdf.save(path, deterministic_id=True)
     return counts
 
 

@@ -35,7 +35,7 @@ cd /path/to/your/docx/files
 python3 $T/bin/convert.py                 # 1. convert: html/, one page per source, plus reports
 ```
 
-The first run converts everything, then stops and writes `project-sample.yaml`, because a manifest needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
+The first run converts everything, then stops and writes `project-sample.yaml`, because the cartridge's manifest (`imsmanifest.xml`, the list of its pages) needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
 
 ```bash
 mv project-sample.yaml project.yaml
@@ -55,13 +55,14 @@ targets:
     format: markdown          # writes src/, the book as Markdown source
 ```
 
-Each target writes into a directory of its own; the content directory keeps the sources, the intermediates, the sidecars, and the reports. See [Configuration](docs/configuration.md) for targets, editions, and the book's structure, and [Markdown sources](docs/markdown.md) for Markdown in and out.
+Each target, one output a run builds, writes into a directory of its own; the book's directory, where you ran `convert.py`, keeps the sources, the intermediates (each page as Pandoc read it, kept between steps), the sidecars (CSV files holding what you decided: alt text, table headers), and the reports. See [Configuration](docs/configuration.md) for targets, editions, and the book's structure, [Markdown sources](docs/markdown.md) for Markdown in and out, and [Terms these pages use](docs/glossary.md) for any word here that's new.
 
 ## Documentation
 
 | Page | What it covers |
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
+| [Terms these pages use](docs/glossary.md) | What a target, a sidecar, an intermediate, and the other words these pages rely on mean; the other programs and standards they name; and the books they measure on |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
 | [Worked examples](docs/examples.md) | Three real books from start to finish: an OpenStax book from its Word files to a course cartridge, a book website from a WARC to an EPUB and an HTML round trip, and a LaTeX book from its repository to a tagged PDF. |
 | [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |

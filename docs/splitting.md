@@ -89,7 +89,7 @@ cd book-2 && python3 $T/bin/convert.py
 
 Each piece is renamed with one hyphen in place of the two (`chapter-3--supply.html` becomes `chapter-3-supply.html`, numbered when that name is taken), every reference to it from every page follows it with its fragment, and the split's record of where each page came from is removed from its head, since each page is a source now. A page the book copied from `_pt/` goes back into `_pt/`. `project.yaml` is the book's, with `contents` naming the pages as they are now, grouped as the book was, and the sidecars keyed on a table's content or an image's path come along; `page-names.csv` doesn't, since there are no pieces left for it to name. Nothing in the book is changed. The pages can come from an HTML target or a Markdown one.
 
-Adopted and converted again, the security textbook's 16 pages came out with the same text as before and the same findings, and no link broken.
+Adopted and converted again, the 16 pages of the security textbook, a book written in AsciiDoc ([the books these pages measure on](glossary.md#the-books-these-pages-measure-on)), came out with the same text as before and the same findings, and no link broken.
 
 A table caption keyed on its position (`chapter-3#table-2`) rather than its label won't find its table after adoption, since the page and the position have both changed; it shows up in the missing-captions report again.
 

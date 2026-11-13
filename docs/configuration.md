@@ -5,11 +5,16 @@ How `packaging.yaml`, `conversion.yaml`, and `project.yaml` fit together, how a 
 ## Configuration
 
 Three files, split by what a setting describes rather than by which script
-reads it.
+reads it. The work has two halves, and these pages call them that:
+conversion (`convert.py`, which turns the sources into pages, an EPUB, a
+PDF, and the other outputs) and packaging (`build-cartridge.py`, which
+turns the pages into a Common Cartridge for an LMS). Each has a file of
+its own, and one file describes the book for both. [Terms these pages
+use](glossary.md) explains the other words these pages rely on.
 
 | File | Holds | Read by |
 |---|---|---|
-| `project.yaml` | Facts about the book: its language, identifier, title, and structure. | both halves |
+| `project.yaml` | Facts about the book: its language, identifier, title, and structure. | both |
 | `conversion.yaml` | How the book is rendered into an output format. | conversion |
 | `packaging.yaml` | How rendered files are assembled into an archive. | packaging |
 
@@ -113,13 +118,15 @@ configuration exists, and several HTML renderings with different
 headers, footers, or options, an EPUB, and whatever else the schema's
 `format` lists when they're declared. The content directory keeps the
 sources, the
-intermediates, the sidecars, and the reports. A page you wrote by hand
-(an `.html` there with no source behind it) is copied into every HTML
+intermediates, the sidecars, and the reports. A page you finished by hand
+(an `.html` in the pass-through directory, `_pt/`; one beside the sources
+is a source like any other: [HTML sources](html.md)) is copied into every HTML
 target with the local files it refers to, and read into an intermediate
-so the EPUB has it too. Two targets whose settings that
-change the filtered intermediate agree (the schema marks these `stage:
-filter`; images, tables, captions, the split, the sidecars) share one
-intermediate; a target that differs gets its own under its output
+so the EPUB has it too. The filtered intermediate is a page after the
+filter has done its work on it, which every target is written from. Two
+targets that agree on every setting that changes it (the schema's
+filter-stage settings: images, tables, captions, the split, the sidecars)
+share one; a target that differs gets its own under its output
 directory. Settings that only change how a target writes (`header`,
 `footer`, `output_dir`) or assemble a book (`epub.*`) cost nothing to
 vary. The packager reads the first HTML target's directory; a package
@@ -516,7 +523,7 @@ defaults:
   heading_levels: source    # outline, the default, closes the gaps
 ```
 
-A heading more than one level below the heading before it skips a level: a screen reader's list of headings, and an EPUB's or a PDF's outline, have a gap there. WCAG's technique for headings asks for headings "properly nested", an `h2` followed by an `h2` or an `h3` ([G141](https://www.w3.org/WAI/WCAG22/Techniques/general/G141), advisory under 1.3.1), and the Nu checker reports a skip as an error. Sites skip levels for the look of a heading's size: LibreTexts sets the legend of each Example, Exercise, or Note box as an `h5`, and a Solution under it as an `h6`, under sections that are `h2`s and `h3`s, and DCIC sets a page's sections at the third level under its title.
+A heading more than one level below the heading before it skips a level: a screen reader's list of headings, and an EPUB's or a PDF's outline, have a gap there. WCAG's technique for headings asks for headings "properly nested", an `h2` followed by an `h2` or an `h3` ([G141](https://www.w3.org/WAI/WCAG22/Techniques/general/G141), advisory under 1.3.1), and the Nu checker reports a skip as an error. Sites skip levels for the look of a heading's size: LibreTexts sets the legend of each Example, Exercise, or Note box as an `h5`, and a Solution under it as an `h6`, under sections that are `h2`s and `h3`s, and *A Data-Centric Introduction to Computing* (DCIC) sets a page's sections at the third level under its title.
 
 With `heading_levels: outline`, the default, the run lifts each such heading to one level below the heading it's under, and what's under it with it, so nothing skips and every heading keeps its place in the outline. A heading's parent is the nearest heading before it at a shallower level in the source; a page's title, which every output shows as its H1, is above them all, so a page's first headings are H2 at the deepest. A heading that skips nothing keeps its level, and none goes deeper. The run says how many headings it moved, on how many pages, and the first. With `source`, every heading keeps the source's level, and the output check names each skip (`heading-skips-level`).
 
@@ -534,7 +541,7 @@ defaults:
     figure_prefixes: [Figure]
 ```
 
-The words that introduce a caption. One book here labels every table
+The words that introduce a caption. One book in the test corpus labels every table
 `Figure 1.1`, and with the default of `Table` alone those tables got no
 caption. Listing `Figure` under `table_prefixes` is safe: which rule
 applies is decided by what the table contains, not by the word.
@@ -564,8 +571,8 @@ per-page entries.
 
 ### Spacer images
 
-Word documents often use a tiny transparent GIF as a bullet. One book here
-had 274 of them across 487 images.
+Word documents often use a tiny transparent GIF as a bullet. One book in the
+test corpus had 274 of them across 487 images.
 
 ```yaml
 # in conversion.yaml
@@ -644,7 +651,7 @@ Measured here, on *Instrumental Analysis*: at 2, 173 of its 483 images are more 
 
 Three repairs, each on unless turned off, and each recorded row by row in `math-repaired.csv` (its kind, the page, and the text before and after).
 
-**An equation's characters.** Word's equation editor lets an author type a character that looks right and means something else, and a screen reader reads the one that's there: the micro sign `µ` for the Greek `μ`, the increment sign `∆` for `Δ`, an en dash for a minus (read as "en dash"), a bar over x written as an en dash or a macron set above it, `ŷ` as one precomposed character rather than y with a hat, a middle dot `·` for the product's dot operator `⋅`, and `H` with a slashed `Ø` for the null hypothesis's `H₀`. Each has one right form, and `math.repair_equations` writes it. Text inside an equation (`\text{}` in TeX, normal or literal text in Word's equation editor) gets `μ` and `Δ`, and a minus sign for an en dash where the text is math: a number's sign (`\text{–1}`), a charge's, a difference (`\text{16 – 2P}`, as the economics textbook types its equations), and a text that's the dash alone, with space, is the operator itself. An en dash stays a dash between two letters (a bond, `H–Cl`), between two digits (a range), beside another dash, and in a text set under or over something as its mark (`\underset{\text{–}}{x}`). A `ŷ` or a middle dot in text stays as typed, since text can't hold the command that would replace it. A Word source's `format: source` copy decides its equations' text as Pandoc reads it, runs side by side as one text, so the copy reads back as the page does. The statistics textbook has several hundred; some of them (µ, ŷ, Ø) are also characters no math font in LaTeX maps, so its PDF had dropped them.
+**An equation's characters.** Word's equation editor lets an author type a character that looks right and means something else, and a screen reader reads the one that's there: the micro sign `µ` for the Greek `μ`, the increment sign `∆` for `Δ`, an en dash for a minus (read as "en dash"), a bar over x written as an en dash or a macron set above it, `ŷ` as one precomposed character rather than y with a hat, a middle dot `·` for the product's dot operator `⋅`, and `H` with a slashed `Ø` for the null hypothesis's `H₀`. Each has one right form, and `math.repair_equations` writes it. Text inside an equation (`\text{}` in TeX, normal or literal text in Word's equation editor) gets `μ` and `Δ`, and a minus sign for an en dash where the text is math: a number's sign (`\text{–1}`), a charge's, a difference (`\text{16 – 2P}`, as the economics textbook, a draft written in Markdown, types its equations), and a text that's the dash alone, with space, is the operator itself. An en dash stays a dash between two letters (a bond, `H–Cl`), between two digits (a range), beside another dash, and in a text set under or over something as its mark (`\underset{\text{–}}{x}`). A `ŷ` or a middle dot in text stays as typed, since text can't hold the command that would replace it. A Word source's `format: source` copy decides its equations' text as Pandoc reads it, runs side by side as one text, so the copy reads back as the page does. The statistics textbook, OpenStax's *Introductory Business Statistics 2e*, has several hundred; some of them (µ, ŷ, Ø) are also characters no math font in LaTeX maps, so its PDF had dropped them.
 
 **Math typed as text.** Some books type math as ordinary text rather than as an equation: italic letters, Greek letters, sub- and superscripts, and `=` or `<` between them. It reads right on screen, but a screen reader gets `σ²` as "sigma 2", and a PDF's text font may have no Greek. `math.from_text` makes an equation of it, conservatively:
 
@@ -685,9 +692,10 @@ build system.
 **A variant file** replaces a page for one target: `about.print.md`
 stands in for `about.md` when the target named `print` is built, and
 `about.md` serves every other target. The same works for `.docx` and
-for a hand-written `.html`. The page keeps the stem, so `contents`,
-links, and sidecars don't know which file produced it, and a target
-with a variant gets intermediates of its own.
+for `.html`, a source or a page in the pass-through directory. The page
+keeps its name (`about`), so `contents`, links, and sidecars don't know
+which file produced it, and a target with a variant gets intermediates
+of its own.
 
 **A passage for some targets**, in Markdown, is a fenced div naming
 them; it is unwrapped where it applies and dropped elsewhere, and the
@@ -704,9 +712,10 @@ Prefer the web edition with a screen reader.
 ```
 
 Names keep; `!name` excludes; a list of only exclusions keeps by
-default. A span takes the same attribute for a phrase. Word sources
-have no such markup, by design; an HTML source, when HTML is an input
-format, will take Jinja's block syntax for the same thing.
+default. A span takes the same attribute for a phrase. An HTML source
+says the same with `data-targets` on a `<div>` or a `<span>`
+(`<div data-targets="epub print">`), which Pandoc reads as that
+attribute. Word sources have no such markup, by design.
 
 **The title block.** A source's opening page carries the document's
 subtitle, date, abstract, and `include-before`, which the page
@@ -742,7 +751,7 @@ the same arguments and does the same steps.
 
 ## Migrating a v0.1 configuration
 
-`imsmanifest.yaml` is no longer read. Both halves stop with directions
+`imsmanifest.yaml`, version 0.1's one configuration file, is no longer read. Conversion and packaging both stop with directions
 rather than ignoring it, because a config that looks live and isn't is
 worse than none.
 

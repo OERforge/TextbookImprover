@@ -2,13 +2,15 @@
 
 From a directory of Word files to a cartridge, in the order the steps have to happen. The short version is in the [README](../README.md); this is the long one, with what each step writes and why the order matters.
 
+Four words come up throughout. A **run** is one go of `convert.py` in the book's directory. A **target** is one output a run builds (HTML pages, an EPUB, a PDF), each in a directory of its own; with no configuration there's one, the pages in `html/`. A **report** is a CSV file a run writes, naming what still needs a person. A **sidecar** is a CSV file you keep beside the sources, holding what you decided, which every later run reads. [Terms these pages use](glossary.md) has these and the rest.
+
 ## Where the page order comes from
 
 A cartridge needs the pages in the book's order, grouped into modules. Three sources, in order of how much you should trust them:
 
-1. **The book's PDF or EPUB**, with `--toc book.pdf` or `--toc book.epub`: the PDF's bookmark outline or the EPUB's navigation document is the table of contents in the order the book uses, with its real chapter titles. The PDF needs `pypdf`; the EPUB needs nothing. Run it *before* adopting the sample, since the sample already places every page and `--toc` orders only pages the config doesn't.
+1. **The book's PDF or EPUB**, with `--toc book.pdf` or `--toc book.epub`: the PDF's bookmark outline or the EPUB's navigation document is the table of contents in the order the book uses, with its real chapter titles. The PDF needs `pypdf`; the EPUB needs nothing. Run it *before* renaming the sample configuration a first run writes (step 2 under [Quick start](#quick-start)), since the sample already places every page and `--toc` orders only pages the configuration doesn't.
 2. **The filenames**, with `--include-all-html`: a page named `3-2-something` is placed under chapter 3 without guessing. Pages with no chapter in their name are left for you to sort.
-3. **A guess**, which is what a bare first run does and says so in the sample.
+3. **A guess** from the file names, which is what a first run with neither option makes, saying so in the sample.
 
 Whichever you use, the result goes to `project-sample.yaml` for review (to `packaging-sample.yaml` for a book named in `packaging.yaml`'s own `project:` block), and anything you then list under `contents` stays where you put it. [Building the cartridge](packaging.md#ordering-from-the-books-own-table-of-contents) has the detail.
 
@@ -30,10 +32,7 @@ has a documented default.
 python3 $T/bin/convert.py
 ```
 
-You get one `.html` per `.docx`, their images, and a set of `*-missing.csv`
-reports naming what still needs a person. The run then stops, because
-building a manifest needs a couple of things only you can supply, and
-writes `project-sample.yaml`.
+You get one page per `.docx`, in `html/`, with their images, and a set of `*-missing.csv` reports naming what still needs a person. The run then stops, because the cartridge's manifest (`imsmanifest.xml`, the file that lists a cartridge's pages and their order) needs two things only you can supply, and writes `project-sample.yaml`.
 
 **2. Fill in the two required settings and rename.** Open
 `project-sample.yaml`, set `identifier` and `title` near the top, then:
@@ -42,14 +41,7 @@ writes `project-sample.yaml`.
 mv project-sample.yaml project.yaml
 ```
 
-Every project setting is in that file at its current value with a sentence
-explaining it, so this is also how you find out what can be configured.
-The run prints the commands that write the other two samples, below.
-Edit the line that's already there rather than adding another — the file
-is complete, so a second copy of a key would discard the first. (The tools
-refuse that rather than let it happen.) Delete any line you're happy to
-leave at its default; they fill it back in. Renaming it never loses anything you had already set — that's
-asserted by a test, not by care.
+Every project setting is in that file at its current value with a sentence explaining it, so this is also how you find out what can be configured. Edit the line that's already there rather than adding another: the file is complete, so a second line for a setting would contradict the first, and the tools refuse a file that sets one twice rather than choose. Delete any line you're happy to leave at its default; a setting the file leaves out takes its default, and the next sample lists it again. A sample is written from your own file's values, so renaming one over a `project.yaml` you already have never loses anything you had set; that's asserted by a test, not by care. The run also prints the commands that write the other two samples, [below](#changing-how-conversion-or-packaging-works).
 
 `identifier` is worth a moment's thought. Brightspace matches on it when
 re-importing, so changing it later duplicates a course rather than
@@ -86,34 +78,17 @@ value your file already gives it or else the default. Rename it to
 | `conversion.yaml` | How documents become pages. | `read-conversion-config.py -d . --init` (`conversion-sample.yaml`) |
 | `packaging.yaml` | How pages become an archive. | `build-cartridge.py -d . --init` (`packaging-sample.yaml`) |
 
-`conversion.yaml` and `packaging.yaml` are optional: every setting in them
-has a default. `project.yaml` names the book for both halves, the
-cartridge and an EPUB or a PDF alike. A `project:` block in
-`packaging.yaml` or `conversion.yaml` names the book for that file's half
-alone, which is enough for a book that uses one half; files that describe
-the book differently stop the run. [Configuration](configuration.md#where-the-book-is-named)
-has the detail.
+`conversion.yaml` and `packaging.yaml` are optional: every setting in them has a default. `project.yaml` names the book for both halves of the work, conversion (the pages, and an EPUB or a PDF) and packaging (the cartridge). A `project:` block in `packaging.yaml` or `conversion.yaml` names the book for that file's half alone, which is enough for a book that uses one half; files that describe the book differently stop the run. [Configuration](configuration.md#where-the-book-is-named) has the detail.
 
 ### Notes
 
-`convert.py` finds its filters, schemas, and the shared library by path
-relative to itself, so the tools can stay where you cloned them. There's
-no install step.
+`convert.py` finds its filters, schemas, and the shared library by path relative to itself, so the tools can stay where you unpacked or cloned them. There's no install step.
 
-Run each script with the interpreter that matches it: `bash` for
-`convert.py`, `python3` for anything ending in `.py`. Running a Python
-script with `bash` produces a confusing pile of `import: command not
-found`. The scripts do carry shebangs, so if the executable bit survived
-however you obtained them, `./bin/convert.py` works too — but it doesn't
-survive a commit made through GitHub's web interface, so the explicit form
-is what this document uses throughout.
+Run the scripts with `python3`, as these pages do. Everything in `bin/` and `util/` is Python; the one shell script is `tests/run-all.sh`, which runs the test suites. Running a Python script with `bash` produces a confusing pile of `import: command not found`. The scripts carry a first line that names their interpreter and are marked executable in a release archive and in a clone, so `$T/bin/convert.py` works there too, but the mark doesn't survive every way of copying files (a commit made through GitHub's web interface drops it), so the `python3` form is what these pages use throughout.
 
-`convert.py` passes any arguments straight through to `build-cartridge.py`,
-so `--zip`, `--check`, `--toc` and `--include-all-html` all work on the front
-script.
+`convert.py` passes any option it doesn't take itself on to `build-cartridge.py`, the packager, so `--zip`, `--check`, `--toc`, and `--include-all-html` all work on `convert.py`.
 
-Work on the Linux filesystem, not under `/mnt/c` or `/mnt/h`. See
-[Converting on a cloud-synced drive](troubleshooting.md#converting-on-a-cloud-synced-drive).
+Under WSL, keep the book on the Linux filesystem, in your home directory, not on a Windows or cloud-synced drive under `/mnt/c` or `/mnt/h`. See [Converting on a cloud-synced drive](troubleshooting.md#converting-on-a-cloud-synced-drive).
 
 ## A book that arrives as an archive
 
@@ -121,7 +96,7 @@ A book often comes packed: a `.zip` of its Word or Markdown files, a course expo
 
 - **A `.zip`** is extracted, and if it holds pages a browser saved, they're unpacked as `unpack-site.py` unpacks a browser's save. The folders that wrap everything are dropped, however many there are (an OpenStax DOCX download has two: `Book_-_DOCX_Customization/book/…`), so the sources land at the top, where `convert.py` looks for them; macOS's `__MACOSX` and `.DS_Store` are left out; and an entry that would land outside the directory is refused, and listed in `unpack-report.csv`. A zip is known by its name, since a Word file, a slide deck, and an EPUB are zips too, and one with no sources at its top stops the run with a list of what it holds.
 - **A Common Cartridge** is unpacked as [A course cartridge as the source](cartridge-input.md) describes.
-- **A WARC or WACZ** is unpacked as [Making WARCs](making-warcs.md) describes.
+- **A WARC or WACZ**, a website as a crawler recorded it, is unpacked as [A book saved from the web](site-input.md) describes; [Making a WARC](making-warcs.md) says how to record one.
 
 From then on the unpacked files are the book: correct them, not the archive, which later runs don't read again. A `project.yaml` or `conversion.yaml` already in the directory is kept, and the archive's is written beside it (`project-unpacked.yaml`, `conversion-unpacked.yaml`). One archive makes one book, so two in a directory stop the run, except several WARCs of one site, which are read together.
 
@@ -147,7 +122,8 @@ python3 $T/bin/convert.py
 #    project.yaml and run step 2 again.)
 mv project-sample.yaml project.yaml
 
-# 4. Work through the reports, appending rows to the sidecar files.
+# 4. Work through the reports: fill in a report's rows and append them
+#    to its sidecar file (image-alt-missing.csv to image-alt.csv, say).
 #    Re-run after each pass; the reports shrink.
 python3 $T/bin/convert.py
 
@@ -155,9 +131,7 @@ python3 $T/bin/convert.py
 python3 $T/bin/convert.py --zip
 ```
 
-Steps 4 and 5 are the loop you will spend the most time in. Everything else
-is done once per book. A page left out of `contents` later on is placed
-in the chapter its name gives with `--include-all-html`.
+Steps 4 and 5 are the loop you will spend the most time in, and [Sidecars and reports](sidecars.md) says what each report wants and which sidecar its rows go in. Everything else is done once per book. A page left out of `contents` later on is placed in the chapter its name gives with `--include-all-html`.
 
 The sample written in step 2 is complete: every project setting appears at
 its current value with a comment explaining it, so renaming it over your
@@ -185,23 +159,15 @@ html/toc.html                         only with a `generate: toc` entry in conte
 html/notes.html                       only with notes.placement set to book
 ```
 
-The source can be `.docx` or `.md`, one page each, in any mix. A page you
-wrote yourself, an `.html` beside the sources with no source of its own,
-is copied into `html/` as it stands, with the files it links, and appears
-in the EPUB and the cartridge like any other page. A file named
-`<stem>.<target>.md` (or `.docx`, `.html`) replaces `<stem>` for that
-target alone; see [Editions](configuration.md#editions).
+In the listing, `html/` is the directory of the `html` target, the one a run has when no configuration declares any, and each other target declared writes into a directory of its own (`epub/`, `src/`). The `.json` files are the intermediates: each page as Pandoc read it, and again after the filter, the program that does the accessibility work on a page, has run.
+
+The sources can be Word (`.docx`), Markdown (`.md`), AsciiDoc (`.adoc`), or HTML (`.html`) files, one page each, in any mix, or a LaTeX book ([Formats](formats.md)). An `.html` file beside the sources is a source like the others. A page you finished by hand and want left as it is goes in the pass-through directory, `_pt/`: it's copied into `html/` as it stands, with the files it links, and appears in the EPUB and the cartridge like any other page ([HTML sources](html.md)). A file named `<page>.<target>.md` (or `.docx`, `.html`) replaces that page for that target alone; see [Editions](configuration.md#editions).
 
 A page's name is its source's name made safe for a link: `01 BigPicture.md`
 is the page `01-BigPicture`. The names of pages cut from a source are the
 source's name and the heading's; `page-names.csv` renames them.
 
-The intermediates are Pandoc's own document model as JSON, which is
-lossless where Markdown wasn't. The first is the source as Pandoc read it;
-the second is what the filter made of it, and it's what every output
-format is rendered from, so a table that looks wrong on the page can be
-checked there before suspecting the writer. Neither is meant to be read
-directly, but neither is opaque:
+The intermediates are in Pandoc's own document format, as JSON, which keeps everything Pandoc read (version 0.1 kept a page as Markdown between its steps, which lost some of it). The first is the source as Pandoc read it; the second is what the filter made of it, and it's what every output format is written from, so a table that looks wrong on the page can be checked there before suspecting the step that writes the page. Neither is meant to be read directly, but neither is opaque:
 
 ```bash
 pandoc -f json -t markdown 1-3-levels-of-measurement.filtered.json | less
@@ -209,10 +175,7 @@ pandoc -f json -t markdown 1-3-levels-of-measurement.filtered.json | less
 
 Deleting the `.json` files costs nothing; the next run regenerates them.
 
-An `.md` file with the same name as a `.docx` is what v0.1 left behind;
-it's named on stderr and otherwise ignored. So are pages an earlier
-version wrote beside the sources, which now go to `html/`. This script
-won't delete files you may want.
+An `.md` file with the same name as a `.docx` is what version 0.1 left behind; the run names it and otherwise ignores it. So are pages a version before 0.5 wrote beside the sources, which now go to `html/`. The run won't delete files you may want.
 
 ## Exit codes
 

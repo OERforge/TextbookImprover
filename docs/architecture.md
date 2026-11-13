@@ -1,6 +1,6 @@
 # How it works
 
-The pieces, what each one does to a page, and how to run the central filter on its own.
+The pieces, what each one does to a page, and how to run the central filter on its own. This page is for someone who wants to know what's inside, or to change it; using the tools needs none of it. The tables of files are dense, and lean on words [Terms these pages use](glossary.md) explains: a target, an intermediate, a sidecar, a `source` target's copy, a deck.
 
 ## The pieces
 
@@ -18,7 +18,8 @@ on another `bin/` script.
 
 | File | What it does |
 |---|---|
-| `convert.py` | Runs the pipeline: each source (`.docx` through a repaired copy, `.md` as it is) → JSON → filtered JSON → (split) → every target's output, then hands off to the packaging side. Every setting comes from `conversion.yaml` through the schema. |
+| `convert.py` | Runs the pipeline: each source read by Pandoc into JSON (a `.docx`, an `.html`, and a LaTeX book each through a repaired copy, the author's file untouched) → filtered JSON → (split into a page per heading, when asked) → every target's output, then hands off to the packaging side. Every setting comes from `conversion.yaml` through the schema. |
+| `table-headers.py` | The table-headers pre-pass: runs on the DOCX before Pandoc, reads `table-headers.csv`, guesses where every other table's headers are, and writes the report. |
 | `figures-and-tables.lua` | Pandoc filter doing the accessibility work on each page. |
 | `media-extensions.lua` | Pandoc filter naming extracted images by their real content type. |
 | `safe-media.lua` | Rewrites a page's local media references at render time to names that need no encoding in a link, matching what `convert.py` copies beside the page, and in lowercase with `media.lowercase`, for a Markdown or AsciiDoc copy too. |
@@ -113,7 +114,6 @@ on another `bin/` script.
 | File | What it does |
 |---|---|
 | `build-cartridge.py` | Builds `imsmanifest.xml` and, optionally, the `.imscc` archive. |
-| `table-headers.py` | The table-headers pre-pass: runs on the DOCX before Pandoc, reads `table-headers.csv`, guesses where every other table's headers are, and writes the report. |
 | `validate-manifest.py` | Checks a manifest against the Common Cartridge 1.1 schemas. Run automatically. |
 | `schema-packaging.yaml` | Declares every packaging setting. |
 
@@ -160,12 +160,12 @@ how it's updated.
 | `slim-corpus.py` | A copy of a Word corpus with each file's document part alone, for the census. |
 | `make-import-tests.py` | Three cartridges differing in one way each, to see what an LMS does on re-import. |
 
-**`tests/`** holds the configuration conformance fixtures and the two test
-runners. See [Testing](testing.md).
+**`tests/`** holds the test suites, the small books and decks they convert,
+and `run-all.sh`, which runs them all. See [Testing](testing.md).
 
 ## What conversion does to your pages
 
-Beyond the Word-to-HTML translation, each page gets:
+Pandoc turns a source into a page; the filter and the steps around it then make these changes to each page. Most were first needed for Word files, which the examples show, and each is made to a page from any kind of source it applies to.
 
 - **Layout tables become figures.** Word positions images with a one-cell
   table and puts the caption in a paragraph underneath. That produces a
@@ -256,9 +256,10 @@ Beyond the Word-to-HTML translation, each page gets:
 - **Media files are renamed to match their real content type.** Word stores
   images with whatever extension the DOCX declares, often `.so` from a
   content type of `application/octet-stream`.
-- **Equation images** whose alt text is MathSpeak get their spelled-out
-  identifiers rejoined, so a screen reader says "Customer Lifetime Value"
-  rather than "upper C u s t o m e r".
+- **Equation images** whose alt text is written in MathSpeak, a set of
+  rules for speaking a formula in words, which spells a name out a letter
+  at a time, get the letters joined again, so a screen reader says
+  "Customer Lifetime Value" rather than "upper C u s t o m e r".
 - **Caption contrast** is set to `#555`, which measures 7.33:1 against
   Pandoc's `#fdfdfd` background. The widely quoted `#767676` is only
   4.47:1 there, because it's computed against pure white. In dark mode,
@@ -304,6 +305,8 @@ environment, which is how `convert.py` passes settings from
 | `FIGURE_LABEL_PREFIXES` | `Figure` | The same for figures |
 | `TABLE_MARKERS` | `matrix=both,row-headers=first-column` | What a fenced div's class declares about a Markdown table's headers |
 
+These are the ones most useful by hand; the filter reads a dozen more, which `grep getenv bin/figures-and-tables.lua` lists with their defaults.
+
 The `*_MISSING`, `SPACER_LOG`, and `IDS_RENAMED` files are appended to,
 not truncated, and carry no header row — `convert.py` collects them across
 a whole run, sorts and deduplicates, then writes the header. Point them at
@@ -317,5 +320,5 @@ TABLE_CAPTIONS_MISSING=/tmp/rows.csv SPACER_BELOW=0.3in \
 
 There's also one toggle near the top of the filter that isn't exposed
 through the config, because no book has yet needed it to differ:
-`NORMALIZE_MATH_ALT`, which rejoins MathSpeak identifiers. Responsive
+`NORMALIZE_MATH_ALT`, which joins the spelled-out letters of an equation image's alt text. Responsive
 images used to sit beside it and are now the `images.responsive` setting.

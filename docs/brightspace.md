@@ -1,7 +1,6 @@
 # How Brightspace treats an imported cartridge
 
-Worth knowing before you import anything twice, because the behavior is
-not what most people assume and one option is destructive.
+What Brightspace, D2L's learning management system, does with a Common Cartridge (the `.imscc` file [the packager](packaging.md) builds) when it's imported, and when it's imported again. Worth knowing before you import anything twice, because the behavior is not what most people assume and one option is destructive.
 
 Everything below was measured in Brightspace, and where noted confirmed
 by D2L. Another LMS may do the same things — nothing here depends on a
@@ -12,9 +11,9 @@ own LMS.
 **Structure is never merged; it's appended.** Importing a cartridge a
 second time doesn't update the modules already in the course. It adds
 another copy of the whole tree. That is why the pages are wrapped in one
-module by default: a re-import then leaves one module to remove rather
-than one per chapter, and in Brightspace modules are deleted one at a
-time.
+module by default (`organization.wrap_in_module` in `packaging.yaml`): a
+re-import then leaves one module to remove rather than one per chapter,
+and in Brightspace modules are deleted one at a time.
 
 **There's one file per path, shared by everything that points at it.**
 Two modules showing the same page are two references to one file, not two
@@ -28,8 +27,9 @@ So after re-importing a book, removing the older module with *Permanently
 delete* empties the newer one too — its structure stays and its pages go
 blank, with nothing to indicate why. Use *Remove from Content* for cleanup
 after a re-import. *Permanently delete* is right only when removing a book
-from the course, and the content prefix is what stops it reaching another
-book's files.
+from the course, and [the content prefix](#the-content-prefix), the one
+folder a package keeps all of a book's files in, is what stops it reaching
+another book's files.
 
 **Deleting a module doesn't reclaim its images.** Measured in
 Brightspace: *Permanently delete* removes the file a topic **is** and
@@ -69,7 +69,8 @@ owned, so this is something to know rather than something to fix. It's
 also a second argument for the content prefix: the leftovers sit in one
 named directory you can find and clear in Manage Files, rather than
 scattered among everything else at the course root. Expect to do that by
-hand after removing a book, and expect the one-time migration to leave the
+hand after removing a book, and expect [moving an existing course to
+prefixed paths](#moving-an-existing-course-to-prefixed-paths) to leave the
 old, unprefixed images behind when the old module goes.
 
 **An href is taken literally.** A cartridge's manifest names its files
@@ -91,7 +92,7 @@ match, so nothing in the archive needs encoding. If you build a
 cartridge by hand or from pages the pipeline did not name, keep every
 file name to letters, digits, `.`, `_`, and `-`. There is no way to
 make Brightspace decode an href, and it is not obvious that it should
-have to; a report has been drafted for D2L.
+have to. Not reported to D2L as of 2026-11-13.
 
 ### The content prefix
 

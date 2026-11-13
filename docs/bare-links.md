@@ -4,7 +4,7 @@ A bare link is one whose text is its own address, as in a reference list:
 
     Seidel, G. E. 2014. "Update on Sexed Semen Technology in Cattle." Animal 8:160-64. https://doi.org/10.1017/S1751731114000202.
 
-A screen reader reads the whole address aloud, and the statistics textbook's longest runs to 132 characters. This page is about what a book can do about that, and why the pipeline offers what it does.
+A screen reader reads the whole address aloud, and the longest in the statistics textbook, OpenStax's *Introductory Business Statistics 2e*, runs to 132 characters. This page is about what a book can do about that, and why the pipeline offers what it does.
 
 ## What the pipeline does
 

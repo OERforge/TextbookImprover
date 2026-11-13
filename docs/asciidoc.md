@@ -4,7 +4,7 @@ An `.adoc` file beside the sources is a page of the book, read with Pandoc's Asc
 
 - **`imagesdir` is applied.** `image::hats.png[]` under `:imagesdir: images` names `images/hats.png`. A chapter that sets none takes its master file's.
 - **A chapter's `=` line is its title** and its `==` sections become `h2`, so a page has one `h1`. Asciidoctor's own settings (`:toc:`, `:icons:`, `:stylesheet:`, `:sectnums:`) are dropped from the metadata, where Pandoc's template would read `toc` as a switch.
-- **Cross-references land.** `<<Unix File Permissions>>` names a section by its title and `<<Malware>>` a chapter by its title; Asciidoctor resolves both, the reader leaves the title as the fragment. After reading, each goes to the heading, or the page, that holds it, on whichever chapter that is, when exactly one does. On the security textbook this resolved 22 references, plus the references to whole chapters.
+- **Cross-references land.** `<<Unix File Permissions>>` names a section by its title and `<<Malware>>` a chapter by its title; Asciidoctor resolves both, the reader leaves the title as the fragment. After reading, each goes to the heading, or the page, that holds it, on whichever chapter that is, when exactly one does. On the security textbook, a book written in AsciiDoc that this page's numbers come from ([the books these pages measure on](glossary.md#the-books-these-pages-measure-on)), this resolved 22 references, plus the references to whole chapters.
 - **Links are repaired.** `mailto:someone@example.org[Name]` gets back the `mailto:` the reader drops, and a code span holding a URL scheme (`` `ftp://` ``), which the reader wraps in a link, is just code again.
 
 ## A master file
@@ -48,4 +48,4 @@ Some things have no form that reads back, and the target changes them and says s
 
 One disagreement isn't handled: a list item holding other lists and continued paragraphs can come back with one of its lists at a different depth. On the statistics book that's one list of 169 pages.
 
-Measured by converting each book to HTML and to AsciiDoc, converting the AsciiDoc, and comparing the two HTML runs with `compare-output.py`: the security textbook gives 14 of 14 pages identical, *Introductory Business Statistics* (from Word) 166 of 169, the economics textbook (from Markdown) 31 of 34, and DCIC (from HTML) 74 of 80, the differences being the cases above.
+Measured by converting each book to HTML and to AsciiDoc, converting the AsciiDoc, and comparing the two HTML runs with `compare-output.py`: the security textbook gives 14 of 14 pages identical, *Introductory Business Statistics* (from Word) 166 of 169, the economics textbook (from Markdown) 31 of 34, and *A Data-Centric Introduction to Computing* (DCIC, from HTML) 74 of 80, the differences being the cases above.

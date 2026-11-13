@@ -10,6 +10,8 @@ Every source format the pipeline reads, the ways a book in that format can arriv
 - **NOT YET IMPLEMENTED**: an output the configuration names but nothing produces yet. A target declaring it is skipped with a warning. None is, now.
 - **Not available**: an output no one has planned.
 
+The books a rating rests on are named in short on this page and the others: the statistics book, the economics book, DCIC, GIAM. [The books these pages measure on](glossary.md#the-books-these-pages-measure-on) says what each one is, and [Terms these pages use](glossary.md) explains the other words used here as though known: a target, a sidecar, a `source` target's copy, a round trip.
+
 Testing with assistive technology has been limited. Where these pages say how a screen reader reads an output, that's NVDA, mostly in Chrome and in Acrobat, with a few things tried in Firefox, and NVDA and Narrator in Word and PowerPoint. Other screen readers (JAWS, VoiceOver, TalkBack, Orca) and other browsers and readers have had little testing or none, and reports of how the outputs work in them are welcome.
 
 ## At a glance

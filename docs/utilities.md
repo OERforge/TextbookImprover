@@ -1,6 +1,6 @@
 # Utilities
 
-Tools in `util/` that aren't part of a conversion but help before or around one: surveying a corpus, checking a source, comparing two runs.
+Tools in `util/` that aren't part of a conversion but help before or around one: surveying a corpus (a collection of books), checking a source, comparing two runs. In the commands below, `T` is the directory the tools are in ([Installation](installation.md#getting-the-tools)).
 
 | Tool | Purpose |
 | --- | --- |
@@ -30,12 +30,12 @@ Each takes `--help`. The census and sample tools read Word files directly and ne
 
 ## Repairing heading styles in the source
 
-Pandoc's DOCX reader reads `Heading 1` through `Heading 9` as headings and nothing else. A book whose top level is styled `Title` loses it on the way in: the first `Title` paragraph becomes the document's metadata title and every later one becomes a plain paragraph, so the page split, the contents guess, and the EPUB's table of contents all see sections with no chapters over them. The all-in-one programming text in the corpus is exactly that, and its own table-of-contents field says so: `TOC \h \z \t "Heading 1,2,Heading 2,3,...,Title,1"`.
+Pandoc's DOCX reader reads `Heading 1` through `Heading 9` as headings and nothing else. A book whose top level is styled `Title` loses it on the way in: the first `Title` paragraph becomes the document's metadata title and every later one becomes a plain paragraph, so the page split, the contents guess, and the EPUB's table of contents all see sections with no chapters over them. The programming text in the test corpus, a whole book in one Word file, is exactly that, and its own table-of-contents field says so: `TOC \h \z \t "Heading 1,2,Heading 2,3,...,Title,1"`.
 
 ```bash
-python3 util/restyle-headings.py book.docx              # report the styles in use
-python3 util/restyle-headings.py book.docx --from-toc   # what the TOC field declares, and what would change
-python3 util/restyle-headings.py book.docx --from-toc -o book-restyled.docx
+python3 $T/util/restyle-headings.py book.docx              # report the styles in use
+python3 $T/util/restyle-headings.py book.docx --from-toc   # what the TOC field declares, and what would change
+python3 $T/util/restyle-headings.py book.docx --from-toc -o book-restyled.docx
 ```
 
 The same repair, decided once for a whole book, is the `word.headings` setting, which applies it to what the conversion reads and to a `source` target's copy ([Word](formats.md#word)); this tool is for one file by hand, and for looking first.
@@ -56,11 +56,13 @@ Restyling removes the `Title` paragraphs, so the converted pages take their titl
 `remediate.py` writes the decisions made about a Word source, or a hand-maintained HTML page, back into a copy of the file, so the author can go on working in their own file from an accessible one. What an HTML page gets is described under [Source](formats.md#source), apart from table captions, which only a run of `convert.py` writes, since they depend on which table the filter gave each description to; what follows is Word's. A target with `format: source` does the same in a run of `convert.py` ([Source](formats.md#source)). It edits the file's XML as text, changing only what it names; every part it doesn't change is copied byte for byte.
 
 ```sh
-table-headers.py *.docx --sidecar table-headers.csv --new new.csv \
+python3 $T/bin/table-headers.py *.docx --sidecar table-headers.csv --new new.csv \
     --report report.csv --resolved resolved.json
-remediate.py *.docx --resolved resolved.json \
+python3 $T/util/remediate.py *.docx --resolved resolved.json \
     --alt image-alt.csv --links bare-links.csv --out remediated
 ```
+
+The first command is the header pre-pass, run by hand: it works out each table's headers, from the sidecar or its own guess, and writes them to `resolved.json` for the second.
 
 - **Tables** get the header declaration from the sidecar, and a table with no sidecar row is left as it is: a guess written into the file would read back as the author's own declaration. `--include-guesses` writes the census's guess too, for trying it out. A header row becomes Word's repeating header row, with any title rows above it, since Word's header rows start at the top of a table. A header column becomes the table style's First Column flag. Either gets a bookmark naming the table's headers, `Title`, `ColumnTitle`, or `RowTitle`, the convention [Freedom Scientific documents for JAWS](https://doccenter.freedomscientific.com/doccenter/archives/training/samplefiles/usethebookmarkfeatureinwordfortableheaders-oldertechnique.htm). Each table is found by its position among the file's tables and changed only when its row count and first cell are what the pre-pass saw; any other is skipped and counted.
 - **Images** get their alt text from the image-alt sidecar, as the picture's description, and `[decorative]` gets Word's "Mark as decorative", with no description or title.
@@ -69,14 +71,14 @@ remediate.py *.docx --resolved resolved.json \
 - **Equations**, with `--repair-equations`, get the characters they mean, as `math.repair_equations` repairs them in the pipeline's pages ([Math](configuration.md#math)): an accent of the macron for a macron or en dash set over a letter, μ for the micro sign, a minus for an en dash, and the rest. An en dash in an equation's normal text is text, and stays. Math typed as text is made an equation only by a run of `convert.py`, since the places come from its filter.
 - **Compatibility mode 15** is set only with `--compat`.
 
-Measured on the statistics book's 169 Word files with `--include-guesses`, since the book has no table-headers sidecar: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
+Measured on the 169 Word files of the statistics book, OpenStax's *Introductory Business Statistics 2e*, with `--include-guesses`, since the book has no table-headers sidecar: 308 of its 332 data tables got header rows and 229 a header column, none was skipped, and the header pre-pass, run again on the copies, reads every one of the 332 as declared with the same value, from the file's own bookmarks. Only `word/document.xml` changed, and only in the 57 files that have tables; the others are the originals byte for byte. OpenStax's files fail Word's schema check on their own, mostly for a paragraph style out of place, and the copies fail it with exactly the same errors. What Word and screen readers do with the changes is documented, not tested here.
 
 Not yet: bands and table splits have no Word equivalent and are left alone, and anything the pipeline decides in the filter rather than a sidecar isn't written. Table captions a run of `convert.py` writes ([Source](formats.md#source)), since they depend on which table the filter gave each description to.
 
 A PowerPoint deck gets what a slides run's `source` target writes ([The copy](slides.md#the-copy)), from the sidecars named, its tables read straight from the table-headers sidecar by their keys:
 
 ```sh
-remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
+python3 $T/util/remediate.py *.pptx --alt image-alt.csv --table-headers table-headers.csv \
     --slide-titles slide-titles.csv --reading-order reading-order.csv \
     --links bare-links.csv --repair-equations --language en-US --out remediated
 ```
@@ -94,10 +96,10 @@ identical sentences.
 
 ```bash
 # Scan a directory. --check writes nothing, so -o is not needed.
-for f in *.docx; do python3 untrack-deletions.py "$f" --check; done
+for f in *.docx; do python3 $T/util/untrack-deletions.py "$f" --check; done
 
 # Repair one file.
-python3 untrack-deletions.py BC-14.docx -o BC-14-fixed.docx
+python3 $T/util/untrack-deletions.py BC-14.docx -o BC-14-fixed.docx
 ```
 
 The same repair, decided once for a whole book, is `word.tracked_deletions: strike`, which applies it to what the conversion reads and to a `source` target's copy; by default a run names each file with tracked deletions ([Word](formats.md#word)).

@@ -10,58 +10,27 @@ A page is named after its file, without the extension and made safe for a link, 
 
 ## Converting on a cloud-synced drive
 
-Both the rename and the reference rewrite in step 2 are checked after the
-fact rather than trusted. `mv` and `sed` report success as soon as the
-kernel accepts the write, which on a network or cloud-synced mount isn't
-the same as the change being visible to the next command. Each is retried
-once, and the run reports how often that was needed:
+A folder that Google Drive, OneDrive, or Dropbox syncs, reached from WSL under `/mnt/...`, can list a file whose contents haven't been downloaded yet. The run skips an empty `.docx` by name, saying that on a cloud-synced drive it's usually such a placeholder, and converts the book without that page, so look for the line. Such a drive can also be slow to show one program what another just wrote, and the symptoms are erratic: a run fails, the next run fails differently, the third succeeds. Version 0.1 checked each file it renamed and retried for that reason; the versions since write their files another way and have no such check.
 
-```
-Note: 3 media write(s) had to be retried before the change
-  was visible. That is a filesystem symptom, not a conversion one.
-```
-
-Any count above zero means the working directory isn't giving a
-consistent view of its own writes. A Google Drive, OneDrive or Dropbox
-folder mounted into WSL (`/mnt/h/...`) is the usual cause, and the
-symptoms are erratic: a run fails, the next run fails differently, the
-third succeeds. **Convert on the Linux filesystem** (`~/work`, not
-`/mnt/...`) and copy the finished `.imscc` back.
-
-If a write is lost twice, the run stops naming the exact file and
-operation rather than letting it surface later as a missing image.
+**Convert on the Linux filesystem** (a folder under your home directory, not `/mnt/...`) and copy the finished files back. A large book also converts noticeably faster there ([Installation](installation.md#on-windows-wsl-first)).
 
 ## Troubleshooting
 
-**`set: Illegal option -o pipefail`** — the script is running under dash.
-Use `bash convert.py` or `./convert.py`, not `sh convert.py`. It re-execs
-itself under bash, so this should only appear with a very old copy.
+**`import: command not found`, then syntax errors** — a Python script was run with `bash` or `sh` (where ImageMagick is installed, the first error is its `import` program's instead). Everything in `bin/` and `util/` is Python: `python3 $T/bin/convert.py`.
 
-**`\r: not found`, then syntax errors** — CRLF line endings from a Windows
-editor. `sed -i 's/\r$//' convert.py`, and set
-`git config --global core.autocrlf input`.
+**`/usr/bin/env: 'python3\r': No such file or directory`** — the script has Windows line endings (CRLF), as a file saved by a Windows editor has, or one checked out by Git for Windows with `core.autocrlf` on, and it was run by its own name. `python3 $T/bin/convert.py` runs it all the same. To put the file right, `sed -i 's/\r$//' convert.py`, and `git config --global core.autocrlf input` keeps a later checkout as the repository has it.
 
-**`couldn't unpack docx container`** — a file that isn't a DOCX. Word lock
-files (`~$Name.docx`), empty cloud placeholders and renamed `.doc` files
-are skipped by name, size and signature; anything else reaching Pandoc is
-genuinely malformed.
+**`couldn't unpack docx container`** — Pandoc was given a file that isn't a Word file. Three kinds are skipped before Pandoc sees them, each with a line saying so: the lock file Word writes while a document is open (`~$Name.docx`), an empty file (often a cloud drive's placeholder), and a file that isn't a zip, as an older `.doc` renamed to `.docx` isn't. Anything else that reaches Pandoc and fails this way is damaged.
 
-**`Stopping: N media reference(s) could not be resolved`** — see
-`media-unresolved.csv`. Usually EMF/WMF.
+**`Stopping: N media reference(s) could not be resolved`** — a page shows an image that isn't on disk or isn't in a format the run can identify; `media-unresolved.csv` names each one. Usually it's an EMF or WMF, Word's own vector formats, which no browser shows: [replace it in Word or convert it](architecture.md#what-conversion-does-to-your-pages).
 
-**A page appears in no report but looks wrong** — check
-`project-sample.yaml`. If a run worked out an ordering, the sample
-holds what it decided.
+**A page is in the wrong place in the book** — check `project-sample.yaml`. When a run worked out the book's order itself, the sample holds what it decided, for you to correct.
 
-**Keys like `page#table-3` don't match what you see** — the number counts
-data tables only, in reading order; image-only tables become figures and
-aren't counted. The `Excerpt` column identifies the row.
+**Keys like `page#table-3` don't match what you see** — in a table report or `table-captions.csv`, the number counts the page's data tables only, in reading order; a table that only holds an image becomes a figure and isn't counted. The `Excerpt` column identifies the table.
 
-**Reports keep listing things you fixed** — check the sidecar key. Table
-descriptions key on the label (`Table 2.1`) or a positional key; image alt
-keys on the media path ignoring its extension.
+**Reports keep listing things you fixed** — check the key in the sidecar's first column, which has to match the report's. A table's description is keyed on its label (`Table 2.1`), or on its position where it has none (`page#table-3`); an image's alt text is keyed on the image's path without its extension.
 
-**`WARNING: image-alt.csv wasn't UTF-8`** — Excel saved the sidecar as plain "CSV", in a code page, and the run rewrote it as UTF-8, keeping the file as it was beside it (`image-alt.csv.windows-1252`, say). Check the lines the warning shows: a character that isn't the one written means the code page was another. A run that stops instead, saying the sidecar `doesn't read as Windows-1252 (…) or as Mac OS Roman (…)`, has found one that was. Either way, you can save the file as "CSV UTF-8 (Comma delimited)" yourself; [A sidecar that isn't UTF-8](sidecars.md#a-sidecar-that-isnt-utf-8) has the steps.
+**`WARNING: image-alt.csv wasn't UTF-8`** — Excel saved the sidecar as plain "CSV", in a code page, and the run rewrote it as UTF-8, keeping the file as it was beside it (`image-alt.csv.windows-1252`, say). Check the lines the warning shows: a character that isn't the one written means the code page was another. A run that stops instead, saying the sidecar `doesn't read as Windows-1252 (…) or as Mac OS Roman (…)`, has found one that was. Either way, you can save the file as "CSV UTF-8 (Comma delimited)" yourself; [A sidecar that isn't UTF-8](sidecars.md#a-sidecar-that-isnt-utf-8) has the steps. ("The mark", below, is the byte-order mark: three bytes at the start of a UTF-8 file that tell Excel it is one.)
 
 **`WARNING: image-alt.csv isn't UTF-8: … but it can't be rewritten as UTF-8`** — the same, but the run couldn't rewrite the file, for the reason it gives: it belongs to another user, it's read-only or the user running the conversion may not write it, another name links to it, its folder can't be written, or it couldn't be written at all, as when Excel has it open on Windows. If it says `isn't rewritten` instead, the file belongs to another user, and that alone keeps the run from rewriting it, as nothing would were it yours: rewritten, it would be yours, not its owner's. Either way, the run read it in its code page all the same and left it as it was. Do what the warning's last line says and run again: make it writable, give that user permission to write it, close Excel, or, for another user's file, replace it with a copy of your own that keeps its mode (`cp -p image-alt.csv mine.csv`, then `mv -f mine.csv image-alt.csv`) or ask its owner to save it as UTF-8 with the mark ([One the run can't change, or can't read](sidecars.md#sidecar-files)); in a folder with the sticky bit that isn't yours, which won't let you replace another user's file, the warning says only to ask its owner. Don't have its owner, or root, run the conversion instead: the book's outputs would be theirs. Or save the file as "CSV UTF-8 (Comma delimited)" yourself. A file in UTF-8 that only lacks the mark gets the same treatment, `has no byte-order mark, … and can't be given one` (or `isn't given one`), as a note when it holds nothing outside ASCII, which reads the same either way, but for another user's that nothing but whose it is keeps from the mark, which is a warning whatever it holds.
 
@@ -77,13 +46,8 @@ keys on the media path ignoring its extension.
   the source (in Word, or as `<th>` cells in an HTML page), where it benefits
   every downstream format. Where the header text is
   there and only unmarked, a value in `table-headers.csv` is enough.
-- **Equation images stay images.** Rejoining MathSpeak identifiers is a
-  mitigation. The real fix is authoring them as equations in the source (a
-  Word equation, TeX math in LaTeX or Markdown, MathML in an HTML page),
-  which convert to MathML.
-- **Identical files in different media directories are separate files.**
-  Each page gets its own copy from Word. Content-level deduplication would
-  require rewriting page markup, which would break the read-only guarantee.
+- **Equation images stay images.** A formula that's a picture is read by its alt text, however good. Where that alt text spells a name out a letter at a time ("upper C u s t o m e r", as alt text written in MathSpeak does), the conversion joins the letters again, which is a mitigation. The real fix is writing the formula as an equation in the source (a Word equation, TeX math in LaTeX or Markdown, MathML in an HTML page), which converts to MathML.
+- **Identical files in different media directories are separate files.** Each page gets its own copy of an image from its Word file. Keeping one copy for all would mean the packager rewriting the pages' references, and it's built never to change a page ([Building the cartridge](packaging.md)).
 - **Cross-page links aren't rewritten** for the LMS's internal link
   format, so links between sections may not resolve after import.
 - **Strikethrough conveys meaning visually.** A screen reader may not
@@ -91,7 +55,7 @@ keys on the media path ignoring its extension.
   column heading or caption.
 - **Complex tables are reported, not fixed.** A table with stacked column
   headers, or with a header row and a header column, needs `headers`/`id`
-  associations that no current setting can express. See the roadmap.
+  associations that no current setting can express. See the [roadmap](../ROADMAP.md).
 - **Word's "Mark as layout table" doesn't mark anything.** Word's
   Accessibility Checker flags a table with no header row and offers
   "Mark as layout table" as the fix. Taking that offer removes the
@@ -111,7 +75,9 @@ keys on the media path ignoring its extension.
   remediated copy of the Word file can't hold it either. A box of one
   cell with no caption is a layout table already.
 - **Two PAC errors on a tagged PDF are the validator's, not the file's.**
-  They're worth recognizing rather than chasing. *Table header cell has no
+  [PAC](https://pac.pdf-accessibility.org), the PDF Accessibility Checker,
+  is a free Windows program from axes4 that checks a PDF against
+  PDF/UA-1. The two are worth recognizing rather than chasing. *Table header cell has no
   associated subcells* is raised because `latex-lab` sets `Scope` through
   an attribute class and PAC doesn't resolve `/ClassMap` references:
   rewriting the same value as an inline `/A` dictionary makes PAC pass
@@ -137,7 +103,7 @@ keys on the media path ignoring its extension.
   names each member after the path it read, so it can't place files under
   a directory. Use `--zip`; the file list says so in its header when a
   prefix is in effect.
-- **`compare-output.py` matches tables by position**, so inserting one
+- **`util/compare-output.py` matches tables by position**, so inserting one
   table reports every later table on that page as changed. It also flags a
   `.docx` and its `.json` intermediate as a duplicated filename, which is
   noise rather than a finding.

@@ -1,6 +1,23 @@
 # Sidecars and reports
 
-A run writes reports naming what still needs a person, and reads sidecar files holding what a person decided. Reports are regenerated every run and live beside the book; sidecars are read, and written only to make each one UTF-8 with the byte-order mark (one Excel saved in a code page rewritten as UTF-8, one without the mark given it), and hold the only thing in the pipeline no script can reproduce.
+A run writes reports naming what still needs a person, and reads sidecar files holding what a person decided. Both are CSV files in the book's directory, which a spreadsheet opens. Reports are regenerated every run; sidecars are read, and written only to make each one UTF-8 with the byte-order mark (one Excel saved in a code page rewritten as UTF-8, one without the mark given it), and hold the only thing in the pipeline no script can reproduce.
+
+## In brief
+
+The work goes in a loop: a run writes a report, you fill in its rows, you append them to the sidecar the report is for, and the next run applies them and reports what's left. A book with no sidecars yet converts all the same: nothing has been decided for it, and the reports say what there is to decide.
+
+| Sidecar | Holds | Its rows come from | Described |
+|---|---|---|---|
+| `image-alt.csv` | Alt text for an image, or that it's decorative | `image-alt-missing.csv` | [Sidecar files](#sidecar-files) |
+| `table-captions.csv` | A description for a table that has none | `table-captions-missing.csv` | [Sidecar files](#sidecar-files) |
+| `table-headers.csv` | Which cells of a table are its headers, or that it's a layout table | `table-headers-new.csv`, with the run's guess filled in | [Sidecar files](#sidecar-files) |
+| `bare-links.csv` | What to do with a link whose text is its address | `bare-links-new.csv` | [Bare links](bare-links.md) |
+| `math-keep.csv` | Math the repairs should leave as it was | `math-repaired.csv` | [Math kept as it was](#math-kept-as-it-was) |
+| `languages.csv` | A page's language, where it isn't the book's | `languages-new.csv` | [A page's language](#a-pages-language) |
+| `page-names.csv` | The name of a page cut from a longer source | `page-names-new.csv` | [Naming the pages](splitting.md#naming-the-pages) |
+| `slide-titles.csv`, `reading-order.csv` | A deck's slide titles and the order its slides are read in | `slide-titles-new.csv`, `reading-order-new.csv` | [Slides](slides.md#the-reports-and-the-sidecars) |
+
+The sections below take the less common sidecars first. [Reports](#reports) lists every report, and [Sidecar files](#sidecar-files) has the three most books need, after what applies to all of them: opening one in a spreadsheet, and what the run does with one it can't read or change.
 
 ## Bare links
 
@@ -85,7 +102,7 @@ A drafted value is used whether or not it's been reviewed, as the table-header g
 
 ### Sidecar files
 
-`image-alt.csv`, `table-captions.csv`, `table-headers.csv`, `page-names.csv`, and `languages.csv` hold your corrections. All five are plain CSV, read afresh each run, and survive re-conversion from updated Word files. `page-names.csv` is read only when `pages.split_level` is on; see [Splitting pages](splitting.md).
+The sidecars hold your corrections. Each is plain CSV, read afresh each run, and survives re-conversion from updated sources. This section says what's true of every sidecar, and then describes `table-headers.csv`, `image-alt.csv`, and `table-captions.csv`; the others are described where [In brief](#in-brief) says. `page-names.csv` is read only when `pages.split_level` is on; see [Splitting pages](splitting.md).
 
 **In a spreadsheet.** Every report starts with a UTF-8 byte-order mark, and so does every file of rows written to become a sidecar (`table-headers-sample.csv`, the CNX unpacker's `table-captions.csv`). Excel opens a UTF-8 CSV with the mark normally, as Microsoft documents ([Opening CSV UTF-8 files correctly in Excel](https://support.microsoft.com/en-us/excel/opening-csv-utf-8-files-correctly-in-excel)); one without it, it reads in the computer's code page, Windows-1252 in the US, where an en dash shows as "â€“" and a minus sign as "âˆ’", as a sidecar written without the mark showed. To keep a sidecar's characters when you save it from Excel, choose "CSV UTF-8 (Comma delimited)", which by many accounts writes the mark, not plain "CSV", which saves in the code page; neither is tried here. A sidecar is read with the mark or without it, at the file's start and at the start of any line, where appending a report to a sidecar, its header row and all, leaves one; and the header row appended with it is skipped wherever it is. Every sidecar is made UTF-8 with the mark, by the run and by the tools that read a sidecar on their own, so that each is read and written alike. One without the mark is given it, and nothing else in it changes, the run saying so. One of ASCII alone reads the same either way and gets it all the same, so that a script reading sidecars finds the mark in each from the start, not in one that comes to hold a character outside ASCII later: read them as `utf-8-sig`, which drops it. One that holds a character outside ASCII gets it so that Excel opens it with its characters, not "Ã©" for "é", which saved from Excel again would become the sidecar's text. For such a file, the run shows its lines outside ASCII as they read: a file Excel saved in a code page can happen to read as UTF-8 ("Gauß’s" in Windows-1252 reads as "Gauߒs"), and with the mark Excel shows it so too, so put such a character right in Excel. One Excel saved as plain "CSV" is rewritten as UTF-8 by the run ([A sidecar that isn't UTF-8](#a-sidecar-that-isnt-utf-8), below).
 

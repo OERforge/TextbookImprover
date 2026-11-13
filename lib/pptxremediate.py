@@ -1245,12 +1245,17 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
         infos = zin.infolist()
         parts = {info.filename: zin.read(info.filename) for info in infos}
         # Each layout's master, which a heading made a title in place
-        # inherits from, as its layout does.
-        masters = {}
+        # inherits from, as its layout does, and each master's theme, which
+        # a heading styled by the theme refers to.
+        masters, themes = {}, {}
         for slide in parsed.slides:
             if slide.layout_part and slide.layout_part not in masters:
                 masters[slide.layout_part] = pptxparse.rel_target(
                     pptxparse.relationships(zin, slide.layout_part), "slideMaster")
+                master = masters[slide.layout_part]
+                if master and master not in themes and master in parts:
+                    themes[master] = pptxparse.rel_target(
+                        pptxparse.relationships(zin, master), "theme")
     texts, encodings = {}, {}
 
     def text_of(part):
@@ -1410,10 +1415,11 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
                 # made the title in place; else a title above the slide.
                 shape, added = pptxtitle.heading_for(slide, title)
                 if shape is not None and shape.id not in repeated:
+                    master = masters.get(slide.layout_part)
                     xml, n = pptxtitle.set_as_title(
                         text_of(part), shape.id, *[text_of(p) if p in parts else None for p in (
-                            slide.layout_part, masters.get(slide.layout_part),
-                            parsed.presentation_part)])
+                            slide.layout_part, master, parsed.presentation_part,
+                            themes.get(master))])
                     if n and added:
                         xml, n = retitle_shape(xml, shape.id, pptxtitle.collapsed(shape.text),
                                                title)

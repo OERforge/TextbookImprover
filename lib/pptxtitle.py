@@ -40,9 +40,22 @@ in LibreOffice as they had, pixel for pixel, but for those whose title had
 a number added, and a text box LibreOffice now reads as a frame and not a
 shape.
 
+A shape PowerPoint draws takes its fill, outline, effects, fonts, and
+text color from the theme's styles (p:style), which a title placeholder's
+inherited fill and outline, and the master's title style, would come
+before. Made a title by PowerPoint, such a shape kept its p:style and had
+the theme's entries it refers to written out as its own fill, outline, and
+effects, and its fonts and color on every run (theme_style()); this writes
+them so too, the fonts and color into its list style. On the slide
+PowerPoint converted, the shape's fill, outline, and effects came out as
+PowerPoint wrote them, element for element, every run as PowerPoint's,
+and in LibreOffice the slide rendered as PowerPoint's did, pixel for
+pixel. A deck whose master has no theme, or a style the theme hasn't the
+entries for, leaves the shape as it is.
+
 The XML is edited as text, never parsed and written again: the elements
-copied from a layout, a master, or the presentation are copied as they're
-written there.
+copied from a layout, a master, the presentation, or the theme are copied
+as they're written there.
 
 Copyright 2026 Robert Szarka
 
@@ -402,6 +415,111 @@ def _sppr(xml, start):
     return Props.read(xml, span[0], S_GROUPS) if span else Props()
 
 
+# --------------------------------------------------------------------------
+# A shape's look from the theme's styles (p:style)
+#
+# A shape PowerPoint draws refers to the theme's formatting scheme for its
+# fill, outline, and effects, each by its place in the scheme's list and a
+# color to put for the list entry's placeholder color (phClr), and to its
+# major or minor fonts and a color for its text (ECMA-376 Part 1,
+# 20.1.4.2.10 to 20.1.4.2.13 and 20.1.4.1.17, fmtScheme). Made a title in
+# PowerPoint (Set as Slide Title, 2026-11-13), such a shape kept its
+# p:style and had what it refers to written out on it: the third fill
+# style, the first line style, and the second effect style's effect list,
+# each with its phClr made the reference's color and phClr's own tint,
+# shade, and saturation kept, as the shape's own fill, outline, and
+# effects; and the minor fonts and the font reference's color on each run.
+# A title placeholder's inherited fill and outline, and the master's title
+# style, would otherwise come before them.
+
+PH_COLOR = re.compile(r'<a:schemeClr val="phClr"\s*(?:/>|>(.*?)</a:schemeClr>)', re.S)
+# A reference's place, as fmtScheme numbers it: 0 none, 1 to 999 the
+# fill, line, or effect list's, 1001 on the background fills'.
+STYLE_LISTS = {"fill": ("a:fillStyleLst", "a:bgFillStyleLst"),
+               "ln": ("a:lnStyleLst", None), "effect": ("a:effectStyleLst", None)}
+STYLE_NONE = {"fill": "<a:noFill/>", "ln": "<a:ln><a:noFill/></a:ln>",
+              "effect": "<a:effectLst/>"}
+FONT_REFS = {"major": "mj", "minor": "mn"}
+
+
+def _color(xml, start):
+    """(name, attributes' text, children's text) of a reference's color,
+    its one child, or None."""
+    for name, s, e in children(xml, start):
+        tag = TAG.match(xml, s)
+        inner = "" if tag.group(4) else xml[tag.end():e - len("</%s>" % name)]
+        return name, tag.group(3), inner
+    return None
+
+
+def _placed(entry, color):
+    """A style list's entry with each phClr made the color: the color's
+    own children first, then phClr's."""
+    if color is None:
+        return entry
+    name, attrs, inner = color
+
+    def put(match):
+        mods = inner + (match.group(1) or "")
+        return "<%s%s/>" % (name, attrs) if not mods else "<%s%s>%s</%s>" % (name, attrs, mods,
+                                                                              name)
+    return PH_COLOR.sub(put, entry)
+
+
+def theme_style(sp, theme):
+    """(shape Props, run Props) of what a shape's p:style refers to in the
+    theme's formatting scheme: fill, outline, and effects (with an effect
+    style's 3-D scene and shape), and fonts and color for its text; None
+    when it has no p:style, or one the theme doesn't have the entries for."""
+    style = _sub(sp, 0, ["p:style"])
+    if style is None:
+        return None
+    scheme = re.search(r"<a:fmtScheme\b", theme or "")
+    if scheme is None:
+        return None
+    shape, run = Props(), Props()
+    for ref, group in (("a:fillRef", "fill"), ("a:lnRef", "ln"), ("a:effectRef", "effect")):
+        span = child(sp, style[0], ref)
+        if span is None:
+            return None
+        idx = attributes(TAG.match(sp, span[0]).group(0)).get("idx", "")
+        if not idx.isdigit():
+            return None
+        n = int(idx)
+        if n == 0:
+            shape.groups[group] = STYLE_NONE[group]
+            continue
+        listed, background = STYLE_LISTS[group]
+        if n > 1000:
+            listed, n = background, n - 1000
+        lst = child(theme, scheme.start(), listed) if listed else None
+        entries = children(theme, lst[0]) if lst else []
+        if n > len(entries):
+            return None
+        _name, s, e = entries[n - 1]
+        entry = _placed(theme[s:e], _color(sp, span[0]))
+        if group != "effect":
+            shape.groups[group] = entry
+            continue
+        for name, es, ee in children(entry, 0):
+            if name in S_GROUPS and S_GROUPS[name] in ("effect", "scene3d", "sp3d"):
+                shape.groups[S_GROUPS[name]] = entry[es:ee]
+    span = child(sp, style[0], "a:fontRef")
+    if span is not None:
+        which = FONT_REFS.get(attributes(TAG.match(sp, span[0]).group(0)).get("idx"))
+        if which:
+            for script in ("latin", "ea", "cs"):
+                run.groups[script] = '<a:%s typeface="+%s-%s"/>' % (
+                    script, which, {"latin": "lt"}.get(script, script))
+        color = _color(sp, span[0])
+        if color is not None:
+            name, attrs, inner = color
+            run.groups["fill"] = "<a:solidFill>%s</a:solidFill>" % (
+                "<%s%s/>" % (name, attrs) if not inner else "<%s%s>%s</%s>" % (name, attrs, inner,
+                                                                             name))
+    return shape, run
+
+
 def _style(xml, name):
     """{level: Props} of a master's text style, or the presentation's."""
     if not xml:
@@ -415,21 +533,31 @@ class Chains:
     text body properties, and shape properties, from the shape's layout,
     master, and presentation."""
 
-    def __init__(self, ph_type, idx, layout, master, presentation):
+    def __init__(self, ph_type, idx, layout, master, presentation, styled=None):
         defaults = _style(presentation, "p:defaultTextStyle")
+        # What the theme's styles give a shape (theme_style()): its text's
+        # fonts and color over the text styles, under any list style a
+        # placeholder has, and its fill, outline, and effects under any it
+        # inherits. Measured for a text box; a placeholder styled by the
+        # theme hasn't been seen.
+        style_shape, style_run = styled or (Props(), Props())
+        style_text = {n: Props() for n in range(1, 10)} if not style_run.empty() else {}
+        for props in style_text.values():
+            props.run = style_run
         if ph_type is None:
-            self.lists = [defaults]
+            self.lists = [defaults, style_text]
             self.body = Props()
-            self.shape = Props()
+            self.shape = style_shape
         else:
             style = {"title": "p:titleStyle", "body": "p:bodyStyle",
                      "other": "p:otherStyle"}[_kind(ph_type)]
             on_layout = matching(layout, ph_type, idx)
             on_master = matching(master, ph_type, None)
-            self.lists = [defaults, _style(master, style), _lst(master, on_master),
+            self.lists = [defaults, _style(master, style), style_text, _lst(master, on_master),
                           _lst(layout, on_layout)]
             self.body = _body(layout, on_layout).over(_body(master, on_master))
-            self.shape = _sppr(layout, on_layout).over(_sppr(master, on_master))
+            self.shape = _sppr(layout, on_layout).over(_sppr(master, on_master)).over(
+                style_shape)
         on_layout = matching(layout, "title", None)
         on_master = matching(master, "title", None)
         self.title_lists = [defaults, _style(master, "p:titleStyle"), _lst(master, on_master),
@@ -474,9 +602,9 @@ def _texts(slide):
 
 def heading_shapes(slide):
     """The shapes that could be a slide's title in place, topmost first:
-    those that show it words, all but a shape that takes its look from the
-    theme's styles, whose fill and outline a title's could displace."""
-    return [s for s in _texts(slide) if not s.styled]
+    those that show it words, a shape that takes its look from the theme's
+    styles among them (set_as_title() writes what they refer to out)."""
+    return _texts(slide)
 
 
 def heading(slide):
@@ -548,32 +676,39 @@ def _in_group(xml, start):
     return True
 
 
-def set_as_title(xml, shape_id, layout=None, master=None, presentation=None):
+def set_as_title(xml, shape_id, layout=None, master=None, presentation=None, theme=None):
     """(xml, count): a slide's XML with the shape whose id is shape_id, a
     p:sp at the top of its tree holding text, made the slide's title in
     place, its look kept, in AlternateContent's Choice and Fallback alike;
     count 0 when there's no such shape (_convert()). layout, master, and
     presentation: the XML of the slide's layout, its master, and the
-    presentation part, what the shape inherits from."""
+    presentation part, what the shape inherits from; theme, the master's
+    theme, what a shape styled by the theme refers to."""
     spans = [(s, e) for s, e in _sp_spans(xml, shape_id) if not _in_group(xml, s)]
     if not spans:
         return xml, 0
     out = xml
     for start, end in sorted(spans, reverse=True):
-        new = _convert(xml[start:end], layout, master, presentation)
+        new = _convert(xml[start:end], layout, master, presentation, theme)
         if new is None:
             return xml, 0
         out = out[:start] + new + out[end:]
     return out, 1
 
 
-def _convert(sp, layout, master, presentation):
+def _convert(sp, layout, master, presentation, theme=None):
     """A p:sp's XML made a title, or None when it holds no text body, is a
-    title already, or takes its look from the theme's styles."""
+    title already, or takes its look from the theme's styles and the
+    theme hasn't what they refer to (theme_style())."""
     nv = _sub(sp, 0, ["p:nvSpPr"])
     body = _sub(sp, 0, ["p:txBody"])
-    if nv is None or body is None or _sub(sp, 0, ["p:style"]):
+    if nv is None or body is None:
         return None
+    styled = None
+    if _sub(sp, 0, ["p:style"]):
+        styled = theme_style(sp, theme)
+        if styled is None:
+            return None
     ph = _sub(sp, 0, ["p:nvSpPr", "p:nvPr", "p:ph"])
     if ph:
         attrs = attributes(TAG.match(sp, ph[0]).group(0))
@@ -582,7 +717,7 @@ def _convert(sp, layout, master, presentation):
             return None
     else:
         ph_type = idx = None
-    chains = Chains(ph_type, idx, layout, master, presentation)
+    chains = Chains(ph_type, idx, layout, master, presentation, styled)
     edits = []          # (start, end, text), applied from the end
 
     # The list style: everything the shape's chain sets, its own over it,
@@ -668,10 +803,11 @@ def _convert(sp, layout, master, presentation):
 # --------------------------------------------------------------------------
 # What a paragraph and a run end up with, for checking
 
-def effective(xml, shape_id, layout=None, master=None, presentation=None):
+def effective(xml, shape_id, layout=None, master=None, presentation=None, theme=None):
     """[(paragraph Props, [run Props])] of a slide shape's text, each
     paragraph's and run's properties as they come out of its chain: its
-    own over its shape's list style over what the shape inherits."""
+    own over its shape's list style over what the shape inherits, the
+    theme's styles' fonts and color among it when theme is given."""
     spans = _sp_spans(xml, shape_id)
     if not spans:
         return []
@@ -682,7 +818,8 @@ def effective(xml, shape_id, layout=None, master=None, presentation=None):
         ph_type, idx = attrs.get("type", "obj"), attrs.get("idx")
     else:
         ph_type = idx = None
-    chains = Chains(ph_type, idx, layout, master, presentation)
+    styled = theme_style(sp, theme) if theme else None
+    chains = Chains(ph_type, idx, layout, master, presentation, styled)
     body = _sub(sp, 0, ["p:txBody"])
     lst = child(sp, body[0], "a:lstStyle")
     levels = chain(chains.lists + [list_levels(sp, lst[0]) if lst else {}])

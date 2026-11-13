@@ -1936,7 +1936,7 @@ def looks(path, part, shape_id):
     return looks_of(xml, shape_id, layout, master, pres)
 
 
-def looks_of(xml, shape_id, layout, master, pres):
+def looks_of(xml, shape_id, layout, master, pres, theme=None):
     def flat(props, attrs, groups):
         out = dict(attrs)
         out.update(props.attrs)
@@ -1946,7 +1946,7 @@ def looks_of(xml, shape_id, layout, master, pres):
         return out
     return [(flat(p, pptxtitle.P_ATTR_DEFAULTS, pptxtitle.P_GROUP_DEFAULTS),
              [flat(r, pptxtitle.R_ATTR_DEFAULTS, pptxtitle.R_GROUP_DEFAULTS) for r in runs])
-            for p, runs in pptxtitle.effective(xml, shape_id, layout, master, pres)]
+            for p, runs in pptxtitle.effective(xml, shape_id, layout, master, pres, theme)]
 
 
 class CopyTarget:
@@ -1987,7 +1987,7 @@ def case_set_title(work):
     yield "each slide with no title is drafted from its heading, numbered as a title is when " \
         "an earlier slide has it", \
         [r[1] for r in rows] == ["Market Basics", "Chapter One", "Market Basics (2)",
-                                 "Pros & Cons", "", "", "Both", "", "Elasticity", "", "",
+                                 "Pros & Cons", "", "", "Both", "Styled", "Elasticity", "", "",
                                  "Summary (2)", "Subhead"] \
         and [r[3] for r in rows] == ["TI" if r[1] else "" for r in rows], [r[:4] for r in rows]
     yield "a draft's source names the shape it's drafted from", \
@@ -2082,8 +2082,9 @@ def case_set_title(work):
     yield "a title that isn't a heading's text is added above the slide, the heading left as " \
         "it was", heading in ninth and e.slides[8].shapes[0].is_title \
         and e.slides[8].shapes[0].box.y < 0, [s.name for s in e.slides[8].shapes]
-    yield "and so is one for a heading in a group, a heading whose id repeats, a styled one, " \
-        "and one on a slide with an empty title placeholder, which takes it", \
+    yield "and so is one for a heading in a group, a heading whose id repeats, a styled one in " \
+        "a deck with no theme, and one on a slide with an empty title placeholder, which takes " \
+        "it", \
         all(e.slides[n].title_shape.box.y < 0 for n in (4, 5, 7, 9, 10)) \
         and e.slides[9].title_shape.id == "5" \
         and pptxtitle.TITLE_PH not in read_part(out, "ppt/slides/slide8.xml"), \
@@ -2132,7 +2133,8 @@ def case_set_title(work):
         any("7 slide(s) given the heading they show as their title, in place, 6 title(s) added " \
             "above their slides" in line for line in said), said[-3:]
     # set_as_title() itself refuses a shape in a group, one styled by the
-    # theme, and a title.
+    # theme in a deck whose theme it isn't given (this deck has none), and
+    # a title.
     with zipfile.ZipFile(path) as z:
         inherited = [z.read(p).decode("utf-8") for p in (
             "ppt/slideLayouts/slideLayout1.xml", "ppt/slideMasters/slideMaster1.xml",
@@ -2140,8 +2142,184 @@ def case_set_title(work):
         refused = [pptxtitle.set_as_title(z.read("ppt/slides/slide%d.xml" % n).decode("utf-8"),
                                           sid, *inherited)[1]
                    for n, sid in ((5, "6"), (8, "4"), (12, "5"))]
-    yield "a shape in a group, one the theme styles, and a title aren't made titles", \
+    yield "a shape in a group, one the theme styles with no theme to read, and a title aren't " \
+        "made titles", \
         refused == [0, 0, 0], refused
+
+
+# A theme's formatting scheme, as PowerPoint's Office theme of 2007 has it
+# (python-pptx's default template's): three fills, lines, and effects,
+# the third effect with a 3-D scene and shape, and three background fills.
+FMT_SCHEME = (
+    '<a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/>'
+    '</a:solidFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr">'
+    '<a:tint val="50000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr">'
+    '<a:tint val="15000"/></a:schemeClr></a:gs></a:gsLst><a:lin ang="16200000" scaled="1"/>'
+    '</a:gradFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr">'
+    '<a:tint val="100000"/><a:shade val="100000"/><a:satMod val="130000"/></a:schemeClr></a:gs>'
+    '<a:gs pos="100000"><a:schemeClr val="phClr"><a:tint val="50000"/><a:shade val="100000"/>'
+    '<a:satMod val="350000"/></a:schemeClr></a:gs></a:gsLst><a:lin ang="16200000" scaled="0"/>'
+    '</a:gradFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" '
+    'algn="ctr"><a:solidFill><a:schemeClr val="phClr"><a:shade val="95000"/><a:satMod '
+    'val="105000"/></a:schemeClr></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" '
+    'cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr">'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>'
+    '</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" '
+    'dist="20000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="38000"/>'
+    '</a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle><a:effectStyle><a:effectLst>'
+    '<a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr '
+    'val="000000"><a:alpha val="35000"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle>'
+    '<a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" '
+    'rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000"/></a:srgbClr></a:outerShdw>'
+    '</a:effectLst><a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" '
+    'dir="t"/></a:scene3d><a:sp3d><a:bevelT w="63500" h="25400"/></a:sp3d></a:effectStyle>'
+    '</a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"><a:tint val="95000"/></a:schemeClr></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"><a:shade val="20000"/></a:schemeClr></a:solidFill>'
+    '</a:bgFillStyleLst></a:fmtScheme>')
+
+
+def with_theme(path):
+    """A deck given a theme, as every deck PowerPoint saves has one: the
+    master's, holding its formatting scheme (FMT_SCHEME)."""
+    theme = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<a:theme xmlns:a="http://'
+             'schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"><a:themeElements>'
+             '<a:clrScheme name="Office"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr '
+             'val="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr '
+             'val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="4F81BD"/></a:accent1><a:accent2>'
+             '<a:srgbClr val="C0504D"/></a:accent2><a:accent3><a:srgbClr val="9BBB59"/></a:accent3>'
+             '<a:accent4><a:srgbClr val="8064A2"/></a:accent4><a:accent5><a:srgbClr val="4BACC6"/>'
+             '</a:accent5><a:accent6><a:srgbClr val="F79646"/></a:accent6><a:hlink><a:srgbClr '
+             'val="0000FF"/></a:hlink><a:folHlink><a:srgbClr val="800080"/></a:folHlink>'
+             '</a:clrScheme><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Calibri"/>'
+             '<a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin '
+             'typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>'
+             '</a:fontScheme>%s</a:themeElements></a:theme>' % FMT_SCHEME)
+    with zipfile.ZipFile(path) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in members:
+            if info.filename == "ppt/slideMasters/_rels/slideMaster1.xml.rels":
+                data = data.replace(b"</Relationships>", (
+                    '<Relationship Id="rIdT" Type="%stheme" Target="../theme/theme1.xml"/>'
+                    '</Relationships>' % REL).encode("utf-8"))
+            elif info.filename == "[Content_Types].xml":
+                data = data.replace(b"</Types>", b'<Override PartName="/ppt/theme/theme1.xml" '
+                                    b'ContentType="application/vnd.openxmlformats-officedocument.'
+                                    b'theme+xml"/></Types>')
+            z.writestr(info, data)
+        z.writestr("ppt/theme/theme1.xml", theme)
+    return path
+
+
+def style_refs(fill=3, ln=1, effect=2, font="minor", color='<a:schemeClr val="accent1"/>',
+               font_color='<a:schemeClr val="lt1"/>'):
+    """A shape's p:style, as PowerPoint gives a rectangle it draws (fill 3,
+    line 1, effect 2, the minor fonts in the light color)."""
+    return ('<p:style><a:lnRef idx="%s">%s</a:lnRef><a:fillRef idx="%s">%s</a:fillRef>'
+            '<a:effectRef idx="%s">%s</a:effectRef><a:fontRef idx="%s">%s</a:fontRef></p:style>'
+            % (ln, color, fill, color, effect, color, font, font_color))
+
+
+def styled_box(shape_id, text, refs, fill=""):
+    """A heading in a shape PowerPoint draws, a rectangle styled by the
+    theme, 40-point, its text centered down the shape, as PowerPoint draws
+    one; fill, a fill of its own."""
+    return ('<p:sp><p:nvSpPr><p:cNvPr id="%s" name="Rectangle %s"/><p:cNvSpPr/><p:nvPr/>'
+            '</p:nvSpPr><p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>%s</p:spPr>%s'
+            '<p:txBody><a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:r><a:rPr '
+            'lang="en-US" sz="4000" dirty="0"/><a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>'
+            % (shape_id, shape_id, xfrm(*HEADING_BOX), fill, refs, esc(text)))
+
+
+def shape_props(xml, shape_id):
+    """{group: XML} of a slide shape's own spPr, and its p:style's XML."""
+    start, end = pptxtitle._sp_spans(xml, shape_id)[0]
+    sp = xml[start:end]
+    sppr = pptxtitle._sub(sp, 0, ["p:spPr"])
+    style = pptxtitle._sub(sp, 0, ["p:style"])
+    return (dict(pptxtitle.Props.read(sp, sppr[0], pptxtitle.S_GROUPS).groups),
+            sp[style[0]:style[1]] if style else None)
+
+
+def case_styled_title(work):
+    """A heading styled by the theme made a slide's title in place, as
+    PowerPoint's Set as Slide Title made one (2026-11-13): its style kept,
+    and what it refers to in the theme written out on it."""
+    accent2 = '<a:schemeClr val="accent2"><a:lumMod val="75000"/></a:schemeClr>'
+    slides = [
+        # 1: as PowerPoint draws a rectangle
+        {"shapes": [styled_box(4, "Drawn", style_refs()), content(3, ["Under it"])]},
+        # 2: a fill of its own, which stays
+        {"shapes": [styled_box(4, "Own fill", style_refs(),
+                               fill='<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill>')]},
+        # 3: the third effect, with its 3-D scene, a background fill, no
+        # line, a color with a change of its own, and the major fonts
+        {"shapes": [styled_box(4, "Background", style_refs(
+            fill=1003, ln=0, effect=3, font="major", color=accent2,
+            font_color='<a:srgbClr val="112233"/>'))]},
+        # 4: a fill the theme hasn't
+        {"shapes": [styled_box(4, "Missing", style_refs(fill=9))]},
+    ]
+    path = with_theme(deck(os.path.join(work, "themed.pptx"), slides, layout=banner_layout(),
+                           master=banner_master()))
+    plain = deck(os.path.join(work, "themeless.pptx"), slides[:1], layout=banner_layout(),
+                 master=banner_master())
+    d = pptxparse.read(path)
+    rows = deckrun.untitled_rows("themed.pptx", "themed", d, {})
+    yield "a heading styled by the theme is drafted as a slide's title, as any heading is", \
+        [r[1] for r in rows] == ["Drawn", "Own fill", "Background", "Missing"], rows
+    key = [rem.slide_key("themed", s) for s in d.slides]
+    titles = dict(zip(key, ("Drawn", "Own fill", "Background", "Missing")))
+    out, counts = remediated(work, "themed.pptx", path, titles=titles)
+    yield "it's made the title in place, but where the theme hasn't what its style refers to", \
+        counts["titles_in_place"] == 3 and counts["titles"] == 1, counts
+    e = pptxparse.read(out)
+    yield "each such slide's title is the heading's text", \
+        [s.title for s in e.slides] == ["Drawn", "Own fill", "Background", "Missing"], \
+        [s.title for s in e.slides]
+    before = [read_part(path, "ppt/slides/slide%d.xml" % n) for n in range(1, 4)]
+    after = [read_part(out, "ppt/slides/slide%d.xml" % n) for n in range(1, 4)]
+    drawn, style = shape_props(after[0], "4")
+    gradient = FMT_SCHEME.split("</a:gradFill>")[1].split("<a:fillStyleLst>")[-1]
+    yield "its style is kept, and the theme's third fill, first line, and second effect are " \
+        "written on it in the reference's color, phClr's own changes kept", \
+        style == shape_props(before[0], "4")[1] \
+        and drawn["fill"] == gradient.replace('val="phClr"', 'val="accent1"') + "</a:gradFill>" \
+        and drawn["ln"].startswith('<a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill>'
+                                   '<a:schemeClr val="accent1"><a:shade val="95000"/>') \
+        and drawn["effect"].startswith('<a:effectLst><a:outerShdw blurRad="40000" dist="23000"') \
+        and "scene3d" not in drawn, drawn
+    own, _style = shape_props(after[1], "4")
+    yield "a fill of its own stays", own["fill"] == '<a:solidFill><a:srgbClr val="00FF00"/>' \
+        '</a:solidFill>' and own["ln"].startswith('<a:ln w="9525"'), own
+    third, _style = shape_props(after[2], "4")
+    yield "a background fill, no line, and an effect's 3-D scene and shape are taken, a " \
+        "color's own change before phClr's", \
+        third["fill"] == '<a:solidFill><a:schemeClr val="accent2"><a:lumMod val="75000"/>' \
+        '<a:shade val="20000"/></a:schemeClr></a:solidFill>' \
+        and third["ln"] == "<a:ln><a:noFill/></a:ln>" and third["sp3d"].startswith("<a:sp3d>") \
+        and third["scene3d"].startswith("<a:scene3d>"), third
+    with zipfile.ZipFile(path) as z:
+        inherited = [z.read(p).decode("utf-8") for p in (
+            "ppt/slideLayouts/slideLayout1.xml", "ppt/slideMasters/slideMaster1.xml",
+            "ppt/presentation.xml", "ppt/theme/theme1.xml")]
+
+    def text_looks(xml):
+        return looks_of(xml, "4", *inherited[:3], theme=inherited[3])
+    yield "its text looks as it did, its fonts and color the style's", \
+        all(text_looks(a) == text_looks(b) for a, b in zip(before, after)) \
+        and text_looks(after[0])[0][1][0]["<fill>"] == '<a:solidFill><a:schemeClr val="lt1"/>' \
+        '</a:solidFill>' and text_looks(after[0])[0][1][0]["<latin>"] == \
+        '<a:latin typeface="+mn-lt"/>' and text_looks(after[2])[0][1][0]["<latin>"] == \
+        '<a:latin typeface="+mj-lt"/>' and text_looks(after[2])[0][1][0]["<fill>"] == \
+        '<a:solidFill><a:srgbClr val="112233"/></a:solidFill>', \
+        [text_looks(x)[0][1] for x in after[:1]]
+    _out, kept = remediated(work, "themeless.pptx", plain, titles={
+        rem.slide_key("themeless", pptxparse.read(plain).slides[0]): "Drawn"})
+    yield "with no theme, the heading stays as it is and the title is added", \
+        kept["titles_in_place"] == 0 and kept["titles"] == 1, kept
 
 
 AVENIR, ARIAL, GEORGIA = "020B0503020202020204", "020B0604020202020204", "02040502050405020303"
@@ -5964,6 +6142,7 @@ CASES = [("reading a deck", case_parse), ("the checks", case_check),
          ("the reading order", case_order), ("drafting an order", case_draft),
          ("titles another slide has", case_retitle),
          ("a heading made a slide's title", case_set_title),
+         ("a heading styled by the theme made a slide's title", case_styled_title),
          ("fonts a license restricts", case_fonts),
          ("links and equations", case_links),
          ("math kept as it was", case_math_keep),

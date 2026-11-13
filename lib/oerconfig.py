@@ -309,7 +309,42 @@ def load_document(path, schema=None):
             if key not in misplaced and _elsewhere(key):
                 detail += "\n  " + _elsewhere(key) + "."
         raise ConfigError(detail)
+    # Each of the three is a block of names, and each target a block under
+    # its name. Written with a dash, or as one word, it is a list or a
+    # text, which has no names to look up: say so here, before anything
+    # asks it for one. An empty one of any kind says nothing, as before.
+    for key in ("project", "defaults", "targets"):
+        if data.get(key) and not isinstance(data[key], dict):
+            raise ConfigError(_not_a_block(path, key, data[key]))
+    for name, block in (data.get("targets") or {}).items():
+        if block and not isinstance(block, dict):
+            raise ConfigError(_not_a_block(path, f"targets.{name}", block))
     return Document(data, path)
+
+
+def _not_a_block(path, key, value):
+    """What to say of a block, or a target, that isn't written as one."""
+    if isinstance(value, list):
+        kind, cure = "a list", " Take the dash from before each name."
+    elif isinstance(value, bool):
+        kind, cure = ("true" if value else "false"), ""
+    else:
+        kind, cure = repr(value), ""
+    if key == "targets":
+        shape = ("a block that names each target, each with its settings "
+                 "indented under its name.")
+        example = "\n  targets:\n    name:\n      setting: value"
+    elif key.startswith("targets."):
+        shape = ("the target's settings, each on a line of its own "
+                 "indented under the target's name.")
+        example = (f"\n  targets:\n    {key[len('targets.'):]}:\n"
+                   "      setting: value")
+    else:
+        shape = ("a block of settings, each on a line of its own indented "
+                 "under it.")
+        example = ""
+    return (f"{path}: {key} is {kind}. It should be {shape}{cure}"
+            + (" For example:" + example if example else ""))
 
 
 # --------------------------------------------------------------------------

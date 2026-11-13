@@ -1,0 +1,4 @@
+# A dash before a target's name makes the targets a list, which has no
+# names to look a target up by. It used to be a traceback.
+target: html
+error: "targets is a list. It should be a block that names each target"

@@ -1,0 +1,4 @@
+# A target with nothing under its name is every default, as it was.
+target: html
+expect:
+  output_dir: html

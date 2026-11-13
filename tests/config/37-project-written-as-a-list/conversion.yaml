@@ -1,0 +1,5 @@
+project:
+  - title: A Book
+targets:
+  html:
+    format: html

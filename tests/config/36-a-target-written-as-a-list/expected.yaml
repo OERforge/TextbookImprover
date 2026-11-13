@@ -1,0 +1,3 @@
+# A dash before a target's settings makes them a list.
+target: html
+error: "targets.html is a list. It should be the target's settings"

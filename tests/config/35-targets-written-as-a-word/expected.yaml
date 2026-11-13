@@ -1,0 +1,3 @@
+# One word where the targets' block goes is a text, not a block.
+target: html
+error: "targets is 'html'. It should be a block that names each target"

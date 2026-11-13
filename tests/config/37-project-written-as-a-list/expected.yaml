@@ -1,0 +1,3 @@
+# The same for the book's own block, in whichever file holds it.
+target: html
+error: "project is a list. It should be a block of settings"

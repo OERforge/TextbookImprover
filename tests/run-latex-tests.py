@@ -2850,8 +2850,9 @@ def case_reading_limits(work):
     starred one's too, and \\foreignquote's, its words in their language;
     with autostyle, the language around each, \\foreignlanguage's,
     otherlanguage's, \\selectlanguage's, and \\foreignquote's own, but not
-    \\hyphenquote's, and Pandoc's own “ ” where English's are; csquotes'
-    options read in order, as csquotes reads them, Latin's marks its
+    \\hyphenquote's, and Pandoc's own “ ” where English's are; a
+    \\setquotestyle in the text to its group's end, and \\setquotestyle*
+    turning autostyle on; csquotes' options read in order, as csquotes reads them, Latin's marks its
     variant's, and each quotation in the innermost language around it; and
     \\textcolor around a list, which the reader made a colored division,
     the words before it a paragraph of their own, as LaTeX colors it; the
@@ -2880,6 +2881,9 @@ def case_reading_limits(work):
                        "\\end{otherlanguage}\n\n"
                        "{\\selectlanguage{french}D \\enquote{trois}.}\n\n"
                        "E \\enquote{four}.\n\n"
+                       "{\\setquotestyle{german}F \\enquote{five} "
+                       "\\foreignlanguage{french}{\\enquote{cinq}}.}\n\n"
+                       "G \\enquote{six}.\n\n"
                        "T \\textcolor{red}{red words \\begin{itemize}\\item one\\end{itemize} "
                        "more} end.\n\n"
                        "U \\textbf{gras \\textcolor{red}{a \\begin{itemize}\\item x"
@@ -2938,6 +2942,23 @@ def case_reading_limits(work):
          and paragraph(english, "(?:<span>)?D " + opening + "trois" + closing
                        + "\\.(?:</span>)?")
          and paragraph(english, "E " + mark("\u201c") + "four" + mark("\u201d") + "\\.")),
+        ("a \\setquotestyle in the text sets its style to its group's end, autostyle off there, "
+         "and \\setquotestyle* turns autostyle on",
+         lambda: paragraph(english, "(?:<span>)?F " + mark("\u201e") + "five" + mark("\u201c")
+                           + ' <span lang="fr">' + mark("\u201e") + "cinq" + mark("\u201c")
+                           + "</span>\\.(?:</span>)?")
+         and paragraph(english, "G " + mark("\u201c") + "six" + mark("\u201d") + "\\.")
+         and "setquotestyle" not in pages[english]
+         and latexsource.quotation_marks(
+             "\\enquote{a} \\setquotestyle*\\foreignlanguage{french}{\\enquote{b}} "
+             "{\\setquotestyle[guillemets]{german}\\enquote{c}} \\enquote{d}", {},
+             latexsource.quote_style("\\usepackage[french,english]{babel}\\usepackage{csquotes}"),
+             latexsource.quote_context("\\usepackage[french,english]{babel}"
+                                       "\\usepackage{csquotes}"))
+         == "\\enquote{a} \\setquotestyle*\\foreignlanguage{french}{\u00ab\u00a0b\u00a0\u00bb} "
+            "{\\setquotestyle[guillemets]{german}\u00bbc\u00ab} \\enquote{d}"
+         and latexsource.quotation_marks("\\setquotestyle{german}\\enquote{e}", {}, None, None)
+         == "\\setquotestyle{german}\\enquote{e}"),
         ("the style is the main language's, autostyle's, style='s, or \\setquotestyle's, a "
          "variant the options give a language too, and none where csquotes isn't loaded or "
          "the marks are Pandoc's",
@@ -3029,7 +3050,7 @@ def case_reading_limits(work):
          is not None),
         ("the run says what it read so",
          lambda: "4 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in told
-         and "5 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in said
+         and "7 csquotes' quotation (\\enquote) given the marks LaTeX sets it with" in said
          and "2 list or another environment in \\textcolor's words read between "
              "\\textcolor around the words before it and after it" in said),
         ("and the author's files are as they were",

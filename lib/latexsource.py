@@ -3821,6 +3821,45 @@ def quote_style(preamble):
     and where neither is, autostyle off. A main language csquotes has no
     style for is read as English's, where LaTeX sets csquotes' fallback,
     a bold question mark, and warns."""
+    setup = quote_setup(preamble)
+    if setup is None:
+        return None
+    reset, default, main, variants = setup
+    if reset == AUTOSTYLE["true"]:
+        return {"main": autostyle_main(preamble, main), "variants": variants}
+    marks = quote_marks(default, variants) or PANDOC_QUOTES
+    return None if marks == PANDOC_QUOTES else {"marks": marks, "variants": variants}
+
+
+def autostyle_main(preamble, main):
+    """The language a quotation outside any other's is in, by name, where
+    autostyle is on: the text's from a hook at \\begin{document} that
+    selects one (opening_language: babel's [english,french] and
+    \\AtBeginDocument{\\selectlanguage{english}} set English's marks under
+    autostyle=true, measured), else the main language's, else American
+    English's."""
+    opening = opening_language(preamble)
+    return (quote_name(opening) if opening else None) or main or "american"
+
+
+def quote_context(preamble):
+    """What a \\setquotestyle in the document's text needs (quotation_marks):
+    None where csquotes isn't loaded, else a dict, "main", the language a
+    quotation outside any other's is in should the text's \\setquotestyle*
+    turn autostyle on (autostyle_main), and "variants", the options'
+    variant for a language."""
+    setup = quote_setup(preamble)
+    if setup is None:
+        return None
+    return {"main": autostyle_main(preamble, setup[2]), "variants": setup[3]}
+
+
+def quote_setup(preamble):
+    """csquotes' state at \\begin{document} as quote_style reads it: None
+    where it isn't loaded, else (reset, default, main, variants), its
+    autostyle value (AUTOSTYLE), the name of the style it sets every
+    quotation in without autostyle, the main language's name for a style
+    (None for one csquotes has none for), and the options' variants."""
     options, loaded = [], None
     for m in code_matches(CSQUOTES_OPTIONS, preamble):
         if m.group(3) is not None:
@@ -3873,18 +3912,10 @@ def quote_style(preamble):
     elif reset == AUTOSTYLE["try"]:
         reset = AUTOSTYLE["true"]
     elif reset >= AUTOSTYLE["once"]:
+        # once and tryonce keep the main language's style, where autostyle
+        # takes the text's opening language (autostyle_main).
         default = main or "english/american"
-    if reset == AUTOSTYLE["true"]:
-        # Each quotation in the language around it, the text's from a hook
-        # at \\begin{document} that selects one (opening_language: babel's
-        # [english,french] and \\AtBeginDocument{\\selectlanguage{english}}
-        # set English's marks under autostyle=true, measured), where once and
-        # tryonce keep the main language's.
-        opening = opening_language(preamble)
-        return {"main": (quote_name(opening) if opening else None) or main or "american",
-                "variants": variants}
-    marks = quote_marks(default, variants) or PANDOC_QUOTES
-    return None if marks == PANDOC_QUOTES else {"marks": marks, "variants": variants}
+    return reset, default, main, variants
 
 
 SELECT_LANGUAGE = re.compile(r"\\selectlanguage\s*\{\s*([A-Za-z]+)\s*\}")
@@ -3921,13 +3952,21 @@ def language_regions(text, spans):
             regions.append((m.end(), end, quote_name(m.group(1))))
     selects = [m for m in SELECT_LANGUAGE.finditer(text)
                if not in_sorted_spans(m.start(), spans, starts)]
-    ends = [len(text)] * len(selects)
-    # Each one's group's end, found in one pass over the text's braces in
-    # code: the first closing brace that takes the depth below the one it
-    # began at, an escaped character none.
+    ends = group_ends(text, [m.end() for m in selects], spans)
+    regions += [(m.end(), ends[k], quote_name(m.group(1))) for k, m in enumerate(selects)]
+    return regions
+
+
+def group_ends(text, places, spans):
+    """The end of the group each place in text (in order) is in, as a
+    declaration there lasts to it: the first closing brace in code after
+    it that takes the depth below the one it began at, an escaped
+    character none; the text's end where none does. Found in one pass
+    over the text's braces; spans (skip_spans) aren't code."""
+    ends = [len(text)] * len(places)
     pending, depth, at, past = [], 0, 0, 0          # pending: (depth, index)
-    for t in (BRACE_TOKEN.finditer(text, selects[0].end()) if selects else ()):
-        while at < len(selects) and selects[at].end() <= t.start():
+    for t in (BRACE_TOKEN.finditer(text, places[0]) if places else ()):
+        while at < len(places) and places[at] <= t.start():
             pending.append((depth, at))
             at += 1
         if t.group(0)[0] == "\\":
@@ -3939,11 +3978,37 @@ def language_regions(text, spans):
         depth += 1 if t.group(0) == "{" else -1
         while pending and pending[-1][0] > depth:
             ends[pending.pop()[1]] = t.start()
-    regions += [(m.end(), ends[k], quote_name(m.group(1))) for k, m in enumerate(selects)]
+    return ends
+
+
+def style_regions(text, spans):
+    """(start, end, name) of each stretch of text a \\setquotestyle in it
+    sets the style of, to the end of the group it's in, name the style's
+    (with its variant after a slash, german/guillemets) or None for
+    \\setquotestyle*, which turns autostyle on. Measured with LuaLaTeX and
+    csquotes 5.2p: \\setquotestyle{german} in a group sets „ “ in it, in a
+    \\foreignlanguage{french} too, autostyle off, and the style and
+    autostyle are as they were after the group; \\setquotestyle* turns
+    autostyle on, each quotation in the language around it. In a master,
+    only the text's: the preamble's are quote_style's."""
+    starts = [start for start, _ in spans]
+    begin = code_matches(BEGIN_DOCUMENT, text)
+    after = begin[0].end() if begin else 0
+    found = [m for m in SET_QUOTE_STYLE.finditer(text, after)
+             if not in_sorted_spans(m.start(), spans, starts)]
+    ends = group_ends(text, [m.end() for m in found], spans)
+    regions = []
+    for k, m in enumerate(found):
+        if m.group(1):
+            name = None
+        else:
+            variant = (m.group(2) or "").strip()
+            name = m.group(3) + ("/" + variant if variant else "")
+        regions.append((m.end(), ends[k], name))
     return regions
 
 
-def quotation_marks(text, counter, style):
+def quotation_marks(text, counter, style, context=None):
     """csquotes' quotations (QUOTATION) with the marks csquotes sets them
     with, by quote_style's style, where they aren't Pandoc's: an outer
     quotation's, or an inner one's, inside an outer one or starred, as the
@@ -3952,26 +4017,36 @@ def quotation_marks(text, counter, style):
     as the reader gives them their language. The HTML writer writes a
     quotation's marks as “ ” whatever the page's language, where LaTeX sets
     « » in French. With autostyle, each in its language (language_regions),
-    the innermost around it, or the main language's."""
+    the innermost around it, or the main language's. A \\setquotestyle
+    in the text sets the style after it, to its group's end (style_regions),
+    for which context is quote_context's, None where csquotes isn't
+    loaded."""
     split = {}
     for m in QUOTE_PIECE_MARK.finditer(text):
         split.setdefault(m.group(1), []).append(m.start())
+    restyled = bool(context) and "setquotestyle" in text
     if not style:
-        if not split:
+        if not split and not restyled:
             return text
-        # A quotation split at its paragraph breaks, in Pandoc's marks.
-        style = {"marks": PANDOC_QUOTES, "variants": {}}
+        # A quotation split at its paragraph breaks, or one after a
+        # \\setquotestyle, from Pandoc's marks.
+        style = {"marks": PANDOC_QUOTES,
+                 "variants": context["variants"] if context else {}}
     spans = skip_spans(text)
     starts = [start for start, _ in spans]
     found = [m for m in QUOTATION.finditer(text) if not in_sorted_spans(m.start(), spans, starts)]
+    styles = style_regions(text, spans) if restyled else []
     auto = "main" in style
-    regions = language_regions(text, spans) if auto else []
+    regions = language_regions(text, spans) if auto or any(
+        name is None for _, _, name in styles) else []
     # The regions begun at a quotation, latest first, and the next one to
     # begin, as the quotations come in order: the innermost around one is
     # the latest begun that hasn't ended, the first of them by
     # language_regions' order where two begin together.
     order = sorted(range(len(regions)), key=lambda k: regions[k][0])
     begun, waiting = [], 0
+    # The same for a \\setquotestyle's stretches, which come in order.
+    styles_begun, styles_waiting = [], 0
     edits, open_quotes, styled_count = [], [], 0   # open_quotes: (close, inner, written)
     for m in found:
         parsed = command_words(text, m)
@@ -3988,8 +4063,16 @@ def quotation_marks(text, counter, style):
         piece = QUOTE_PIECE_MARK.match(text, start)
         written = bool(piece) or any(w for _, _, w in open_quotes)
         open_quotes.append((close, inner, written))
-        if auto:
-            name = style["main"]
+        while styles_waiting < len(styles) and styles[styles_waiting][0] <= m.start():
+            heapq.heappush(styles_begun, (-styles[styles_waiting][0], styles_waiting))
+            styles_waiting += 1
+        while styles_begun and styles[styles_begun[0][1]][1] <= m.start():
+            heapq.heappop(styles_begun)
+        here = styles[styles_begun[0][1]] if styles_begun else None
+        if here is not None and here[2] is not None:
+            styled = quote_marks(here[2], style["variants"]) or PANDOC_QUOTES
+        elif auto or here is not None:
+            name = style.get("main") or context["main"]
             while waiting < len(order) and regions[order[waiting]][0] <= m.start():
                 heapq.heappush(begun, (-regions[order[waiting]][0], order[waiting]))
                 waiting += 1
@@ -4458,7 +4541,7 @@ def substitute_in_code(pattern, text, spans, make, counter, key):
 
 def repair_text(text, counter, math_macros=(), counters=(), tags=None, environments=(),
                 places=None, tag_environments=None, block_macros=(), language_aliases=(),
-                quotes=None):
+                quotes=None, quote_text=None):
     """The rewrites every file of the copy gets: booleans as toggles,
     \\input braced, artifact images marked, and the rest. math_macros: the
     names of the macros formulas use (math_macros); counters, the book's
@@ -4468,7 +4551,8 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
     environments are babel's (babel_tags); block_macros, its macros that
     make a block (block_macros); language_aliases, its environments for
     otherlanguage* (language_aliases); quotes, how csquotes sets its
-    quotations (quote_style)."""
+    quotations (quote_style), and quote_text, what a \\setquotestyle in the
+    text needs (quote_context)."""
     # First, so no rewrite after takes the code for LaTeX: an lstlisting
     # and \verb are verbatim to them all.
     text = inline_code_marks(text, counter)
@@ -4504,7 +4588,7 @@ def repair_text(text, counter, math_macros=(), counters=(), tags=None, environme
                            macros=block_macros, aliases=language_aliases)
     # After them, which write a passage's command with its name as written.
     text = babel_names(text, counter)
-    text = quotation_marks(text, counter, quotes)
+    text = quotation_marks(text, counter, quotes, quote_text)
     text = drop(text, "OERLinkContents", counter, "link_contents")
     # The PDF target's rule under each row of a table ruled row by row
     # (pdf-target.lua's ROW_RULES): the reader would expand them as the
@@ -9064,6 +9148,7 @@ def prepare(base, work, master, say, macros=""):
     tag_environments = babel_tags([t for _, t in originals], environments=True)
     aliases = language_aliases([t for _, t in originals])
     quotes = quote_style("".join(t for _, t in preamble_parts)) if begin else None
+    quote_text = quote_context("".join(t for _, t in preamble_parts)) if begin else None
     environments = book_environments([t for _, t in originals])
     macros_blocks = block_macros(originals, environments)
     # An environment whose code calls one of the book's commands that
@@ -9081,7 +9166,7 @@ def prepare(base, work, master, say, macros=""):
         texts[name] = repair_text(text, counts, in_math, counting["counters"], tags,
                                   environments, places, tag_environments,
                                   block_macros=macros_blocks, language_aliases=aliases,
-                                  quotes=quotes)
+                                  quotes=quotes, quote_text=quote_text)
         dropped += sorted((name, author_line(text, line, command, words), command, words)
                           for line, command, words in places)
     # A chapter \include-d by the book's own macro, written out, so the

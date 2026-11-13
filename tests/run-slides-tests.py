@@ -5868,7 +5868,7 @@ def case_first_column(work):
     noted = [line for line in said if line.startswith("NOTE: 1 table(s) in the copies have "
                                                       "their headers in their first column")]
     yield "and the run says once that PowerPoint's checker asks for a header row", \
-        len(noted) == 1 and "may list them as Missing Table Header" in noted[0], said[-6:]
+        len(noted) == 1 and "lists them as Missing Table Header" in noted[0], said[-6:]
     found = pptxcheck.check(d, "column.pptx", kind="pptx",
                             tables=lambda _slide, _shape: "first-column")
     left = [f.where.split(",")[0] for f in found if f.check == "pptx-table-no-header"]

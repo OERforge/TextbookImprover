@@ -1242,5 +1242,6 @@ def check_copies(copies, path, tables, alt_max_chars, alt_placeholders, say, ord
         say("NOTE: %d table(s) in the copies have their headers in their first column, as "
             "decided (First Column), and aren't counted as missing a header. PowerPoint's "
             "own checker asks for a header row (\"Tables specify column header "
-            "information\"), so it may list them as Missing Table Header." % columns)
+            "information\") and lists them as Missing Table Header, First Column "
+            "checked or not." % columns)
     return unreadable

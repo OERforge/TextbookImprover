@@ -6,7 +6,7 @@ $--
 $-- Variables decks.py sets: aspect-ratio (the slide's shape, width:height),
 $-- frametitle-tag (the heading every slide's title is tagged as if
 $-- ltx-talk's code for a slide's title isn't the code this template knows,
-$-- 0.6.9's, as 0.6.10's is, and 0.6.11's: H1, or one level more for each
+$-- 0.6.9's, as 0.6.10's is, and 0.6.11's, as 0.6.12's is: H1, or one level more for each
 $-- level of sections), math-setup
 $-- (how a formula's MathML is carried), oer-macros (the commands
 $-- pdf-target.lua's output uses, from lib/latexbuild.py), code-spaces (a
@@ -59,7 +59,7 @@ $oer-macros$
 \ExplSyntaxOn
 % A footnote's text given apart from its mark (\footnotetext, as the
 % writer gives a footnote in a table), and a slide's title's footnote
-% (deck-pdf.lua): ltx-talk (0.6.9 to 0.6.11) takes the overlay a footnote is shown on
+% (deck-pdf.lua): ltx-talk (0.6.9 to 0.6.12) takes the overlay a footnote is shown on
 % from a list \footnote adds to, and with nothing there LaTeX never
 % finished. Its text is shown on the whole frame.
 \seq_if_exist:NT \g__talk_footnote_overlay_seq
@@ -133,7 +133,7 @@ $oer-macros$
 % section, H3 in a subsection, as on the deck's page. ltx-talk tags every
 % slide's title with one tag, frametitle, so its code is given a tag that
 % the sections below change, if the code is 0.6.9's, as 0.6.10's is, or
-% 0.6.11's, which sets the title in a box the text's width.
+% 0.6.11's, as 0.6.12's is, which sets the title in a box the text's width.
 \tl_new:N \g__oer_frametitle_tag_tl
 \tl_gset:Nn \g__oer_frametitle_tag_tl { oerframetitle1 }
 % The level of a slide's title, which a heading on the slide is one below.
@@ -300,8 +300,8 @@ $oer-macros$
 % A heading on a slide, as on the deck's page, #1 levels below the
 % slide's title, deck-pdf.lua working out how many, as the page does: a
 % block's title (a heading below the slide level), which ltx-talk sets as
-% a paragraph, the block's first, if its code is 0.6.9's, as 0.6.10's and
-% 0.6.11's are, the level \oerblocklevel at the head of the title gives (a
+% a paragraph, the block's first, if its code is 0.6.9's, as 0.6.10's to
+% 0.6.12's are, the level \oerblocklevel at the head of the title gives (a
 % block with no title has none, and no heading); and a heading in a
 % quotation, a list, or a table, which deck-pdf.lua makes a bold paragraph
 % in oerheading. Each

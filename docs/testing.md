@@ -81,7 +81,7 @@ PANDOC39_REAL="$(command -v pandoc)" PATH="$PWD/tests/pandoc39:$PATH" python3 te
 
 It works on Linux and macOS, whose `PATH` finds a script by its name; Windows' doesn't.
 
-Before a release, run the suites under it as well as with the latest Pandoc. Under it, what needs a newer Pandoc skips, as with 3.9 itself: a deck's PowerPoint file needs 3.10.1, and its reveal.js presentation 3.12. What it can't show is what 3.9's readers, writers, and templates make of what they're given, since those are the installed Pandoc's; the differences known are on the installation page.
+Before a release, run the suites under it as well as with the latest Pandoc, and put Pandoc 3.12.1 under it for that run, not the latest. A Word file is written by the Pandoc under the stand-in, and Pandoc's Word writer changed how it writes a list's items in 3.13 and the order of a nested table's alignments in 3.14; the code that reads such a file back asks Pandoc's version, hears 3.9, and reads the file as an older Pandoc would have written it. So over Pandoc 3.14 six checks of a Word file read back fail, five in the convert suite and one in the LaTeX suite, and over 3.12.1 both suites pass (measured 2026-11-14). None of the six is a fault Pandoc 3.9 itself would show, its writer being its own. Under the stand-in, what needs a newer Pandoc skips, as with 3.9 itself: a deck's PowerPoint file needs 3.10.1, and its reveal.js presentation 3.12. What it can't show is what 3.9's readers, writers, and templates make of what they're given, since those are the installed Pandoc's; the differences known are on the installation page.
 
 ### Extending them
 

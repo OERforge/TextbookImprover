@@ -6,6 +6,12 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+## [0.10] - 2026-11-14
+
+Slides, OpenStax's own sources, and checking against WCAG, mostly. A folder of PowerPoint decks, or of decks written in Markdown, is now slides: each deck is checked, the decisions it needs are reported in sidecars, and a copy is written with the decisions made so far, and a deck written in Markdown, or a PowerPoint deck read as one, becomes a PowerPoint file, a reveal.js presentation, and a tagged PDF. A book written in CNXML, OpenStax's own format, is a source, its exercises taken from OpenStax's bank, and a LibreTexts book can be read from a web archive. `--wcag` checks each HTML page, presentation, and EPUB's content document with axe-core, each EPUB with DAISY's Ace when it's installed, and each PDF against veraPDF's WCAG 2.2 profile. A PDF is set in IBM Plex on OpenStax's page by default, and what's too wide for its line is fitted to it and named. Several changes mean an existing book needs attention before it builds as before, each under Breaking: the book is named in `project.yaml`, a PDF needs LaTeX 2026-06-01 or later, and a run reads none of Pandoc's data folders, a book's own templates being settings now. Tested with Pandoc 3.14, 3.13, and 3.12.1, and on Python 3.9, the oldest supported.
+
+**The next release is planned to change where a book's files sit on disk, which will be a breaking change.** A book's sources, its sidecars, and everything a run writes are each to have a folder of their own, and a book laid out as it is now will have to be moved before it builds again. This is the version to stay on until a book has been moved.
+
 ### Breaking
 
 - **A CSV's cell a spreadsheet would take for a formula is written with an apostrophe before it**, in every report and every file of rows written to become a sidecar (`lib/sidecars.py`'s `csv_writer`): a cell that begins with `=`, `+`, `-`, `@`, a tab, a line end, or the full-width forms of the first four, as OWASP advises against a formula Excel or LibreOffice Calc would run as the file opens, where a book's alt text, captions, a formula's TeX, or a link's words could put one. A cell that begins with apostrophes of its own before such a character gets one more. Every reader of a sidecar takes that one apostrophe off, the run's filters and tools alike, so rows taken from a report into a sidecar read as written, and a sidecar's cell typed with one, as Excel has text that begins with `=` typed, now reads without it, where it had kept it. A script that reads a report with Python's `csv` module finds the apostrophe; `sidecars.csv_rows` and `sidecars.dict_rows` read as the run does. In the CSVs the runs here had written, 53 of 117,314 cells began so, in two reports, none in a sidecar. Excel for Microsoft 365 opens such a file with the apostrophes as text and saves it back unchanged. A row with a line's end in one of its cells is written with every cell quoted, since an older Python's writer (3.9.25, measured) left a carriage return in a cell unquoted where a file's lines end in a line feed alone, and the row couldn't be read back; 3.11.18, 3.12.3, and 3.13.18 quote it themselves.
@@ -861,7 +867,8 @@ Sidecar files need no migration, and can now be moved out of the book's director
 
 First release. DOCX to accessible HTML via Markdown, with a Pandoc filter handling figures, tables, alt text, and captions; sidecar CSV files for decisions a script can't make; and an IMS Common Cartridge builder.
 
-[Unreleased]: https://github.com/OERforge/TextbookImprover/compare/v0.9...HEAD
+[Unreleased]: https://github.com/OERforge/TextbookImprover/compare/v0.10...HEAD
+[0.10]: https://github.com/OERforge/TextbookImprover/compare/v0.9...v0.10
 [0.9]: https://github.com/OERforge/TextbookImprover/compare/v0.8...v0.9
 [0.8]: https://github.com/OERforge/TextbookImprover/compare/v0.7...v0.8
 [0.7]: https://github.com/OERforge/TextbookImprover/compare/v0.6...v0.7

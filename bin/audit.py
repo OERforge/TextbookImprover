@@ -77,7 +77,7 @@ import sourcecheck  # noqa: E402
 import tablecensus  # noqa: E402
 import wcag as wcag_lib  # noqa: E402
 
-VERSION = "0.9"
+VERSION = "0.10"
 KIND_OF = {".docx": "source-docx", ".md": "source-md", ".html": "html",
            ".xhtml": "html", ".epub": "epub", ".pdf": "pdf", ".pptx": "source-pptx"}
 # The report's three forms, by their names in the folder the audit writes

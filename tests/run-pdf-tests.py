@@ -7454,7 +7454,8 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice")
+                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice",
+                "-converted")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7593,6 +7594,51 @@ def build_twice(work):
     return paths[0], paths[1], said
 
 
+def build_converted(work):
+    """A book whose picture LaTeX can't read, a GIF, made a PNG for LaTeX,
+    beside a PNG of the GIF's name, with images.downsample: (the PDF's
+    path, what the run said), or None where there's no Pillow, which makes
+    the GIF and its copy."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    os.makedirs(os.path.join(work, "assets"))
+    Image.new("RGB", (800, 400), (0, 120, 200)).save(os.path.join(work, "assets", "wide.gif"))
+    noise_png(os.path.join(work, "assets", "wide.png"), 30, 15)
+    for name, text in (
+            ("one.md", "# One\n\n![A blue box](assets/wide.gif){width=1in}\n\n"
+                       "![A box of noise](assets/wide.png){width=2in}\n"),
+            ("project.yaml", "project:\n  title: Converted\n  identifier: org.example.converted\n"
+                             "  language: en-US\n  contents:\n    - one\n"),
+            ("conversion.yaml", "defaults:\n  images:\n    downsample: 2\n"
+                                "targets:\n  pdf:\n    format: pdf\n")):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return (os.path.join(work, "pdf", "org.example.converted.pdf"),
+            converted.stdout + converted.stderr)
+
+
+def converted_checks(built):
+    """The checks of the book whose GIF is made a PNG (build_converted)."""
+    if built is None:
+        print("  skip  no Pillow to make a GIF with; a picture LaTeX can't read, made a PNG "
+              "for it, isn't checked")
+        return []
+    path, said = built
+    return [
+        ("a GIF made a PNG for LaTeX is drawn from images.downsample's smaller copy, and a "
+         "PNG of its name beside it is drawn as itself, not as the GIF's copy",
+         lambda: explained(os.path.exists(path)
+                           and sorted(image_pixels(path)) == [(30, 15), (192, 96)],
+                           lambda: f"{sorted(image_pixels(path)) if os.path.exists(path) else 'no PDF'}"
+                                   f"; the run said:\n{last_lines(said)}")),
+    ]
+
+
 def twice_checks(first, second, said):
     """The check of the book built twice (build_twice)."""
     def same():
@@ -7685,6 +7731,7 @@ BUILDS = {
     "-doctoc": build_doc_toc,
     "-own": build_own_template,
     "-twice": build_twice,
+    "-converted": build_converted,
 }
 
 # The longest builds, started first when they run side by side, in this
@@ -8743,6 +8790,7 @@ def checks(work, built):
     items += doc_toc_checks(doc_toc_path, doc_toc_said)
     items += own_template_checks(own_path, own_said)
     items += twice_checks(twice_first, twice_second, twice_said)
+    items += converted_checks(built["-converted"])
     return items
 
 

@@ -1682,12 +1682,14 @@ LATEX_JOB = "input"
 LATEX_RUNS = 4
 
 
-def latex_images(document, base, out_dir, dpi=96):
+def latex_images(document, base, out_dir, dpi=96, copies=None):
     """document with each local picture LaTeX can't read pointed at a copy
-    it can, made under out_dir at the picture's own relative path (an SVG
-    a PDF, anything else a PNG), or document itself where there's none;
-    None where a picture isn't a local file, which only Pandoc's own
-    route fetches, or where one couldn't be converted."""
+    it can, made under out_dir at the picture's own relative path with
+    LaTeX's extension after its own (an SVG a PDF, anything else a PNG),
+    from the smaller copy in copies (images.downsample) where there's one,
+    or document itself where there's none; None where a picture isn't a
+    local file, which only Pandoc's own route fetches, or where one
+    couldn't be converted."""
     todo, remote = [], []
 
     def walk(value):
@@ -1713,18 +1715,29 @@ def latex_images(document, base, out_dir, dpi=96):
     walk(copy["blocks"])
     for target in todo:
         src = target[0]
-        stem, ext = os.path.splitext(src)
-        new = stem + (".pdf" if ext.lower() == ".svg" else ".png")
-        out = os.path.join(out_dir, new)
+        ext = os.path.splitext(src)[1].lower()
+        # The copy's name keeps the picture's own extension, since TeX
+        # looks in out_dir before the book's folder, where a.png beside
+        # a.gif would otherwise be drawn as a.gif's copy; and a parent
+        # folder is a folder named "up", so the copy stays in out_dir.
+        parts = [("up" if part == os.pardir else part)
+                 for part in os.path.normpath(src).split(os.sep) if part]
+        parts[-1] += ".pdf" if ext == ".svg" else ".png"
+        new = "/".join(parts)
+        out = os.path.join(out_dir, *parts)
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        # The smaller copy images.downsample made, which Pandoc's route
+        # finds before the original.
+        given = os.path.join(copies, src) if copies else None
+        given = given if given and os.path.isfile(given) else os.path.join(base, src)
         try:
-            if ext.lower() == ".svg":
+            if ext == ".svg":
                 subprocess.run(["rsvg-convert", "-f", "pdf", "-a", "--dpi-x", str(dpi),
-                                "--dpi-y", str(dpi), "-o", out, os.path.join(base, src)],
+                                "--dpi-y", str(dpi), "-o", out, given],
                                capture_output=True, check=True)
             else:
                 from PIL import Image
-                with Image.open(os.path.join(base, src)) as picture:
+                with Image.open(given) as picture:
                     clear = picture.mode in ("RGBA", "LA", "PA") or "transparency" in picture.info
                     picture.convert("RGBA" if clear else "RGB").save(out, "PNG")
         except Exception:               # the converter's absence or the file's fault alike
@@ -1973,7 +1986,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # route, which is there to compare the two.
         images_dir = os.path.join(work, "images")
         for_latex = None if os.environ.get("OER_PDF_VIA") == "pandoc" \
-            else latex_images(document, base, images_dir)
+            else latex_images(document, base, images_dir, copies=scaled)
         if for_latex is not None:
             latex_json = book_json
             if for_latex is not document:

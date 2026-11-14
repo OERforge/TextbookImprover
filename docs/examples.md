@@ -416,18 +416,19 @@ python3 $T/bin/convert.py
 
 ```
 GIAM.tex is the book: 11 page(s), one for each file it \include-s, and 2 for what it holds itself, each part or chapter it sets between them a page of its own.
-93 of 93 drawing(s) made images by LaTeX, in rendered/.
-Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 50 line break in a minipage read as \newline; 1 space between words a command sets (\hspace, \quad, \hfill) kept as a space, which the reader dropped, running the words together; 10 PDF or EPS image made SVG; 8 \ref to an enumerated item written as the item's number; 847 group or number after a command the reader takes whole kept apart from it, so it's read; 755 box (\fbox, \makebox, \resizebox, and the like) read as what it holds, which the reader dropped with it; 17 bibliography entry written out from BibTeX's .bbl, in the book's style, where the bibliography is; 16 citation written as the label LaTeX prints, linked to its entry; 65 reference or counter given the value LaTeX gives it.
+93 of 93 drawing(s) made images by LaTeX, in rendered/, each an SVG for the pages and the PDF LaTeX made of it, which a PDF from the pages and the latex target include.
+Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; 1 \cline or \cmidrule read as a whole rule; 50 line break in a minipage read as \newline; 1 space between words a command sets (\hspace, \quad, \hfill) kept as a space, which the reader dropped, running the words together; 10 PDF or EPS image made SVG; 6 image's scale written as the width it gives the image, where the reader dropped it and set the image at its natural size; 8 \ref to an enumerated item written as the item's number; 847 group or number after a command the reader takes whole kept apart from it, so it's read; 755 box (\fbox, \makebox, \resizebox, and the like) read as what it holds, which the reader dropped with it; 17 bibliography entry written out from BibTeX's .bbl, in the book's style, where the bibliography is; 16 citation written as the label LaTeX prints, linked to its entry; 65 reference or counter given the value LaTeX gives it.
 Wrote latex-conversion-macros-sample.tex: 3 macro(s) whose formulas texmath can't make MathML of, with a definition suggested for 2 and 1 for a person to define. Check it, then save it as latex-conversion-macros.tex.
 37 LaTeX cross-reference(s) resolved to the section or id they name.
 table-headers: 102 data table(s): 4 needs-source, 98 new
-Wrote table-captions-missing.csv (99 table(s) needing a description).
+table-headers: 95 table(s) have no sidecar row; prefilled rows are in table-headers-new.csv -- paste them into table-headers.csv
+Wrote table-captions-missing.csv (98 table(s) needing a description).
 Wrote image-alt-missing.csv (102 image(s) needing alt text).
 Wrote bare-links-new.csv (10 bare link(s) with no row in bare-links.csv).
-Output check: 11 page(s), 198 finding(s):
+Output check: 11 page(s), 318 finding(s):
+    118  table-header-is-formula: a header cell holding only a formula, which NVDA doesn't announce as its column's header
     104  image-without-alt: an img element has no alt attribute
      57  formula-shown-as-tex: a formula Pandoc couldn't convert, shown as its TeX
-     37  table-without-headers-or-caption: a data table with no th and no caption
 ...
 ERROR: project.yaml not found, so the book has no identifier or title.
 
@@ -518,13 +519,13 @@ Read from a copy of the LaTeX: 21 \ifthenelse on a boolean read as a toggle; ...
 Wrote epub/giam-3.2.epub: 11 page(s), 104 image(s), 104 without alternative text.
   Claims: accessMode textual, visual; sufficient textual,visual; features structuralNavigation, tableOfContents, readingOrder, MathML.
   epubcheck ran on 1 EPUB(s).
-Output check: 11 page(s) and 1 EPUB(s), 284 finding(s):
+Output check: 11 page(s) and 1 EPUB(s), 530 finding(s):
+    242  table-header-is-formula: a header cell holding only a formula, which NVDA doesn't announce as its column's header
     104  image-empty-alt-not-decorative: alt is empty but the image is not marked aria-hidden="true"
     104  image-without-alt: an img element has no alt attribute
-     76  table-without-headers-or-caption: a data table with no th and no caption
 ```
 
-No formula is left as TeX now: Pandoc warns about none, and every one in the book is MathML. The EPUB passes epubcheck. What's left is the reports: alt text for the 102 images and drawings, and headers and descriptions for the tables, worked through as in [the first example](#6-work-through-the-reports). Until then the EPUB doesn't claim `alternativeText`, and the check finds each image twice, once in the HTML and once in the EPUB.
+No formula is left as TeX now: Pandoc warns about none, and every one in the book is MathML. The EPUB passes epubcheck. What's left is the reports: alt text for the 102 images and drawings, and headers and descriptions for the tables, among them the header cells that hold only a formula, which NVDA doesn't announce as their column's header ([Checking](checking.md), `table-header-is-formula`), worked through as in [the first example](#6-work-through-the-reports). Until then the EPUB doesn't claim `alternativeText`, and the check finds each image twice, once in the HTML and once in the EPUB.
 
 ### 6. A copy of the LaTeX that builds a tagged PDF
 
@@ -540,8 +541,8 @@ python3 $T/bin/convert.py
 ```
 
 ```
-tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, luatex85 loaded for LuaLaTeX, so a test for pdfTeX (\ifx\pdfoutput\undefined) takes it for pdfTeX and pdfTeX's commands work, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, the PostScript font families the book names (ptm) set in TeX Gyre's OpenType clones, where installed, which the OpenType fonts' encoding has, 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 display formula(s) opening a paragraph in a center environment given \leavevmode.
-tagged: the book's other master(s) written too, GIAM-hw.tex with 9 file(s) only it reaches, 0 image(s) and drawing(s) given alt text and 0 marked artifact; GIAM-solutions_manual.tex, which reaches no file the others don't, 0 image(s) and drawing(s) given alt text and 0 marked artifact, each made to build with LaTeX's tagging as the book's is; luatex85 loaded for LuaLaTeX in GIAM-hw.tex, GIAM-solutions_manual.tex, for a test for pdfTeX (\ifx\pdfoutput\undefined) and pdfTeX's commands.
+tagged: 154 LaTeX file(s) written, 3 of them changed: 0 image(s) and drawing(s) given alt text and 0 marked artifact, as keys LaTeX's tagging reads. 3 definition(s) from latex-conversion-macros.tex written after the preamble, as the conversion reads them. Made to build with LaTeX's tagging, with LuaLaTeX: \DocumentMetadata added, babel given main=english, so its main language is the book's, which it takes from \DocumentMetadata's lang otherwise, 2 pdftex option(s) and 1 pdfTeX setting(s) taken out, luatex85 loaded for LuaLaTeX, so a test for pdfTeX (\ifx\pdfoutput\undefined) takes it for pdfTeX and pdfTeX's commands work, 2 starred theorem(s) defined only when tagging hasn't, \centerline on a line of its own made a centered paragraph, unicode-math loaded, so each formula carries its MathML, with the OpenType Latin Modern fonts (TeX's own design) and a fallback for characters they lack, the PostScript font families the book names (ptm) set in TeX Gyre's OpenType clones, where installed, which the OpenType fonts' encoding has, its drawings in picture mode drawn with paths by pict2e, not a font's glyphs (picture_paths), its line breaks (\\, \newline, \linebreak, and \break) told to leave a space between their lines in the text a screen reader gets, where LaTeX's tagging ran the words on either side together, its parts' and chapters' headings told to leave a space between a heading's number and its title in the text a screen reader gets, where LaTeX's tagging ran them together ("Chapter 1Introduction"), its lists of contents, figures, or tables told to leave a space between an entry's number, its title, and its page number in the text a screen reader gets, where LaTeX's tagging ran them together ("1.1A section3"), 51 figure(s) and table(s) tagged where the text has them, not gathered at the end of the document, and 1 display formula(s) opening a paragraph in a center environment given \leavevmode.
+tagged: the book's other master(s) written too, GIAM-hw.tex with 9 file(s) only it reaches, 0 image(s) and drawing(s) given alt text and 0 marked artifact, babel given main=english; GIAM-solutions_manual.tex, which reaches no file the others don't, 0 image(s) and drawing(s) given alt text and 0 marked artifact, babel given main=english, each made to build with LaTeX's tagging as the book's is; luatex85 loaded for LuaLaTeX in GIAM-hw.tex, GIAM-solutions_manual.tex, for a test for pdfTeX (\ifx\pdfoutput\undefined) and pdfTeX's commands.
 ```
 
 The run also checks GIAM's class and packages against the LaTeX tagging project's status list, from TeX's `latex-tagging-status` package. TinyTeX doesn't install it, and then the run says how (`tlmgr install latex-tagging-status`); with it, the run says:
@@ -589,13 +590,14 @@ python3 $T/bin/convert.py
 ```
 
 ```
-Wrote pdf/giam-3.2.pdf: 434 page(s), built by LaTeX from the book's own files, made to build with LaTeX's tagging as a source target would make them: 0 image(s) and drawing(s) with alt text and 0 marked artifact, 57 table(s) with a header row and 13 with a header column declared, a person's or the census's, each formula with its MathML, its figures and tables tagged where the text has them, and 195 figure(s) LaTeX gave a placeholder for alt text, which image-alt.csv can describe.
+Wrote pdf/giam-3.2.pdf: 434 page(s), built by LaTeX from the book's own files, made to build with LaTeX's tagging as a source target would make them: 0 image(s) and drawing(s) with alt text and 0 marked artifact, 57 table(s) with a header row and 13 with a header column declared, a person's or the census's, each formula with its MathML, its drawings in picture mode drawn with paths by pict2e, not a font's glyphs (picture_paths), a space between a line break's two lines in the text a screen reader gets, a space between a part's or a chapter's number and its title in the text a screen reader gets, a space between a contents entry's number, its title, and its page number in the text a screen reader gets, its figures and tables tagged where the text has them, and 195 figure(s) LaTeX gave a placeholder for alt text, which image-alt.csv can describe.
 ...
-Output check: 11 page(s), 1 EPUB(s), and 1 PDF(s), 479 finding(s):
+Output check: 11 page(s), 1 EPUB(s), and 1 PDF(s), 854 finding(s):
+    242  table-header-is-formula: a header cell holding only a formula, which NVDA doesn't announce as its column's header
     104  image-empty-alt-not-decorative: alt is empty but the image is not marked aria-hidden="true"
     104  image-without-alt: an img element has no alt attribute
-     76  table-without-headers-or-caption: a data table with no th and no caption
-  giam-3.2.pdf: 186 pdf-figure-alt-is-placeholder: a figure's alternative text in the PDF is the placeholder LaTeX writes for a drawing that has none
+  giam-3.2.pdf: 128 pdf-table-header-is-formula: a header cell (TH) holding only a formula: NVDA reads it in the header row but announces no header on moving into its column, where it announces words beside a formula
+  giam-3.2.pdf: 186 pdf-figure-alt-is-placeholder: a figure's alternative text in the PDF is the placeholder LaTeX writes for a drawing that has none, or says nothing about the figure otherwise: punctuation, a word such as "image", a camera's name for a file, a default name
   giam-3.2.pdf: 9 pdf-figure-alt-is-file-name: a figure's alternative text in the PDF is a file name, which is what LaTeX writes when an image has none
 ```
 

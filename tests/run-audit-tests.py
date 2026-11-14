@@ -540,7 +540,10 @@ def case_current():
     check runs again each time, keeping nothing: veraPDF's WCAG checks
     with two versions of a module, Ace failing on an EPUB, veraPDF
     failing on a PDF's PDF/UA checks; nor when a form of the report it
-    was written in is gone."""
+    was written in is gone. Without a browser, axe-core can't check the
+    page or the EPUB's content documents, and an audit that warns of that
+    keeps nothing, so the checks of the folder's report are skipped and
+    those of a PDF alone run."""
     sys.path.insert(0, HERE)
     import fakeace
     import fakeverapdf
@@ -645,29 +648,37 @@ def case_current():
     with open(os.path.join(out, "audit-cache.json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh)
     lost = twice("--wcag", paths=(os.path.relpath(folder, WORK),))
+
+    def browsed(check):
+        """A check of the folder's report, which needs a browser."""
+        return check if browser else (
+            lambda: print("  skip  no browser: the folder's page and EPUB keep nothing, "
+                          "so its report is never current") or True)
     return [
         ("each audit finishes, and takes the report for current just when it leaves it as it "
          "was",
          lambda: not stopped or fail(stopped[0][-2000:])),
         ("an audit with --wcag and nothing changed takes the report for current",
-         lambda: not first and second),
+         browsed(lambda: not first and second)),
         ("but not with another WCAG version, level, best practices, experimental rules, or "
          "--verbose, on a PDF alone, each of them current run again, and the run before them "
          "not",
          lambda: choices == [[False, True, False]] * 5 or fail(repr(choices))),
         ("nor with a form of the report asked for that wasn't written with it, or is gone, "
          "until it is",
-         lambda: forms == [False, True, True, False, True, False, False, True]
-         or fail(repr(forms))),
+         browsed(lambda: forms == [False, True, True, False, True, False, False, True]
+                 or fail(repr(forms)))),
         ("nor with another veraPDF, its WCAG modules gone, another Ace, or none, and none "
          "said of in other words",
-         lambda: [upgraded, unmodeled, reaced, unaced] == [[False, True]] * 3
-         + [[False, True, False, True]] or fail(repr([upgraded, unmodeled, reaced, unaced]))),
+         browsed(lambda: [upgraded, unmodeled, reaced, unaced] == [[False, True]] * 3
+                 + [[False, True, False, True]]
+                 or fail(repr([upgraded, unmodeled, reaced, unaced])))),
         ("never while a check runs again each time, keeping nothing: veraPDF's WCAG checks "
          "with two versions of a module, Ace failing on an EPUB, or veraPDF on a PDF's PDF/UA "
          "checks",
-         lambda: duplicated == [False, False] and unduplicated == [False, True]
-         and failing == [[False, False]] * 2 or fail(repr([duplicated, unduplicated, failing]))),
+         browsed(lambda: duplicated == [False, False] and unduplicated == [False, True]
+                 and failing == [[False, False]] * 2
+                 or fail(repr([duplicated, unduplicated, failing])))),
         ("without --wcag, nor without veraPDF when it had it",
          lambda: [plain, unverapdf, again] == [[False, True], [False, True], False]
          or fail(repr([plain, unverapdf, again]))),
@@ -675,9 +686,9 @@ def case_current():
          lambda: restyled == [False, True] if browser
          else print("  skip  no browser: a stylesheet changed isn't checked") or True),
         ("nor with its files named another way",
-         lambda: named == [False, True] * 3 or fail(repr(named))),
+         browsed(lambda: named == [False, True] * 3 or fail(repr(named)))),
         ("nor with a file read again, as when the cache has lost what it found",
-         lambda: lost == [False, True] or fail(repr(lost))),
+         browsed(lambda: lost == [False, True] or fail(repr(lost)))),
     ]
 
 

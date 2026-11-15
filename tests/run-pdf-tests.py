@@ -7455,7 +7455,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
                 "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice",
-                "-converted")
+                "-converted", "-stopped")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7639,6 +7639,166 @@ def converted_checks(built):
     ]
 
 
+def build_stopped(work):
+    """Books LaTeX stops on, each its own way: {name: (its folder, what the
+    run said)}. `package` names a package TeX doesn't have, in its
+    metadata file; `command` has a command nothing defines in a page's raw
+    LaTeX, and is built again by Pandoc's own route (`pandoc`) and, with
+    the command taken out, to a PDF (`mended`); `second` writes that
+    command into the contents, which LaTeX reads on its second run; and
+    `killed` is a sound book whose LuaLaTeX is killed on its first run,
+    its files left cut off, with the real one there for any run after
+    it, and `runs` how many it got."""
+    pages = {
+        "package": "A sound page.\n",
+        "command": "Before it. `\\oernosuchcommand`{=latex} After it.\n",
+        "second": "`\\addtocontents{toc}{\\protect\\oernosuchcommand}`{=latex}A sound page, "
+                  "but for what it writes into the contents.\n",
+        "killed": "A sound page.\n",
+    }
+    built = {}
+
+    def convert(book, **environment):
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                              cwd=book, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, env=dict(os.environ, **environment))
+        return done.stdout + done.stderr
+
+    for name, text in pages.items():
+        book = os.path.join(work, name)
+        os.makedirs(book)
+        files = {
+            "one.md": "# One\n\nA first page.\n\n## A section\n\nIts text.\n",
+            "two.md": "# Two\n\n" + text,
+            "project.yaml": f"project:\n  title: Stopped\n  identifier: org.example.{name}\n"
+                            "  language: en-US\n  contents:\n    - one\n    - two\n",
+            "conversion.yaml": "targets:\n  pdf:\n    format: pdf\n",
+        }
+        if name == "package":
+            files["meta.yaml"] = ("header-includes:\n  - |\n    ```{=latex}\n"
+                                  "    \\usepackage{oernosuchpackage}\n    ```\n")
+            files["conversion.yaml"] += "    pdf:\n      metadata: meta.yaml\n"
+        for file_name, content in files.items():
+            with open(os.path.join(book, file_name), "w", encoding="utf-8") as fh:
+                fh.write(content)
+        environment = {}
+        if name == "killed":
+            # LuaLaTeX itself for the release's probe, the page's measure,
+            # and any run after the first of the book's own, which is the
+            # one given the seed.
+            tools = os.path.join(work, "killed-bin")
+            os.makedirs(tools)
+            real = shutil.which("lualatex")
+            count = os.path.join(work, "killed-runs")
+            with open(os.path.join(tools, "lualatex"), "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n"
+                         f"case \"$*\" in *setrandomseed*) ;; *) exec '{real}' \"$@\" ;; esac\n"
+                         f"echo run >> '{count}'\n"
+                         f"[ \"$(wc -l < '{count}')\" -gt 1 ] && exec '{real}' \"$@\"\n"
+                         "out=.\n"
+                         "job=texput\n"
+                         "while [ $# -gt 1 ]; do\n"
+                         "  [ \"$1\" = -output-directory ] && out=\"$2\"\n"
+                         "  [ \"$1\" = -jobname ] && job=\"$2\"\n"
+                         "  shift\n"
+                         "done\n"
+                         "printf '%s\\n' '\\relax ' '\\@writefile{toc}{\\contentsline "
+                         "{chapter}{Cut of' > \"$out/$job.aux\"\n"
+                         ": > \"$out/$job.toc\"\n"
+                         "printf '%s\\n' 'This is LuaHBTeX, cut off' > \"$out/$job.log\"\n"
+                         "kill -KILL $$\n")
+            os.chmod(os.path.join(tools, "lualatex"), 0o755)
+            environment["PATH"] = tools + os.pathsep + os.environ.get("PATH", "")
+        built[name] = (book, convert(book, **environment))
+        if name == "killed":
+            try:
+                with open(count, encoding="utf-8") as fh:
+                    built["runs"] = len(fh.read().split())
+            except OSError:
+                built["runs"] = 0
+        if name == "command":
+            kept = [f for f in ("book.log", "book.tex")
+                    if os.path.exists(os.path.join(book, "pdf", f))]
+            lines = []
+            if "book.tex" in kept:
+                with open(os.path.join(book, "pdf", "book.tex"), encoding="utf-8") as fh:
+                    lines = fh.read().split("\n")
+            built["kept"] = (kept, lines)
+            shutil.rmtree(os.path.join(book, "pdf"))
+            built["pandoc"] = (book, convert(book, OER_PDF_VIA="pandoc"))
+            built["pandoc-kept"] = os.path.exists(os.path.join(book, "pdf", "book.log"))
+            with open(os.path.join(book, "pdf", "book.log"), "w", encoding="utf-8") as fh:
+                fh.write("a failed build's log\n")
+            with open(os.path.join(book, "two.md"), "w", encoding="utf-8") as fh:
+                fh.write("# Two\n\nBefore it. After it.\n")
+            built["mended"] = (book, convert(book))
+    return built
+
+
+def stopped_checks(built):
+    """The checks of the books LaTeX stops on (build_stopped)."""
+    def said(name):
+        return built[name][1]
+
+    def why(name):
+        # Without the commands the run echoes, which would be all of it.
+        return lambda: "the run said:\n" + last_lines(
+            "\n".join(line for line in said(name).splitlines() if not line.startswith("+ ")), 16)
+
+    def at_line():
+        m = re.search(r"LaTeX stopped on its first run, at line (\d+) of the book's LaTeX, on "
+                      r"the page two:", said("command"))
+        kept, lines = built["kept"]
+        return bool(m) and kept == ["book.log", "book.tex"] \
+            and "\\oernosuchcommand" in lines[int(m.group(1)) - 1]
+
+    return [
+        ("a PDF whose LaTeX names a package TeX doesn't have isn't built, and the run gives "
+         "LaTeX's error, the file it couldn't find, and how to find the package that has it",
+         lambda: explained(
+             "LaTeX stopped on its first run" in said("package")
+             and "! LaTeX Error: File `oernosuchpackage.sty' not found." in said("package")
+             and "LaTeX can't find oernosuchpackage.sty" in said("package")
+             and "LaTeX failed building" in said("package")
+             and "wasn't built" in said("package"), why("package"))),
+        ("a command nothing defines, in a page's raw LaTeX, stops the build with LaTeX's "
+         "error, the line of the book's LaTeX it's on, and the page that's on, and the log "
+         "and that LaTeX are kept where the PDF would have been",
+         lambda: explained(
+             "! Undefined control sequence." in said("command")
+             and "pdf/book.log" in said("command").replace(os.sep, "/")
+             and at_line(), why("command"))),
+        ("built by Pandoc's own route, the same book is reported as Pandoc reports it, and "
+         "no log is kept",
+         lambda: explained(
+             "Error producing PDF." in said("pandoc")
+             and "pandoc failed building" in said("pandoc")
+             and "LaTeX stopped" not in said("pandoc")
+             and not built["pandoc-kept"], why("pandoc"))),
+        ("and with the command taken out it builds, and the failed build's log is gone",
+         lambda: explained(
+             os.path.exists(os.path.join(built["mended"][0], "pdf", "org.example.command.pdf"))
+             and "wasn't built" not in said("mended")
+             and not os.path.exists(os.path.join(built["mended"][0], "pdf", "book.log")),
+             why("mended"))),
+        ("an error that first shows on LaTeX's second run, in the contents its first run "
+         "wrote, is reported as that run's, with the line of the contents it's on",
+         lambda: explained(
+             bool(re.search(r"LaTeX stopped on its second run, at line \d+ of the contents it "
+                            r"wrote on an earlier run", said("second")))
+             and "! Undefined control sequence." in said("second")
+             and "\\oernosuchcommand" in said("second"), why("second"))),
+        ("a LuaLaTeX killed on its first run is reported as killed, with the signal, and "
+         "LaTeX isn't run again on the files it left cut off",
+         lambda: explained(
+             "LuaLaTeX was killed on its first run, by signal 9 (SIGKILL)" in said("killed")
+             and built["runs"] == 1
+             and "File ended" not in said("killed") and "Runaway" not in said("killed")
+             and "wasn't built" in said("killed"),
+             lambda: f"LuaLaTeX was run {built['runs']} time(s); " + why("killed")())),
+    ]
+
+
 def twice_checks(first, second, said):
     """The check of the book built twice (build_twice)."""
     def same():
@@ -7732,6 +7892,7 @@ BUILDS = {
     "-own": build_own_template,
     "-twice": build_twice,
     "-converted": build_converted,
+    "-stopped": build_stopped,
 }
 
 # The longest builds, started first when they run side by side, in this
@@ -8791,6 +8952,7 @@ def checks(work, built):
     items += own_template_checks(own_path, own_said)
     items += twice_checks(twice_first, twice_second, twice_said)
     items += converted_checks(built["-converted"])
+    items += stopped_checks(built["-stopped"])
     return items
 
 

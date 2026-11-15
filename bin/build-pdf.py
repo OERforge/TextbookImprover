@@ -49,6 +49,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1777,11 +1778,101 @@ def pandoc_warnings(log):
     return "".join(line + "\n" for line in lines)
 
 
-def pdf_via_latex(book_json, filters, searched, out_path, base, work, environment, seed):
+ORDINALS = ("first", "second", "third", "fourth")
+ERROR_LINE = re.compile(r"^l\.(\d+) ?(.*)$")
+# What LaTeX writes on one run and reads on the next, and what each is
+# written from, for an error that first shows on a later run.
+WRITTEN_FILES = (("toc", "the contents it wrote on an earlier run, from the book's headings"),
+                 ("aux", "what it wrote on an earlier run of the book's headings, captions, "
+                         "and labels"),
+                 ("lof", "the list of figures it wrote on an earlier run, from their captions"),
+                 ("lot", "the list of tables it wrote on an earlier run, from their captions"),
+                 ("out", "the bookmarks it wrote on an earlier run, from the book's headings"))
+
+
+def error_block(log):
+    """LaTeX's first error in a log, as Pandoc gives one: from the first
+    line that opens with ! to the line that says where it was (l.123), or
+    None."""
+    lines = log.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.startswith("!")), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("l.")),
+               len(lines) - 1)
+    return lines[start:end + 1]
+
+
+def error_place(block, source, tex_dir, pages):
+    """Where an error (error_block) was, in words, or "": a line of the
+    book's LaTeX, with the page it's on (pages, {label: stem}), or of a
+    file an earlier run wrote. TeX names the line by its number alone,
+    whatever file it was reading, and shows the line as far as it had
+    read, so the file is the one whose line of that number begins so."""
+    where = ERROR_LINE.match(block[-1]) if block else None
+    if not where or not where.group(2).strip():
+        return ""
+    number, shown = int(where.group(1)), where.group(2).rstrip()
+
+    def begins(lines):
+        if not 0 < number <= len(lines):
+            return False
+        line = lines[number - 1]
+        # A long line is shown from its last few dozen characters on.
+        return shown[3:] in line if shown.startswith("...") else line.startswith(shown)
+
+    lines = source.split("\n")
+    if begins(lines):
+        owner = latexbuild.line_owners(lines, pages)[number - 1]
+        return f"at line {number} of the book's LaTeX" + (f", on the page {owner}" if owner else "")
+    for extension, what in WRITTEN_FILES:
+        try:
+            with open(os.path.join(tex_dir, LATEX_JOB + "." + extension), encoding="utf-8",
+                      errors="replace") as fh:
+                if begins(fh.read().split("\n")):
+                    return f"at line {number} of {what}"
+        except OSError:
+            continue
+    return ""
+
+
+def latex_stopped(code, run, log, said, source, tex_dir, pages):
+    """What to say of a LaTeX run that failed, as lines: that LaTeX was
+    killed, where it was; or its first error and where that was; or, where
+    its log has no error, the last of what it said."""
+    which = ORDINALS[run - 1] if run <= len(ORDINALS) else f"{run}th"
+    stopped = -code if code < 0 else code - 128 if code > 128 else 0
+    if stopped:
+        try:
+            name = f" ({signal.Signals(stopped).name})"
+        except ValueError:
+            name = ""
+        return [f"LuaLaTeX was killed on its {which} run, by signal {stopped}{name}, before it "
+                "finished the PDF"
+                + (", as a system kills a program when memory runs out, and as a time limit "
+                   "or a person can" if stopped == signal.SIGKILL else "")
+                + ". LaTeX reported no error of its own, and what it left half written "
+                "wasn't read again."]
+    block = error_block(log) or error_block(said)
+    if block:
+        place = error_place(block, source, tex_dir, pages)
+        return [f"LaTeX stopped on its {which} run" + (", " + place if place else "") + ":"] + block
+    last = [line for line in (log or said).split("\n") if line.strip()][-12:]
+    return [f"LaTeX stopped on its {which} run (exit status {code}) without naming an error; "
+            "the last of what it said:"] + last
+
+
+def pdf_via_latex(book_json, filters, searched, out_path, base, work, environment, seed,
+                  pages=None, kept=None):
     """Build out_path from book_json as Pandoc's -t pdf would, with LaTeX
-    run here. Returns (the run as subprocess gives one, with what Pandoc
-    would have written to stderr; what LaTeX's last run said; the LaTeX it
-    read)."""
+    run here, but for a run that fails, which is the last: Pandoc runs
+    LaTeX again while there's a contents file, and reports the later
+    run's error, which can be one the first run's cut-off files made.
+    Returns (the run as subprocess gives one, with what there is to say on
+    its stderr; what LaTeX's last run said; the LaTeX it read). After a
+    failed run, LaTeX's log and the LaTeX it read are left in the folder
+    kept, as book.log and book.tex, and pages ({label: stem}) names the
+    page an error is on."""
     tex_dir = os.path.join(work, "latex")
     os.makedirs(tex_dir, exist_ok=True)
     tex = os.path.join(tex_dir, LATEX_JOB + ".tex")
@@ -1814,21 +1905,26 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
             log = ""
         again = any("Warning:" in line and "Rerun" in line for line in log.split("\n")) \
             or (run < 3 and os.path.exists(os.path.join(tex_dir, LATEX_JOB + ".toc")))
-        if not again:
+        if code or not again:
             break
     made = os.path.join(tex_dir, LATEX_JOB + ".pdf")
     stderr = wrote.stderr
     if code or not os.path.exists(made):
-        lines = (log or said).split("\n")
-        start = next((i for i, line in enumerate(lines) if line.startswith("!")), None)
-        if start is None:
-            message = log or said
-        else:
-            end = next((i for i in range(start, len(lines)) if lines[i].startswith("l.")),
-                       len(lines) - 1)
-            message = "\n".join(lines[start:end + 1]) + "\n"
+        lines = latex_stopped(code or 43, run, log, said, source, tex_dir, pages or {}) if code \
+            else [f"LaTeX finished its {ORDINALS[run - 1]} run and made no PDF; the last of "
+                  "what it said:"] + [line for line in (log or said).split("\n")
+                                      if line.strip()][-12:]
+        if kept:
+            os.makedirs(kept, exist_ok=True)
+            with open(os.path.join(kept, "book.log"), "w", encoding="utf-8") as fh:
+                fh.write(log or said)
+            shutil.copyfile(tex, os.path.join(kept, "book.tex"))
+            there = os.path.relpath(kept, base)
+            lines.append(f"LaTeX's log is kept as {os.path.join(there, 'book.log')}, and the "
+                         f"LaTeX it read, whose lines the log names, as "
+                         f"{os.path.join(there, 'book.tex')}.")
         return subprocess.CompletedProcess(command, code or 43, "",
-                                           stderr + "Error producing PDF.\n" + message), said, source
+                                           stderr + "\n".join(lines) + "\n"), said, source
     shutil.copyfile(made, out_path)
     return subprocess.CompletedProcess(command, 0, "", stderr + pandoc_warnings(log)), said, source
 
@@ -1987,6 +2083,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         images_dir = os.path.join(work, "images")
         for_latex = None if os.environ.get("OER_PDF_VIA") == "pandoc" \
             else latex_images(document, base, images_dir, copies=scaled)
+        # A failed build's log (pdf_via_latex), which only that build leaves.
+        stale = os.path.join(out_dir, "book.log")
+        if os.path.exists(stale):
+            os.remove(stale)
         if for_latex is not None:
             latex_json = book_json
             if for_latex is not document:
@@ -1995,7 +2095,9 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                     json.dump(for_latex, fh)
             result, said, source = pdf_via_latex(
                 latex_json, filters, [scaled, images_dir], os.path.abspath(out_path), base, work,
-                environment, latex_seed(project, name))
+                environment, latex_seed(project, name),
+                pages={page_id(stem): stem for stem, _t, _d in assembly.pages},
+                kept=os.path.abspath(out_dir))
         else:
             command += downsample.resource_args(scaled)
             # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
@@ -2064,7 +2166,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         if result.returncode != 0:
             for advice in latexbuild.failure_advice(result.stderr):
                 print(advice, file=sys.stderr)
-            sys.exit(f"pandoc failed building {out_path}.")
+            by = "LaTeX" if result.args and result.args[0] == ENGINE else "pandoc"
+            sys.exit(f"{by} failed building {out_path}.")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

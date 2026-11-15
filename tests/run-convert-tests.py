@@ -4127,10 +4127,8 @@ def case_pdf_capacity(work):
     itself without end: the PDF target names each for what it is. The
     LuaLaTeX here answers the release probe and fails a build as LuaTeX
     does, its log in LuaTeX's words and named after the job when the
-    command names one, as build-pdf.py's does; the real thing takes four
-    LaTeX runs a build (it's run again while there's a .toc, which the
-    pages' LaTeX always has, whatever the exit status, as Pandoc runs
-    it), about eight seconds a run for the strings."""
+    command names one, as build-pdf.py's does; the real thing takes about
+    eight seconds to run out of strings."""
     said = {}
     for name, log in CAPACITY_LOGS.items():
         book = os.path.join(work, name)

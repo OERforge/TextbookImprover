@@ -156,10 +156,10 @@ Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a 
 
 ## Optional: the full validators
 
-Every run [checks its output](checking.md) with nothing but Python. Two validators know the specifications in full and are used as well when they're present; both are Java, and the Nu checker needs **Java 17 or later** (its own classes are built for 11, but it bundles a Jetty library built for 17, and Java 11 fails on that with `UnsupportedClassVersionError`). epubcheck is happy on 11. Nothing else in the project needs Java, and a run without the validators loses only their findings.
+Every run [checks its output](checking.md) with nothing but Python. Two validators know the specifications in full and are used as well when they're present; both are Java, and the Nu checker needs **Java 17 or later** (its own classes are built for 11, but it bundles a Jetty library built for 17, and Java 11 fails on that with `UnsupportedClassVersionError`). epubcheck is happy on 11. The line below installs Java 21, which Ubuntu 22.04, 24.04, and 26.04 and Debian 13 all package, where Debian 13 has no Java 17. Nothing else in the project needs Java, and a run without the validators loses only their findings.
 
 ```bash
-sudo apt install openjdk-17-jre-headless       # Java 17, about 50 MB
+sudo apt install openjdk-21-jre-headless       # Java 21, about 50 MB
 
 mkdir -p ~/tools
 curl -L -o /tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip

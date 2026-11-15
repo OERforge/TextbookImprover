@@ -313,7 +313,7 @@ The 29 KB and 242 KB pages were built by hand the way TextbookImprover builds pa
 
 **An image with `alt=""` may carry no `role` attribute**, which the Nu checker enforces; the filter writes `aria-hidden="true"` for a decorative image (as of 0.8, 2026-10-03).
 
-**`vnu.jar` needs Java 17, and writes its JSON to stderr.** It bundles a Jetty built for Java 17 though its own classes are built for 11, and fails on 11 with `UnsupportedClassVersionError`; epubcheck 5.2 is happy on 11. So the installation page installs `openjdk-17-jre-headless`. The Nu checker writes its JSON to stderr unless given `--stdout`, and Java's own notices land there too, so the reader starts at the first brace (as of 0.8, 2026-10-03).
+**`vnu.jar` needs Java 17, and writes its JSON to stderr.** It bundles a Jetty built for Java 17 though its own classes are built for 11, and fails on 11 with `UnsupportedClassVersionError`; epubcheck 5.2 is happy on 11. The installation page installs `openjdk-21-jre-headless`, since Debian 13 has OpenJDK 21 and 25 and no 17, and Ubuntu 22.04 (from `jammy-updates`), 24.04, and 26.04 have 17 and 21 alike; the suites' validators ran on Java 21.0.13 on 2026-11-15, epubcheck 5.4.0, the Nu checker 26.11.14, and veraPDF 1.30.4 among them (Ubuntu's package indexes measured, Debian's read). The Nu checker writes its JSON to stderr unless given `--stdout`, and Java's own notices land there too, so the reader starts at the first brace (as of 0.8, 2026-10-03).
 
 ## WAVE
 

@@ -9,6 +9,7 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 ### Changed
 
 - **The repository is `github.com/OERforge/textbookimprover`**, renamed from `TextbookImprover`, and the addresses here follow it: the changelog's links, the installation page's download and clone, and the address `util/shortdoi.py` gives the servers it asks. GitHub sends the old address to the new one. A release's archive now unpacks to a folder named for the repository, `textbookimprover-0.10` for 0.10 (both the `.tar.gz` and the `.zip`), and the installation page's clone is `~/tools/textbookimprover`, so `$T` follows. The program is still TextbookImprover. **A Word target's namespace changes with it**: the custom XML part that carries the bookmark names Pandoc's writer hashed, and the marks for a table, rule, or figure a list item holds or a table in a quotation (`docxtarget.ID_MAP_NS`), is written as `https://github.com/OERforge/textbookimprover/ids`, and reading takes that or the old `https://github.com/OERforge/TextbookImprover/ids` (`docxrepair.holds_id_map`), so a Word file a release up to 0.10 wrote reads back as it did.
+- **The installation page installs Java 21** (`openjdk-21-jre-headless`) for the validators, in place of Java 17, which Debian 13 doesn't package. Ubuntu 22.04, 24.04, and 26.04 have both, about 50 MB to download either way, and the Nu checker still needs 17 or later.
 
 ### Fixed
 

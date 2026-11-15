@@ -1,0 +1,5 @@
+# A setting of a section, written beside it in a target, says the target
+# it's in and the section it belongs to, not "the top level" and the
+# nearest spelling (media).
+target: pdf
+error: "unknown setting 'metadata' in targets.pdf: metadata is a setting of pdf (pdf.metadata), written under pdf:"

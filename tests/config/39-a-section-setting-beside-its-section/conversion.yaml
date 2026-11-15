@@ -1,0 +1,4 @@
+targets:
+  pdf:
+    format: pdf
+    metadata: preamble.md

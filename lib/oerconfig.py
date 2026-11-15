@@ -351,7 +351,7 @@ def _not_a_block(path, key, value):
 # merging
 # --------------------------------------------------------------------------
 
-def _merge(node, base, override, source, problems, warnings=None):
+def _merge(node, base, override, source, problems, warnings=None, block=""):
     """Rules 2, 3 and 4. Returns a new dict; neither argument is modified.
 
     When warnings is given, a key the schema does not declare is kept and
@@ -360,6 +360,9 @@ def _merge(node, base, override, source, problems, warnings=None):
     been written for a newer version of the tools, and a reader that drops
     what it does not understand and then rewrites the file destroys
     exactly the settings it was being lenient about.
+
+    block is where the settings were written (defaults, targets.pdf), so
+    that a key unknown there is said to be there, not at the file's top.
     """
     out = dict(base)
     if not isinstance(override, dict):
@@ -371,15 +374,15 @@ def _merge(node, base, override, source, problems, warnings=None):
         child = node.keys.get(key) if node.is_section else None
         if child is None:
             if warnings is None:
-                problems.append(_unknown_key(node, key, source))
+                problems.append(_unknown_key(node, key, source, block))
             else:
-                warnings.append(_unknown_key(node, key, source)
+                warnings.append(_unknown_key(node, key, source, block)
                                 + " (kept, not used)")
                 out[key] = value
             continue
         if child.is_section:
             out[key] = _merge(child, base.get(key) or {}, value or {},
-                              source, problems, warnings)
+                              source, problems, warnings, block)
         elif value is None:
             # Rule 4: an explicit null clears, falling back to the schema
             # default. Distinguishable from an absent key because YAML
@@ -456,16 +459,38 @@ def _elsewhere(dotted):
             + ", and a ".join(f"{name} setting, {where}" for name, where in homes))
 
 
-def _unknown_key(node, key, source):
+def _unknown_key(node, key, source, block=""):
     known = sorted(node.keys) if node.is_section else []
-    where = node.path or "the top level"
+    where = ".".join(part for part in (block, node.path) if part) or "the top level"
     dotted = f"{node.path}.{key}" if node.path else key
     elsewhere = _elsewhere(dotted)
     if elsewhere:
         return f"{source}: unknown setting {key!r} in {where}: {elsewhere}"
+    # A setting of one of this block's sections, written beside them, as
+    # metadata for pdf.metadata: saying which is more use than the nearest
+    # spelling, which for metadata was media.
+    inside = _inside(node, key)
+    if inside:
+        return (f"{source}: unknown setting {key!r} in {where}: "
+                + ", and ".join(f"{key} is a setting of {path} ({path}.{key}), "
+                                f"written under {path}:" for path in inside))
     close = difflib.get_close_matches(key, known, n=1, cutoff=0.6)
     hint = f"; did you mean {close[0]}?" if close else ""
     return f"{source}: unknown setting {key!r} in {where}{hint}"
+
+
+def _inside(node, key):
+    """The paths of the sections below node that have a setting named key,
+    in the schema's order."""
+    found = []
+    if not node.is_section:
+        return found
+    for child in node.keys.values():
+        if child.is_section:
+            if key in child.keys:
+                found.append(child.path)
+            found.extend(_inside(child, key))
+    return found
 
 
 # --------------------------------------------------------------------------
@@ -676,13 +701,14 @@ def resolve(schema, project_schema, documents, target=None,
             "in each, or set it in one file only.")
     for doc in documents:
         project_raw = _merge(project_schema.root, project_raw,
-                             doc.project, doc.source, problems, soft)
+                             doc.project, doc.source, problems, soft,
+                             "project")
 
     # ---- settings layers -------------------------------------------------
     settings_raw = schema.defaults()
     for doc in documents:
         settings_raw = _merge(schema.root, settings_raw, doc.defaults,
-                              doc.source, problems, soft)
+                              doc.source, problems, soft, "defaults")
 
     target_block, target_source = None, None
     if target is not None:
@@ -695,7 +721,8 @@ def resolve(schema, project_schema, documents, target=None,
             listed = ", ".join(available) if available else "none are defined"
             raise ConfigError(f"no target named {target!r} ({listed})")
         settings_raw = _merge(schema.root, settings_raw, target_block,
-                              target_source, problems, soft)
+                              target_source, problems, soft,
+                              f"targets.{target}")
 
     # A target-only setting in the defaults block would apply to every
     # target at once, which is never what it means.

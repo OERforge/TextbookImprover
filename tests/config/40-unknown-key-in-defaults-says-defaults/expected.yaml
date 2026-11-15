@@ -1,0 +1,2 @@
+# An unknown setting in a section under defaults names both.
+error: "unknown setting 'spacer_bellow' in defaults.images; did you mean spacer_below?"

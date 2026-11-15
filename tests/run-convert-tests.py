@@ -7435,7 +7435,7 @@ def case_docx_target(work):
          lambda: re.search(r"<dl>\s*<dt>What is a set\?</dt>(?:(?!</dl>).)*<dt>Why is order irrelevant\?</dt>",
                            one_back, re.S)),
         ("ids Pandoc's writer hashes are mapped in the Word file and read back as they were",
-         lambda: "OERforge/TextbookImprover/ids" in part("one.docx", "customXml/item1.xml")
+         lambda: "OERforge/textbookimprover/ids" in part("one.docx", "customXml/item1.xml")
          and 'id="_foundations"' in one_back
          and 'id="an-identifier-well-past-the-forty-characters-word-allows"' in one_back
          and 'href="#_foundations"' in one_back),

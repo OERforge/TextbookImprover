@@ -1723,7 +1723,7 @@ def add_footer(parts, names, infos, paragraphs):
 # carries the names it hashed, in a custom XML part, which Word keeps,
 # and reading Word renames them back (docxrepair.apply_id_map).
 ID_MAP_PART = "customXml/item1.xml"
-ID_MAP_NS = "https://github.com/OERforge/TextbookImprover/ids"
+ID_MAP_NS = "https://github.com/OERforge/textbookimprover/ids"
 
 
 def bookmark_names(ident):

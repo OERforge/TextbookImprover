@@ -1095,6 +1095,18 @@ def join_nested_quotes(doc):
     return joined
 
 
+# The Word target's part, by its namespace (docxtarget.ID_MAP_NS) as
+# written now and as releases up to 0.10 wrote it, before the
+# repository's name was put in lowercase.
+ID_MAP_NAMESPACES = ("OERforge/textbookimprover/ids", "OERforge/TextbookImprover/ids")
+
+
+def holds_id_map(data):
+    """Whether a custom XML part's text is the one a Word target writes
+    (docxtarget.ID_MAP_PART), in either spelling of its namespace."""
+    return any(ns in data for ns in ID_MAP_NAMESPACES)
+
+
 def id_map(docx_path):
     """{bookmark name: id} from the map a Word target writes into its
     file (docxtarget.ID_MAP_PART), or {} for any other file."""
@@ -1102,7 +1114,7 @@ def id_map(docx_path):
         for name in z.namelist():
             if name.startswith("customXml/") and name.endswith(".xml"):
                 data = z.read(name).decode("utf-8", "replace")
-                if "OERforge/TextbookImprover/ids" in data:
+                if holds_id_map(data):
                     return {html.unescape(b): html.unescape(n) for b, n in re.findall(
                         r'<id bookmark="([^"]*)" name="([^"]*)"\s*/>', data)}
     return {}
@@ -1123,7 +1135,7 @@ def _list_blocks(parts):
     for name, data in parts.items():
         if name.startswith("customXml/") and name.endswith(".xml"):
             data = data.decode("utf-8", "replace")
-            if "OERforge/TextbookImprover/ids" in data:
+            if holds_id_map(data):
                 return [(k, int(n), int(f), c) for k, n, f, c in re.findall(
                     r'<listBlock kind="([trqf])" n="(\d+)" follow="(\d+)" continues="(\d+)"\s*/>',
                     data)]

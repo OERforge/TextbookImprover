@@ -6,6 +6,10 @@ Versions are two-part and pre-1.0: breaking changes may land in any of them unti
 
 ## [Unreleased]
 
+### Changed
+
+- **The repository is `github.com/OERforge/textbookimprover`**, renamed from `TextbookImprover`, and the addresses here follow it: the changelog's links, the installation page's download and clone, and the address `util/shortdoi.py` gives the servers it asks. GitHub sends the old address to the new one. A release's archive now unpacks to a folder named for the repository, `textbookimprover-0.10` for 0.10 (both the `.tar.gz` and the `.zip`), and the installation page's clone is `~/tools/textbookimprover`, so `$T` follows. The program is still TextbookImprover. **A Word target's namespace changes with it**: the custom XML part that carries the bookmark names Pandoc's writer hashed, and the marks for a table, rule, or figure a list item holds or a table in a quotation (`docxtarget.ID_MAP_NS`), is written as `https://github.com/OERforge/textbookimprover/ids`, and reading takes that or the old `https://github.com/OERforge/TextbookImprover/ids` (`docxrepair.holds_id_map`), so a Word file a release up to 0.10 wrote reads back as it did.
+
 ### Fixed
 
 - **A PDF that LaTeX stops on says what LaTeX said first, where, and where its log is.** `build-pdf.py`, which has run LuaLaTeX itself since 0.10, went on as Pandoc does after a run that failed: it ran LaTeX again while there was a contents file, four runs at most, and reported the last run's error. Where the first run was cut off, the error reported was one its half-written files made: with LuaLaTeX killed on its first run, LaTeX was run three times and the build said "File ended while scanning use of `\@writefile`", at `\begin{document}` (measured 2026-11-15 with a LuaLaTeX that leaves its `.aux` cut off and is killed, Pandoc 3.14, LuaTeX 1.24.0). Now the first run that fails is the last. The run says which of LaTeX's runs it was and gives LaTeX's first error from that run's log, in LaTeX's words, as before. It says where the error's line is: the line of the book's LaTeX, with the page of the book that line is on, or, for an error that first shows on a later run, the file LaTeX wrote on an earlier one (the contents, the cross-references, a list of figures or tables, the bookmarks). TeX names the line by its number alone, whatever file it was reading, so the file is the one whose line of that number begins with what TeX shows of it. LaTeX's log and the LaTeX it read are left in the target's folder, as `book.log` and `book.tex`, and the next build of the target removes the log. A LuaLaTeX stopped by a signal is reported as killed, with the signal, and, for SIGKILL, with the note that a system kills a program so when memory runs out. The advice that follows an error, for a file LaTeX can't find, a language babel doesn't have, and the rest, is as it was. A small book stopped on its first run failed in 15 seconds where it took 25 (one build each). Where Pandoc still makes the PDF, a book with a picture at a web address, nothing changes: the message is Pandoc's "Error producing PDF.", after its own runs.
@@ -871,14 +875,14 @@ Sidecar files need no migration, and can now be moved out of the book's director
 
 First release. DOCX to accessible HTML via Markdown, with a Pandoc filter handling figures, tables, alt text, and captions; sidecar CSV files for decisions a script can't make; and an IMS Common Cartridge builder.
 
-[Unreleased]: https://github.com/OERforge/TextbookImprover/compare/v0.10...HEAD
-[0.10]: https://github.com/OERforge/TextbookImprover/compare/v0.9...v0.10
-[0.9]: https://github.com/OERforge/TextbookImprover/compare/v0.8...v0.9
-[0.8]: https://github.com/OERforge/TextbookImprover/compare/v0.7...v0.8
-[0.7]: https://github.com/OERforge/TextbookImprover/compare/v0.6...v0.7
-[0.6]: https://github.com/OERforge/TextbookImprover/compare/v0.5...v0.6
-[0.5]: https://github.com/OERforge/TextbookImprover/compare/v0.4...v0.5
-[0.4]: https://github.com/OERforge/TextbookImprover/compare/v0.3...v0.4
-[0.3]: https://github.com/OERforge/TextbookImprover/compare/v0.2...v0.3
-[0.2]: https://github.com/OERforge/TextbookImprover/compare/v0.1...v0.2
-[0.1]: https://github.com/OERforge/TextbookImprover/releases/tag/v0.1
+[Unreleased]: https://github.com/OERforge/textbookimprover/compare/v0.10...HEAD
+[0.10]: https://github.com/OERforge/textbookimprover/compare/v0.9...v0.10
+[0.9]: https://github.com/OERforge/textbookimprover/compare/v0.8...v0.9
+[0.8]: https://github.com/OERforge/textbookimprover/compare/v0.7...v0.8
+[0.7]: https://github.com/OERforge/textbookimprover/compare/v0.6...v0.7
+[0.6]: https://github.com/OERforge/textbookimprover/compare/v0.5...v0.6
+[0.5]: https://github.com/OERforge/textbookimprover/compare/v0.4...v0.5
+[0.4]: https://github.com/OERforge/textbookimprover/compare/v0.3...v0.4
+[0.3]: https://github.com/OERforge/textbookimprover/compare/v0.2...v0.3
+[0.2]: https://github.com/OERforge/textbookimprover/compare/v0.1...v0.2
+[0.1]: https://github.com/OERforge/textbookimprover/releases/tag/v0.1

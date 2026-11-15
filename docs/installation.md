@@ -96,24 +96,24 @@ Two ways, and nothing to build either way. A release is a fixed set of files you
 
 ```bash
 mkdir -p ~/tools && cd ~/tools
-curl -L -o TextbookImprover-0.10.tar.gz \
-  https://github.com/OERforge/TextbookImprover/archive/refs/tags/v0.10.tar.gz
-tar xzf TextbookImprover-0.10.tar.gz        # gives ~/tools/TextbookImprover-0.10
+curl -L -o textbookimprover-0.10.tar.gz \
+  https://github.com/OERforge/textbookimprover/archive/refs/tags/v0.10.tar.gz
+tar xzf textbookimprover-0.10.tar.gz        # gives ~/tools/textbookimprover-0.10
 ```
 
-The [releases page](https://github.com/OERforge/TextbookImprover/releases) lists every version with its changelog; replace `v0.10` and `0.10` above to take a different one. A `.zip` of the same files is there too, for unpacking on the Windows side.
+The [releases page](https://github.com/OERforge/textbookimprover/releases) lists every version with its changelog; replace `v0.10` and `0.10` above to take a different one. A `.zip` of the same files is there too, for unpacking on the Windows side.
 
 **Or a clone**, if you'd rather follow the project or send a patch:
 
 ```bash
 sudo apt install git
-git clone https://github.com/OERforge/TextbookImprover.git ~/tools/TextbookImprover
+git clone https://github.com/OERforge/textbookimprover.git ~/tools/textbookimprover
 ```
 
 Either way, the directory you now have is what the rest of the documentation calls `$T`, and setting that in your shell makes every command here copy-and-pasteable:
 
 ```bash
-export T=~/tools/TextbookImprover-0.10      # or ~/tools/TextbookImprover for a clone
+export T=~/tools/textbookimprover-0.10      # or ~/tools/textbookimprover for a clone
 python3 $T/bin/convert.py --help
 ```
 

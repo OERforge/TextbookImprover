@@ -429,7 +429,7 @@ def check_consistency():
         os.path.join(ROOT, "bin", "audit.py"), encoding="utf-8").read(), re.M).group(1)
     installation = open(os.path.join(ROOT, "docs", "installation.md"),
                         encoding="utf-8").read()
-    named = set(re.findall(r"TextbookImprover-(\d+\.\d+)", installation)
+    named = set(re.findall(r"textbookimprover-(\d+\.\d+)", installation)
                 + re.findall(r"refs/tags/v(\d+\.\d+)\.tar\.gz", installation)
                 + re.findall(r"replace `v(\d+\.\d+)`", installation))
     # The oldest Pandoc convert.py takes, which each suite that runs it
@@ -838,9 +838,17 @@ def check_list_continuations():
                  + later("two deep", 1680, "SourceCode"))
     held_code_path = code_file("held.docx", both)
     with zipfile.ZipFile(held_code_path, "a") as z:
-        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/textbookimprover/'
                    'ids"><listBlock kind="t" n="0" follow="3" continues="0"/></ids>')
     held_code = docxrepair.quoted_code(held_code_path)
+    # A file written before the repository's name was put in lowercase,
+    # its part under the old spelling of the namespace.
+    old_ns_path = os.path.join(work, "old-namespace.docx")
+    with zipfile.ZipFile(old_ns_path, "w") as z:
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+                   'ids"><id bookmark="X1a2b" name="_foundations"/>'
+                   '<listBlock kind="t" n="0" follow="3" continues="0"/></ids>')
+    old_ns = (docxrepair.id_map(old_ns_path), docxrepair.list_tables(old_ns_path))
     # A file the target wrote, as reading it gets it ready for the reader.
     repaired = os.path.join(work, "repaired.docx")
     source = os.path.join(work, "source.docx")
@@ -849,7 +857,7 @@ def check_list_continuations():
         z.writestr("word/numbering.xml", LIST_NUMBERING)
         z.writestr("word/styles.xml", LIST_STYLES)
         z.writestr("word/settings.xml", both)
-        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/textbookimprover/'
                    'ids"><listBlock kind="t" n="0" follow="1" continues="1"/></ids>')
         # A note holding a list, its item's later paragraph in the
         # writer's form.
@@ -918,7 +926,7 @@ def check_list_continuations():
     figure_docx = os.path.join(work, "figure.docx")
     figure_json = os.path.join(work, "figure.json")
     with zipfile.ZipFile(figure_docx, "w") as z:
-        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/TextbookImprover/'
+        z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/textbookimprover/'
                    'ids"><listBlock kind="f" n="1" follow="1" continues="1"/></ids>')
     with open(figure_json, "w", encoding="utf-8") as fh:
         json.dump(read_back, fh)
@@ -941,7 +949,7 @@ def check_list_continuations():
         apply_list_tables leaves them."""
         with zipfile.ZipFile(figure_docx, "w") as z:
             z.writestr("customXml/item1.xml", '<ids xmlns="https://github.com/OERforge/'
-                       'TextbookImprover/ids">%s</ids>' % "".join(
+                       'textbookimprover/ids">%s</ids>' % "".join(
                            '<listBlock kind="%s" n="%d" follow="%d" continues="%s"/>' % m
                            for m in marks))
         with open(figure_json, "w", encoding="utf-8") as fh:
@@ -1332,6 +1340,10 @@ def check_list_continuations():
         ("code in a quote in a quote after a table its item holds is found at its quote's depth "
          "beyond the item's text, not counted from the margin",
          lambda: held_code == [("two deep", 2)]),
+        ("a Word file written before the namespace was put in lowercase still gives its id map "
+         "and its marks, and the namespace the target writes is the first the reader looks for",
+         lambda: old_ns == ({"X1a2b": "_foundations"}, [("t", 0, 3, "0")])
+         and docxtarget.ID_MAP_NS.endswith(docxrepair.ID_MAP_NAMESPACES[0])),
         ("a list in a table's cell: its item's later paragraph is the item's, a list paragraph "
          "for a reader before 3.13 only",
          lambda: [(f[0], f[4]) for f in found(cell_list, False)] == [("the cell's later", False)]

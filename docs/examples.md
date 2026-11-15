@@ -5,7 +5,7 @@ Three real books taken from the files their publishers offer to a finished resul
 The examples use `T` for the directory you unpacked or cloned TextbookImprover into:
 
 ```bash
-T=/path/to/TextbookImprover
+T=/path/to/textbookimprover
 ```
 
 ## An OpenStax book, from Word files to a course cartridge

@@ -62,7 +62,7 @@ import sidecars  # noqa: E402
 DOI_URL = re.compile(r"^(?:https?://)?(?:dx\.)?doi\.org/(10\.\S+)$", re.I)
 SHORT = re.compile(r"^10/[0-9A-Za-z]+$")
 AGENT = ("TextbookImprover-shortdoi/1 "
-         "(+https://github.com/OERforge/TextbookImprover)")
+         "(+https://github.com/OERforge/textbookimprover)")
 
 
 def doi_of(url):

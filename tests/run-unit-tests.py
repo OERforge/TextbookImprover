@@ -2437,10 +2437,22 @@ def check_pandoc_math_option():
     """MathML is asked for by the Pandoc's version (pandocversion.mathml):
     with --mathml in 3.9 and 3.10, which have no --math-method and stop
     on it, and with --math-method=mathml from 3.11, which added it and
-    deprecated --mathml, warning on every run."""
+    deprecated --mathml, warning on every run. And the release whose
+    readers and writers a command runs (pandocversion.engine): its own,
+    unless its --version names another in a line of its own, as the
+    stand-in for Pandoc 3.9 does, which changes no option it's given."""
     import pandocversion
     work = scratch("pandoc-versions-")
     said = {}
+    behind = os.path.join(work, "pandoc-behind")
+    with open(behind, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 3.9'\necho 'Features: +server +lua'\n"
+                 "echo 'Readers and writers: pandoc 3.14.1'\n")
+    os.chmod(behind, 0o755)
+    unnamed = os.path.join(work, "pandoc-unnamed")
+    with open(unnamed, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'pandoc 3.9'\necho 'Readers and writers: '\n")
+    os.chmod(unnamed, 0o755)
     for version in ("3.9", "3.10.1", "3.11", "3.13"):
         path = os.path.join(work, "pandoc-" + version)
         with open(path, "w", encoding="utf-8") as fh:
@@ -2454,6 +2466,15 @@ def check_pandoc_math_option():
         ("and 3.11 and 3.13 with --math-method=mathml",
          lambda: said["3.11"] == ((3, 11), ["--math-method=mathml"])
          and said["3.13"] == ((3, 13), ["--math-method=mathml"])),
+        ("a Pandoc's readers and writers are its own version's",
+         lambda: pandocversion.engine(os.path.join(work, "pandoc-3.10.1")) == (3, 10, 1)
+         and pandocversion.engine(os.path.join(work, "pandoc-3.13")) == (3, 13)),
+        ("but for one whose --version names another release for them, its options still "
+         "its own version's; a line that names none changes nothing",
+         lambda: pandocversion.engine(behind) == (3, 14, 1)
+         and pandocversion.version(behind) == (3, 9)
+         and pandocversion.mathml(behind) == ["--mathml"]
+         and pandocversion.engine(unnamed) == (3, 9)),
     ]
 
 
@@ -2674,8 +2695,10 @@ def check_pandoc39_stand_in():
     depth = run("--version", env=dict(first, PANDOC39_REAL=told))
     lua_line = "true true 3.9 false"
     return [
-        ("it says it's 3.9",
-         lambda: version.stdout.startswith("pandoc 3.9\n")),
+        ("it says it's 3.9, and names the Pandoc it runs as the one that reads and writes",
+         lambda: version.stdout.startswith("pandoc 3.9\n")
+         and version.stdout.splitlines()[-1] == "Readers and writers: " + said.splitlines()[0]
+         and version.stdout.splitlines()[1:-1] == said.splitlines()[1:]),
         ("an option 3.9 lacks stops it as 3.9 stops, with exit code 6",
          lambda: unknown.returncode == 6
          and unknown.stderr == ("Unknown option --math-method.\n"
@@ -2699,7 +2722,8 @@ def check_pandoc39_stand_in():
          and two_plain.returncode == 0 and "<em>x</em><sup>2</sup>" in two_plain.stdout),
         ("it tells the Pandoc it runs how many stand-ins deep it is, and a run ten deep, "
          "as one that runs itself is, stops, saying so",
-         lambda: depth.stdout == "pandoc 3.9\ndepth 1\n"
+         lambda: depth.stdout == ("pandoc 3.9\ndepth 1\n"
+                                  "Readers and writers: pandoc 3.12.0\n")
          and deep.returncode != 0 and "10 stand-ins deep" in deep.stderr and not deep.stdout),
     ]
 

@@ -8662,9 +8662,9 @@ def case_quoted_lists(work):
         parser.feed(html)
         return [(tag, [(" ".join(words[0].split()), inner) for words, inner in items])
                 for tag, items in parser.top]
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
-                             text=True).stdout.split()[1]
-    indented = tuple(int(p) for p in re.findall(r"\d+", version)[:2]) >= (3, 13)
+    # By the release whose Word writer wrote the file, which under the
+    # stand-in for Pandoc 3.9 isn't the one --version opens with.
+    indented = pandocversion.engine()[:2] >= (3, 13)
 
     def figure_items(html=None):
         """The items of a page's one list at the top (figures.html's), or []

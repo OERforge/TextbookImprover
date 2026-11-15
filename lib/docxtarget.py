@@ -1394,9 +1394,11 @@ def _numbering(paragraph):
 
 
 def pandoc_version():
-    """The version of the Pandoc on the path, as a tuple of numbers; () when
-    there's none."""
-    return pandocversion.version()
+    """The release whose Word writer and reader the Pandoc on the path
+    runs, as a tuple of numbers; () when there's none. Its own version,
+    but for a script that runs a later release's behind an earlier one's
+    options (pandocversion.engine)."""
+    return pandocversion.engine()
 
 
 def continuations_indented():

@@ -4060,6 +4060,72 @@ def make_cff2_face(path, axes=2):
     return True
 
 
+# Lua's garbage collector as the font setting leaves it
+# (latexbuild.STATIC_FONTS): luaotfload's node mode leaves more garbage a
+# page with IBM Plex Serif than with Latin Modern, and at Lua's defaults
+# the collector fell further behind with every page, a plain document of
+# 2,500 and 5,000 like paragraphs peaking at 342 and 478 MB, and a tagged
+# book of about 1,030 pages stopped for memory at 5.9 GB (2026-11-15).
+COLLECTOR_PARAGRAPH = (r"Paragraph {n} has text, \textbf{{bold words}}, \emph{{emphasis}}, "
+                       r"and $a^2+b^2=c^2$ and $\int_0^1 x\,dx$. {{\footnotesize Small type "
+                       r"here too.}} More words follow to fill the line out." "\n\n")
+COLLECTOR_PEAK = ("import resource, subprocess, sys\n"
+                  "subprocess.run(sys.argv[1:], stdout=subprocess.DEVNULL, "
+                  "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)\n"
+                  "print(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)\n")
+COLLECTOR_SAID = "OER-COLLECTOR"
+
+
+def build_collector(work):
+    """LuaLaTeX's runs of the font setting (latexbuild.STATIC_FONTS) with
+    IBM Plex Serif, as the PDF target's default faces are: ({count: peak
+    resident memory in kilobytes} for an untagged document of 2,500 and of
+    5,000 like paragraphs, and the log of a tagged one, which says at its
+    last page the collector's pause and step multiplier, as Lua gives them
+    when they're set again)."""
+    import latexbuild
+    os.makedirs(work)
+    peaks = {}
+    for count, tagged in ((2500, False), (5000, False), (300, True)):
+        name = f"collector-{count}"
+        with open(os.path.join(work, name + ".tex"), "w", encoding="utf-8") as fh:
+            fh.write(("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
+                      if tagged else "")
+                     + "\\documentclass{book}\n" + latexbuild.STATIC_FONTS
+                     + "\\usepackage{unicode-math}\n\\setmainfont{IBM Plex Serif}\n"
+                     "\\begin{document}\n"
+                     + "".join(COLLECTOR_PARAGRAPH.format(n=n) for n in range(count))
+                     + "\\directlua{texio.write_nl('" + COLLECTOR_SAID + " '"
+                     " .. collectgarbage('setpause', 100) .. ' '"
+                     " .. collectgarbage('setstepmul', 400))}\n\\end{document}\n")
+        done = run([sys.executable, "-c", COLLECTOR_PEAK, "lualatex",
+                    "-interaction=nonstopmode", name + ".tex"], work)
+        if tagged:
+            log = os.path.join(work, name + ".log")
+            peaks["log"] = (open(log, encoding="utf-8", errors="replace").read()
+                            if os.path.exists(log) else "")
+        else:
+            peaks[count] = int(done.stdout.strip() or 0)
+    return peaks
+
+
+def collector_checks(result):
+    """The checks of Lua's garbage collector as the font setting leaves it
+    (build_collector)."""
+    said = re.findall(COLLECTOR_SAID + r" (\d+) (\d+)", result["log"])
+    return [
+        ("in a tagged PDF in IBM Plex Serif, Lua's garbage collector keeps the pause of "
+         "100 and the step multiplier of 400 the font setting gives it, to its last page",
+         lambda: explained(said == [("100", "400")],
+                           lambda: f"the log said {said or 'nothing of the collector'}")),
+        ("LuaLaTeX's memory doesn't grow with a document's length in IBM Plex Serif: twice "
+         "the paragraphs, 5,000 against 2,500, take less than 50 MB more at their peak",
+         lambda: explained(result[2500] > 0 and result[5000] - result[2500] < 50 * 1024,
+                           lambda: f"peaks of {result[2500] // 1024} and "
+                                   f"{result[5000] // 1024} MB")),
+    ]
+
+
 def build_cff2_face(work):
     """The pages and the book CFF2_FACE is set in (make_cff2_face): ({way:
     (its PDF's path, LaTeX's log)} for lost, harf, and node, and weight and
@@ -7454,7 +7520,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice",
+                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice", "-collector",
                 "-converted", "-stopped")
 
 
@@ -7892,6 +7958,7 @@ BUILDS = {
     "-code": build_code,
     "-mathfont": build_math_font,
     "-cff2": build_cff2_face,
+    "-collector": build_collector,
     "-measured": build_measured,
     "-numbered": build_note_numbers,
     "-ams": build_ams,
@@ -7952,6 +8019,7 @@ def checks(work, built):
      tall_said, wrap_paths, wrap_said) = built["-code"]
     math_paths, math_said = built["-mathfont"]
     cff2_result = built["-cff2"]
+    collector_result = built["-collector"]
     measured_path, measured_said, measured_source = built["-measured"]
     numbered_path, numbered_source = built["-numbered"]
     ams_path, ams_said = built["-ams"]
@@ -8866,6 +8934,7 @@ def checks(work, built):
     items += default_checks(default_path, default_said, lacking_path, lacking_said)
     items += math_font_checks(math_paths, math_said)
     items += cff2_face_checks(cff2_result)
+    items += collector_checks(collector_result)
     items += measured_checks(measured_path, measured_said, measured_source)
     items += note_numbers_checks(numbered_path, numbered_source)
     items += preamble_checks(preamble_path, preamble_source, preamble_said)

@@ -489,8 +489,27 @@ CODE_SPACES = r"""\makeatletter
 # bold were both drawn as its regular at its smallest optical size. Where
 # that mode writes such a face, the run says so (TextbookImprover CFF2
 # face, cff2_faces), and the build warns.
+#
+# And Lua's garbage collector is set to keep up with what a long book
+# throws away (a pause of 100, a step multiplier of 400, where Lua 5.3's
+# defaults are 200 and 200). luaotfload's node mode leaves more garbage a
+# page with IBM Plex Serif than with Latin Modern, and the collector, at
+# its defaults, fell further behind with every page: in a plain document
+# of 2,500 and 5,000 like paragraphs, LuaLaTeX's peak memory was 342 and
+# 478 MB, and Lua's heap after a full collection was the same for both,
+# 133 MB, so nothing was kept that should have gone. Introduction to
+# Sociology 3e's tagged PDF of 1,026 pages peaked at 2,155 MB, its heap at
+# 1.1 GB with 460 to 490 MB of it live; Instrumental Analysis' of about
+# 1,030 was stopped for memory at 5.9 GB. With the collector so, the plain
+# document peaked at 298 and 299 MB, and the sociology book at 1,189 MB in
+# 150 s against 138 s, its pages' content, structure tree, and text the
+# same. A full collection at every page did as well for the plain
+# document and took twice as long. Read before the faces, as the rest of
+# this setting is, so the collector is so before any page is set.
 STATIC_FONTS = r"""\ifdefined\directlua
 \directlua{
+  collectgarbage("setpause", 100)
+  collectgarbage("setstepmul", 400)
   if not oerfonts and fonts and fonts.constructors and fonts.constructors.trytosharefont then
     oerfonts = { share = fonts.constructors.trytosharefont }
     fonts.constructors.trytosharefont = function(target, tfmdata)

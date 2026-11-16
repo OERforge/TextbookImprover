@@ -9663,9 +9663,11 @@ def check_shared_workers():
     cases_started = os.path.exists(stopped_log)
 
     def most_logged(log):
-        """The most at once of what logged its start and its end there."""
+        """The most at once of what logged its start and its end there,
+        in the order the lines were written, not by the clock's time in
+        them, which a machine may set back meanwhile."""
         with open(log, encoding="utf-8") as fh:
-            events = sorted(line.split() for line in fh)
+            events = [line.split() for line in fh]
         now = most = 0
         for _, what in events:
             now += 1 if what == "start" else -1
@@ -9820,7 +9822,7 @@ def check_run_all():
                 sharing.add(name)
     stand_in = ("import json, os, sys, time\n"
                 "name = os.path.basename(sys.argv[0])\n"
-                "start = time.time()\n"
+                "start = time.monotonic()\n"
                 "def note(what):\n"
                 "    with open(os.environ['STAND_IN_LOG'], 'a') as fh:\n"
                 "        fh.write(json.dumps([name, what, time.time(), sys.argv[1:]]) + '\\n')\n"
@@ -9834,7 +9836,7 @@ def check_run_all():
                 "if failing:\n"
                 "    print('  FAIL  ' + name + ' found something')\n"
                 "if name == 'run-pdf-tests.py':\n"
-                "    while slots and len(os.listdir(slots)) < 3 and time.time() < start + 20:\n"
+                "    while slots and len(os.listdir(slots)) < 3 and time.monotonic() < start + 20:\n"
                 "        time.sleep(0.05)\n"
                 "note('end %d' % len(os.listdir(slots)) if slots else 'end')\n"
                 "sys.exit(1 if failing else 0)\n")
@@ -9857,8 +9859,13 @@ def check_run_all():
         done = subprocess.run([shell, os.path.join(work, "tests", "run-all.sh"), *options],
                               capture_output=True, text=True, stdin=subprocess.DEVNULL,
                               env=environ, cwd=work)
+        # In the order the notes were written, which is the file's: each
+        # is one appended line. Not by the clock's time in them, which a
+        # machine may set back while the suites run, as WSL does when it
+        # corrects its clock, so that one suite's end seemed to come
+        # after the next one's start.
         with open(log, encoding="utf-8") as fh:
-            events = sorted((json.loads(line) for line in fh), key=lambda event: event[2])
+            events = [json.loads(line) for line in fh]
         # The most at once: of the suites that do one thing at a time,
         # and of them all.
         most = {}

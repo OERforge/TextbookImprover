@@ -1851,11 +1851,36 @@ def pages_set(log, said):
     return max(len(PAGE_SET.findall(text or "")) for text in (log, said))
 
 
+# What LuaTeX and the libraries under it say when they're refused memory,
+# as under a limit on the program's address space, where the kernel doesn't
+# kill it: Lua's allocator as an error that names no line of the book, and
+# LuaTeX's own with no line that opens with !, on the terminal alone.
+NO_MEMORY = re.compile(r"x(?:m|c|re)alloc: request for [^\n]*?failed|[Nn]ot enough memory|"
+                       r"[Oo]ut of memory|[Cc]annot allocate memory")
+
+
+def memory_refused(log, said):
+    """What a run of LaTeX said of memory it was refused, on the terminal
+    or in its log, or None."""
+    for text in (said, log):
+        found = NO_MEMORY.search(text or "")
+        if found:
+            return found.group(0)
+    return None
+
+
+def pages_then(log, said):
+    """A sentence on how far a run that was cut short had got."""
+    count = pages_set(log, said)
+    return (f"By then it had set at least {count} page{'s' if count != 1 else ''}."
+            if count else "It hadn't yet set a page.")
+
+
 def latex_stopped(code, run, log, said, source, tex_dir, pages):
     """What to say of a LaTeX run that failed, as lines: that LaTeX was
     killed, where it was, and how many pages it had set; or its first
-    error and where that was; or, where its log has no error, the last of
-    what it said."""
+    error and where that was; or, where it names no error, that it was
+    refused memory, if it said so, or the last of what it said."""
     which = ORDINALS[run - 1] if run <= len(ORDINALS) else f"{run}th"
     stopped = -code if code < 0 else code - 128 if code > 128 else 0
     if stopped:
@@ -1863,19 +1888,26 @@ def latex_stopped(code, run, log, said, source, tex_dir, pages):
             name = f" ({signal.Signals(stopped).name})"
         except ValueError:
             name = ""
-        count = pages_set(log, said)
         return [f"LuaLaTeX was killed on its {which} run, by signal {stopped}{name}, before it "
                 "finished the PDF"
                 + (", as a system kills a program when memory runs out, and as a time limit "
                    "or a person can" if stopped == signal.SIGKILL else "")
                 + ". LaTeX reported no error of its own, and what it left half written "
-                "wasn't read again. "
-                + (f"By then it had set at least {count} page{'s' if count != 1 else ''}."
-                   if count else "It hadn't yet set a page.")]
+                "wasn't read again. " + pages_then(log, said)]
     block = error_block(log) or error_block(said)
-    if block:
+    if block and NO_MEMORY.search(block[0]):
+        # Lua's own allocator, refused: an error by its form, of no line.
+        refused = block[0].lstrip("! ").strip()
+    else:
+        refused = None if block else memory_refused(log, said)
+    if block and not refused:
         place = error_place(block, source, tex_dir, pages)
         return [f"LaTeX stopped on its {which} run" + (", " + place if place else "") + ":"] + block
+    if refused:
+        return [f"LuaLaTeX stopped on its {which} run (exit status {code}) because it was "
+                f"refused memory: it said \"{refused}\". That's a limit on what the program may "
+                "use, or a machine with no more to give, and no error in the book. "
+                + pages_then(log, said)]
     last = [line for line in (log or said).split("\n") if line.strip()][-12:]
     return [f"LaTeX stopped on its {which} run (exit status {code}) without naming an error; "
             "the last of what it said:"] + last

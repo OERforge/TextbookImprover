@@ -7714,13 +7714,19 @@ def build_stopped(work):
     command into the contents, which LaTeX reads on its second run; and
     `killed` is a sound book whose LuaLaTeX is killed on its first run,
     its files left cut off, with the real one there for any run after
-    it, and `runs` how many it got."""
+    it, and `runs` how many it got; `refused` and `lua` are the same
+    book whose LuaLaTeX stops as one refused memory does, the first
+    saying so on the terminal alone, as LuaTeX's own allocator does, the
+    second as an error in its log, as Lua's does, with `refused-runs` and
+    `lua-runs` how many each got."""
     pages = {
         "package": "A sound page.\n",
         "command": "Before it. `\\oernosuchcommand`{=latex} After it.\n",
         "second": "`\\addtocontents{toc}{\\protect\\oernosuchcommand}`{=latex}A sound page, "
                   "but for what it writes into the contents.\n",
         "killed": "A sound page.\n",
+        "refused": "A sound page.\n",
+        "lua": "A sound page.\n",
     }
     built = {}
 
@@ -7748,14 +7754,14 @@ def build_stopped(work):
             with open(os.path.join(book, file_name), "w", encoding="utf-8") as fh:
                 fh.write(content)
         environment = {}
-        if name == "killed":
+        if name in ("killed", "refused", "lua"):
             # LuaLaTeX itself for the release's probe, the page's measure,
             # and any run after the first of the book's own, which is the
             # one given the seed.
-            tools = os.path.join(work, "killed-bin")
+            tools = os.path.join(work, name + "-bin")
             os.makedirs(tools)
             real = shutil.which("lualatex")
-            count = os.path.join(work, "killed-runs")
+            count = os.path.join(work, name + "-runs")
             with open(os.path.join(tools, "lualatex"), "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n"
                          f"case \"$*\" in *setrandomseed*) ;; *) exec '{real}' \"$@\" ;; esac\n"
@@ -7777,16 +7783,27 @@ def build_stopped(work):
                          "'(fontspec)             <->s*[1]\"[IBMPlexSerif-Regular.otf]\"' "
                          "'[0.9999975357318877]' '[1' '' '{/a/pdftex.map}] [2]' "
                          "'(./a.cfg) [3] [4' '' '] (./b.cfg) [1] [2' > \"$out/$job.log\"\n"
-                         "kill -KILL $$\n")
+                         + {"killed": "kill -KILL $$\n",
+                            # As LuaTeX's own allocator ends it: on the
+                            # terminal, at the end of another line.
+                            "refused": "printf '%s\n' '(./b.cfg) luaotfload | db : Reload "
+                                       "initiated.xcalloc: request for 309 elements of size 8 "
+                                       "failed.'\nexit 1\n",
+                            # And as Lua's does: an error, of no line.
+                            "lua": "printf '%s\n' '! error:  (lua): not enough memory' "
+                                   ">> \"$out/$job.log\"\n"
+                                   "printf '%s\n' '!  ==> Fatal error occurred, no output PDF "
+                                   "file produced!'\nexit 1\n"}[name])
             os.chmod(os.path.join(tools, "lualatex"), 0o755)
             environment["PATH"] = tools + os.pathsep + os.environ.get("PATH", "")
         built[name] = (book, convert(book, **environment))
-        if name == "killed":
+        if name in ("killed", "refused", "lua"):
+            key = "runs" if name == "killed" else name + "-runs"
             try:
                 with open(count, encoding="utf-8") as fh:
-                    built["runs"] = len(fh.read().split())
+                    built[key] = len(fh.read().split())
             except OSError:
-                built["runs"] = 0
+                built[key] = 0
         if name == "command":
             kept = [f for f in ("book.log", "book.tex")
                     if os.path.exists(os.path.join(book, "pdf", f))]
@@ -7869,6 +7886,22 @@ def stopped_checks(built):
              and "File ended" not in said("killed") and "Runaway" not in said("killed")
              and "wasn't built" in said("killed"),
              lambda: f"LuaLaTeX was run {built['runs']} time(s); " + why("killed")())),
+        ("a LuaLaTeX that stops for memory it was refused, saying so on the terminal alone "
+         "or as an error of no line, is reported as refused memory, with what it said and "
+         "the pages it had set, and isn't run again",
+         lambda: explained(
+             all("LuaLaTeX stopped on its first run (exit status 1) because it was refused "
+                 "memory" in said(name)
+                 and "By then it had set at least 5 pages." in said(name)
+                 and "without naming an error" not in said(name)
+                 and "LaTeX stopped on its first run:" not in said(name)
+                 and built[name + "-runs"] == 1
+                 and "LaTeX failed building" in said(name)
+                 and "wasn't built" in said(name) for name in ("refused", "lua"))
+             and "xcalloc: request for 309 elements of size 8 failed" in said("refused")
+             and "error:  (lua): not enough memory" in said("lua"),
+             lambda: f"LuaLaTeX was run {built['refused-runs']} and {built['lua-runs']} "
+                     "time(s); " + why("refused")() + why("lua")())),
     ]
 
 

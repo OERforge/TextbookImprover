@@ -7705,7 +7705,12 @@ def build_stopped(work):
                          "printf '%s\\n' '\\relax ' '\\@writefile{toc}{\\contentsline "
                          "{chapter}{Cut of' > \"$out/$job.aux\"\n"
                          ": > \"$out/$job.toc\"\n"
-                         "printf '%s\\n' 'This is LuaHBTeX, cut off' > \"$out/$job.log\"\n"
+                         # A log as far as its fifth page: six pages begun,
+                         # the last cut off, and two things that aren't pages.
+                         "printf '%s\\n' 'This is LuaHBTeX, cut off' "
+                         "'(fontspec)             <->s*[1]\"[IBMPlexSerif-Regular.otf]\"' "
+                         "'[0.9999975357318877]' '[1' '' '{/a/pdftex.map}] [2]' "
+                         "'(./a.cfg) [3] [4' '' '] (./b.cfg) [1] [2' > \"$out/$job.log\"\n"
                          "kill -KILL $$\n")
             os.chmod(os.path.join(tools, "lualatex"), 0o755)
             environment["PATH"] = tools + os.pathsep + os.environ.get("PATH", "")
@@ -7788,10 +7793,12 @@ def stopped_checks(built):
                             r"wrote on an earlier run", said("second")))
              and "! Undefined control sequence." in said("second")
              and "\\oernosuchcommand" in said("second"), why("second"))),
-        ("a LuaLaTeX killed on its first run is reported as killed, with the signal, and "
-         "LaTeX isn't run again on the files it left cut off",
+        ("a LuaLaTeX killed on its first run is reported as killed, with the signal and the "
+         "pages its log shows it had set, and LaTeX isn't run again on the files it left "
+         "cut off",
          lambda: explained(
              "LuaLaTeX was killed on its first run, by signal 9 (SIGKILL)" in said("killed")
+             and "By then it had set at least 5 pages." in said("killed")
              and built["runs"] == 1
              and "File ended" not in said("killed") and "Runaway" not in said("killed")
              and "wasn't built" in said("killed"),

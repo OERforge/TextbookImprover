@@ -4900,6 +4900,9 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             name = safe_stem(os.path.splitext(os.path.basename(master))[0]) + ".pdf"
         out_path = os.path.join(target.output_dir, name)
         shutil.copyfile(pdf, out_path)
+        # Built in a copy of the book in a temporary folder, which LuaTeX's
+        # ID takes in.
+        latexbuild.steady_id(out_path)
         written.append(out_path)
         pages += latexbuild.pages_written(log) or 0
         unnamed += log.count("Alternative text for graphic is missing")

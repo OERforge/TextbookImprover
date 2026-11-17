@@ -5635,6 +5635,46 @@ def check_glyph_names():
     ]
 
 
+def check_steady_id():
+    """latexbuild.steady_id: two PDFs that differ only in their /ID, as
+    two LaTeX runs in folders named at random do, are the same file once
+    each is given its ID from its content under SOURCE_DATE_EPOCH, and left
+    alone without it."""
+    import latexbuild
+    try:
+        import pikepdf
+    except ImportError:
+        return [("two PDFs that differ only in their ID made the same file",
+                 lambda: print("  skip  no pikepdf to write a PDF") or True)]
+    folder = tempfile.mkdtemp()
+    paths = []
+    for n, first in enumerate((b"\x01" * 16, b"\x02" * 16)):
+        pdf = pikepdf.new()
+        pdf.add_blank_page()
+        pdf.trailer.ID = pikepdf.Array([pikepdf.String(first), pikepdf.String(first)])
+        path = os.path.join(folder, f"{n}.pdf")
+        pdf.save(path, static_id=False, deterministic_id=True)
+        paths.append(path)
+
+    def read(path):
+        with open(path, "rb") as fh:
+            return fh.read()
+    before = [read(p) for p in paths]
+    left = [latexbuild.steady_id(p, {}) for p in paths]
+    untouched = [read(p) for p in paths] == before
+    steadied = [latexbuild.steady_id(p, {"SOURCE_DATE_EPOCH": "1700000000"}) for p in paths]
+    after = [read(p) for p in paths]
+    shutil.rmtree(folder, ignore_errors=True)
+    return [
+        ("two PDFs that differ only in their ID",
+         lambda: before[0] != before[1]),
+        ("are left alone without SOURCE_DATE_EPOCH",
+         lambda: left == [False, False] and untouched),
+        ("and are the same file with it",
+         lambda: steadied == [True, True] and after[0] == after[1]),
+    ]
+
+
 def check_natural_sizes():
     """An image's natural size as graphicx sets it under LuaLaTeX
     (latexsource.natural_size), in big points, for a scale key, which
@@ -10078,6 +10118,7 @@ GROUPS = [
     ("raw code in Markdown, where Pandoc repeats, pairs, or escapes it",
      check_markdown_reader_contexts),
     ("a figure's glyph names given their text", check_glyph_names),
+    ("a PDF's ID made from its content", check_steady_id),
     ("an image's natural size, for its scale", check_natural_sizes),
     ("the AAA page's measure of its lines", check_aaa_line_length),
     ("a formula's words, in an HTML source", check_math_words),

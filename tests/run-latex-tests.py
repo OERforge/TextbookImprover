@@ -4394,6 +4394,47 @@ def case_scaled_images(work):
     ]
 
 
+def case_steady_drawings(work):
+    """A drawing's PDF kept beside its SVG is the same file from two
+    readings under SOURCE_DATE_EPOCH, each with its own temporary folder,
+    which LaTeX's ID takes in: the ID is made again from the content
+    (latexbuild.steady_id). latexsource's own functions, as
+    case_kept_images calls them."""
+    label = ("a drawing's PDF made twice under SOURCE_DATE_EPOCH, each time in its own "
+             "temporary folder, is the same file, its ID too")
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import latexsource
+    preamble = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n"
+    engine = latexsource.pick_engine(preamble)
+    missing = [p for p in (engine, "pdftocairo", "pdfseparate", "kpsewhich") if not shutil.which(p)]
+    if missing or not subprocess.run(["kpsewhich", "tikz.sty", "preview.sty"],
+                                     capture_output=True, text=True,
+                                     stdin=subprocess.DEVNULL).stdout.count("\n") == 2:
+        why = ("no " + ", ".join(missing) if missing else "TeX lacks tikz or preview") \
+            + ": a drawing's PDF isn't made twice"
+        return [(label, lambda: skip(why))]
+    drawing = "\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}"
+    made = []
+    saved = os.environ.get("SOURCE_DATE_EPOCH")
+    os.environ["SOURCE_DATE_EPOCH"] = "1700000000"
+    try:
+        for n in (1, 2):
+            base, scratch = os.path.join(work, f"book{n}"), os.path.join(work, f"scratch{n}")
+            os.makedirs(base)
+            os.makedirs(scratch)
+            latexsource.render(base, scratch, preamble, [("rendered/line.svg", drawing)],
+                               lambda said: None)
+            kept = os.path.join(base, "rendered", "line.pdf")
+            with open(kept, "rb") if os.path.exists(kept) else open(os.devnull, "rb") as fh:
+                made.append(fh.read())
+    finally:
+        if saved is None:
+            os.environ.pop("SOURCE_DATE_EPOCH", None)
+        else:
+            os.environ["SOURCE_DATE_EPOCH"] = saved
+    return [(label, lambda: made[0] and made[0] == made[1])]
+
+
 def case_kept_images(work):
     """A PDF image's PDF kept beside its SVG (latexsource.convert_graphic),
     read again: one whose fonts couldn't be embedded when it was kept, as
@@ -10956,6 +10997,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("one file", case_single), ("an unbuilt book", case_unbuilt),
          ("PDF and EPS images that can't be made SVG", case_unmade_images),
          ("a PDF image's PDF, kept and read again", case_kept_images),
+         ("a drawing's PDF made twice", case_steady_drawings),
          ("images graphicx scales", case_scaled_images),
          ("an SVG picture the latex target can't make a PDF", case_unmade_svg),
          ("a table tagged as a division of paragraphs", case_layout_tables),

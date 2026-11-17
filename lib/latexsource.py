@@ -5138,6 +5138,10 @@ def render(base, work, preamble, items, say, counter=None):
                     kept = os.path.join(base, beside_pdf(name))
                     os.replace(one, kept)
                     map_glyphs(kept, counter)
+                    # LaTeX wrote it in a temporary folder, which its ID
+                    # takes in.
+                    import latexbuild
+                    latexbuild.steady_id(kept)
                     record[beside_pdf(name)] = key(source)
             if os.path.isfile(one):
                 os.remove(one)

@@ -4755,6 +4755,30 @@ def overfull_warning(found, where="PDF"):
 PAGES_WRITTEN = re.compile(r"Output written on .*?\((\d+) pages?")
 
 
+def steady_id(path, env=None):
+    """The PDF at path given an /ID made from its content, where
+    SOURCE_DATE_EPOCH is set in env (the run's environment by default), so
+    that two builds of one document are the same file. LuaTeX makes the
+    ID from the time and the folder it runs in, and pdfTeX from the time
+    and the output's folder; a deck's LuaLaTeX, a LaTeX book's copy, and
+    its drawings' LaTeX each run in a temporary folder whose name is
+    random, so their IDs differ from build to build, and pikepdf's
+    deterministic_id keeps the first half of an ID it finds. Without the
+    old ID, it makes both halves from the content. False where it left
+    the file alone (no SOURCE_DATE_EPOCH, no pikepdf, or no file)."""
+    if not (env or os.environ).get("SOURCE_DATE_EPOCH") or not os.path.isfile(path):
+        return False
+    try:
+        import pikepdf
+    except ImportError:
+        return False
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        if "/ID" in pdf.trailer:
+            del pdf.trailer["/ID"]
+        pdf.save(path, deterministic_id=True)
+    return True
+
+
 def pages_written(output):
     """The pages of the PDF LaTeX wrote, as its output says, or None where
     it doesn't say."""

@@ -3022,6 +3022,30 @@ def case_svg(work):
     return checks
 
 
+def case_pdf_steady(work):
+    """A deck's PDF built twice under SOURCE_DATE_EPOCH is the same file:
+    its LuaLaTeX runs in a folder named at random, which LuaTeX's ID takes
+    in, and the ID is made again from the content (latexbuild.steady_id)."""
+    problem = pdf_ready()
+    if problem:
+        print(f"  skip  {problem}; a deck's PDF isn't built twice")
+        return []
+    work = folder(work, "targets:\n  pdf:\n    format: pdf\n",
+                  decks_given={"steady.md": "---\ntitle: Steady\n---\n\n# A Slide\n\nText.\n"})
+    pdf = os.path.join(work, "pdf", "steady.pdf")
+    env = dict(os.environ, SOURCE_DATE_EPOCH="1700000000")
+    built = []
+    for _ in range(2):
+        shutil.rmtree(os.path.join(work, "pdf"), ignore_errors=True)
+        done = convert(work, "--quick", env=env)
+        with open(pdf, "rb") if os.path.exists(pdf) else open(os.devnull, "rb") as fh:
+            built.append((done.returncode, fh.read()))
+    return [
+        ("a deck's PDF built twice under SOURCE_DATE_EPOCH is the same file, its ID too",
+         lambda: built[0][0] == built[1][0] == 0 and built[0][1] and built[0][1] == built[1][1]),
+    ]
+
+
 def case_timeout(work):
     """LaTeX that doesn't finish is stopped: build_pdf with an engine that
     only sleeps, and a limit of a second."""
@@ -5504,6 +5528,7 @@ CASES = [("the pieces", case_pieces),
          ("a deck's PDF", case_pdf),
          ("the PDF's settings", case_pdf_settings),
          ("an SVG the PDF can't show", case_svg),
+         ("a deck's PDF built twice", case_pdf_steady),
          ("LaTeX that doesn't finish", case_timeout),
          ("LaTeX that doesn't settle", case_unsettled),
          ("a slide too wide", case_wide_slide),

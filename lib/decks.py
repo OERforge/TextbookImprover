@@ -1057,4 +1057,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         if remove_empty_paragraphs:
             result["paragraphs"] = pdfparagraphs.remove_from(out_pdf)
         result["tidied"] = tidy(out_pdf)
+    # LuaLaTeX ran in a folder named at random, which its ID takes in.
+    if result["ok"]:
+        latexbuild.steady_id(out_pdf, env)
     return result

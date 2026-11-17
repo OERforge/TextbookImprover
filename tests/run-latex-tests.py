@@ -5194,6 +5194,50 @@ PLOT_FIGURE = ("\\begin{figure}[h]\\centering\\includegraphics{plot}"
                "\\caption{A plot}\\end{figure}\n")
 
 
+def case_book_pdf_seeded(work):
+    """A LaTeX book's PDF from its own LaTeX (pdf.from: book) built twice
+    under SOURCE_DATE_EPOCH is the same file: latexmk's LuaLaTeX is given
+    the seed the Pandoc route's is (latexbuild.latexmk_seed_rc), so what
+    LuaTeX's random numbers make, tagpdf's namespace among them, comes out
+    the same. The book draws a random number into its text, and its own
+    .latexmkrc sets the LuaLaTeX command and code to run before the book,
+    both of which the seed keeps."""
+    label = ("a LaTeX book's PDF from its own LaTeX, built twice under SOURCE_DATE_EPOCH, "
+             "is the same file, a random number in its text")
+    why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+    if why:
+        return [(label, lambda: skip(why))]
+    book = os.path.join(work, "book")
+    os.makedirs(book)
+    with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{article}\n\\title{Drawn}\n\\begin{document}\n"
+                 "Drawn: \\uniformdeviate 1000000, \\BookOwn.\n\\end{document}\n")
+    with open(os.path.join(book, ".latexmkrc"), "w", encoding="utf-8") as fh:
+        fh.write("$lualatex = 'lualatex -synctex=0 %O %S';\n"
+                 "$pre_tex_code = '\\\\def\\\\BookOwn{its own code kept}';\n")
+    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      from: book\n")
+    env = dict(os.environ, SOURCE_DATE_EPOCH="1700000000")
+    built = []
+    for _ in range(2):
+        for made in ("pdf", "rendered"):
+            shutil.rmtree(os.path.join(book, made), ignore_errors=True)
+        done = convert(book, env=env)
+        path = os.path.join(book, "pdf", "book.pdf")
+        with open(path, "rb") if os.path.exists(path) else open(os.devnull, "rb") as fh:
+            built.append((done.returncode, fh.read()))
+    def own_code():
+        if not shutil.which("pdftotext"):
+            return skip("no pdftotext to read the PDF")
+        return "its own code kept" in subprocess.run(
+            ["pdftotext", os.path.join(book, "pdf", "book.pdf"), "-"],
+            capture_output=True, text=True).stdout
+    return [(label, lambda: built[0][0] == built[1][0] == 0 and built[0][1]
+             and built[0][1] == built[1][1]),
+            ("and the code its own .latexmkrc puts before the book is kept, with its "
+             "own LuaLaTeX command", own_code)]
+
+
 def case_book_pdf(work):
     """A LaTeX book's PDF, built from the book's own LaTeX (pdf.from: book):
     its index, which the pages don't have, its figure's alt text from the
@@ -11004,6 +11048,7 @@ CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
          ("the source target", case_source), ("a book with fonts of its own", case_own_fonts),
          ("a face with a STAT table that isn't a variable font", case_static_face),
          ("a LaTeX book's PDF, from its own LaTeX", case_book_pdf),
+         ("a LaTeX book's PDF from its own LaTeX, built twice", case_book_pdf_seeded),
          ("a term struck out with cancel, in pieces no book reaches", case_struck_out),
          ("a list's item that opens with fancyvrb's code", case_code_label),
     ("a block of code's lines, a line each in PDF 1.7's role map", case_code_lines),

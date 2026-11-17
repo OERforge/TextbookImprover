@@ -4755,6 +4755,34 @@ def overfull_warning(found, where="PDF"):
 PAGES_WRITTEN = re.compile(r"Output written on .*?\((\d+) pages?")
 
 
+def latex_seed(project, name):
+    """A seed for LuaTeX's random numbers that a book keeps from one build
+    to the next: from its identifier, or the target's name without one.
+    tagpdf names its namespace with them, so a PDF built without a seed
+    differs from build to build in that name and in the ID made from it."""
+    import zlib
+    return zlib.crc32(str((project or {}).get("identifier") or name).encode("utf-8")) % (1 << 28)
+
+
+def latexmk_seed_rc(path, seed):
+    """An rc file for latexmk's -r that seeds LuaTeX's random numbers
+    before it reads the book, as the Pandoc route's LaTeX is seeded. It's
+    read after the book's own .latexmkrc, and keeps what that sets: the
+    seed goes before any $pre_tex_code of the book's, and each engine's
+    command takes it through %P, its own options kept, where -usepretex
+    would set each command afresh."""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("# Written by TextbookImprover: LuaTeX's random numbers seeded before\n"
+                 "# the book is read, so the PDF is the same from one build to the next.\n"
+                 f"$pre_tex_code = '\\setrandomseed {seed}\\relax ' . ($pre_tex_code // '');\n"
+                 "foreach my $cmd ('lualatex', 'pdflatex', 'xelatex', 'latex') {\n"
+                 "    no strict 'refs';\n"
+                 "    ${$cmd} =~ s/%S/%P/ unless ${$cmd} =~ /%P/;\n"
+                 "}\n"
+                 "1;\n")
+    return path
+
+
 def steady_id(path, env=None):
     """The PDF at path given an /ID made from its content, where
     SOURCE_DATE_EPOCH is set in env (the run's environment by default), so

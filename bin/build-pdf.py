@@ -1747,13 +1747,6 @@ def latex_images(document, base, out_dir, dpi=96, copies=None):
     return copy
 
 
-def latex_seed(project, name):
-    """A seed for LuaTeX's random numbers that a book keeps from one build
-    to the next: from its identifier, or the target's name without one."""
-    import zlib
-    return zlib.crc32(str((project or {}).get("identifier") or name).encode("utf-8")) % (1 << 28)
-
-
 def pandoc_warnings(log):
     """LaTeX's warnings and missing characters, from its log, as the lines
     Pandoc's -t pdf writes for them (latexWarnings and
@@ -2146,7 +2139,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                     json.dump(for_latex, fh)
             result, said, source = pdf_via_latex(
                 latex_json, filters, [scaled, images_dir], os.path.abspath(out_path), base, work,
-                environment, latex_seed(project, name),
+                environment, latexbuild.latex_seed(project, name),
                 pages={page_id(stem): stem for stem, _t, _d in assembly.pages},
                 kept=os.path.abspath(out_dir))
         else:

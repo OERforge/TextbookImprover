@@ -4844,13 +4844,19 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     # builds, where the output folders aren't.
     embed_figures(target, build, build, (), "the copy LaTeX builds")
 
+    # LuaTeX's random numbers seeded as the Pandoc route's are: tagpdf
+    # names its namespace with them, so an unseeded PDF differs from one
+    # build to the next.
+    seed_rc = latexbuild.latexmk_seed_rc(os.path.join(work, f"pdf-{target.name}-seed.rc"),
+                                         latexbuild.latex_seed(project, target.name))
+
     def one(master):
         folder = os.path.join(build, os.path.dirname(master))
         # The PDF and the log where they're looked for, whatever the book's
         # .latexmkrc says ($out_dir); the command line wins over it.
         command = ["latexmk", "-lualatex", "-outdir=.", "-auxdir=.",
                    "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
-                   os.path.basename(master)]
+                   "-r", seed_rc, os.path.basename(master)]
         if TRACE:
             say("+ (in a copy of the book) " + " ".join(shell_quote(c) for c in command))
         result = subprocess.run(command, cwd=folder, capture_output=True, text=True,

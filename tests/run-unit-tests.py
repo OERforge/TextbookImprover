@@ -9559,15 +9559,20 @@ def check_shared_workers():
     shared, shared_count = fresh(two)
     alone, alone_count = fresh(None)
 
-    def most_at_once(module):
-        """Six threads, each holding a slot for a moment."""
-        state, lock = {"now": 0, "most": 0}, threading.Lock()
+    def most_at_once(module, expected):
+        """Six threads, each holding a slot until as many hold one at
+        once as are expected to (or ten seconds have gone, on a machine
+        too busy to start them together), and for a moment more, in
+        which one more than there should be would show."""
+        state, lock = {"now": 0, "most": 0}, threading.Condition()
 
         def hold():
             with module.slot():
                 with lock:
                     state["now"] += 1
                     state["most"] = max(state["most"], state["now"])
+                    lock.notify_all()
+                    lock.wait_for(lambda: state["most"] >= expected, 10)
                 time.sleep(0.05)
                 with lock:
                     state["now"] -= 1
@@ -9577,7 +9582,7 @@ def check_shared_workers():
         for thread in threads:
             thread.join()
         return state["most"]
-    in_threads, unshared = most_at_once(shared), most_at_once(alone)
+    in_threads, unshared = most_at_once(shared, 2), most_at_once(alone, 6)
 
     # Two processes hold both slots; a third wait gets in only when one
     # of them is killed.
@@ -9675,7 +9680,11 @@ def check_shared_workers():
         return most
 
     # A suite's cases, six threads' worth on the two slots: a script that
-    # runs the case it's told, as the suites' do.
+    # runs the case it's told, as the suites' do. A case holds its slot
+    # until the notes show two running at once (or ten seconds have
+    # gone), and a moment more: how long a process takes to start, on a
+    # busy machine or the first time its files are read, isn't what's
+    # counted.
     suite = os.path.join(work, "suite.py")
     cases_log = os.path.join(work, "cases.log")
     with open(suite, "w", encoding="utf-8") as fh:
@@ -9684,7 +9693,17 @@ def check_shared_workers():
                  "def note(what):\n"
                  f"    with open({cases_log!r}, 'a') as fh:\n"
                  "        fh.write('%.6f %s\\n' % (time.time(), what))\n"
+                 "def most():\n"
+                 "    now = most = 0\n"
+                 f"    for line in open({cases_log!r}):\n"
+                 "        what = line.split()[1:] if line.endswith('\\n') else []\n"
+                 "        now += {'start': 1, 'end': -1}.get(''.join(what), 0)\n"
+                 "        most = max(most, now)\n"
+                 "    return most\n"
                  "note('start')\n"
+                 "until = time.monotonic() + 10\n"
+                 "while most() < 2 and time.monotonic() < until:\n"
+                 "    time.sleep(0.01)\n"
                  "time.sleep(0.1)\n"
                  "print('  ok    case ' + index)\n"
                  "note('end')\n"
@@ -9700,7 +9719,8 @@ def check_shared_workers():
     pdf_suite = load(os.path.join(HERE, "run-pdf-tests.py"), "pdf_suite")
     pdf_suite.parallel = shared
     builds_log = os.path.join(work, "builds.log")
-    order, order_lock = [], threading.Lock()
+    order, order_lock = [], threading.Condition()
+    building = {"now": 0, "most": 0}
 
     def stand_in(suffix):
         def build(folder):
@@ -9708,8 +9728,14 @@ def check_shared_workers():
                 order.append(suffix)
                 with open(builds_log, "a", encoding="utf-8") as fh:
                     fh.write("%.6f start\n" % time.time())
+                # Held until two are building at once, as a case is.
+                building["now"] += 1
+                building["most"] = max(building["most"], building["now"])
+                order_lock.notify_all()
+                order_lock.wait_for(lambda: building["most"] >= 2, 10)
             time.sleep(0.05)
             with order_lock:
+                building["now"] -= 1
                 with open(builds_log, "a", encoding="utf-8") as fh:
                     fh.write("%.6f end\n" % time.time())
             return folder

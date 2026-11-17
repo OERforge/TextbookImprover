@@ -4,7 +4,8 @@ rules for a deck's pictures (pptxcheck.py) and a book's images
 (convert.py, the output check).
 
 What needs a person: alt text holding a file name or extension, which
-PowerPoint's Accessibility Checker counts as missing; alt text that says
+PowerPoint's Accessibility Checker counts as missing, or only its own
+picture's file name without one ("Alice" for assets/Alice.jpg); alt text that says
 nothing (punctuation, a word such as "image", a clip-art id, a camera's
 name for a file, a shape's default name, or a pattern a project lists in
 images.alt_placeholders); a description Office generated, which Office
@@ -31,6 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import hashlib
+import posixpath
 import re
 
 ALT_MAX_CHARS = 120
@@ -211,12 +213,28 @@ def credit(text):
     return marked
 
 
-def problem(alt, rules=None, limit=ALT_MAX_CHARS):
+def is_file_name(alt, src):
+    """True when the alt text says only what the file at src is called:
+    "db locked" for db-locked.png, which is what Asciidoctor writes when
+    the author gave none (49 of one EPUB's 51 images), and what several
+    editors fill in. It passes a check for alt's presence and describes
+    nothing."""
+    from urllib.parse import unquote
+    leaf = posixpath.basename(unquote((src or "").split("?", 1)[0].split("#", 1)[0]))
+    def squash(text):
+        return re.sub(r"[\W_]+", "", text or "").lower()
+    stem = leaf.rsplit(".", 1)[0]
+    return bool(squash(alt)) and squash(alt) in (squash(stem), squash(leaf))
+
+
+def problem(alt, rules=None, limit=ALT_MAX_CHARS, src=None):
     """(kind, rule) for alt text that needs a person, or None: kind is
     is-file-name, placeholder, auto-generated, page-title, credit, or
     too-long (over limit characters; none, for no limit), and rule which
     of its rules it broke, in words. rules: placeholder_rules() of the
-    project's own patterns."""
+    project's own patterns. src, where it's known, is the picture's
+    address, so that alt text that is only its file's name, without the
+    extension, is found too."""
     text = " ".join((alt or "").split())
     if not text:
         return None
@@ -224,6 +242,8 @@ def problem(alt, rules=None, limit=ALT_MAX_CHARS):
     cleaned = clean(text)
     if FILE_NAME.search(text):
         return ("is-file-name", "a file name or extension")
+    if src and is_file_name(text, src):
+        return ("is-file-name", "the picture's file name")
     if not re.search(r"\w", text):
         return ("placeholder", "punctuation only")
     if cleaned in GENERIC_WORDS or cleaned in words \

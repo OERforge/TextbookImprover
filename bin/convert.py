@@ -6574,7 +6574,7 @@ def judge_alt_text(seen_file, rows_file, placeholders=(), base=".", per_source=F
     found = {}
     for index, (image, source, alt, src, decided) in enumerate(seen):
         if not decided:
-            found[index] = alttext.problem(alt, rules, limit=None)
+            found[index] = alttext.problem(alt, rules, limit=None, src=src or image)
     files = {image: os.path.join(base, unquote(src or image))
              for image, _source, _alt, src, _decided in seen}
     groups = {}

@@ -797,19 +797,9 @@ def summarize(findings):
 
 
 def alt_is_file_name(alt, src):
-    """True when the alt text says only what the file is called:
-    "db locked" for db-locked.png, which is what Asciidoctor writes when
-    the author gave none (49 of one EPUB's 51 images), and what several
-    editors fill in. It passes a check for alt's presence and describes
-    nothing."""
-    import posixpath
-    import re
-    from urllib.parse import unquote
-    leaf = posixpath.basename(unquote(src.split("?", 1)[0].split("#", 1)[0]))
-    def squash(text):
-        return re.sub(r"[\W_]+", "", text).lower()
-    stem = leaf.rsplit(".", 1)[0]
-    return bool(squash(alt)) and squash(alt) in (squash(stem), squash(leaf))
+    """True when the alt text says only what the file is called
+    (alttext.is_file_name, which the report of a run's pictures uses too)."""
+    return alttext.is_file_name(alt, src)
 
 
 # Kept for callers that only have a regex to hand: what a check name means.

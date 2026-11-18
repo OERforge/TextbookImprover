@@ -182,18 +182,15 @@ def style_length(style, name):
 
 def pixel_size(path):
     """(width, height) of a raster image as shown, from Pillow when it's
-    installed, which turns a JPEG's EXIF orientation into the shape a
-    browser shows; else from the file's header. None when neither knows
-    the file."""
+    installed, its sides changing places where its EXIF orientation turns
+    it a quarter and Pillow hasn't made the turn already (_turn): the
+    shape a browser shows a JPEG or a PNG in. Else from the file's header.
+    None when neither knows the file."""
     if Image is not None:
         try:
             with Image.open(path) as im:
                 width, height = im.size
-                try:
-                    orientation = im.getexif().get(0x0112, 1)
-                except Exception:
-                    orientation = 1
-                if orientation in (5, 6, 7, 8):
+                if _turn(im) in SIDEWAYS:
                     width, height = height, width
                 return width, height
         except Exception:
@@ -696,21 +693,74 @@ def resource_args(folder, first=None):
 ORIENTATION = 0x0112
 TURNS = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM", 5: "TRANSPOSE",
          6: "ROTATE_270", 7: "TRANSVERSE", 8: "ROTATE_90"}
+# The turns that change an image's sides over.
+SIDEWAYS = ("TRANSPOSE", "ROTATE_270", "TRANSVERSE", "ROTATE_90")
+# Whether Pillow's TIFF reader makes the turn itself (_tiff_turned); None
+# until it's been tried.
+_TIFF_TURNED = None
+
+
+def _tiff_turned():
+    """Whether this Pillow's TIFF reader turns an image by its orientation
+    as it opens it, which newer releases do (12.3.0 does: a TIFF stored
+    600 by 400 with orientation 6 opens 400 by 600, turned, its tag still
+    6) and other formats' readers don't: tried once, on a TIFF of two
+    pixels made in memory and stored half a turn round."""
+    global _TIFF_TURNED
+    if _TIFF_TURNED is None:
+        try:
+            import io
+            exif = Image.Exif()
+            exif[ORIENTATION] = 3
+            two = Image.new("L", (2, 1))
+            two.putpixel((0, 0), 255)
+            held = io.BytesIO()
+            two.save(held, format="TIFF", exif=exif.tobytes())
+            held.seek(0)
+            with Image.open(held) as im:
+                _TIFF_TURNED = im.getexif().get(ORIENTATION) == 3 and im.getpixel((0, 0)) == 0
+        except Exception:
+            _TIFF_TURNED = False
+    return _TIFF_TURNED
+
+
+def _tagged(im):
+    """An opened image's EXIF orientation where it turns or mirrors the
+    image and a copy drawn that way is wanted, else 1. A WebP's is 1
+    whatever its tag: a browser draws a WebP as stored (Chromium 153, a
+    file from Pillow and one from ImageMagick), so a WebP turned would no
+    longer be the picture the page shows."""
+    try:
+        found = im.getexif().get(ORIENTATION, 1)
+    except Exception:
+        return 1
+    return found if found in TURNS and im.format != "WEBP" else 1
+
+
+def _turn(im):
+    """The name of the turn Pillow has to make to draw an opened image
+    upright, by its EXIF orientation (_tagged), or None where there's none
+    to make: an image shown as stored, a WebP, and a TIFF this Pillow's
+    reader has turned already (_tiff_turned), which would be turned twice."""
+    found = _tagged(im)
+    if found == 1 or (im.format == "TIFF" and _tiff_turned()):
+        return None
+    return TURNS[found]
 
 
 def orientation(path):
     """A raster image's EXIF orientation, 2 to 8, where it turns or
     mirrors the image as stored, which a browser does and LaTeX, Word, and
-    PowerPoint don't; 1 where the image is shown as stored, where Pillow
-    can't read it, or without Pillow."""
+    PowerPoint don't; 1 where the image is shown as stored, for a WebP,
+    which a browser draws as stored whatever its tag (_tagged), where
+    Pillow can't read it, or without Pillow."""
     if Image is None:
         return 1
     try:
         with Image.open(path) as im:
-            found = im.getexif().get(ORIENTATION, 1)
+            return _tagged(im)
     except Exception:
         return 1
-    return found if found in TURNS else 1
 
 
 def upright_one(path, out):
@@ -719,10 +769,11 @@ def upright_one(path, out):
     its EXIF data, so that it's shown the same way with the tag read or
     not: in the original's format, with its color profile, the rest of a
     JPEG's EXIF data (its two resolutions changing places with its sides),
-    and a JPEG at the quality it was saved at. Returns whether it was
-    written."""
-    turn = TURNS.get(orientation(path))
-    if not turn:
+    and a JPEG at the quality it was saved at. A TIFF that Pillow's reader
+    has turned already (_tiff_turned) is written as it was opened, turned
+    once. Returns whether it was written."""
+    tag = orientation(path)
+    if tag == 1:
         return False
     methods = getattr(Image, "Transpose", Image)
     quality = jpeg_quality(path) or QUALITY
@@ -735,10 +786,15 @@ def upright_one(path, out):
             exif = original.getexif()
             sampling = _sampling(original) if fmt == "JPEG" else -1
             progressive = bool(info.get("progressive") or info.get("progression"))
-            turned = original.transpose(getattr(methods, turn))
+            turn = _turn(original)
+            if turn:
+                turned = original.transpose(getattr(methods, turn))
+            else:
+                original.load()
+                turned = original.copy()
     except Exception:
         return False
-    sideways = turn in ("TRANSPOSE", "ROTATE_270", "TRANSVERSE", "ROTATE_90")
+    sideways = TURNS[tag] in SIDEWAYS
     options = {}
     if info.get("icc_profile"):
         options["icc_profile"] = info["icc_profile"]

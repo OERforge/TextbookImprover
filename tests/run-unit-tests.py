@@ -2689,6 +2689,23 @@ def check_upright():
         from_original = im.size
     none = downsample.upright(book, [{"blocks": [{"t": "Para", "c": [image("media/plain.jpg")]}]}],
                               os.path.join(work, "none"))
+    # Other formats, each stored on its side with orientation 6. Pillow's
+    # TIFF reader may have made the turn itself; a browser draws a WebP
+    # as stored.
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    stored = shown.transpose(getattr(methods, "ROTATE_90"))
+    for name in ("o6.tif", "o6.png", "o6.webp"):
+        stored.save(os.path.join(book, "media", name), exif=exif.tobytes())
+    others = {}
+    for name in ("o6.tif", "o6.png", "o6.webp"):
+        source = os.path.join(book, "media", name)
+        out = os.path.join(work, "others", name)
+        others[name] = (downsample.orientation(source), downsample.pixel_size(source),
+                        downsample.upright_one(source, out),
+                        corner(out)[:4] if os.path.exists(out) else None)
+    with Image.open(os.path.join(book, "media", "o6.tif")) as im:
+        opened_turned = im.size == (40, 60)
     return checks + [
         ("a picture's orientation is read where it turns or mirrors it, and is 1 for one "
          "shown as stored, a tag that is none of the eight, and a file that isn't a picture "
@@ -2712,6 +2729,15 @@ def check_upright():
          lambda: from_small == (20, 30) and from_original == (40, 60)),
         ("and documents with no turned picture get no folder",
          lambda: none is None and not os.path.exists(os.path.join(work, "none"))),
+        ("a TIFF and a PNG stored on their sides are turned once, whether or not Pillow's "
+         "reader has turned the TIFF already, and their shape as shown is the upright one",
+         lambda: downsample._tiff_turned() == opened_turned and all(
+             others[name] == (6, (40, 60), True, ((40, 60), True, True, None))
+             for name in ("o6.tif", "o6.png"))
+         or fail(f"got: {others}")),
+        ("a WebP is left as stored whatever its orientation, as a browser draws it: its "
+         "shape the stored one, and no copy",
+         lambda: others["o6.webp"] == (1, (60, 40), False, None) or fail(f"got: {others}")),
     ]
 
 

@@ -5707,7 +5707,12 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
             run([*pandocrun.PANDOC, "-f", "json", "-t", "docx", page, "-o", out,
                  "--lua-filter=" + TARGET_FILTER] + highlighting.ARGS
                 + (["--reference-doc", reference] if reference else [])
-                + downsample.resource_args(DOWNSAMPLED.get(target.name)),
+                + downsample.resource_args(
+                    DOWNSAMPLED.get(target.name),
+                    # A picture whose EXIF orientation turns it, which Word
+                    # doesn't read as a browser does: a copy drawn that way.
+                    downsample.upright(base, [source], os.path.join(work, f"upright-{target.name}"),
+                                       DOWNSAMPLED.get(target.name))),
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep, footer).items():

@@ -683,10 +683,121 @@ def folder_for_build(plan, base, documents, work, announce=None, label=None):
     return made
 
 
-def resource_args(folder):
+def resource_args(folder, first=None):
     """Pandoc's options to find the copies in folder before the originals,
-    which it looks for in the folder it runs in."""
-    return ["--resource-path", folder + os.pathsep + "."] if folder else []
+    which it looks for in the folder it runs in, and those in first (the
+    copies upright makes) before either."""
+    folders = [f for f in (first, folder) if f]
+    return ["--resource-path", os.pathsep.join(folders + ["."])] if folders else []
+
+
+# How Pillow turns an image stored with each EXIF orientation into the
+# image as a browser shows it; 1, as stored, isn't here.
+ORIENTATION = 0x0112
+TURNS = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM", 5: "TRANSPOSE",
+         6: "ROTATE_270", 7: "TRANSVERSE", 8: "ROTATE_90"}
+
+
+def orientation(path):
+    """A raster image's EXIF orientation, 2 to 8, where it turns or
+    mirrors the image as stored, which a browser does and LaTeX, Word, and
+    PowerPoint don't; 1 where the image is shown as stored, where Pillow
+    can't read it, or without Pillow."""
+    if Image is None:
+        return 1
+    try:
+        with Image.open(path) as im:
+            found = im.getexif().get(ORIENTATION, 1)
+    except Exception:
+        return 1
+    return found if found in TURNS else 1
+
+
+def upright_one(path, out):
+    """A copy at out of the image at path with its pixels turned or
+    mirrored as its EXIF orientation says, and the orientation left out of
+    its EXIF data, so that it's shown the same way with the tag read or
+    not: in the original's format, with its color profile, the rest of a
+    JPEG's EXIF data (its two resolutions changing places with its sides),
+    and a JPEG at the quality it was saved at. Returns whether it was
+    written."""
+    turn = TURNS.get(orientation(path))
+    if not turn:
+        return False
+    methods = getattr(Image, "Transpose", Image)
+    quality = jpeg_quality(path) or QUALITY
+    try:
+        with Image.open(path) as original:
+            if getattr(original, "n_frames", 1) > 1:
+                return False
+            fmt = original.format
+            info = dict(original.info)
+            exif = original.getexif()
+            sampling = _sampling(original) if fmt == "JPEG" else -1
+            progressive = bool(info.get("progressive") or info.get("progression"))
+            turned = original.transpose(getattr(methods, turn))
+    except Exception:
+        return False
+    sideways = turn in ("TRANSPOSE", "ROTATE_270", "TRANSVERSE", "ROTATE_90")
+    options = {}
+    if info.get("icc_profile"):
+        options["icc_profile"] = info["icc_profile"]
+    dpi = info.get("dpi")
+    if dpi and all(isinstance(d, numbers.Real) and d > 0 for d in dpi):
+        dpi = tuple(float(d) for d in dpi)
+        options["dpi"] = dpi[::-1] if sideways else dpi
+    try:
+        del exif[ORIENTATION]
+        across, down = EXIF_RESOLUTION
+        if sideways and exif.get(across) and exif.get(down):
+            exif[across], exif[down] = exif[down], exif[across]
+        data = exif.tobytes()
+    except Exception:            # EXIF data Pillow reads but can't write
+        data = None
+    if fmt == "JPEG":
+        if turned.mode not in ("RGB", "L", "CMYK"):
+            turned = turned.convert("RGB")
+        options.update(quality=quality, optimize=True, progressive=progressive)
+        if sampling >= 0 and turned.mode != "L":
+            options["subsampling"] = sampling
+    elif fmt == "WEBP":
+        options.update(quality=QUALITY)
+    elif fmt not in ("PNG", "TIFF"):
+        return False
+    if data and fmt in ("JPEG", "WEBP", "PNG", "TIFF"):
+        options["exif"] = data
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    try:
+        turned.save(out, format=fmt, **options)
+    except (OSError, ValueError, KeyError, TypeError):
+        if os.path.exists(out):
+            os.remove(out)
+        return False
+    return True
+
+
+def upright(base, documents, folder, copies=None):
+    """For a target whose writer or reader doesn't turn an image by its
+    EXIF orientation (a PDF's LaTeX, a Word file, a PowerPoint file):
+    copies, under folder at each image's own path, of the local raster
+    images the documents show (as measure takes them) whose orientation
+    turns or mirrors them, each drawn the way a browser shows the
+    original (upright_one), made from the smaller copy in copies
+    (images.downsample, which keeps the orientation) where there's one.
+    Pandoc finds them before the originals and the smaller copies
+    (resource_args, its first), and LaTeX by its search path. Returns
+    folder, or None where no image needs a copy or Pillow isn't
+    installed."""
+    if Image is None:
+        return None
+    made = False
+    for m in measure(base, documents):
+        source = os.path.join(copies, m.src) if copies else m.path
+        if not os.path.isfile(source):
+            source = m.path
+        if upright_one(source, os.path.join(folder, m.src)):
+            made = True
+    return folder if made else None
 
 
 def limit_of(value):

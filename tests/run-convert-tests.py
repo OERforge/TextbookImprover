@@ -4258,6 +4258,81 @@ def case_html_ids(work):
     ]
 
 
+def case_turned_pictures(work):
+    """A photograph stored on its side, its EXIF orientation turning it:
+    a Word target carries a copy drawn the way a browser shows it, with no
+    orientation left in it, in a box taller than wide, from the smaller
+    copy where images.downsample makes one; an html target and an EPUB
+    keep the author's file, which a browser turns itself."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return [("skip: no Pillow to make a photograph with", lambda: True)]
+    import io
+    os.makedirs(work)
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (600, 400), (0, 120, 200)).save(
+        os.path.join(work, "phone.jpg"), quality=90, exif=exif.tobytes())
+    with open(os.path.join(work, "p.md"), "w", encoding="utf-8") as fh:
+        fh.write("# P\n\n![A blue photograph, taller than wide](phone.jpg){width=100px}\n")
+    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+                 "  word:\n    format: docx\n"
+                 "  small:\n    format: docx\n    images:\n      downsample: 2\n")
+    with open(os.path.join(work, "project.yaml"), "w") as fh:
+        fh.write("project:\n  identifier: org.example.turned\n  title: Turned\n")
+    ran = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                         cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def pictures(path, folder):
+        """Each JPEG in a zip's folder: its size and its orientation."""
+        if not os.path.exists(path):
+            return []
+        found = []
+        with zipfile.ZipFile(path) as z:
+            for name in z.namelist():
+                if name.startswith(folder) and name.lower().endswith((".jpg", ".jpeg")):
+                    with Image.open(io.BytesIO(z.read(name))) as im:
+                        found.append((im.size, im.getexif().get(0x0112)))
+        return found
+
+    def box(path):
+        """A Word file's first picture's box, as (width, height) in EMU."""
+        if not os.path.exists(path):
+            return None
+        with zipfile.ZipFile(path) as z:
+            m = re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', z.read("word/document.xml").decode())
+        return (int(m.group(1)), int(m.group(2))) if m else None
+    word = os.path.join(work, "word", "p.docx")
+    small = os.path.join(work, "small", "p.docx")
+    with open(os.path.join(work, "phone.jpg"), "rb") as fh:
+        original = fh.read()
+
+    def same(*parts):
+        path = os.path.join(work, *parts)
+        if not os.path.exists(path):
+            return False
+        with open(path, "rb") as fh:
+            return fh.read() == original
+    return [
+        ("the run succeeds", lambda: ran.returncode == 0),
+        ("a Word target's copy of a photograph stored on its side is drawn the way a "
+         "browser shows it, with no orientation left in it",
+         lambda: pictures(word, "word/media/") == [((400, 600), None)]),
+        ("and its box is taller than wide",
+         lambda: box(word) is not None and box(word)[1] > box(word)[0]),
+        ("with images.downsample, the upright copy is made from the smaller one",
+         lambda: pictures(small, "word/media/") == [((200, 300), None)]
+         and box(small) is not None and box(small)[1] > box(small)[0]),
+        ("an html target keeps the author's file, which a browser turns itself",
+         lambda: same("html", "phone.jpg")),
+        ("and so does an EPUB",
+         lambda: pictures(os.path.join(work, "epub", "org.example.turned.epub"), "EPUB/media/")
+         == [((600, 400), 6)]),
+    ]
+
+
 def case_html_images(work):
     """An HTML source's decorative images stay decorative: an empty alt,
     or Canvas's role="presentation" with none. An image with no alt is
@@ -10415,6 +10490,7 @@ CASES = [
     ("two files, one page", case_stem_collisions),
     ("file names lowercased", case_lowercase_names),
     ("images scaled down to a set number of times the width shown", case_downsample),
+    ("a photograph turned by its EXIF orientation", case_turned_pictures),
     ("white space with nothing to show: an empty mark, a cell of a no-break space",
      case_white_marks),
     ("a link to a file in another case, or with backslashes", case_linked_paths),

@@ -7521,7 +7521,7 @@ BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-siz
                 "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
                 "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
                 "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice", "-collector",
-                "-converted", "-stopped")
+                "-converted", "-turned", "-stopped")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7701,6 +7701,51 @@ def converted_checks(built):
          lambda: explained(os.path.exists(path)
                            and sorted(image_pixels(path)) == [(30, 15), (192, 96)],
                            lambda: f"{sorted(image_pixels(path)) if os.path.exists(path) else 'no PDF'}"
+                                   f"; the run said:\n{last_lines(said)}")),
+    ]
+
+
+def build_turned(work):
+    """A book with a photograph stored on its side, 300 by 200, its EXIF
+    orientation turning it to 200 by 300 as a browser shows it: (the PDF's
+    path, what the run said), or None where there's no Pillow, which makes
+    the photograph and its upright copy."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    os.makedirs(os.path.join(work, "assets"))
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (300, 200), (0, 120, 200)).save(
+        os.path.join(work, "assets", "phone.jpg"), quality=90, exif=exif.tobytes())
+    for name, text in (
+            ("one.md", "# One\n\n![A blue photograph, taller than wide](assets/phone.jpg)\n"),
+            ("project.yaml", "project:\n  title: Turned\n  identifier: org.example.turned\n"
+                             "  language: en-US\n  contents:\n    - one\n"),
+            ("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                               cwd=work, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    return (os.path.join(work, "pdf", "org.example.turned.pdf"),
+            converted.stdout + converted.stderr)
+
+
+def turned_checks(built):
+    """The check of the book whose photograph is stored on its side
+    (build_turned)."""
+    if built is None:
+        print("  skip  no Pillow to make a photograph with; a picture turned by its EXIF "
+              "orientation isn't checked")
+        return []
+    path, said = built
+    return [
+        ("a photograph whose EXIF orientation turns it is drawn the way a browser shows "
+         "it, taller than wide, not as it's stored",
+         lambda: explained(os.path.exists(path) and image_pixels(path) == [(200, 300)],
+                           lambda: f"{image_pixels(path) if os.path.exists(path) else 'no PDF'}"
                                    f"; the run said:\n{last_lines(said)}")),
     ]
 
@@ -7999,6 +8044,7 @@ BUILDS = {
     "-own": build_own_template,
     "-twice": build_twice,
     "-converted": build_converted,
+    "-turned": build_turned,
     "-stopped": build_stopped,
 }
 
@@ -9061,6 +9107,7 @@ def checks(work, built):
     items += own_template_checks(own_path, own_said)
     items += twice_checks(twice_first, twice_second, twice_said)
     items += converted_checks(built["-converted"])
+    items += turned_checks(built["-turned"])
     items += stopped_checks(built["-stopped"])
     return items
 

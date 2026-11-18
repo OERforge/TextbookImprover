@@ -2121,6 +2121,9 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 plan, base, [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
+        # A picture whose EXIF orientation turns it, which LaTeX doesn't
+        # read: a copy drawn the way a browser shows it, found first.
+        turned = downsample.upright(base, [document], os.path.join(work, "upright"), scaled)
         # LaTeX run here (pdf_via_latex), unless a picture is one only
         # Pandoc's own route fetches, or OER_PDF_VIA=pandoc asks for that
         # route, which is there to compare the two.
@@ -2138,12 +2141,12 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 with open(latex_json, "w", encoding="utf-8") as fh:
                     json.dump(for_latex, fh)
             result, said, source = pdf_via_latex(
-                latex_json, filters, [scaled, images_dir], os.path.abspath(out_path), base, work,
+                latex_json, filters, [turned, scaled, images_dir], os.path.abspath(out_path), base, work,
                 environment, latexbuild.latex_seed(project, name),
                 pages={page_id(stem): stem for stem, _t, _d in assembly.pages},
                 kept=os.path.abspath(out_dir))
         else:
-            command += downsample.resource_args(scaled)
+            command += downsample.resource_args(scaled, turned)
             # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
             # which names the lines it couldn't fit (overfull_lines).
             log_path = os.path.join(work, "pandoc-log.json")

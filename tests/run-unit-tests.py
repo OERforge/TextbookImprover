@@ -2608,6 +2608,113 @@ def check_images_plan():
     ]
 
 
+def check_upright():
+    """A picture whose EXIF orientation turns or mirrors it (lib/downsample.py):
+    the orientation read, 1 for anything else; a copy drawn the way a
+    browser shows the original, for each of the seven orientations, with
+    no orientation left in it and its two resolutions changing places with
+    its sides; the copies a target's documents need, made from a smaller
+    copy where there's one, and none where no picture is turned; and
+    Pandoc's resource path with those copies first."""
+    import downsample
+    paths = [downsample.resource_args(*given) for given in (
+        (None,), ("small",), ("small", "up"), (None, "up"), (None, None))]
+    checks = [
+        ("Pandoc looks in the upright copies, then the smaller ones, then the book's folder",
+         lambda: paths == [[], ["--resource-path", "small" + os.pathsep + "."],
+                           ["--resource-path", os.pathsep.join(["up", "small", "."])],
+                           ["--resource-path", "up" + os.pathsep + "."], []]),
+    ]
+    if downsample.Image is None:
+        return checks + [("a picture's orientation and its upright copy",
+                          lambda: print("  skip  no Pillow (python3-pil)") or True)]
+    from PIL import Image, ImageDraw
+    work = scratch("upright-")
+    book = os.path.join(work, "book")
+    os.makedirs(os.path.join(book, "media"))
+    # As shown: 40 wide and 60 high, gray, with a red corner at its top left.
+    shown = Image.new("RGB", (40, 60), (200, 200, 200))
+    ImageDraw.Draw(shown).rectangle([0, 0, 15, 15], fill=(220, 20, 20))
+    methods = getattr(Image, "Transpose", Image)
+    # What a camera stores for each orientation: the turn that undoes it.
+    undo = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM", 5: "TRANSPOSE",
+            6: "ROTATE_90", 7: "TRANSVERSE", 8: "ROTATE_270"}
+    for tag, turn in undo.items():
+        exif = Image.Exif()
+        exif[0x0112], exif[282], exif[283], exif[296] = tag, 200.0, 100.0, 2
+        shown.transpose(getattr(methods, turn)).save(
+            os.path.join(book, "media", f"o{tag}.jpg"), quality=95, subsampling=0,
+            exif=exif.tobytes())
+    shown.save(os.path.join(book, "media", "plain.jpg"), quality=95)
+    exif = Image.Exif()
+    exif[0x0112] = 9
+    shown.save(os.path.join(book, "media", "nine.jpg"), quality=95, exif=exif.tobytes())
+    with open(os.path.join(book, "media", "not.jpg"), "w") as fh:
+        fh.write("no picture")
+    read = {name: downsample.orientation(os.path.join(book, "media", name))
+            for name in ["plain.jpg", "nine.jpg", "not.jpg", "absent.jpg"]
+            + [f"o{tag}.jpg" for tag in undo]}
+
+    def corner(path):
+        """An upright copy's size, whether its top left is the red corner
+        and its bottom right gray, its orientation, and its resolutions."""
+        with Image.open(path) as im:
+            rgb = im.convert("RGB")
+            red, gray = rgb.getpixel((5, 5)), rgb.getpixel((im.size[0] - 5, im.size[1] - 5))
+            tags = im.getexif()
+            return (im.size, red[0] > 170 and red[1] < 90, min(gray) > 150,
+                    tags.get(0x0112), float(tags.get(282) or 0), float(tags.get(283) or 0))
+    made = {tag: downsample.upright_one(os.path.join(book, "media", f"o{tag}.jpg"),
+                                        os.path.join(work, "one", f"o{tag}.jpg"))
+            for tag in undo}
+    copies = {tag: corner(os.path.join(work, "one", f"o{tag}.jpg")) for tag in undo}
+    left = downsample.upright_one(os.path.join(book, "media", "plain.jpg"),
+                                  os.path.join(work, "one", "plain.jpg"))
+
+    def image(src):
+        return {"t": "Image", "c": [["", [], []], [], [src, ""]]}
+    page = {"blocks": [{"t": "Para", "c": [image("media/o6.jpg"), image("media/plain.jpg"),
+                                             image("media/o3.jpg"), image("media/absent.jpg")]}]}
+    folder = downsample.upright(book, [page], os.path.join(work, "up"))
+    listed = sorted(os.listdir(os.path.join(work, "up", "media")))
+    # A smaller copy of one of them, as images.downsample makes: 20 by 30
+    # as shown, its orientation kept.
+    small = os.path.join(work, "small")
+    downsample.scale_one(os.path.join(book, "media", "o6.jpg"),
+                         os.path.join(small, "media", "o6.jpg"), 0.5, 95)
+    downsample.upright(book, [page], os.path.join(work, "up-small"), small)
+    with Image.open(os.path.join(work, "up-small", "media", "o6.jpg")) as im:
+        from_small = im.size
+    with Image.open(os.path.join(work, "up-small", "media", "o3.jpg")) as im:
+        from_original = im.size
+    none = downsample.upright(book, [{"blocks": [{"t": "Para", "c": [image("media/plain.jpg")]}]}],
+                              os.path.join(work, "none"))
+    return checks + [
+        ("a picture's orientation is read where it turns or mirrors it, and is 1 for one "
+         "shown as stored, a tag that is none of the eight, and a file that isn't a picture "
+         "or isn't there",
+         lambda: read == dict({"plain.jpg": 1, "nine.jpg": 1, "not.jpg": 1, "absent.jpg": 1},
+                              **{f"o{tag}.jpg": tag for tag in undo})),
+        ("a copy of a picture stored with each orientation is drawn as a browser shows the "
+         "original, its red corner at the top left, with no orientation left in it",
+         lambda: all(made.values()) and all(
+             copies[tag][:4] == ((40, 60), True, True, None) for tag in undo)),
+        ("its two resolutions change places where its sides do, and stay where they don't",
+         lambda: all(copies[tag][4:] == (100.0, 200.0) for tag in (5, 6, 7, 8))
+         and all(copies[tag][4:] == (200.0, 100.0) for tag in (2, 3, 4))),
+        ("a picture shown as stored gets no copy",
+         lambda: left is False and not os.path.exists(os.path.join(work, "one", "plain.jpg"))),
+        ("a target's documents get a copy of each picture they show that is turned, at its "
+         "own path, and of no other",
+         lambda: folder == os.path.join(work, "up") and listed == ["o3.jpg", "o6.jpg"]),
+        ("made from the smaller copy where there's one, and from the original where there "
+         "isn't",
+         lambda: from_small == (20, 30) and from_original == (40, 60)),
+        ("and documents with no turned picture get no folder",
+         lambda: none is None and not os.path.exists(os.path.join(work, "none"))),
+    ]
+
+
 def check_pandoc39_stand_in():
     """tests/pandoc39/pandoc, the stand-in for Pandoc 3.9 the suites can
     be run under, still answers as 3.9 does: its version; an option 3.9
@@ -10062,6 +10169,7 @@ GROUPS = [
     ("MathML asked for by Pandoc's version", check_pandoc_math_option),
     ("images.compress and images.downsample, as the copies are made",
      check_images_plan),
+    ("a picture turned by its EXIF orientation, and its upright copy", check_upright),
     ("the stand-in for Pandoc 3.9 (tests/pandoc39)", check_pandoc39_stand_in),
     ("MathML asked for in every call that writes HTML", check_math_asked_for),
     ("a name bound once, and lengths in TeX's units", check_bound_once),

@@ -1559,6 +1559,97 @@ def case_downsample(work):
     return checks
 
 
+def case_turned_pictures(work):
+    """A photograph stored on its side, its EXIF orientation turning it:
+    a deck's PowerPoint file and its PDF carry a copy drawn the way a
+    browser shows it, with no orientation left in it, the PowerPoint
+    file's in a box taller than wide, and from the smaller copy where
+    images.downsample makes one; the deck's own file stays as it is."""
+    old_pptx = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if old_pptx:
+        print(f"  skip  {old_pptx}; a PowerPoint file's turned picture isn't checked")
+    unready = pdf_ready()
+    if unready:
+        print(f"  skip  {unready}; a deck's PDF with a turned picture isn't checked")
+    if old_pptx and unready:
+        return []
+    try:
+        from PIL import Image
+    except ImportError:
+        print("  skip  Pillow not installed (python3-pil); a deck's pictures aren't turned")
+        return []
+    import io
+    import zipfile
+    work = folder(work, "targets:\n"
+                        + ("" if old_pptx else "  slides:\n    format: pptx\n"
+                           "  small:\n    format: pptx\n    images:\n      downsample: 2\n")
+                        + ("" if unready else "  print:\n    format: pdf\n"),
+                  decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
+                                         "![A blue photograph, taller than wide](img/phone.jpg)"
+                                         "{width=100px}\n"})
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    phone = os.path.join(work, "img", "phone.jpg")
+    Image.new("RGB", (600, 400), (0, 120, 200)).save(phone, quality=90, exif=exif.tobytes())
+    with open(phone, "rb") as fh:
+        original = fh.read()
+    result = convert(work, "--quick")
+
+    def pptx_pictures(name):
+        """Each JPEG in a PowerPoint file: its size and its orientation;
+        and its first picture's box, (width, height) in EMU."""
+        path = os.path.join(work, name, "one.pptx")
+        if not os.path.exists(path):
+            return [], None
+        found, box = [], None
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if n.startswith("ppt/media/") and n.lower().endswith((".jpg", ".jpeg")):
+                    with Image.open(io.BytesIO(z.read(n))) as im:
+                        found.append((im.size, im.getexif().get(0x0112)))
+                if n.startswith("ppt/slides/slide") and n.endswith(".xml") and box is None:
+                    m = re.search(r'<p:pic>.*?<a:ext cx="(\d+)" cy="(\d+)"',
+                                  z.read(n).decode(), re.S)
+                    if m:
+                        box = (int(m.group(1)), int(m.group(2)))
+        return found, box
+
+    def pdf_sizes():
+        import pypdf
+
+        def resolved(entry):
+            return entry.get_object() if hasattr(entry, "get_object") else entry
+        found = []
+        path = os.path.join(work, "print", "one.pdf")
+        if not os.path.exists(path):
+            return found
+        for page in pypdf.PdfReader(path).pages:
+            resources = resolved(page.get("/Resources")) or {}
+            for image in (resolved(resources.get("/XObject")) or {}).values():
+                image = image.get_object()
+                if image.get("/Subtype") == "/Image":
+                    found.append((int(image["/Width"]), int(image["/Height"])))
+        return found
+    checks = [
+        ("the deck converts, and its own picture stays as it is",
+         lambda: result.returncode == 0 and open(phone, "rb").read() == original),
+    ]
+    if not old_pptx:
+        checks += [
+            ("a deck's PowerPoint file carries a photograph stored on its side drawn the way "
+             "a browser shows it, with no orientation left in it, in a box taller than wide",
+             lambda: pptx_pictures("slides")[0] == [((400, 600), None)]
+             and pptx_pictures("slides")[1] is not None
+             and pptx_pictures("slides")[1][1] > pptx_pictures("slides")[1][0]),
+            ("with images.downsample, the upright copy is made from the smaller one",
+             lambda: pptx_pictures("small")[0] == [((200, 300), None)]),
+        ]
+    if not unready:
+        checks.append(("its PDF draws the photograph the way a browser shows it",
+                       lambda: pdf_sizes() == [(400, 600)]))
+    return checks
+
+
 def case_implied(work):
     work = folder(work, None, decks_given={"one.md": UNTITLED})
     result = convert(work, "--quick")
@@ -5522,6 +5613,7 @@ CASES = [("the pieces", case_pieces),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),
+         ("a photograph turned by its EXIF orientation", case_turned_pictures),
          ("the headings' levels on a page", case_levels),
          ("the implied target, and a book's Markdown", case_implied),
          ("pages per slide, and the notes", case_split),

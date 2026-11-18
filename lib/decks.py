@@ -951,6 +951,10 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         source = os.path.join(work, "deck.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
+        # A photograph whose EXIF orientation turns it, which LaTeX doesn't
+        # read: a copy drawn the way a browser shows it, found first.
+        scaled = (env or os.environ).get("DOWNSAMPLED") or None
+        upright = downsample.upright(base, [doc], os.path.join(work, "upright"), scaled)
         tex = os.path.join(work, "deck.tex")
         standards = [str(s).strip() for s in standards if str(s).strip()] or ["ua-2"]
         # The font setting first, read before the template's faces.
@@ -973,7 +977,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         command = [*pandocrun.PANDOC, "-f", "json", "-t", "beamer", "-s", source, "-o", tex,
                    "--template", template, "--slide-level", str(level),
                    "--extract-media", os.path.join(work, "media"),
-                   *downsample.resource_args((env or os.environ).get("DOWNSAMPLED")),
+                   *downsample.resource_args(scaled, upright),
                    "-M", f"lang={language}",
                    "-V", f"aspect-ratio={shape}", "-V", f"frametitle-tag={tag}",
                    "-V", "math-setup=" + latexbuild.math_setup(standards, ua1_math),

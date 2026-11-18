@@ -495,10 +495,15 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
             with open(source, "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
         record_path, log_path = os.path.join(work, "record.json"), os.path.join(work, "log.json")
+        # A photograph whose EXIF orientation turns it, which PowerPoint
+        # draws as stored, in a box of the stored shape: a copy drawn the
+        # way a browser shows it, found first.
+        scaled = (env or os.environ).get("DOWNSAMPLED") or None
+        upright = downsample.upright(base, [doc], os.path.join(work, "upright"), scaled)
         command = [*pandocrun.PANDOC, "-f", "json", "-t", "pptx", source, "-o", out,
                    "--reference-doc", reference, "--slide-level", str(level),
                    "--log", log_path] + highlighting.ARGS + downsample.resource_args(
-                       (env or os.environ).get("DOWNSAMPLED"))
+                       scaled, upright)
         for path in filters:
             command += ["--lua-filter", path]
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

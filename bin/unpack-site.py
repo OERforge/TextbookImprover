@@ -47,6 +47,9 @@ from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import htmlparse as hp
     import sitesource
@@ -282,12 +285,12 @@ def main():
     names = sitesource.resource_names(site, used)
     notes += [n for n in site.notes if n[1] == "extension-corrected"]
     for key, relative in names.items():
-        path = os.path.join(out, *relative.split("/"))
+        path = P(out).source(*relative.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as fh:
             fh.write(site.resources[key][0])
     for url, page in site.pages.items():
-        with open(os.path.join(out, page.name + ".html"), "w",
+        with open(P(out).source(page.name + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(sitesource.finish_references(markup[url], names))
 
@@ -334,11 +337,11 @@ def main():
     if book:
         notes += book.summary(profile["name"])
     if not args.whole_pages:
-        with open(os.path.join(out, "project.yaml"), "w",
+        with open(P(out).project_file(), "w",
                   encoding="utf-8") as fh:
             fh.write(project_yaml("unpack-site.py", meta, tree, {}, unnamed,
                                   title))
-    write_report(os.path.join(out, "unpack-report.csv"), notes)
+    write_report(P(out).report("unpack-report.csv"), notes)
     summarize(notes, out, len(site.pages))
     print(f"{len(names)} resource(s) under {out}/assets/, each once.")
     return 0

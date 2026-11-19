@@ -44,14 +44,14 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
+import projectpaths
 
 # The variable's value as this process found it, before it was taken out.
 DATA_DIRS = os.environ.pop("PANDOC_DATA_DIRS", None)
 
 # An empty folder of this process's own, given to every Pandoc as its
 # user data folder, and removed when the process ends.
-EMPTY = tempfile.mkdtemp(prefix="ti-pandoc-data-")
+EMPTY = projectpaths.mkdtemp(prefix="ti-pandoc-data-")
 atexit.register(shutil.rmtree, EMPTY, True)
 
 

@@ -64,13 +64,13 @@ import html
 import os
 import re
 import shutil
-import tempfile
 import zipfile
 
 import docxtarget
 import languages
 import pandocrun
 import sidecars
+import projectpaths
 
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 FIRST_ROW = 0x0020
@@ -728,7 +728,7 @@ def equation_texs(parts, name):
     body_end = document.rindex("</w:body>")
     body = "".join("<w:p>%s</w:p>" % eq for eq in equations)
     probe = document[:body_start] + body + document[body_end:]
-    handle, path = tempfile.mkstemp(suffix=".docx")
+    handle, path = projectpaths.mkstemp(suffix=".docx")
     os.close(handle)
     try:
         with zipfile.ZipFile(path, "w") as z:
@@ -1196,7 +1196,7 @@ def equations_for(texs):
     if not texs:
         return {}
     source = "\n\n".join("$%s$" % t for t in texs) + "\n"
-    handle, path = tempfile.mkstemp(suffix=".docx")
+    handle, path = projectpaths.mkstemp(suffix=".docx")
     os.close(handle)
     try:
         result = subprocess.run([*pandocrun.PANDOC, "-f", "markdown", "-t", "docx", "-o", path],
@@ -1521,7 +1521,7 @@ def remediate(source, destination, tables=None, alts=None, titles=None, compat=F
             parts["word/settings.xml"] = new.encode("utf-8")
             changed.add("word/settings.xml")
             counts["compat"] = 1
-    handle, temporary = tempfile.mkstemp(suffix=".docx", dir=os.path.dirname(os.path.abspath(destination)))
+    handle, temporary = projectpaths.mkstemp(suffix=".docx", dir=os.path.dirname(os.path.abspath(destination)))
     os.close(handle)
     with zipfile.ZipFile(temporary, "w") as out:
         for info in infos:

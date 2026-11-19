@@ -47,6 +47,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 
 try:
     import oerconfig
@@ -83,9 +86,9 @@ def main():
         parser.error(f"give --init, to write {SAMPLE_NAME}")
 
     base = args.dir
-    config_path = os.path.join(base, CONFIG_NAME)
+    config_path = P(base).config_file()
 
-    legacy = os.path.join(base, LEGACY_NAME)
+    legacy = P(base).top(LEGACY_NAME)
     if os.path.isfile(legacy) and not os.path.isfile(config_path):
         sys.exit(
             f"{legacy} is the v0.1 configuration and is no longer read.\n"
@@ -99,7 +102,7 @@ def main():
 
     documents = []
     try:
-        project_path = os.path.join(base, PROJECT_NAME)
+        project_path = P(base).project_file()
         if os.path.isfile(project_path):
             documents.append(
                 oerconfig.load_document(project_path, project_schema))
@@ -121,7 +124,7 @@ def main():
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
 
-    out = os.path.join(base, SAMPLE_NAME)
+    out = P(base).report(SAMPLE_NAME)
     targets = {}
     for doc in documents:
         targets.update({n: b or {} for n, b in doc.targets.items()})

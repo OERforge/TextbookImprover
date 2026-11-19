@@ -71,13 +71,17 @@ import shutil
 import copy
 import subprocess
 import sys
-import tempfile
 from collections import Counter, OrderedDict
 from html import unescape as html_unescape
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+# Where a project's files are is lib/projectpaths.py's to say: a function
+# handed the book's folder asks P(base) for each path in it.
+P = projectpaths.of
 try:
     import alttext
     import decksave
@@ -316,8 +320,8 @@ def archive_targets(targets, base):
         folder = os.path.abspath(target.output_dir)
         if kind == "none" or not os.path.isdir(folder):
             continue
-        if folder == os.path.abspath(base) or \
-                os.path.abspath(base).startswith(folder + os.sep):
+        if folder == os.path.abspath(P(base).sources()) or \
+                os.path.abspath(P(base).sources()).startswith(folder + os.sep):
             say(f"NOTE: target {target.name} writes into the content directory, which "
                 "isn't archived; give it an output_dir of its own.")
             continue
@@ -333,7 +337,7 @@ def archive_targets(targets, base):
                        for here, dirs, names in os.walk(folder)
                        if not (own and (here == own or here.startswith(own + os.sep)))
                        for name in names)
-        handle, temp = tempfile.mkstemp(prefix=".archive-", dir=os.path.dirname(folder))
+        handle, temp = projectpaths.of().temp_file(".archive-", beside=folder)
         os.close(handle)
         try:
             if kind == "zip":
@@ -354,7 +358,7 @@ def archive_targets(targets, base):
         finally:
             if os.path.exists(temp):
                 os.remove(temp)
-        say(f"{target.name}: {len(files)} file(s) packed into {os.path.relpath(path, base)}.")
+        say(f"{target.name}: {len(files)} file(s) packed into {os.path.relpath(path, P(base).top())}.")
 
 
 def browser_save(directory):
@@ -395,7 +399,7 @@ def latex_book_here(base):
             return True
     except OSError:
         pass
-    path = os.path.join(base, "conversion.yaml")
+    path = P(base).config_file()
     if os.path.isfile(path):
         with open(path, encoding="utf-8", errors="replace") as fh:
             return bool(LATEX_MAIN_SET.search(fh.read()))
@@ -421,7 +425,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     import tarfile
     skip = SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS + (
         ".yaml", ".yml", ".csv", ".json", ".css", ".lua", ".txt", ".pdf", ".epub")
-    candidates = sorted(p for p in glob.glob(os.path.join(base, "*"))
+    candidates = sorted(p for p in glob.glob(P(base).source("*"))
                         if os.path.isfile(p) and not p.lower().endswith(skip))
     cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
     archives = [p for p in candidates
@@ -446,7 +450,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     # where latex.main names them (FINC 308's src/), whose own cartridge,
     # built beside them, was taken for a book to unpack.
     if any(p.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS)
-           for p in glob.glob(os.path.join(base, "*"))) or latex_book_here(base):
+           for p in glob.glob(P(base).source("*"))) or latex_book_here(base):
         # Beside a folder of its own name, an archive is that folder
         # packed, as a target's archive setting packs one: the run's own
         # output, which needs no word on every run.
@@ -455,7 +459,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         if not found:
             return
         slides_here = not any(p.lower().endswith(SOURCE_EXTENSIONS)
-                              for p in glob.glob(os.path.join(base, "*"))) \
+                              for p in glob.glob(P(base).source("*"))) \
             and not latex_book_here(base)
         say(", ".join(os.path.basename(p) for p in found)
             + ": not read, since this directory has sources, which are the "
@@ -485,7 +489,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
     if check_only:
         say(f"{names} would be unpacked here and its pages converted.")
         return
-    work = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
+    work = P(base).unpack_dir()
     try:
         if tool in ("zip", "tar"):
             notes = (extract_tar if tool == "tar" else extract_zip)(archives[0], work)
@@ -494,7 +498,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
             # from their addresses, where converting the saved files would
             # keep "| Site" in every title and the browser's file names.
             if browser_save(work):
-                site = tempfile.mkdtemp(prefix=".unpacking-", dir=base)
+                site = P(base).unpack_dir()
                 run = subprocess.run([sys.executable,
                                       os.path.join(HERE, "unpack-site.py"),
                                       work, "-o", site],
@@ -542,9 +546,9 @@ def unpack_archives(base, check_only=False, linked_documents=False):
         # the directory as it was, not half unpacked.
         moves = []
         for name in sorted(os.listdir(work)):
-            target = os.path.join(base, name)
+            target = P(base).source(name)
             if name in kept and os.path.exists(target):
-                target = os.path.join(base, kept[name])
+                target = P(base).source(kept[name])
             if os.path.exists(target):
                 die(f"{os.path.basename(target)} is already here; unpacking "
                     f"{names} would overwrite it. Unpack it into a new "
@@ -557,9 +561,9 @@ def unpack_archives(base, check_only=False, linked_documents=False):
             shutil.move(os.path.join(work, name), target)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    sources = sum(1 for p in glob.glob(os.path.join(base, "*"))
+    sources = sum(1 for p in glob.glob(P(base).source("*"))
                   if p.lower().endswith(SOURCE_EXTENSIONS))
-    decks = sum(1 for p in glob.glob(os.path.join(base, "*"))
+    decks = sum(1 for p in glob.glob(P(base).source("*"))
                 if p.lower().endswith(DECK_EXTENSIONS))
     # Decks in other formats are slides once they're saved as PowerPoint
     # (save_other_decks), which says what to correct then; in a book's
@@ -576,7 +580,7 @@ def unpack_archives(base, check_only=False, linked_documents=False):
            if others else ". Correct them")
         + ", not the archive: later runs don't read it again."
         + (" unpack-report.csv says what the unpacking found."
-           if os.path.exists(os.path.join(base, "unpack-report.csv")) else ""))
+           if os.path.exists(P(base).report("unpack-report.csv")) else ""))
 
 
 # How many decks a run couldn't save as PowerPoint (save_other_decks),
@@ -608,7 +612,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             + (", ..." if len(found.in_place) > 4 else "") + "). To save one as PowerPoint "
             "again, delete its PowerPoint file.")
         for name, pptx in found.in_place:
-            original, saved = os.path.join(base, name), os.path.join(base, pptx)
+            original, saved = P(base).source(name), P(base).media(pptx)
             if os.path.getmtime(original) > os.path.getmtime(saved):
                 say(f"WARNING: {name} is newer than {pptx}, which is read in its place: if {name} "
                     f"has changes {pptx} hasn't, delete {pptx} and run again, which saves it anew.")
@@ -623,7 +627,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             "one of them here, or save one as PowerPoint yourself.")
     to_save = []
     for name, target in found.to_save:
-        why = decksave.problem(os.path.join(base, name))
+        why = decksave.problem(P(base).source(name))
         if why:
             say(f"ERROR: {name} couldn't be saved as PowerPoint: {why}.")
             SAVE_FAILED += 1
@@ -659,7 +663,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
     saved = []
     for name, target in to_save:
         try:
-            decksave.save(program, os.path.join(base, name), os.path.join(base, target))
+            decksave.save(program, P(base).source(name), P(base).media(target))
         except decksave.SaveError as exc:
             say(f"ERROR: {name} couldn't be saved as PowerPoint: {exc}.")
             SAVE_FAILED += 1
@@ -671,7 +675,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             "original isn't read again. Correct the PowerPoint file, or the sidecars, not the "
             "original; to save one again, delete its PowerPoint file.")
     for name, target in saved:
-        objects = decksave.objects_without_pictures(os.path.join(base, target))
+        objects = decksave.objects_without_pictures(P(base).media(target))
         if objects:
             say(f"NOTE: LibreOffice gave {objects} embedded object(s) in {target} no picture, "
                 "so they're left out, as the run says of each"
@@ -737,7 +741,7 @@ class Target:
         self.resolved = resolved
         self.format = resolved["format"]
         self.output_dir = os.path.normpath(
-            os.path.join(base, str(resolved["output_dir"] or name)))
+            P(base).target_dir(name, resolved["output_dir"]))
         self.fingerprint = None      # set once every target is known
         # tables.bands: auto derives from the format, and is resolved here,
         # before targets are compared, so two targets that differ in it
@@ -759,7 +763,7 @@ def book_sources(base):
     """The files at the top of base a book is read from, by their
     extension, apart from a repository's files about itself (README.md and
     the rest), which a folder of decks may have too."""
-    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(base, "*"))
+    return sorted(os.path.basename(p) for p in glob.glob(P(base).source("*"))
                   if os.path.isfile(p) and p.lower().endswith(SOURCE_EXTENSIONS)
                   and os.path.basename(p).lower() not in REPOSITORY_FILES)
 
@@ -851,8 +855,8 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     project_schema = oerconfig.load_schema(
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
 
-    legacy = os.path.join(base, LEGACY_NAME)
-    config_path = os.path.join(base, CONFIG_NAME)
+    legacy = P(base).top(LEGACY_NAME)
+    config_path = P(base).config_file()
     if os.path.isfile(legacy) and not os.path.isfile(config_path):
         die(f"{LEGACY_NAME} is the v0.1 configuration and is no longer read.\n"
             "  Split it into project.yaml, conversion.yaml and packaging.yaml:\n"
@@ -861,7 +865,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             "  changes the original.")
 
     documents = []
-    project_path = os.path.join(base, PROJECT_NAME)
+    project_path = P(base).project_file()
     try:
         if os.path.isfile(project_path):
             documents.append(oerconfig.load_document(project_path,
@@ -918,7 +922,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     # held project.yaml and conversion.yaml to that; packaging.yaml's block
     # is held to it here, before anything is converted, since the packager
     # reads it only at the end.
-    packaging_path = os.path.join(base, PACKAGING_NAME)
+    packaging_path = P(base).packaging_file()
     packaged = oerconfig.inline_project(packaging_path)
     if packaged:
         conflicts = oerconfig.project_conflicts(
@@ -1066,7 +1070,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     for target in targets:
         if target.fingerprint not in owners:
             owners[target.fingerprint] = target
-            target.pages_dir = base if len(owners) == 1 else \
+            target.pages_dir = P(base).pages() if len(owners) == 1 else \
                 os.path.join(target.output_dir, "intermediates")
         else:
             target.pages_dir = owners[target.fingerprint].pages_dir
@@ -1083,7 +1087,7 @@ def resolve_path(base, name):
     to a path that did not exist.
     """
     name = str(name)
-    return name if os.path.isabs(name) else os.path.join(base, name)
+    return P(base).named(name)
 
 
 # A book's own template, stylesheet, or Word reference document, kept with
@@ -1106,9 +1110,9 @@ def own_file(target, setting, base):
     if not os.path.isfile(path):
         die(f"{setting} is {name} for target {target.name}, which doesn't exist "
             f"(looked at {path}). Nothing was converted.")
-    folders = {os.path.abspath(base)}
+    folders = {os.path.abspath(P(base).sources())}
     if PASSTHROUGH:
-        folders.add(os.path.abspath(os.path.join(base, PASSTHROUGH)))
+        folders.add(os.path.abspath(P(base).source(PASSTHROUGH)))
     if os.path.dirname(path) in folders and path.lower().endswith(
             SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS):
         die(f"{setting} is {name} for target {target.name}, which is beside the book's "
@@ -1159,7 +1163,7 @@ def check_sidecar(path, setting, default, base):
         die(f"ERROR: {setting} is set to {path}, which is a folder, not a file.\n"
             f"       Name the sidecar's file, or remove the setting to use ./{default}.")
     named = not (os.path.basename(path) == default and
-                 os.path.dirname(os.path.abspath(path)) == os.path.abspath(base))
+                 os.path.dirname(os.path.abspath(path)) == os.path.abspath(P(base).settings_folder()))
     # A link to nothing at the default name is gone without, said to be;
     # a setting naming one stops the run, as one naming nothing does.
     if os.path.exists(path) or (os.path.lexists(path) and not named):
@@ -1173,7 +1177,7 @@ def check_sidecar(path, setting, default, base):
         return
     gone = f", a link to {os.readlink(path)}, which isn't there" if os.path.islink(path) else ""
     die(f"ERROR: {setting} is set to {path}, which does not exist{gone}.\n"
-        f"       A relative name resolves against {os.path.abspath(base)}.\n"
+        f"       A relative name resolves against {os.path.abspath(P(base).settings_folder())}.\n"
         f"       Create the file, or remove the setting to use ./{default}.")
 
 
@@ -1247,7 +1251,7 @@ def variant_sources(base, target_name):
     <stem>.<target>.md, .docx, or .html. The page keeps the stem, so
     contents, links, and sidecars don't know which file produced it."""
     found, clashes = {}, []
-    where = [base] + ([os.path.join(base, PASSTHROUGH)] if PASSTHROUGH
+    where = [P(base).sources()] + ([P(base).source(PASSTHROUGH)] if PASSTHROUGH
                       else [])
     for directory in where:
         for ext in SOURCE_EXTENSIONS:
@@ -1258,7 +1262,7 @@ def variant_sources(base, target_name):
                     clashes.append((found[safe_stem(stem)], path))
                 found[safe_stem(stem)] = path
     for one, other in clashes:
-        die(f"{os.path.relpath(one, base)} and {os.path.relpath(other, base)} "
+        die(f"{os.path.relpath(one, P(base).sources())} and {os.path.relpath(other, P(base).sources())} "
             f"are both target {target_name}'s variant of the same page. "
             "Keep one. Nothing was converted.")
     return found
@@ -1266,7 +1270,7 @@ def variant_sources(base, target_name):
 
 def in_passthrough(base, path):
     return bool(PASSTHROUGH) and os.path.dirname(os.path.abspath(path)) \
-        == os.path.abspath(os.path.join(base, PASSTHROUGH))
+        == os.path.abspath(P(base).source(PASSTHROUGH))
 
 
 def is_variant(name):
@@ -1285,15 +1289,15 @@ def markdown_sources(base, fragments, decks=False):
     decks: the folder is slides, and each file here a deck, but for a
     repository's files about itself (README.md and the rest)."""
     found = []
-    here = sorted(glob.glob(os.path.join(base, "*.md")))
+    here = sorted(glob.glob(P(base).source("*.md")))
     passthrough = passthrough_dir(base)
     if passthrough and not decks:
         here += sorted(glob.glob(os.path.join(passthrough, "*.md")))
     for path in here:
-        name = os.path.relpath(path, base).replace(os.sep, "/")
+        name = os.path.relpath(path, P(base).sources()).replace(os.sep, "/")
         if os.path.abspath(path) in fragments or is_variant(name):
             continue
-        if os.path.exists(os.path.join(base, name[:-3] + ".docx")):
+        if os.path.exists(P(base).source(name[:-3] + ".docx")):
             continue
         # A LaTeX book's repository files, which aren't the book's pages,
         # nor a folder of decks'.
@@ -1589,12 +1593,12 @@ def stop_alone(base, prep, master, place, env):
     reaches them, but those its preamble reads, which hold its definitions."""
     import latexsource
     name, line = place
-    lines = latexsource.read_text(os.path.join(base, name)).split("\n")
+    lines = latexsource.read_text(P(base).source(name)).split("\n")
     named = [latexsource.resolve(base, m.group(2) or m.group(3), os.path.dirname(master))
              for m in latexsource.code_matches(latexsource.INPUT, lines[line - 1])] \
         if 0 < line <= len(lines) else []
     named = [n for n in named if n]
-    text = latexsource.read_text(os.path.join(base, master))
+    text = latexsource.read_text(P(base).source(master))
     begin = latexsource.code_matches(latexsource.BEGIN_DOCUMENT, text)
     preamble = {piece for piece, _ in latexsource.preamble_pieces(
         base, master, text[:begin[0].start()])} if begin else set()
@@ -1648,8 +1652,8 @@ def read_latex_to_json(base, masters, env, work, titles=None):
     for index, master in enumerate(masters):
         _, missing = latexsource.reached(base, master)
         if missing:
-            makefiles = sorted({os.path.relpath(os.path.join(d, "Makefile"), base)
-                                for d in [base] + [os.path.join(base, os.path.dirname(m))
+            makefiles = sorted({os.path.relpath(os.path.join(d, "Makefile"), P(base).sources())
+                                for d in [P(base).sources()] + [P(base).source(os.path.dirname(m))
                                                    for m in missing]
                                 if os.path.isfile(os.path.join(d, "Makefile"))})
             die(f"{master} reaches {len(missing)} file(s) that aren't here: "
@@ -1814,7 +1818,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                 untitled.append((stem, title, "declared" if stem in (titles or {}) else
                                  "pdftitle" if pdftitle else "name",
                                  latexsource.has_heading(blocks)))
-            with open(os.path.join(base, stem + ".json"), "w",
+            with open(P(base).raw(stem), "w",
                       encoding="utf-8") as fh:
                 json.dump({"pandoc-api-version": doc["pandoc-api-version"],
                            "meta": page_meta, "blocks": blocks}, fh)
@@ -1978,15 +1982,15 @@ def asciidoc_sources(base):
     it includes them in is the book's order."""
     sources, order, masters, imagesdir = [], [], [], ""
     header = {}
-    for path in sorted(glob.glob(os.path.join(base, "*.adoc"))
-                       + glob.glob(os.path.join(base, "*.asciidoc"))):
+    for path in sorted(glob.glob(P(base).source("*.adoc"))
+                       + glob.glob(P(base).source("*.asciidoc"))):
         name = os.path.basename(path)
         if is_variant(name):
             continue
         with open(path, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         included = [n for n in INCLUDE.findall(text)
-                    if os.path.isfile(os.path.join(base, n)) and "/" not in n]
+                    if os.path.isfile(P(base).source(n)) and "/" not in n]
         if included:
             masters.append(name)
             m = re.search(r"^:imagesdir:\s*(\S+)\s*$", text, re.M)
@@ -2031,19 +2035,19 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
     env = dict(env, ASCIIDOC_IMAGESDIR=imagesdir)
     for name in docs:
         stem = safe_stem(os.path.splitext(name)[0])
-        fixed = adoc_root_index_text(os.path.join(base, name))
+        fixed = adoc_root_index_text(P(base).source(name))
         if fixed is None:
             run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", name,
                  "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
-                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
         else:
             # The text given on stdin, read from the file's own directory,
             # where its includes are found as they would be from the file.
-            folder = os.path.join(base, os.path.dirname(name))
+            folder = P(base).source(os.path.dirname(name))
             done = subprocess.run(
                 [*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json",
-                 "-o", os.path.join(base, stem + ".json"),
+                 "-o", P(base).raw(stem),
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
                  "--lua-filter=" + MEDIA_FILTER],
@@ -2052,7 +2056,7 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
             sys.stderr.write(done.stderr)
             if done.returncode:
                 die(f"pandoc couldn't read {name}.")
-        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+        portable_media_paths(P(base).raw(stem), base, name)
         stems.append(stem)
         PAGE_SOURCES[stem] = ("asciidoc", name)
     return stems
@@ -2101,7 +2105,7 @@ def fill_namerefs(base, stems):
                 current = collect(value, current)
         return current
     for stem in stems:
-        with open(os.path.join(base, stem + ".json"), encoding="utf-8") as fh:
+        with open(P(base).raw(stem), encoding="utf-8") as fh:
             docs[stem] = json.load(fh)
         collect(docs[stem]["blocks"], [])
 
@@ -2158,7 +2162,7 @@ def fill_namerefs(base, stems):
         before = filled + len(unknown)
         fill(doc["blocks"])
         if filled + len(unknown) != before:
-            with open(os.path.join(base, stem + ".json"), "w", encoding="utf-8") as fh:
+            with open(P(base).raw(stem), "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
     if filled:
         say(f"{filled} \\nameref given the title of the section, or the caption, its "
@@ -2200,7 +2204,7 @@ def resolve_asciidoc_xrefs(base, stems, kind="AsciiDoc"):
             for value in node:
                 collect(value, stem)
     for stem in stems:
-        with open(os.path.join(base, stem + ".json"), encoding="utf-8") as fh:
+        with open(P(base).raw(stem), encoding="utf-8") as fh:
             docs[stem] = json.load(fh)
         collect(docs[stem]["blocks"], stem)
         # <<Malware>> names a chapter, whose title is its = line: metadata.
@@ -2237,7 +2241,7 @@ def resolve_asciidoc_xrefs(base, stems, kind="AsciiDoc"):
         before = resolved
         fix(doc["blocks"], stem)
         if resolved != before:
-            with open(os.path.join(base, stem + ".json"), "w",
+            with open(P(base).raw(stem), "w",
                       encoding="utf-8") as fh:
                 json.dump(doc, fh)
     if resolved:
@@ -2282,7 +2286,7 @@ def source_documents(base):
     .doc renamed to .docx does not, and neither does a placeholder.
     """
     found = []
-    for path in sorted(glob.glob(os.path.join(base, "*.docx"))):
+    for path in sorted(glob.glob(P(base).source("*.docx"))):
         name = os.path.basename(path)
         if is_variant(name):
             continue                    # read for its target, below
@@ -2336,7 +2340,7 @@ def portable_media_paths(path, base, name):
 
     def found(ref):
         """ref as it names a file here: (path, how) or None."""
-        if os.path.isfile(os.path.join(base, unquote(ref))):
+        if os.path.isfile(P(base).referenced(unquote(ref))):
             return None
         if "%" not in ref and not os.path.isabs(ref):
             cased = case_match(base, ref)
@@ -2345,18 +2349,18 @@ def portable_media_paths(path, base, name):
         return None
 
     def candidate(ref):
-        if os.path.isfile(os.path.join(base, unquote(ref))):
+        if os.path.isfile(P(base).referenced(unquote(ref))):
             return None
         swapped = ref.replace("\\", "/").replace("%5C", "/") \
                      .replace("%5c", "/")
         if swapped != ref and os.path.isfile(
-                os.path.join(base, unquote(swapped))):
+                P(base).referenced(unquote(swapped))):
             return swapped, "windows"
-        for entry in sorted(os.listdir(base)):
+        for entry in sorted(os.listdir(P(base).run_dir())):
             rest = ref[len(entry):]
             if ref.startswith(entry) and rest \
-                    and os.path.isdir(os.path.join(base, entry)) \
-                    and os.path.isfile(os.path.join(base, entry,
+                    and os.path.isdir(P(base).referenced(entry)) \
+                    and os.path.isfile(P(base).referenced(entry,
                                                     unquote(rest))):
                 return entry + "/" + rest, "windows"
         cased = found(swapped)
@@ -2490,8 +2494,8 @@ def read_markdown_to_json(base, docs, env, decks=False):
         run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json", name,
              "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
              "--lua-filter=" + MEDIA_FILTER],
-            env=env, cwd=base)
-        settle_markdown(os.path.join(base, stem + ".json"), base, name, decks)
+            env=env, cwd=P(base).run_dir())
+        settle_markdown(P(base).raw(stem), base, name, decks)
         stems.append(stem)
         PAGE_SOURCES[stem] = ("markdown", name)
         if decks:
@@ -2520,11 +2524,11 @@ def read_pptx_to_json(base, decks, env, work, paths):
     for name in decks:
         stem = safe_stem(name[:-5])
         try:
-            doc, record = pptxsource.read(os.path.join(base, name), base, work, alts, tables,
+            doc, record = pptxsource.read(P(base).source(name), base, work, alts, tables,
                                           titles, orders, api_version=version, env=env)
         except Exception:               # its checks said why
             continue
-        with open(os.path.join(base, stem + ".json"), "w", encoding="utf-8") as fh:
+        with open(P(base).raw(stem), "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         DECK_SOURCES[stem] = name
         PAGE_SOURCES[stem] = ("pptx", name)
@@ -2552,7 +2556,7 @@ def html_sources(base, others, hand):
     directory is a target's copy of it. A page finished by hand belongs
     in the pass-through directory, where it's copied as it stands."""
     found = []
-    for path in sorted(glob.glob(os.path.join(base, "*.html"))):
+    for path in sorted(glob.glob(P(base).source("*.html"))):
         name = os.path.basename(path)
         stem = name[:-5]
         if is_variant(name) or stem in hand or stem in others \
@@ -2636,7 +2640,7 @@ def read_html_to_json(base, docs, env, work):
         # keeps them; see lib/htmlrepair.py -- run from the book's
         # directory, so the paths the page names are still the files'.
         repaired = os.path.join(repaired_dir, name)
-        moved = htmlrepair.repaired_copy(os.path.join(base, name), repaired)
+        moved = htmlrepair.repaired_copy(P(base).source(name), repaired)
         if moved and TRACE:
             say(f"# {name}: {moved} id(s) moved onto anchors the reader "
                 "keeps")
@@ -2667,8 +2671,8 @@ def read_html_to_json(base, docs, env, work):
              repaired,
              "-o", stem + ".json", "--lua-filter=" + HTML_RAW_FILTER,
              "--lua-filter=" + HTML_SOURCE_FILTER,
-             "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
-        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+             "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
+        portable_media_paths(P(base).raw(stem), base, name)
         stems.append(stem)
         PAGE_SOURCES[stem] = ("html", name)
     return stems
@@ -2707,7 +2711,7 @@ def read_to_json(base, docs, env, work):
         # sees a difference.
         repaired = os.path.join(repaired_dir, name)
         notes = []
-        moved = docxrepair.repaired_copy(os.path.join(base, name), repaired,
+        moved = docxrepair.repaired_copy(P(base).source(name), repaired,
                                          WORD_HEADINGS, WORD_DELETIONS, notes)
         for note in notes:
             say(f"WARNING: {name}: word.headings not applied: {note}.")
@@ -2717,22 +2721,22 @@ def read_to_json(base, docs, env, work):
         run([*pandocrun.PANDOC, "-f", "docx", "-t", "json", repaired,
              "-o", stem + ".json",
              "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
-            env=env, cwd=base)
+            env=env, cwd=P(base).run_dir())
         # ScreenTips, which Pandoc's reader drops, as the links' titles.
-        tips = docxrepair.apply_screentips(repaired, os.path.join(base, stem + ".json"))
+        tips = docxrepair.apply_screentips(repaired, P(base).raw(stem))
         # Word's decorative marker, which Pandoc's reader doesn't read.
-        docxrepair.apply_decorative(repaired, os.path.join(base, stem + ".json"))
+        docxrepair.apply_decorative(repaired, P(base).raw(stem))
         # Code a list item holds in a quote, the quote the reader drops.
-        docxrepair.apply_quoted_code(os.path.join(base, name), os.path.join(base, stem + ".json"))
+        docxrepair.apply_quoted_code(P(base).source(name), P(base).raw(stem))
         # A term with no definition, which the reader reads as a Div.
-        docxrepair.apply_definition_terms(os.path.join(base, stem + ".json"))
+        docxrepair.apply_definition_terms(P(base).raw(stem))
         # Ids Pandoc's writer hashed, named again from the file's own map.
-        docxrepair.apply_id_map(repaired, os.path.join(base, stem + ".json"))
-        docxrepair.apply_list_tables(repaired, os.path.join(base, stem + ".json"))
+        docxrepair.apply_id_map(repaired, P(base).raw(stem))
+        docxrepair.apply_list_tables(repaired, P(base).raw(stem))
         # Numbered code a Word target wrote, numbered again.
-        docxrepair.apply_number_lines(repaired, os.path.join(base, stem + ".json"))
+        docxrepair.apply_number_lines(repaired, P(base).raw(stem))
         # A link to a file beside the document, in another case.
-        portable_media_paths(os.path.join(base, stem + ".json"), base, name)
+        portable_media_paths(P(base).raw(stem), base, name)
         if tips and TRACE:
             say(f"# {name}: {tips} ScreenTip(s) kept as link titles")
         stems.append(stem)
@@ -2754,12 +2758,12 @@ def passthrough_dir(base):
     """The pass-through directory, when the project has one and it's here."""
     if not PASSTHROUGH:
         return None
-    path = os.path.join(base, PASSTHROUGH)
+    path = P(base).source(PASSTHROUGH)
     return path if os.path.isdir(path) else None
 
 
 def hand_path(base, stem):
-    return os.path.join(base, PASSTHROUGH, stem + ".html")
+    return P(base).source(PASSTHROUGH, stem + ".html")
 
 
 def hand_pages(base, stems):
@@ -2811,9 +2815,9 @@ def copy_hand_pages(base, hand, target_dir, variants=None):
         for ref in local_references(source):
             if ref.endswith(".html"):
                 continue
-            src = os.path.normpath(os.path.join(base, ref))
+            src = os.path.normpath(P(base).referenced(ref))
             if not os.path.isfile(src) or not src.startswith(
-                    os.path.abspath(base)):
+                    os.path.abspath(P(base).sources())):
                 say(f"WARNING: {stem}.html refers to {ref}, which is not "
                     "here; not copied.")
                 continue
@@ -2836,12 +2840,12 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
     for stem in hand:
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
         source = variants.get(stem) if str(variants.get(stem, "")).endswith(
-            ".html") else os.path.relpath(hand_path(base, stem), base)
+            ".html") else os.path.relpath(hand_path(base, stem), P(base).sources())
         # raw_html, or the reader fetches every <iframe> over the network
         # to read it into the page (Readers/HTML.hs, pIframe).
         run([*pandocrun.PANDOC, "-f", "html+raw_html", "-t", "json", source,
              "-o", target, "--lua-filter=" + HTML_RAW_FILTER],
-            env=env, cwd=base)
+            env=env, cwd=P(base).run_dir())
         out.append(target)
     return out
 
@@ -2862,27 +2866,27 @@ def read_variants(base, target, work, env):
             docxrepair.repaired_copy(path, repaired, WORD_HEADINGS, WORD_DELETIONS)
             run([*pandocrun.PANDOC, "-f", "docx", "-t", "json", repaired, "-o", out,
                  "--lua-filter=" + MEDIA_FILTER, "--extract-media=" + stem],
-                env=env, cwd=base)
-            docxrepair.apply_screentips(repaired, os.path.join(base, out)
+                env=env, cwd=P(base).run_dir())
+            docxrepair.apply_screentips(repaired, P(base).media(out)
                                         if not os.path.isabs(out) else out)
-            docxrepair.apply_decorative(repaired, os.path.join(base, out)
+            docxrepair.apply_decorative(repaired, P(base).media(out)
                                         if not os.path.isabs(out) else out)
-            docxrepair.apply_quoted_code(path, os.path.join(base, out)
+            docxrepair.apply_quoted_code(path, P(base).media(out)
                                          if not os.path.isabs(out) else out)
-            docxrepair.apply_definition_terms(os.path.join(base, out)
+            docxrepair.apply_definition_terms(P(base).media(out)
                                               if not os.path.isabs(out) else out)
-            docxrepair.apply_id_map(repaired, os.path.join(base, out)
+            docxrepair.apply_id_map(repaired, P(base).media(out)
                                     if not os.path.isabs(out) else out)
-            docxrepair.apply_list_tables(repaired, os.path.join(base, out)
+            docxrepair.apply_list_tables(repaired, P(base).media(out)
                                          if not os.path.isabs(out) else out)
-            docxrepair.apply_number_lines(repaired, os.path.join(base, out)
+            docxrepair.apply_number_lines(repaired, P(base).media(out)
                                           if not os.path.isabs(out) else out)
             portable_media_paths(out, base, name)
         elif name.endswith((".adoc", ".asciidoc")):
             run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
-                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
             portable_media_paths(out, base, name)
         elif name.endswith(".html"):
             repaired = os.path.join(out_dir, name)
@@ -2891,12 +2895,12 @@ def read_variants(base, target, work, env):
             run([*pandocrun.PANDOC, "-f", "html+raw_html+epub_html_exts", "-t", "json",
                  repaired, "-o", out, "--lua-filter=" + HTML_RAW_FILTER,
                  "--lua-filter=" + HTML_SOURCE_FILTER,
-                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
             portable_media_paths(out, base, name)
         else:
             run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
-                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=base)
+                 "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
             settle_markdown(out, base, name, DECK_RUN, report=False)
         raw[stem] = out
     return raw
@@ -2908,13 +2912,13 @@ def warn_about_leftovers(base, stems, fragments, web=()):
     error. Markdown from a v0.1 run is no longer read by anything; it is
     named rather than removed, since deleting a user's files is not this
     script's decision to make."""
-    for path in sorted(glob.glob(os.path.join(base, "*.json"))):
+    for path in sorted(glob.glob(P(base).source("*.json"))):
         name = os.path.basename(path)
         if name.endswith(INTERMEDIATE) or name[:-5] in stems:
             continue
         say(f"Skipping {name}: no matching .docx in this directory.")
         say("  It is left over from an earlier run, or its .docx has moved.")
-    for path in sorted(glob.glob(os.path.join(base, "*.md"))):
+    for path in sorted(glob.glob(P(base).source("*.md"))):
         if os.path.abspath(path) in fragments:
             continue
         if not os.path.exists(path[:-3] + ".docx"):
@@ -2925,7 +2929,7 @@ def warn_about_leftovers(base, stems, fragments, web=()):
     # rather than removed, since deleting a user's files is not this
     # script's decision; but they are not this run's pages, which go to
     # each target's directory.
-    old = [os.path.basename(p) for p in glob.glob(os.path.join(base, "*.html"))
+    old = [os.path.basename(p) for p in glob.glob(P(base).source("*.html"))
            if os.path.basename(p) not in web
            and (os.path.basename(p)[:-5] in stems
                 or os.path.basename(p)[:-5].split("--", 1)[0] in stems)]
@@ -2988,14 +2992,14 @@ def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     # file system that ignores case finds it, is one.
     written = {naming: {} for naming in namings if any(naming)}
     for stem in stems:
-        intermediate = os.path.join(base, stem + ".json")
+        intermediate = P(base).raw(stem)
         images = media_references(intermediate)
         # The files a page links to are copied with it, so they're named
         # alike; their being there isn't checked (linked_files).
         for ref in images + [r for r in linked_files(intermediate) if r not in images]:
             # A Markdown source writes a space in a file name as %20, as a
             # link must; the file on disk has the space.
-            path = os.path.join(base, unquote(ref))
+            path = P(base).referenced(unquote(ref))
             if written and os.path.isfile(path):
                 found = os.stat(path)
                 real = (found.st_dev, found.st_ino)
@@ -3174,7 +3178,7 @@ def own_language(base, kind, name, meta=None):
     among what's read; a LaTeX book's from its preamble; a hand-written
     page's from its HTML, before it's read; any other's as its reader
     gave it, in meta."""
-    path = os.path.join(base, name)
+    path = P(base).source(name)
     if kind == "docx" or name.lower().endswith(".docx"):
         return languages.docx_own(path, name)
     if kind == "pptx":
@@ -3233,7 +3237,7 @@ def settle_languages(base, stems, project, paths, hand=(), variants=()):
     match_language_rows(paths, names)
     for stem in stems:
         if stem not in LANGUAGES:
-            path = os.path.join(base, stem + ".json")
+            path = P(base).raw(stem)
             kind, name = PAGE_SOURCES.get(stem, (None, None))
             meta = {}
             if kind not in ("docx", "pptx", "latex"):
@@ -3242,9 +3246,9 @@ def settle_languages(base, stems, project, paths, hand=(), variants=()):
             own = own_language(base, kind, name, meta) if name else None
             LANGUAGES[stem] = languages.decide(LANGUAGE_ROWS.get(stem), own,
                                                project["language"])
-        settle_page_language(os.path.join(base, stem + ".json"), LANGUAGES[stem])
+        settle_page_language(P(base).raw(stem), LANGUAGES[stem])
     for stem in hand:
-        name = os.path.relpath(hand_path(base, stem), base).replace(os.sep, "/")
+        name = os.path.relpath(hand_path(base, stem), P(base).sources()).replace(os.sep, "/")
         PAGE_SOURCES[stem] = ("hand", name)
         LANGUAGES[stem] = languages.decide(LANGUAGE_ROWS.get(stem),
                                            own_language(base, "hand", name),
@@ -3260,7 +3264,7 @@ def variant_languages(base, target, raw, project):
         if stem not in LANGUAGES:
             with open(path, encoding="utf-8") as fh:
                 meta = json.load(fh).get("meta", {})
-            name = os.path.relpath(target.variants[stem], base).replace(os.sep, "/")
+            name = os.path.relpath(target.variants[stem], P(base).sources()).replace(os.sep, "/")
             lower = name.lower()
             kind = "docx" if lower.endswith(".docx") else "html" if lower.endswith(".html") \
                 else "asciidoc" if lower.endswith((".adoc", ".asciidoc")) else "markdown"
@@ -3278,8 +3282,8 @@ def book_packaged(targets, base):
     (build-cartridge.py's unnamed), as the third and fourth reviews found
     the note saying otherwise."""
     return (os.path.isfile(CARTRIDGE_TOOL) and any(t.format == "html" for t in targets)
-            and (os.path.isfile(os.path.join(base, PROJECT_NAME))
-                 or bool(oerconfig.inline_project(os.path.join(base, PACKAGING_NAME)))))
+            and (os.path.isfile(P(base).project_file())
+                 or bool(oerconfig.inline_project(P(base).packaging_file()))))
 
 
 def whole_book_outputs(targets, latex_book, packaged):
@@ -3444,11 +3448,11 @@ def filter_pages(base, stems, target, env, raw=None):
             if old.endswith((INTERMEDIATE, ".html")):
                 os.remove(old)
         out = os.path.join(pages_dir, stem + INTERMEDIATE)
-        source = (raw or {}).get(stem) or os.path.join(base, stem + ".json")
+        source = (raw or {}).get(stem) or P(base).raw(stem)
         run([*pandocrun.PANDOC, "-f", "json", "-t", "json", source, "-o", out,
              "--lua-filter=" + FIGURE_FILTER,
              "--lua-filter=" + MATH_FILTER,
-             "--lua-filter=" + TITLE_FILTER], env=env, cwd=base)
+             "--lua-filter=" + TITLE_FILTER], env=env, cwd=P(base).run_dir())
         written.append(out)
     return written
 
@@ -3748,7 +3752,7 @@ def merged_document(members, title, where, holder, base, book_language=None):
     api, blocks, seen, moved = None, [], set(), 0
     docs = []
     for stem, _, _ in members:
-        with open(os.path.join(base, stem + INTERMEDIATE), encoding="utf-8") as fh:
+        with open(P(base).page(stem), encoding="utf-8") as fh:
             docs.append(json.load(fh))
     spoken = {page_language(doc.get("meta"), book_language) for doc in docs}
     language = spoken.pop() if len(spoken) == 1 else book_language
@@ -4104,7 +4108,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         stem = os.path.splitext(name)[0]
         out = os.path.join(target.output_dir, name)
         own, replacing = copy_language(name)
-        counts = docxremediate.remediate(os.path.join(base, name), out, resolved.get(stem, []),
+        counts = docxremediate.remediate(P(base).source(name), out, resolved.get(stem, []),
                                          alts.get(stem, {}), titles,
                                          str(target["compatibility_mode"]) == "15",
                                          captions=captions.get(stem, []),
@@ -4129,10 +4133,10 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     pages = 0
     for stem in html_stems:
         name = stem + ".html"
-        if not os.path.exists(os.path.join(base, name)):
+        if not os.path.exists(P(base).source(name)):
             continue
         own, replacing = copy_language(name)
-        counts = htmlremediate.remediate(os.path.join(base, name),
+        counts = htmlremediate.remediate(P(base).source(name),
                                          os.path.join(target.output_dir, name),
                                          resolved_html.get(stem, []), page_alts, links, own,
                                          captions.get(stem, []),
@@ -4145,7 +4149,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
     for name in markdown:
         own, replacing = copy_language(name)
         counts = mdremediate.remediate(
-            os.path.join(base, name), os.path.join(target.output_dir, name), page_alts, links,
+            P(base).source(name), os.path.join(target.output_dir, name), page_alts, links,
             captions.get(safe_stem(os.path.basename(name)[:-3]), []), own,
             replace=replacing is not None)
         for key, n in counts.items():
@@ -4159,7 +4163,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         mathml = str(target["latex_mathml"]) == "on"
         pictures = str(target["picture_paths"]) == "on"
         definitions = None
-        macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
+        macros_path = P(base).named(LATEX_MACROS) if LATEX_MACROS else ""
         if str(target["latex_definitions"]) == "on" and os.path.isfile(macros_path):
             definitions = latexsource.read_text(macros_path)
         # Each master the book is read through (latex.main's, in order), with
@@ -4176,7 +4180,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
                          if e.get("latex") and e.get("supplier") == "sidecar"}
             seen = set()
             for stem in stems:
-                page = os.path.join(base, stem + ".json")
+                page = P(base).raw(stem)
                 if os.path.exists(page):
                     seen.update(os.path.splitext(ref)[0] for ref in media_references(page))
             merge_counts(counts, texremediate.remediate(
@@ -4195,7 +4199,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         # only it reaches, alt text by key, and the same tagging setup.
         listed, others = {m for m, _ in latex_parts}, []
         for folder in dict.fromkeys(os.path.dirname(m) for m, _ in latex_parts):
-            for other in latexsource.masters(os.path.join(base, folder) if folder else base):
+            for other in latexsource.masters(P(base).source(folder) if folder else base):
                 other = os.path.normpath(os.path.join(folder, other))
                 if other in listed:
                     continue
@@ -4220,7 +4224,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         # status matters: advice from the tagging project's list.
         if tagging or any(latexsource.code_matches(
                 texremediate.DOCUMENT_METADATA,
-                latexsource.read_text(os.path.join(base, m))) for m, _ in latex_parts):
+                latexsource.read_text(P(base).source(m))) for m, _ in latex_parts):
             import taggingstatus
             taggingstatus.check(base, [m for m, _ in latex_parts], say)
         documents = len(latex_parts)
@@ -4387,8 +4391,8 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         if tagging:
             written.extend(embed_figures(
                 target, base, target.output_dir,
-                list(outputs) + [os.path.join(base, latexsource.RENDERED)], "the copy"))
-    others = sorted(f for f in os.listdir(base) if f.endswith(".adoc") and not f.startswith("."))
+                list(outputs) + [P(base).media(latexsource.RENDERED)], "the copy"))
+    others = sorted(f for f in os.listdir(P(base).sources()) if f.endswith(".adoc") and not f.startswith("."))
     if docs or pages or md_files or not latex_parts:
         say(f"{target.name}: {len(docs)} Word file(s), {pages} HTML page(s), and "
             f"{md_files} Markdown file(s) remediated: "
@@ -4790,18 +4794,18 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     if os.path.isdir(build):
         shutil.rmtree(build)
     outputs = {os.path.abspath(t.output_dir) for t in targets} | {
-        os.path.abspath(os.path.join(base, latexsource.RENDERED))}
+        os.path.abspath(P(base).media(latexsource.RENDERED))}
 
     # A version control folder and an operating system's own files aren't
     # the book's; a .latexmkrc is, with what the book's build needs.
     def leave_out(directory, names):
         return [n for n in names if n in (".git", ".hg", ".svn", ".DS_Store", "__MACOSX")
                 or os.path.abspath(os.path.join(directory, n)) in outputs]
-    shutil.copytree(base, build, ignore=leave_out, symlinks=True)
+    shutil.copytree(P(base).sources(), build, ignore=leave_out, symlinks=True)
     # A link the book makes to something beside it (figs -> ../shared/figs)
     # would point beside the copy, where nothing is: it points where the
     # book's did. A link inside the book still finds its copy.
-    root = os.path.abspath(base)
+    root = os.path.abspath(P(base).sources())
     for folder, dirs, names in os.walk(build):
         for name in dirs + names:
             link = os.path.join(folder, name)
@@ -4822,7 +4826,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         with open(html_json, encoding="utf-8") as fh:
             resolved_html = json.load(fh)
     definitions = None
-    macros_path = os.path.join(base, LATEX_MACROS) if LATEX_MACROS else ""
+    macros_path = P(base).named(LATEX_MACROS) if LATEX_MACROS else ""
     if os.path.isfile(macros_path):
         definitions = latexsource.read_text(macros_path)
     alts = htmlremediate.alt_rows(paths["image_alt"])
@@ -4834,7 +4838,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                    for e in resolved_html.get(stem, []) if e.get("latex") and e.get("headers")}
         seen = set()
         for stem in stems:
-            page = os.path.join(base, stem + ".json")
+            page = P(base).raw(stem)
             if os.path.exists(page):
                 seen.update(os.path.splitext(ref)[0] for ref in media_references(page))
         merge_counts(counts, texremediate.remediate(
@@ -5732,7 +5736,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                     # doesn't read as a browser does: a copy drawn that way.
                     downsample.upright(base, [source], os.path.join(work, f"upright-{target.name}"),
                                        DOWNSAMPLED.get(target.name))),
-                env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=base)
+                env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=P(base).run_dir())
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep, footer).items():
                 added[key] = added.get(key, 0) + n
@@ -5751,7 +5755,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                  "--lua-filter=" + TARGET_FILTER] + lowered + [
                  "--lua-filter=" + MARKDOWN_FILTER],
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="asciidoc"),
-                cwd=base)
+                cwd=P(base).run_dir())
             collect_losses(found, target.name, stem, losses)
             with open(out, encoding="utf-8") as fh:
                 text = fh.read()
@@ -5776,7 +5780,7 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
              "--standalone", "--wrap=none", "--markdown-headings=atx",
              "--lua-filter=" + TARGET_FILTER] + lowered + [
              "--lua-filter=" + MARKDOWN_FILTER],
-            env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="markdown"), cwd=base)
+            env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="markdown"), cwd=P(base).run_dir())
         collect_losses(found, target.name, stem, losses)
         written.append(out)
     if word:
@@ -5925,7 +5929,7 @@ def render_html(target, pages, base, fragments, language, env):
                    "--lua-filter=" + SAFE_MEDIA_FILTER,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
                    *html_template(target, base)]
-        run(command, env=env, cwd=base)
+        run(command, env=env, cwd=P(base).run_dir())
         # The notes' heading, which Pandoc's writer doesn't write, and
         # each empty header cell a data cell (lib/headercells.py).
         with open(out, encoding="utf-8") as fh:
@@ -6197,8 +6201,8 @@ def early_project_sample(base, project, targets, check_only):
     that fails) still leaves it. The packager writes the sample again at the
     end, with an outline's order when --toc gives one. Not for a book named
     in packaging.yaml's block, which keeps its packaging-sample.yaml."""
-    if oerconfig.inline_project(os.path.join(base, PACKAGING_NAME)) and \
-            not os.path.isfile(os.path.join(base, PROJECT_NAME)):
+    if oerconfig.inline_project(P(base).packaging_file()) and \
+            not os.path.isfile(P(base).project_file()):
         return
     path, used = write_project_sample(project, [], hint_contents=True)
     packaged = any(t.format == "html" for t in targets) and not check_only
@@ -6210,7 +6214,7 @@ def early_project_sample(base, project, targets, check_only):
 def metadata_title(base, setting):
     """The title in the file pdf.metadata names, as build-pdf.py reads it,
     which a PDF takes over project.yaml's."""
-    path = setting if os.path.isabs(setting) else os.path.join(base, setting)
+    path = P(base).named(setting)
     if not os.path.isfile(path):
         return ""
     if path.lower().endswith((".yaml", ".yml")):
@@ -6220,7 +6224,7 @@ def metadata_title(base, setting):
         command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json", path]
         stdin = None
     result = subprocess.run(command, input=stdin, capture_output=True,
-                            text=True, cwd=base)
+                            text=True, cwd=P(base).run_dir())
     if result.returncode:
         return ""
     return " ".join(meta_text(json.loads(result.stdout).get("meta", {}),
@@ -6256,11 +6260,11 @@ def name_book_target(target, base, pages):
     if TITLE_DECLARED:
         return True, None
     kind = BOOK_KINDS[target.format]
-    has_project = os.path.isfile(os.path.join(base, PROJECT_NAME))
+    has_project = os.path.isfile(P(base).project_file())
     setting = str(target["pdf.metadata"] or "").strip()
     if target.format in ("pdf", "latex") and setting and metadata_title(base, setting):
         return True, None
-    packaged = oerconfig.inline_project(os.path.join(base, PACKAGING_NAME))
+    packaged = oerconfig.inline_project(P(base).packaging_file())
     if packaged and packaged.get("title"):
         say(f"ERROR: target {target.name} needs the book's title, which "
             f"{PACKAGING_NAME}'s project: block gives, but only packaging "
@@ -6349,7 +6353,7 @@ def write_generated(target, tree, titles, api, base, work, fragments,
                    "--standalone", "--ascii", *pandocversion.mathml(),
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
                    *html_template(target, base)]
-        run(command, env=with_fragments(env, fragments), cwd=base)
+        run(command, env=with_fragments(env, fragments), cwd=P(base).run_dir())
         written.append(out)
     return written
 
@@ -6403,7 +6407,7 @@ def arrange_notes(target, pages, base, work, fragments, language, env,
                    "--lua-filter=" + HEADER_FILTER, "-M", f"lang={language}",
                    "-M", "pagetitle=" + (heading or "Notes"),
                    *html_template(target, base)]
-        run(command, env=with_fragments(env, fragments), cwd=base)
+        run(command, env=with_fragments(env, fragments), cwd=P(base).run_dir())
         with open(out, encoding="utf-8") as fh:
             notes_page = notes_lib.Page("notes.html", fh.read(), "notes",
                                         heading or "Notes", "html")
@@ -6474,7 +6478,7 @@ def copy_media(base, output_dir, pages, safe=True, lower=False, scaled=None):
         for ref in media_references(page) + linked_files(page):
             if ref in copied:
                 continue
-            src = os.path.normpath(os.path.join(base, unquote(ref)))
+            src = os.path.normpath(P(base).referenced(unquote(ref)))
             if not os.path.isfile(src):
                 continue
             # Under the safe name safe-media.lua wrote into the page;
@@ -6608,7 +6612,7 @@ def judge_alt_text(seen_file, rows_file, placeholders=(), base=".", per_source=F
     for index, (image, source, alt, src, decided) in enumerate(seen):
         if not decided:
             found[index] = alttext.problem(alt, rules, limit=None, src=src or image)
-    files = {image: os.path.join(base, unquote(src or image))
+    files = {image: P(base).referenced(unquote(src or image))
              for image, _source, _alt, src, _decided in seen}
     groups = {}
     for index, (image, source, alt, src, decided) in enumerate(seen):
@@ -6831,9 +6835,9 @@ def main():
     # A deck's reference document beside the decks is their look, not a
     # deck (slides.reference_doc).
     looks = {os.path.normcase(os.path.abspath(resolve_path(base, name)))
-             for name in oerconfig.reference_docs(os.path.join(base, CONFIG_NAME))}
+             for name in oerconfig.reference_docs(P(base).config_file())}
     decks = [name for name in deckrun.deck_sources(base)
-             if os.path.normcase(os.path.abspath(os.path.join(base, name))) not in looks]
+             if os.path.normcase(os.path.abspath(P(base).source(name))) not in looks]
     # Decks in another format, saved as PowerPoint before they're read
     # (save_other_decks), are PowerPoint decks for what the folder is,
     # but beside decks written in Markdown, which a slides run reads
@@ -6879,7 +6883,7 @@ def main():
                             check_only=args.check_only) and not decks:
             sys.exit(0)
         decks = [name for name in deckrun.deck_sources(base)
-                 if os.path.normcase(os.path.abspath(os.path.join(base, name))) not in looks]
+                 if os.path.normcase(os.path.abspath(P(base).source(name))) not in looks]
     # Pandoc 3.9 introduced the options this script relies on. Earlier
     # versions accept most of the command line and quietly do something
     # else: 3.6 and older write grid tables without cell spans, so a table
@@ -6971,7 +6975,7 @@ def main():
                 + "): it's slides (project.kind), and its decks are the files "
                 "written in Markdown.")
 
-    work = tempfile.mkdtemp(prefix="convert-")
+    work = P(base).temp_dir("convert-")
     try:
         MATH_KEEP_PAGES = deck_math_keep(paths, work) if PPTX_RUN else ""
         # Where the filters read the sidecars they read themselves: a copy
@@ -7095,7 +7099,7 @@ def main():
             early_project_sample(base, project, targets, args.check_only)
         for target in targets:
             if web and target.format == "html" and os.path.abspath(
-                    target.output_dir) == os.path.abspath(base):
+                    target.output_dir) == os.path.abspath(P(base).sources()):
                 die(f"Target {target.name} writes its pages beside the "
                     "sources, which would overwrite the .html sources. Give "
                     "it an output_dir of its own.")
@@ -7117,7 +7121,7 @@ def main():
             import zipfile
             with_deletions = []
             for name in docs:
-                with zipfile.ZipFile(os.path.join(base, name)) as z:
+                with zipfile.ZipFile(P(base).source(name)) as z:
                     if "word/document.xml" in z.namelist() and wordrepairs.count_deletions(
                             z.read("word/document.xml").decode("utf-8", "replace")):
                         with_deletions.append(name)
@@ -7126,7 +7130,7 @@ def main():
                     "changes, which won't appear: " + ", ".join(with_deletions[:5])
                     + (", ..." if len(with_deletions) > 5 else "")
                     + ". word.tracked_deletions: strike keeps it, struck through.")
-        prepass = list(docs) + [os.path.join(base, s + ".json")
+        prepass = list(docs) + [P(base).raw(s)
                                 for s in list(html_stems) + (tex_stems if master else [])]
         if prepass:
             env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,
@@ -7136,14 +7140,14 @@ def main():
                    "--new", reports["table_headers_new"],
                    "--report", reports["table_headers_report"],
                    "--resolved", env["TABLE_HEADERS_RESOLVED"],
-                   "--resolved-html", os.path.join(work, "table-headers-html.json")], cwd=base)
+                   "--resolved-html", os.path.join(work, "table-headers-html.json")], cwd=P(base).run_dir())
         if not stems:
             import latexsource
-            below = sorted(os.path.join(d, m) for d in os.listdir(base)
-                           if os.path.isdir(os.path.join(base, d)) and not d.startswith(".")
-                           and os.path.abspath(os.path.join(base, d)) not in
+            below = sorted(os.path.join(d, m) for d in os.listdir(P(base).sources())
+                           if os.path.isdir(P(base).source(d)) and not d.startswith(".")
+                           and os.path.abspath(P(base).source(d)) not in
                            {os.path.abspath(o) for o in output_dirs}
-                           for m in latexsource.masters(os.path.join(base, d)))
+                           for m in latexsource.masters(P(base).source(d)))
             die("No .docx, .md, .adoc, .html, or LaTeX files here, so there is "
                 "nothing to convert."
                 + (f" {len(below)} whole LaTeX document(s) are in a folder below: "
@@ -7510,8 +7514,8 @@ def main():
         # run does, when a target needed the book's name (a master's order
         # was written as soon as it was read).
         unnamed_here = UNNAMED and not os.path.isfile(
-            os.path.join(base, PROJECT_NAME)) and not oerconfig.inline_project(
-                os.path.join(base, PACKAGING_NAME))
+            P(base).project_file()) and not oerconfig.inline_project(
+                P(base).packaging_file())
         if unnamed_here:
             contents = project.get("contents") or contents_from_tree(
                 book_tree(project, pages_by_dir[targets[0].pages_dir])[0])
@@ -7530,19 +7534,19 @@ def main():
     # for the packager (--zip, --toc) asks for it.
     conversion_names = BOOK_HINT.get("project") or {}
     if (conversion_names.get("title") or conversion_names.get("identifier")) \
-            and not passthrough and not os.path.isfile(os.path.join(base, PACKAGING_NAME)):
+            and not passthrough and not os.path.isfile(P(base).packaging_file()):
         say(f"No {PACKAGING_NAME} or {PROJECT_NAME}, and {CONFIG_NAME} names "
             "the book for conversion, so nothing is packaged. A "
             f"{PROJECT_NAME}, or a {PACKAGING_NAME} with a project: block, "
             "would build the cartridge.")
         return unnamed
     command = ["python3", CARTRIDGE_TOOL, "-d", base]
-    if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(base):
+    if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
         command += ["--pages", html_targets[0].output_dir]
     # What the sources said about the book, for the packager's sample.
     hint = None
     if BOOK_HINT:
-        handle, hint = tempfile.mkstemp(prefix="project-hint-", suffix=".json")
+        handle, hint = P(base).temp_file("project-hint-", ".json")
         with os.fdopen(handle, "w", encoding="utf-8") as fh:
             json.dump(BOOK_HINT, fh)
         command += ["--project-hint", hint]

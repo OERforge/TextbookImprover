@@ -52,10 +52,12 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 
 try:
     import downsample
@@ -637,7 +639,7 @@ def rendered_originals(blocks, base):
     ones, resampled. Only in a book a LaTeX source wrote, whose rendered/
     holds the reading's record. Returns how many."""
     import latexsource
-    if not os.path.isfile(os.path.join(base, latexsource.RENDERED, ".rendered.json")):
+    if not os.path.isfile(P(base).media(latexsource.RENDERED, ".rendered.json")):
         return 0
     count = [0]
 
@@ -648,7 +650,7 @@ def rendered_originals(blocks, base):
                 src = target[0]
                 if src.startswith(latexsource.RENDERED + "/") and src.lower().endswith(".svg"):
                     pdf = src[:-4] + ".pdf"
-                    if os.path.isfile(os.path.join(base, pdf)):
+                    if os.path.isfile(P(base).media(pdf)):
                         target[0] = pdf
                         count[0] += 1
             for value in node.values():
@@ -727,7 +729,7 @@ def svg_to_pdf(blocks, base, out_dir):
                     out = os.path.join(out_dir, pdf)
                     os.makedirs(os.path.dirname(out) or out_dir, exist_ok=True)
                     done = subprocess.run(["rsvg-convert", "-f", "pdf", "-o", out,
-                                           os.path.join(base, src)],
+                                           P(base).referenced(src)],
                                           capture_output=True) \
                         if shutil.which("rsvg-convert") else None
                     if done is not None and done.returncode == 0:
@@ -753,7 +755,7 @@ def copy_images(blocks, base, out_dir):
         if isinstance(value, dict):
             if value.get("t") == "Image":
                 src = value["c"][2][0]
-                source = os.path.join(base, src)
+                source = P(base).referenced(src)
                 out = os.path.join(out_dir, src)
                 if "://" not in src and os.path.isfile(source) \
                         and not os.path.exists(out):
@@ -908,7 +910,7 @@ def own_template(base, resolved):
     setting = str(resolved["pdf.template"] or "").strip()
     if not setting:
         return None
-    path = os.path.abspath(os.path.join(base, setting))
+    path = os.path.abspath(P(base).named(setting))
     if not os.path.isfile(path):
         sys.exit(f"pdf.template is set to {setting}, which does not exist "
                  f"(looked at {path}).")
@@ -920,7 +922,7 @@ def metadata_file(base, setting):
     # Whole, since Pandoc runs in the book's folder: a path relative to a
     # folder given relative to where the build runs (-d book) had Pandoc
     # look for book/book/meta.yaml.
-    path = os.path.abspath(os.path.join(base, setting))
+    path = os.path.abspath(P(base).named(setting))
     if not os.path.isfile(path):
         sys.exit(f"pdf.metadata is set to {setting}, which does not exist "
                  f"(looked at {path}).")
@@ -932,7 +934,7 @@ def metadata_file(base, setting):
         command = [*pandocrun.PANDOC, "-f", "markdown", "-t", "json", path]
         stdin = None
     result = subprocess.run(command, input=stdin, capture_output=True,
-                            text=True, cwd=base)
+                            text=True, cwd=P(base).run_dir())
     if result.returncode != 0:
         sys.exit(f"pandoc could not read {path}:\n{result.stderr}")
     return json.loads(result.stdout).get("meta", {})
@@ -1513,14 +1515,14 @@ def measure_page(document, filters, environment, base):
     meta["toc"] = meta_bool(False)
     probe = {"pandoc-api-version": document["pandoc-api-version"], "meta": meta,
              "blocks": [{"t": "RawBlock", "c": ["latex", body]}]}
-    work = tempfile.mkdtemp(prefix="measure-page-")
+    work = projectpaths.mkdtemp(prefix="measure-page-")
     try:
         source = os.path.join(work, "measure.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(probe, fh)
         latex = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", source,
                                 "-o", os.path.join(work, "measure.tex")] + filters,
-                               cwd=base, env=environment, capture_output=True, text=True)
+                               cwd=P(base).run_dir(), env=environment, capture_output=True, text=True)
         if latex.returncode:
             return None, "Pandoc couldn't write its LaTeX: " + (
                 latex.stderr.strip().splitlines() or ["no reason given"])[-1]
@@ -1530,7 +1532,7 @@ def measure_page(document, filters, environment, base):
             done = subprocess.run(
                 [ENGINE, "-interaction=nonstopmode", "-halt-on-error", "-output-directory",
                  work, os.path.join(work, "measure.tex")],
-                cwd=base, env=dict(environment, OER_MEASURE_LUA=os.path.join(
+                cwd=P(base).run_dir(), env=dict(environment, OER_MEASURE_LUA=os.path.join(
                     work, "measure-page.lua"), OER_MEASURE_OUT=out),
                 capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL,
                 timeout=600)
@@ -1730,7 +1732,7 @@ def latex_images(document, base, out_dir, dpi=96, copies=None):
         # The smaller copy images.downsample made, which Pandoc's route
         # finds before the original.
         given = os.path.join(copies, src) if copies else None
-        given = given if given and os.path.isfile(given) else os.path.join(base, src)
+        given = given if given and os.path.isfile(given) else P(base).referenced(src)
         try:
             if ext == ".svg":
                 subprocess.run(["rsvg-convert", "-f", "pdf", "-a", "--dpi-x", str(dpi),
@@ -1921,7 +1923,7 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
     os.makedirs(tex_dir, exist_ok=True)
     tex = os.path.join(tex_dir, LATEX_JOB + ".tex")
     wrote = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", book_json,
-                            "-o", tex] + filters, cwd=base, capture_output=True, text=True,
+                            "-o", tex] + filters, cwd=P(base).run_dir(), capture_output=True, text=True,
                            env=environment)
     if wrote.returncode:
         return wrote, "", ""
@@ -1939,7 +1941,7 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
     log_path = os.path.join(tex_dir, LATEX_JOB + ".log")
     said, log, code = "", "", 1
     for run in range(1, LATEX_RUNS + 1):
-        done = subprocess.run(command, cwd=base, capture_output=True, env=env)
+        done = subprocess.run(command, cwd=P(base).run_dir(), capture_output=True, env=env)
         code = done.returncode
         said = done.stdout.decode("utf-8", "replace")
         try:
@@ -1963,7 +1965,7 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
             with open(os.path.join(kept, "book.log"), "w", encoding="utf-8") as fh:
                 fh.write(log or said)
             shutil.copyfile(tex, os.path.join(kept, "book.tex"))
-            there = os.path.relpath(kept, base)
+            there = os.path.relpath(kept, P(base).run_dir())
             lines.append(f"LaTeX's log is kept as {os.path.join(there, 'book.log')}, and the "
                          f"LaTeX it read, whose lines the log names, as "
                          f"{os.path.join(there, 'book.tex')}.")
@@ -2059,13 +2061,13 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         "blocks": assembly.blocks,
     }
 
-    out_dir = os.path.join(base, str(resolved["output_dir"] or name))
+    out_dir = P(base).target_dir(name, resolved["output_dir"])
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, output_name(resolved, project, name))
     if as_latex:
         return write_latex(base, name, resolved, project, document, out_dir)
 
-    work = tempfile.mkdtemp(prefix="build-pdf-")
+    work = projectpaths.mkdtemp(prefix="build-pdf-")
     try:
         book_json = os.path.join(work, "book.json")
         with open(book_json, "w", encoding="utf-8") as fh:
@@ -2099,7 +2101,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                                    book_json, "-o",
                                    os.path.join(os.path.abspath(out_dir),
                                                 "book.tex")] + filters,
-                                  cwd=base, env=environment, capture_output=True, text=True)
+                                  cwd=P(base).run_dir(), env=environment, capture_output=True, text=True)
             if latex_only:
                 said, note = bookmark_said(kept.stderr, record_path,
                                            "the bookmarks of a PDF made from the LaTeX")
@@ -2153,7 +2155,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             command += ["--log", log_path]
             # Run in the content directory: image paths in the intermediates
             # are relative to it.
-            result = subprocess.run(command, cwd=base, capture_output=True,
+            result = subprocess.run(command, cwd=P(base).run_dir(), capture_output=True,
                                     text=True, env=environment)
             said, source = latex_said(log_path)
         # The PDF's own pages, which the last line counts beside the book's.
@@ -2236,7 +2238,7 @@ def write_latex(base, name, resolved, project, document, out_dir):
     shows beside them, SVGs made PDFs. Prints the master's path."""
     svgs, failed = svg_to_pdf(document["blocks"], base, out_dir)
     copied = copy_images(document["blocks"], base, out_dir)
-    work = tempfile.mkdtemp(prefix="build-latex-")
+    work = projectpaths.mkdtemp(prefix="build-latex-")
     try:
         book_json = os.path.join(work, "book.json")
         with open(book_json, "w", encoding="utf-8") as fh:
@@ -2275,7 +2277,7 @@ def write_latex(base, name, resolved, project, document, out_dir):
         record_path = os.path.join(work, "pdf-record.json")
         done = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", book_json]
                               + filters + (["--template", template] if template else []),
-                              cwd=base, env=dict(environment, OER_PDF_RECORD=record_path),
+                              cwd=P(base).run_dir(), env=dict(environment, OER_PDF_RECORD=record_path),
                               capture_output=True, text=True)
         said, note = bookmark_said(done.stderr, record_path,
                                    "the bookmarks of a PDF made from the LaTeX")

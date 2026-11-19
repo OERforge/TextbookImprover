@@ -55,6 +55,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 
 try:
     import yaml
@@ -141,7 +144,7 @@ def main():
                         help="report the split without writing anything")
     args = parser.parse_args()
 
-    legacy_path = os.path.join(args.dir, LEGACY_NAME)
+    legacy_path = P(args.dir).top(LEGACY_NAME)
     if not os.path.isfile(legacy_path):
         sys.exit(f"No {LEGACY_NAME} in {args.dir}. Nothing to migrate.")
 
@@ -201,12 +204,12 @@ def main():
     for name, schema, doc in (
             ("conversion.yaml", conversion_schema, conversion_doc),
             ("packaging.yaml", packaging_schema, packaging_doc)):
-        path = os.path.join(args.dir, name)
+        path = P(args.dir).top(name)
         resolved = oc.resolve(schema, project_schema,
                               [oc.Document(doc, legacy_path)])
         outputs.append((path, schema, resolved, doc["targets"]))
 
-    project_path = os.path.join(args.dir, "project.yaml")
+    project_path = P(args.dir).project_file()
 
     print(f"Read {legacy_path}")
     print()

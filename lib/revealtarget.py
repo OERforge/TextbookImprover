@@ -89,12 +89,12 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 
 import headercells
 import highlighting
 import pandocversion
 import pandocrun
+import projectpaths
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
@@ -393,7 +393,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
     their place."""
     result = {"ok": False, "log": "", "refused": "", "warnings": [], "slides": 0,
               "html": out}
-    work = tempfile.mkdtemp(prefix="deck-reveal-")
+    work = projectpaths.mkdtemp(prefix="deck-reveal-")
     try:
         style, script = os.path.join(work, "style.html"), os.path.join(work, "script.html")
         with open(STYLESHEET, encoding="utf-8") as fh:
@@ -417,7 +417,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         for path in filters:
             command += ["--lua-filter", path]
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-        done = subprocess.run(command, cwd=base, capture_output=True, text=True,
+        done = subprocess.run(command, cwd=projectpaths.of(base).run_dir(), capture_output=True, text=True,
                               env=dict(env or os.environ, HEADER_INCLUDES_FILE=style,
                                        INCLUDE_AFTER_FILE=script,
                                        DECK_NOTES=str(notes), DECK_LEVELS_ONLY="1"))

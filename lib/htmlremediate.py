@@ -34,12 +34,14 @@ import html as htmllib
 import os
 import re
 import shutil
-import tempfile
 from urllib.parse import unquote
 
 import headercells
 import sidecars
 from names import case_match
+import projectpaths
+
+P = projectpaths.of
 
 TABLE_TAG = re.compile(r"<table\b[^>]*>|</table\s*>", re.I)
 ROW_TAG = re.compile(r"<table\b[^>]*>|</table\s*>|<tr\b[^>]*>|</tr\s*>", re.I)
@@ -242,7 +244,7 @@ def image_key(src, base=None):
     path = unquote(src.replace("\\", "/"))
     path = path[2:] if path.startswith("./") else path
     if base and "://" not in path and not os.path.isabs(path) \
-            and not os.path.isfile(os.path.join(base, path)):
+            and not os.path.isfile(P(base).referenced(path)):
         cased = case_match(base, path)
         if cased:
             path = cased.replace(os.sep, "/")
@@ -411,7 +413,7 @@ def remediate(source, destination, tables=None, alts=None, links=None, language=
         counts["language"] = 0
     else:
         new, counts["language"] = remediate_language(new, language)
-    handle, temporary = tempfile.mkstemp(suffix=".html",
+    handle, temporary = projectpaths.mkstemp(suffix=".html",
                                          dir=os.path.dirname(os.path.abspath(destination)))
     os.close(handle)
     with open(temporary, "wb") as fh:

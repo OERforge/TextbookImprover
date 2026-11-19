@@ -46,6 +46,9 @@ from urllib.parse import unquote
 import sidecars
 import pandocrun
 from names import case_match
+import projectpaths
+
+P = projectpaths.of
 
 ESC = re.compile(r"\\([^A-Za-z0-9\s])")
 SPLIT = "<!-- TIQ-SPLIT -->"
@@ -145,7 +148,7 @@ def sidecar_key(target, base=None):
     does, as the conversion reads it."""
     path = unquote(target.replace("\\", "/"))
     path = path[2:] if path.startswith("./") else path
-    if base and not os.path.isabs(path) and not os.path.isfile(os.path.join(base, path)):
+    if base and not os.path.isabs(path) and not os.path.isfile(P(base).referenced(path)):
         cased = case_match(base, path)
         if cased:
             path = cased.replace(os.sep, "/")

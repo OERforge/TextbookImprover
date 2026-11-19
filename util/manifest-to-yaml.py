@@ -45,6 +45,9 @@ BIN_DIR = os.path.join(
 LIB_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")
 sys.path.insert(0, LIB_DIR)
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 
 try:
     import yaml
@@ -236,8 +239,8 @@ def main():
            "<file> entries were dropped: build-cartridge.py rediscovers " \
            "them from the pages on every run."
 
-    packaging_path = os.path.join(args.dir, "packaging.yaml")
-    project_path = os.path.join(args.dir, "project.yaml")
+    packaging_path = P(args.dir).packaging_file()
+    project_path = P(args.dir).project_file()
     for path in (packaging_path, project_path):
         if os.path.exists(path):
             sys.exit(f"{path} already exists. Move it aside first.")

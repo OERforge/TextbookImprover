@@ -72,6 +72,9 @@ import languages
 import latexbuild
 import latexsource
 import names
+import projectpaths
+
+P = projectpaths.of
 
 GENERATED_FROM = (".fig", ".xfig")
 INCLUDEGRAPHICS = re.compile(r"\\includegraphics\s*(\[[^]]*\])?\s*\{([^}]*)\}")
@@ -128,7 +131,7 @@ def _split(inner):
 
 
 def generated(base, name):
-    stem = os.path.splitext(os.path.join(base, name))[0]
+    stem = os.path.splitext(P(base).source(name))[0]
     return any(os.path.exists(stem + ext) for ext in GENERATED_FROM)
 
 
@@ -1136,7 +1139,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     another master's copy has written already, read here and not written
     again, as when a book's masters share chapters. Returns a dict of
     counts, and in unplaced_keys the keys of those decisions."""
-    master_text = latexsource.read_text(os.path.join(base, master))
+    master_text = latexsource.read_text(P(base).source(master))
     dirs = latexsource.graphics_paths(latexsource.split_master(master_text)[0])
     folder = os.path.dirname(master)
     if folder:
@@ -1146,7 +1149,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
     totals = {"files": 0, "changed": 0}
     originals, texts = {}, {}
     for name in files:
-        originals[name] = latexsource.read_text(os.path.join(base, name))
+        originals[name] = latexsource.read_text(P(base).source(name))
     # The macros the conversion follows, so a call is found as it was read
     # (latexsource.expand_image_macros): the book's definitions in the order
     # LaTeX reads them, a chapter where the book's own macro \include-s it,
@@ -1304,7 +1307,7 @@ def remediate(base, out_dir, master, files, alts, tagging=False, language=None,
         # The author's file mode, so the copy laid over the tree changes
         # only what it says: 65 of the 165 files GIAM's copy writes are
         # executable, and each written as 644 was a change in git's diff.
-        shutil.copymode(os.path.join(base, name), out)
+        shutil.copymode(P(base).source(name), out)
         totals["files"] += 1
         totals["changed"] += int(texts[name] != originals[name])
     return totals
@@ -2207,7 +2210,7 @@ def preamble_packages(texts, master, base=None):
             continue
         for name, ext in wanted:
             for where in dict.fromkeys((folder, "")):
-                path = os.path.join(base, where, name + ext)
+                path = P(base).source(where, name + ext)
                 if path not in read and os.path.isfile(path):
                     read.add(path)
                     text = latexsource.read_text(path)
@@ -2498,7 +2501,7 @@ def loaded_class(name, master, base):
     seen, folder = {name}, os.path.dirname(master)
     while base:
         for where in dict.fromkeys((folder, "")):
-            path = os.path.join(base, where, name + ".cls")
+            path = P(base).source(where, name + ".cls")
             if os.path.isfile(path):
                 break
         else:

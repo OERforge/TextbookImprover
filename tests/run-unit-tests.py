@@ -929,17 +929,16 @@ def check_move_to_src():
     ]
 
 
-# The scripts that ask lib/projectpaths.py for every path in a project,
-# and the folders each may still join a name to itself: its own (HERE)
-# and a temporary folder the path module gave it.
-PATHS_SCRIPTS = {"bin/build-epub.py": ("HERE", "work")}
+# The names a script holds the book's folder under as it's handed down: a
+# script asks lib/projectpaths.py for a path in it, and doesn't use the
+# folder itself.
+BOOK_FOLDERS = ("base", "args.dir")
 
 
-def own_paths(source, allowed):
-    """What a script does that puts a project's path together itself: a
-    name joined to a folder that isn't the script's own or a temporary
-    one, a temporary folder made without asking, or a program run in a
-    folder the path module didn't name."""
+def own_paths(source, folders=BOOK_FOLDERS):
+    """What a script does that puts a project's path together itself: the
+    book's folder given to os, glob, shutil, or open, a program run in it
+    by name, or a temporary folder made without asking."""
     import ast
     found = []
     for node in ast.walk(ast.parse(source)):
@@ -947,22 +946,15 @@ def own_paths(source, allowed):
             names = [a.name for a in node.names] + [getattr(node, "module", None)]
             if "tempfile" in names:
                 found.append(f"line {node.lineno}: imports tempfile")
-        if isinstance(node, ast.Attribute) and node.attr == "root" \
-                and ast.unparse(node.value) == "paths":
-            found.append(f"line {node.lineno}: paths.root")
         if not isinstance(node, ast.Call):
             continue
-        called = ast.unparse(node.func) if hasattr(ast, "unparse") else ""
-        if called == "os.path.join" and node.args:
-            first = node.args[0]
-            if not (isinstance(first, ast.Name) and first.id in allowed) \
-                    and ast.unparse(first) != "os.path.dirname(HERE)":
-                found.append(f"line {node.lineno}: os.path.join("
-                             f"{ast.unparse(first)}, ...)")
-        for keyword in node.keywords:
-            if keyword.arg == "cwd" \
-                    and not ast.unparse(keyword.value).startswith("paths.run_dir("):
-                found.append(f"line {node.lineno}: cwd={ast.unparse(keyword.value)}")
+        called = ast.unparse(node.func)
+        if called.split(".")[0] in ("os", "glob", "shutil", "open", "io"):
+            found += [f"line {node.lineno}: {called}({ast.unparse(arg)}, ...)"
+                      for arg in node.args if ast.unparse(arg) in folders]
+        found += [f"line {node.lineno}: cwd={ast.unparse(keyword.value)}"
+                  for keyword in node.keywords
+                  if keyword.arg == "cwd" and ast.unparse(keyword.value) in folders]
     return found
 
 
@@ -976,11 +968,15 @@ def check_project_paths():
     for folder in made:
         atexit.register(shutil.rmtree, folder, ignore_errors=True)
     found = {}
-    for script, allowed in PATHS_SCRIPTS.items():
-        with open(os.path.join(ROOT, script), encoding="utf-8") as fh:
-            found[script] = own_paths(fh.read(), allowed)
+    for folder in ("bin", "lib"):
+        for name in sorted(os.listdir(os.path.join(ROOT, folder))):
+            if name.endswith(".py") and name != "projectpaths.py":
+                with open(os.path.join(ROOT, folder, name), encoding="utf-8") as fh:
+                    mine = own_paths(fh.read())
+                if mine:
+                    found[folder + "/" + name] = mine
     wrong = ("import tempfile\nx = os.path.join(base, 'epub')\nrun(c, cwd=base)\n"
-             "run(c, cwd=paths.root)\n")
+             "for name in os.listdir(args.dir):\n    pass\ny = P(base).source('a.md')\n")
     return [
         ("today's layout: the settings, a part's sources, sidecars, reports, and "
          "intermediates in the project's folder, a target's folder beside them",
@@ -1002,11 +998,11 @@ def check_project_paths():
          and not there.inside("out/passwd") and not there.inside(work + "-other/x")),
         ("a temporary folder is new each time it's asked for",
          lambda: len(set(made)) == 2 and all(os.path.isdir(m) for m in made)),
-        ("a script that joins a name to the book's folder, makes its own temporary "
-         "folder, or runs a program in a folder it chose is found",
-         lambda: len(own_paths(wrong, ("HERE",))) == 5 or fail(str(own_paths(wrong, ("HERE",))))),
-        ("no converted script puts a project's path together itself",
-         lambda: not any(found.values()) or fail(str(found))),
+        ("a script that joins a name to the book's folder, lists it, makes its own "
+         "temporary folder, or runs a program in it is found, and one that asks isn't",
+         lambda: len(own_paths(wrong)) == 4 or fail(str(own_paths(wrong)))),
+        ("no script in bin/ or lib/ puts a project's path together itself",
+         lambda: not found or fail(str(found))),
     ]
 
 

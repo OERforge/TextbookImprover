@@ -81,6 +81,9 @@ from bookcontents import (  # noqa: E402
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import importlib
     validate_manifest = importlib.import_module("validate-manifest")
@@ -439,7 +442,7 @@ def config_documents(base, config_path):
     documents = []
     packaging_schema, project_schema = load_schemas()
     try:
-        project_path = os.path.join(base, PROJECT_NAME)
+        project_path = P(base).project_file()
         if os.path.isfile(project_path):
             documents.append(
                 oerconfig.load_document(project_path, project_schema))
@@ -608,8 +611,8 @@ def sample_commands(base, pages_dir):
     """The commands that write the packaging and conversion samples, for a
     run that wrote only the project's."""
     here = os.path.dirname(os.path.abspath(__file__))
-    where = os.path.relpath(base)
-    pages = "" if os.path.abspath(pages_dir) == os.path.abspath(base) \
+    where = os.path.relpath(P(base).top())
+    pages = "" if os.path.abspath(pages_dir) == os.path.abspath(P(base).top()) \
         else f" --pages {os.path.relpath(pages_dir)}"
     return [
         f"  python3 {os.path.join(here, 'build-cartridge.py')} -d {where}{pages} --init"
@@ -1003,9 +1006,9 @@ def main():
         args.include_all_html = True
 
     base = args.dir
-    config_path = args.config or os.path.join(base, CONFIG_NAME)
-    sample_path = os.path.join(base, SAMPLE_NAME)
-    output_path = args.output or os.path.join(base, "imsmanifest.xml")
+    config_path = args.config or P(base).packaging_file()
+    sample_path = P(base).report(SAMPLE_NAME)
+    output_path = args.output or P(base).package_file("imsmanifest.xml")
 
     if args.emit_conversion_config:
         sys.exit("--emit-conversion-config was retired in v0.2. Conversion "
@@ -1039,7 +1042,7 @@ def main():
     schema, project_schema = load_schemas()
     resolved, documents, target = None, [], None
 
-    legacy_path = os.path.join(base, LEGACY_NAME)
+    legacy_path = P(base).top(LEGACY_NAME)
     if os.path.isfile(legacy_path) and not os.path.isfile(config_path):
         sys.exit(
             f"{legacy_path} is the v0.1 configuration and is no longer "
@@ -1095,7 +1098,7 @@ def main():
     # Where the book is named: project.yaml, which both halves read, or a
     # project: block in this file, which only packaging reads. Named in
     # neither, it has no identifier or title, and the run stops for them.
-    project_path = os.path.join(base, PROJECT_NAME)
+    project_path = P(base).project_file()
     inline = oerconfig.inline_project(config_path)
     has_project_file = os.path.isfile(project_path)
     # A book named in this file, as a book that uses packaging alone may
@@ -1380,7 +1383,7 @@ def main():
             guess_contents(stems, back_matter, TITLES, PARTS, ROLES)
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
-        project_sample_path = os.path.join(base, PROJECT_SAMPLE_NAME)
+        project_sample_path = P(base).report(PROJECT_SAMPLE_NAME)
         for problem in fatal:
             print(f"ERROR: {problem}", file=sys.stderr)
         if args.init:
@@ -1458,7 +1461,7 @@ def main():
 
     with open(output_path, "w", encoding="utf-8", newline="") as handle:
         handle.write(xml)
-    list_path = os.path.join(base, FILE_LIST_NAME)
+    list_path = P(base).package_file(FILE_LIST_NAME)
     with open(list_path, "w", encoding="utf-8") as handle:
         if prefix:
             # zip -@ names each member after the path it reads, so this
@@ -1503,7 +1506,7 @@ def main():
                             bool(config.get("contents")), args.toc))
             print(f"Wrote {sample_path} for review.")
         else:
-            review = os.path.join(base, PROJECT_SAMPLE_NAME)
+            review = P(base).report(PROJECT_SAMPLE_NAME)
             used = project_sample(project_schema, settled, documents, hint,
                                   bool(config.get("contents")), args.toc,
                                   review, notes)
@@ -1511,7 +1514,7 @@ def main():
                   + (f", with {', '.join(used)} from {hint.get('source')}"
                      if used else "") + ".")
 
-    cartridge = os.path.join(base, config["manifest"]["cartridge"])
+    cartridge = P(base).package_file(config["manifest"]["cartridge"])
     if args.zip:
         with zipfile.ZipFile(cartridge, "w", zipfile.ZIP_DEFLATED) as archive:
             # imsmanifest.xml sits at the package root whatever else

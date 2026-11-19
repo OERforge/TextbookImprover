@@ -23,6 +23,9 @@ import os
 import re
 
 import sidecars
+import projectpaths
+
+P = projectpaths.of
 
 
 def xml_name(text):
@@ -142,4 +145,4 @@ def summarize(notes, out, pages):
     for check, count in sorted(counts.items()):
         print(f"  {count:5d}  {check}")
     if notes:
-        print(f"Details in {os.path.join(out, 'unpack-report.csv')}.")
+        print(f"Details in {P(out).report('unpack-report.csv')}.")

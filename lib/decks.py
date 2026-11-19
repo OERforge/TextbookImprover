@@ -50,13 +50,15 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from urllib.parse import unquote
 
 import downsample
 import highlighting
 import latexbuild
 import pandocrun
+import projectpaths
+
+P = projectpaths.of
 
 # The intermediate's record of the slide level, which also says the page
 # is a deck. target-blocks.lua takes it out of everything a target
@@ -646,7 +648,7 @@ def svgs_to_pdf(doc, base, out_dir):
         if src not in made:
             out = os.path.join(out_dir, "svg-%d.pdf" % len(made))
             # The address as Markdown gives it, a space as %20.
-            source = os.path.join(base, unquote(src))
+            source = P(base).referenced(unquote(src))
             why = None
             if not os.path.isfile(source):
                 why = "there's no such file"
@@ -940,7 +942,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               "pdf": out_pdf}
     level = renumber(doc.get("blocks", []), level)
     result["tag"] = tag = frame_tag(doc.get("blocks", []), level)
-    work = tempfile.mkdtemp(prefix="deck-pdf-")
+    work = projectpaths.mkdtemp(prefix="deck-pdf-")
     try:
         result["svg_failed"] = svgs_to_pdf(doc, base, work)
         if result["svg_failed"]:
@@ -996,7 +998,7 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             command += ["--lua-filter", path]
         if trace:
             trace(command)
-        done = subprocess.run(command, cwd=base, capture_output=True, text=True,
+        done = subprocess.run(command, cwd=P(base).run_dir(), capture_output=True, text=True,
                               env=dict(env or os.environ, DECK_SLIDE_LEVEL=str(level)))
         if done.returncode:
             result["log"] = done.stderr

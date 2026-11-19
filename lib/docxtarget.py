@@ -53,10 +53,10 @@ import json
 import os
 import re
 import shutil
-import tempfile
 import zipfile
 
 import pandocversion
+import projectpaths
 
 W_URI = "http://schemas.microsoft.com/office/word"
 SETTING = ('<w:compatSetting w:name="compatibilityMode" w:uri="%s" '
@@ -1991,7 +1991,7 @@ def finish(path, doc, keep=None, footer=()):
                 "</Types>", '<Override PartName="/%s" ContentType="application/xml"/>'
                 "</Types>" % ID_MAP_PART, 1).encode("utf-8")
         counts["ids"] = len(mapping)
-    handle, temporary = tempfile.mkstemp(suffix=".docx",
+    handle, temporary = projectpaths.mkstemp(suffix=".docx",
                                          dir=os.path.dirname(os.path.abspath(path)))
     os.close(handle)
     try:

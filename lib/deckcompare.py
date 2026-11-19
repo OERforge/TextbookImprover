@@ -43,10 +43,10 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 
 import pandocrun
 import pptxsource
+import projectpaths
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MATH_FILTER = os.path.join(os.path.dirname(HERE), "bin", "math-repair.lua")
@@ -263,7 +263,7 @@ def read(path, work, pandoc="pandoc", alts=None, tables=None, titles=None, order
     equations' characters, math typed as text made equations, and an en
     dash in text made a minus sign (math.repair_equations, math.from_text,
     and math.minus_in_text)."""
-    folder = tempfile.mkdtemp(prefix="compare-", dir=work)
+    folder = projectpaths.mkdtemp(prefix="compare-", dir=work)
     try:
         doc, _record = pptxsource.read(path, folder, folder, alts, tables, titles, orders,
                                        pandoc=pandoc, api_version=pptxsource.api_version(pandoc))

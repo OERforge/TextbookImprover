@@ -61,6 +61,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 import pandocrun  # noqa: E402
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import yaml
     from names import safe_stem
@@ -273,7 +276,7 @@ def main():
                       json.dumps(tree))
         front = yaml.safe_dump({"title": page["title"]}, allow_unicode=True,
                                sort_keys=False)
-        with open(os.path.join(out, page["name"] + ".md"), "w",
+        with open(P(out).source(page["name"] + ".md"), "w",
                   encoding="utf-8") as fh:
             fh.write("---\n" + front + "---\n\n" + body)
     for kind, label in (("inline-math", "kramdown inline formula(s) made "
@@ -299,7 +302,7 @@ def main():
                 with open(path, "rb") as fh:
                     if fh.read(3) == b"---":
                         continue
-            dest = os.path.join(out, os.path.relpath(path, src))
+            dest = P(out).source(os.path.relpath(path, src))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(path, dest)
 
@@ -311,7 +314,7 @@ def main():
         "title": str(config.get("title") or os.path.basename(src)),
         "language": str(config.get("lang") or "en"),
         "contents": tree}}
-    with open(os.path.join(out, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
         fh.write("# Written by unpack-jekyll.py from " + src + "; yours to "
                  "edit.\n" + yaml.safe_dump(project, allow_unicode=True,
                                             sort_keys=False, width=1000))
@@ -327,7 +330,7 @@ def main():
         if page["name"] not in named:
             notes.append((page["name"] + ".md", "not-in-navigation",
                           "no nav_order or parent places it"))
-    write_report(os.path.join(out, "unpack-report.csv"), notes)
+    write_report(P(out).report("unpack-report.csv"), notes)
     summarize(notes, out, len(pages))
     return 0
 

@@ -34,6 +34,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import cartridgesource as cs
     import epubsource
@@ -232,7 +235,7 @@ def main():
     for path in order:
         if not path.lower().endswith((".html", ".htm")):
             # A source the pipeline converts from its own format.
-            with open(os.path.join(out, names[path]
+            with open(P(out).source(names[path]
                                    + os.path.splitext(path)[1].lower()),
                       "wb") as fh:
                 fh.write(cartridge.read(path))
@@ -242,7 +245,7 @@ def main():
         unresolved |= missing
         markup = cs.with_title(markup, titles.get(path, ""))
         markup = epubsource.rewrite_references(markup, path, names, root)
-        with open(os.path.join(out, names[path] + ".html"), "w",
+        with open(P(out).source(names[path] + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(markup)
         host = cs.links_out(markup)
@@ -266,7 +269,7 @@ def main():
             path = cs.path_in(archive, href)
             if path in pages or path not in archive:
                 continue
-            dest = os.path.join(out, *posixpath.relpath(path, root or ".")
+            dest = P(out).source(*posixpath.relpath(path, root or ".")
                                 .split("/"))
             if os.path.exists(dest):
                 continue
@@ -281,13 +284,13 @@ def main():
     meta = {"title": [title]}
     if cartridge.language:
         meta["language"] = [cartridge.language]
-    with open(os.path.join(out, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
         fh.write(project_yaml("unpack-cartridge.py from "
                               + os.path.basename(args.cartridge)
                               + (f" (Common Cartridge {cartridge.version})"
                                  if cartridge.version else ""),
                               meta, tree, {}, unnamed, title))
-    write_report(os.path.join(out, "unpack-report.csv"), notes)
+    write_report(P(out).report("unpack-report.csv"), notes)
     summarize(notes, out, len(order))
     if copied:
         print(f"{copied} other file(s) kept where the cartridge had them.")

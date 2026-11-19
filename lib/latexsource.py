@@ -73,6 +73,9 @@ import subprocess
 from names import case_match
 import pandocversion
 import pandocrun
+import projectpaths
+
+P = projectpaths.of
 
 # A page marker, a paragraph of its own the reader keeps as text, put
 # before each \include in the copy and cut at afterwards; and one after
@@ -315,7 +318,7 @@ def stop_place(base, copy, said):
     name, line = os.path.normpath(m.group(1)), int(m.group(2))
     try:
         ours = read_text(os.path.join(copy, name)).splitlines()
-        theirs = read_text(os.path.join(base, name)).splitlines()
+        theirs = read_text(P(base).source(name)).splitlines()
     except OSError:
         return None
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
@@ -338,7 +341,7 @@ def reads_files(base, name, line):
     """Whether line of the author's file name, in base, begins the
     document or reads a file in its code (READS_FILES)."""
     try:
-        lines = read_text(os.path.join(base, name)).split("\n")
+        lines = read_text(P(base).source(name)).split("\n")
     except OSError:
         return False
     text = lines[line - 1] if 0 < line <= len(lines) else ""
@@ -350,7 +353,7 @@ def brace_problems(base, files):
     it never closes, or closes a } it never opened, each file's first."""
     found = []
     for name in files:
-        text = read_text(os.path.join(base, name))
+        text = read_text(P(base).source(name))
         opened, closed = unbalanced_braces(text)
         for kind, at in (("a { that nothing in the file closes", opened[:1]),
                          ("a } that closes nothing", closed[:1])):
@@ -462,8 +465,8 @@ def is_master(text):
 def masters(base):
     """The .tex files directly in base that are whole documents."""
     found = []
-    for name in sorted(os.listdir(base)):
-        path = os.path.join(base, name)
+    for name in sorted(os.listdir(P(base).sources())):
+        path = P(base).source(name)
         if name.endswith(".tex") and os.path.isfile(path) \
                 and is_master(read_text(path)):
             found.append(name)
@@ -474,13 +477,13 @@ def named_documents(base, entry):
     """What a latex.main entry names, a path below base or a pattern
     (src/*.tex, in sorted order): (the files, those of them that are
     whole documents)."""
-    if os.path.isfile(os.path.join(base, entry)):
+    if os.path.isfile(P(base).source(entry)):
         matches = [os.path.normpath(entry)]
     else:
-        matches = sorted(os.path.relpath(p, base) for p in
-                         glob.glob(os.path.join(glob.escape(base), entry))
+        matches = sorted(os.path.relpath(p, P(base).sources()) for p in
+                         glob.glob(os.path.join(glob.escape(P(base).sources()), entry))
                          if os.path.isfile(p))
-    return matches, [m for m in matches if is_master(read_text(os.path.join(base, m)))]
+    return matches, [m for m in matches if is_master(read_text(P(base).source(m)))]
 
 
 def chosen_masters(base, main):
@@ -517,7 +520,7 @@ def binder(base, master):
     gives them, when it reaches no other LaTeX file: a binder of documents
     built on their own (FINC 308's "Combined" file, a PDF per topic), with
     nothing of its own to convert. [] for any other master."""
-    text = read_text(os.path.join(base, master))
+    text = read_text(P(base).source(master))
     if not is_master(text):
         return []
     found = [m.group(1) for m in code_matches(INCLUDEPDF, split_master(text)[1])]
@@ -533,18 +536,18 @@ def binder_sources(base, pdfs, skip=()):
     the binder's order; and the PDFs with none."""
     candidates = {}
     skip = {os.path.abspath(s) for s in skip}
-    for folder, dirs, names in os.walk(base):
+    for folder, dirs, names in os.walk(P(base).sources()):
         dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d != RENDERED
                          and os.path.abspath(os.path.join(folder, d)) not in skip)
         for name in sorted(names):
             if name.endswith(".tex"):
                 candidates.setdefault(name[:-4], []).append(
-                    os.path.relpath(os.path.join(folder, name), base))
+                    os.path.relpath(os.path.join(folder, name), P(base).sources()))
     found, missing = [], []
     for pdf in pdfs:
         stem = os.path.splitext(os.path.basename(pdf.strip().strip('"')))[0]
         paths = [p for p in candidates.get(stem, [])
-                 if is_master(read_text(os.path.join(base, p)))]
+                 if is_master(read_text(P(base).source(p)))]
         if not paths:
             missing.append(pdf)
         elif paths[0] not in found:
@@ -562,7 +565,7 @@ def resolve(base, name, folder=""):
     for where in dict.fromkeys((folder, "")):
         for candidate in (name, name + ".tex"):
             path = os.path.normpath(os.path.join(where, candidate))
-            if os.path.isfile(os.path.join(base, path)):
+            if os.path.isfile(P(base).source(path)):
                 return path
     return None
 
@@ -601,7 +604,7 @@ def reached(base, master):
             if name in files:
                 continue
             files.append(name)
-            text = texts[name] = read_text(os.path.join(base, name))
+            text = texts[name] = read_text(P(base).source(name))
             written.update(m.group(1) for m in code_matches(FILECONTENTS, text))
             for m in code_matches(INPUT, text):
                 target = m.group(2) or m.group(3)
@@ -828,7 +831,7 @@ def preamble_pieces(base, master, preamble):
     def own(name):
         for where in dict.fromkeys((folder, "")):
             path = os.path.normpath(os.path.join(where, name + ".sty"))
-            if os.path.isfile(os.path.join(base, path)):
+            if os.path.isfile(P(base).source(path)):
                 return path
         return None
 
@@ -850,7 +853,7 @@ def preamble_pieces(base, master, preamble):
             out.append((name, text[pos:m.end()]))
             for path in paths:
                 seen.add(path)
-                out += pieces(path, read_text(os.path.join(base, path)), depth + 1)
+                out += pieces(path, read_text(P(base).source(path)), depth + 1)
             pos = m.end()
         return out + [(name, text[pos:])]
     return pieces(master, preamble, 0)
@@ -5028,7 +5031,7 @@ def render(base, work, preamble, items, say, counter=None):
     counter counts the PDFs whose glyphs were given their text
     (map_glyphs)."""
     counter = {} if counter is None else counter
-    record_path = os.path.join(base, RENDERED, ".rendered.json")
+    record_path = P(base).media(RENDERED, ".rendered.json")
     try:
         with open(record_path, encoding="utf-8") as fh:
             record = json.load(fh)
@@ -5039,7 +5042,7 @@ def render(base, work, preamble, items, say, counter=None):
         return hashlib.sha256((preamble + "\n" + source).encode(
             "utf-8", "surrogateescape")).hexdigest()
     def current(name, source):
-        return record.get(name) == key(source) and os.path.isfile(os.path.join(base, name))
+        return record.get(name) == key(source) and os.path.isfile(P(base).media(name))
     # The PDF's record too: a PDF beside a drawing's SVG that the drawing
     # didn't make is a PDF image's of the same name (convert_graphic),
     # which a PDF from the pages would include in the drawing's place (a
@@ -5054,12 +5057,12 @@ def render(base, work, preamble, items, say, counter=None):
             if not current(n, s) or (separate and not current(beside_pdf(n), s))]
     done = [n for n, s in items if (n, s) not in todo]
     for name, source in items:
-        stale = os.path.join(base, beside_pdf(name))
+        stale = P(base).media(beside_pdf(name))
         if os.path.isfile(stale) and not current(beside_pdf(name), source):
             os.remove(stale)
     for name in done:
-        svg_in_points(os.path.join(base, name))
-        map_glyphs(os.path.join(base, beside_pdf(name)), counter)
+        svg_in_points(P(base).media(name))
+        map_glyphs(P(base).media(beside_pdf(name)), counter)
     # Said last, of the drawings the pages have, made or kept: said first,
     # of every drawing, it called drawings SVGs that LaTeX then left out,
     # where LaTeX lacked the preview package, beside the warning that says
@@ -5078,7 +5081,7 @@ def render(base, work, preamble, items, say, counter=None):
     def keep_svgs():
         for name, source in todo:
             if name not in done and current(name, source):
-                svg_in_points(os.path.join(base, name))
+                svg_in_points(P(base).media(name))
                 done.append(name)
     engine = pick_engine(preamble)
     if not shutil.which(engine) or not shutil.which("pdftocairo"):
@@ -5103,7 +5106,7 @@ def render(base, work, preamble, items, say, counter=None):
         result = subprocess.run(
             [engine, "-interaction=nonstopmode", "-halt-on-error",
              "-output-directory", rdir, os.path.join(rdir, job + ".tex")],
-            cwd=base, capture_output=True, text=True, errors="replace",
+            cwd=P(base).run_dir(), capture_output=True, text=True, errors="replace",
             stdin=subprocess.DEVNULL)
         pdf = os.path.join(rdir, job + ".pdf")
         if result.returncode != 0 or not os.path.isfile(pdf):
@@ -5124,7 +5127,7 @@ def render(base, work, preamble, items, say, counter=None):
             except OSError:
                 pages = False
         for page, (name, source) in enumerate(batch, start=1):
-            out = os.path.join(base, name)
+            out = P(base).media(name)
             os.makedirs(os.path.dirname(out), exist_ok=True)
             made = subprocess.run(["pdftocairo", "-svg", "-f", str(page), "-l",
                                    str(page), pdf, out], capture_output=True,
@@ -5135,7 +5138,7 @@ def render(base, work, preamble, items, say, counter=None):
                 record[name] = key(source)
                 done.append(name)
                 if pages and os.path.isfile(one):
-                    kept = os.path.join(base, beside_pdf(name))
+                    kept = P(base).media(beside_pdf(name))
                     os.replace(one, kept)
                     map_glyphs(kept, counter)
                     # LaTeX wrote it in a temporary folder, which its ID
@@ -5220,7 +5223,7 @@ def resolve_graphic(base, name, dirs, counter=None):
                 candidate = os.path.normpath(os.path.join(d, name + ext))
                 if not (ext or os.path.splitext(name)[1]):
                     continue
-                if exact and os.path.isfile(os.path.join(base, candidate)):
+                if exact and os.path.isfile(P(base).source(candidate)):
                     return candidate
                 if not exact:
                     found = case_match(base, candidate)
@@ -5316,9 +5319,9 @@ def convert_graphic(base, work, path, record, counter=None):
     said."""
     counter = {} if counter is None else counter
     name = f"{RENDERED}/{os.path.splitext(path)[0]}.svg".replace(os.sep, "/")
-    with open(os.path.join(base, path), "rb") as fh:
+    with open(P(base).source(path), "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
-    out = os.path.join(base, name)
+    out = P(base).media(name)
     beside = os.path.splitext(out)[0] + ".pdf"
     eps = path.lower().endswith((".eps", ".ps"))
     if record.get(name) == digest and os.path.isfile(out) and os.path.isfile(beside):
@@ -5329,7 +5332,7 @@ def convert_graphic(base, work, path, record, counter=None):
         # review).
         import latexbuild
         if not eps and latexbuild.unembedded_fonts(beside):
-            keep_pdf(os.path.join(base, path), beside, counter)
+            keep_pdf(P(base).source(path), beside, counter)
         map_glyphs(beside, counter)
         return name, None
     missing = [program for program in (("epstopdf", "gs", "pdftocairo") if eps
@@ -5337,7 +5340,7 @@ def convert_graphic(base, work, path, record, counter=None):
                if not shutil.which(program)]
     if missing:
         return None, missing
-    source = os.path.join(base, path)
+    source = P(base).source(path)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     if eps:
         done = subprocess.run(["epstopdf", source, "--outfile=" + beside],
@@ -5674,7 +5677,7 @@ def repair_graphics(base, work, text, dirs, record, counter, left_out):
         path = resolve_graphic(base, name, dirs, counter)
         if path is None:
             continue
-        head = scaled_options(text[start:brace], os.path.join(base, path))
+        head = scaled_options(text[start:brace], P(base).source(path))
         if path.lower().endswith(CONVERT):
             key = path.replace(os.sep, "/")
             made, why = (None, left_out[key]) if key in left_out \
@@ -8144,7 +8147,7 @@ def run_bibtex(base, work, folder, keys, style, databases):
     os.makedirs(where, exist_ok=True)
 
     def own(name, extension):
-        for candidate in (os.path.join(base, folder, name), os.path.join(base, name)):
+        for candidate in (P(base).source(folder, name), P(base).source(name)):
             for path in (candidate, candidate + extension):
                 if path.endswith(extension) and os.path.isfile(path):
                     return path
@@ -8167,7 +8170,7 @@ def run_bibtex(base, work, folder, keys, style, databases):
     bbl = os.path.join(where, "book.bbl")
     if os.path.exists(bbl):
         os.remove(bbl)
-    paths = os.pathsep.join(os.path.abspath(p) for p in (base, os.path.join(base, folder))) \
+    paths = os.pathsep.join(os.path.abspath(p) for p in (P(base).sources(), P(base).source(folder))) \
         + os.pathsep
     # Lines broken at 79 characters, as TeX Live's and MiKTeX's BibTeX
     # break them by default (TinyTeX sets 10000): where a database ends a
@@ -8745,8 +8748,8 @@ def database_paths(base, master, resources):
         for candidate in (resource, resource + ".bib",
                           os.path.join(os.path.dirname(master), resource),
                           os.path.join(os.path.dirname(master), resource + ".bib")):
-            if os.path.isfile(os.path.join(base, candidate)):
-                found.append(os.path.join(base, candidate))
+            if os.path.isfile(P(base).source(candidate)):
+                found.append(P(base).source(candidate))
                 break
     return found
 
@@ -8952,13 +8955,13 @@ def bibliographies(base, work, texts, files, master, originals, counts, say):
         if bbl is not None and BIBTEX_PROBLEM[0]:
             say(f"BibTeX made the bibliography with an error, as LaTeX's build would read it: "
                 f"{BIBTEX_PROBLEM[0]}.")
-        built = os.path.join(base, os.path.splitext(master)[0] + ".bbl")
+        built = P(base).source(os.path.splitext(master)[0] + ".bbl")
         cannot = ("BibTeX couldn't make the bibliography (%s)" % BIBTEX_PROBLEM[0]
                   if BIBTEX_PROBLEM[0] else "No BibTeX here to make the bibliography")
         if bbl is None and os.path.exists(built):
             bbl = read_text(built)
             say(f"{cannot}, so it's the one the book's own build left, "
-                f"{os.path.relpath(built, base)}.")
+                f"{os.path.relpath(built, P(base).sources())}.")
         if bbl is None:
             setup = citeproc(place, databases)
             say(cannot + ", and the book's own build left no .bbl, so "
@@ -9134,7 +9137,7 @@ def prepare(base, work, master, say, macros=""):
     files, missing = reached(base, master)
     counts = {}
     texts = {}
-    originals = [(name, read_text(os.path.join(base, name))) for name in files]
+    originals = [(name, read_text(P(base).source(name))) for name in files]
     master_text = dict(originals).get(master, "")
     begin = code_matches(BEGIN_DOCUMENT, master_text)
     preamble_parts = preamble_pieces(base, master, master_text[:begin[0].start()]) \
@@ -9216,11 +9219,11 @@ def prepare(base, work, master, say, macros=""):
             places.setdefault(name, []).append((start, end, alt, dname))
             items.append((dname, text[start:end]))
     made = set(render(base, work, split_master(read_text(
-        os.path.join(base, master)))[0], items, say, counts)) if items else set()
+        P(base).source(master)))[0], items, say, counts)) if items else set()
     counts["drawings"] = len(items)
     counts["drawings_made"] = len(made)
     counts["drawings_pdf"] = sum(1 for dname in made
-                                 if os.path.isfile(os.path.join(base, beside_pdf(dname))))
+                                 if os.path.isfile(P(base).media(beside_pdf(dname))))
     for name, found in places.items():
         text = texts[name]
         for start, end, alt, dname in reversed(found):
@@ -9235,10 +9238,10 @@ def prepare(base, work, master, say, macros=""):
     # given the extension, PDF and EPS made SVG. A person's definitions
     # win over the book's, as they do in the reading.
     definitions_file = None
-    if macros and os.path.isfile(os.path.join(base, macros)):
-        definitions_file = (macros, read_text(os.path.join(base, macros)))
+    if macros and os.path.isfile(P(base).named(macros)):
+        definitions_file = (macros, read_text(P(base).named(macros)))
     expand_image_macros(texts, files, counts, definitions_file)
-    record_path = os.path.join(base, RENDERED, ".rendered.json")
+    record_path = P(base).media(RENDERED, ".rendered.json")
     try:
         with open(record_path, encoding="utf-8") as fh:
             record = json.load(fh)
@@ -9281,8 +9284,8 @@ def prepare(base, work, master, say, macros=""):
     # A person's definitions for reading, after the book's own, so they
     # win: \suchthat as \mid, say, where the book draws a bar with a rule.
     extra = ""
-    if macros and os.path.isfile(os.path.join(base, macros)):
-        extra = read_text(os.path.join(base, macros)) + "\n"
+    if macros and os.path.isfile(P(base).named(macros)):
+        extra = read_text(P(base).named(macros)) + "\n"
         counts["macros_file"] = 1
     preamble_copy = re.sub(
         r"(\\begin\s*\{document\})$",
@@ -9308,7 +9311,7 @@ def book_page(base, master, originals=None):
     master reaches, the master first, when they're read already."""
     if originals is None:
         files, _ = reached(base, master)
-        originals = [(name, read_text(os.path.join(base, name))) for name in files]
+        originals = [(name, read_text(P(base).source(name))) for name in files]
     includes = include_macros(originals)
     return (page_layout(originals, includes),
             [m.group(0) for m in book_colors(originals, includes)])
@@ -9993,17 +9996,17 @@ def macro_sample(base, preps, filter_path, macros_file, say):
     if isinstance(preps, dict):
         preps = [preps]
     defined, uses, failing, suggestions = {}, {}, set(), {}
-    person = read_text(os.path.join(base, macros_file)) \
-        if macros_file and os.path.isfile(os.path.join(base, macros_file)) else ""
+    person = read_text(P(base).named(macros_file)) \
+        if macros_file and os.path.isfile(P(base).named(macros_file)) else ""
     alt = {}
     for prep in preps:
-        for found in alt_arguments([(n, read_text(os.path.join(base, n)))
+        for found in alt_arguments([(n, read_text(P(base).source(n)))
                                     for n in prep["files"]], person):
             alt.setdefault(found[0], found)
     for prep in preps:
         copy = prep["copy"]
         texts = [read_text(os.path.join(copy, n)) for n in prep["files"]]
-        originals = [read_text(os.path.join(base, n)) for n in prep["files"]]
+        originals = [read_text(P(base).source(n)) for n in prep["files"]]
         # The commands the reading copy makes of the book's environments
         # are the copy's, not the book's macros, and a person's definition
         # goes by the book's own text, not the copy's.
@@ -10038,7 +10041,7 @@ def macro_sample(base, preps, filter_path, macros_file, say):
         for name, s in own_suggestions.items():
             if name not in still:
                 suggestions.setdefault(name, s)
-    sample = os.path.join(base, SAMPLE)
+    sample = P(base).report(SAMPLE)
     if not failing and not alt:
         if os.path.exists(sample):
             os.remove(sample)

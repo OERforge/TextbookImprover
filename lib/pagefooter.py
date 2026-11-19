@@ -61,6 +61,9 @@ import subprocess
 import pandocversion
 
 import pandocrun
+import projectpaths
+
+P = projectpaths.of
 
 # A link's target with a scheme, which a page that isn't the book's own
 # HTML can follow: a relative one names a file the target doesn't carry.
@@ -83,7 +86,7 @@ def named_file(text, base):
     text = str(text or "").strip()
     if not text or "\n" in text:
         return None
-    candidate = os.path.join(base, text)
+    candidate = P(base).named(text)
     return os.path.abspath(candidate) if os.path.isfile(candidate) else None
 
 

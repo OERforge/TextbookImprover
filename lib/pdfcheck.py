@@ -33,7 +33,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from collections import Counter
 from xml.etree import ElementTree
 
@@ -41,6 +40,7 @@ import alttext
 import findings as findings_lib
 import wcag
 from findings import Finding, describe_input, digest, from_row, md_code, md_text, now, rows_of
+import projectpaths
 
 try:
     import pypdf
@@ -1065,7 +1065,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
             [os.path.join(os.path.abspath(folder), "*")]
             + ([environment["CLASSPATH_PREFIX"]] if environment.get("CLASSPATH_PREFIX")
                else []))
-        with tempfile.TemporaryDirectory() as work:
+        with projectpaths.TemporaryDirectory() as work:
             probe = os.path.join(work, "wcag-probe.pdf")
             with open(probe, "wb") as fh:
                 fh.write(wcag_probe())

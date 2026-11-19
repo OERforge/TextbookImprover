@@ -31,8 +31,8 @@ import io
 import os
 import re
 import stat
-import tempfile
 import unicodedata
+import projectpaths
 
 # Accepted spellings of the decorative marker, matched case-insensitively
 # after trimming. figures-and-tables.lua's DECORATIVE_MARKERS is the same
@@ -729,7 +729,7 @@ def _replace(path, text):
     left as it was (OwnerLost)."""
     real = os.path.realpath(path)
     owner = os.stat(real).st_uid
-    handle, temporary = tempfile.mkstemp(prefix="." + os.path.basename(real) + ".",
+    handle, temporary = projectpaths.mkstemp(prefix="." + os.path.basename(real) + ".",
                                          suffix=".tmp", dir=os.path.dirname(real))
     try:
         with os.fdopen(handle, "w", encoding="utf-8", newline="") as fh:
@@ -966,7 +966,7 @@ def filter_copy(path, folder):
         return path
     except UnicodeDecodeError:
         pass
-    handle, copy = tempfile.mkstemp(prefix="sidecar-", suffix="-" + os.path.basename(path),
+    handle, copy = projectpaths.mkstemp(prefix="sidecar-", suffix="-" + os.path.basename(path),
                                     dir=folder)
     with os.fdopen(handle, "w", encoding=CSV_ENCODING, newline="") as fh:
         fh.write(text(path))

@@ -24,6 +24,9 @@ import subprocess
 
 import latexbuild
 import latexsource
+import projectpaths
+
+P = projectpaths.of
 
 DATA = "latex-tagging-status.ltx"
 PAGE = "https://latex3.github.io/tagging-project/tagging-status/"
@@ -70,7 +73,7 @@ def kernel_date(cwd):
 
 def preamble_code(base, master):
     """The master's preamble, in code, with each file it \\input-s there."""
-    text = latexsource.read_text(os.path.join(base, master))
+    text = latexsource.read_text(P(base).source(master))
     preamble = latexsource.split_master(text)[0]
     pieces = [preamble]
     spans = latexsource.skip_spans(preamble)
@@ -79,7 +82,7 @@ def preamble_code(base, master):
             continue
         name = m.group(1).strip()
         for candidate in (name, name + ".tex"):
-            path = os.path.join(base, candidate)
+            path = P(base).source(candidate)
             if os.path.isfile(path):
                 pieces.append(latexsource.read_text(path))
                 break

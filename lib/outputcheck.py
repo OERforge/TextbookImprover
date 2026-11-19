@@ -38,7 +38,6 @@ import posixpath
 import re
 import shutil
 import subprocess
-import tempfile
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
@@ -46,6 +45,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
 import alttext
+import projectpaths
 
 # What a link names that isn't a file of the set, a scheme in any case
 # ("Http://", as a source typed it) compared lowercased.
@@ -883,7 +883,7 @@ def find_validator(name):
 def run_epubcheck(command, path):
     """epubcheck's messages as findings, or a finding that it failed."""
     findings = []
-    with tempfile.TemporaryDirectory() as work:
+    with projectpaths.TemporaryDirectory() as work:
         report = os.path.join(work, "epubcheck.json")
         try:
             subprocess.run(command + ["--json", report, path],

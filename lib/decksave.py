@@ -64,9 +64,9 @@ import re
 import shutil
 import signal
 import subprocess
-import tempfile
 import zipfile
 from xml.etree import ElementTree
+import projectpaths
 
 # What each format is, in a message, by its extension.
 FORMATS = {".odp": "an OpenDocument presentation", ".ppt": "a PowerPoint 97-2003 deck"}
@@ -89,9 +89,9 @@ def other_decks(base):
     """The decks at the top of a folder that a run saves as PowerPoint
     first, in name order: all but the lock files PowerPoint keeps beside
     a deck it has open (~$NAME). LibreOffice's (.~lock.NAME#) end in #."""
-    return [name for name in sorted(os.listdir(base))
+    return [name for name in sorted(os.listdir(projectpaths.of(base).sources()))
             if name.lower().endswith(EXTENSIONS) and not name.startswith("~$")
-            and os.path.isfile(os.path.join(base, name))]
+            and os.path.isfile(projectpaths.of(base).source(name))]
 
 
 def powerpoint_name(name):
@@ -118,7 +118,7 @@ def plan(base, looks=()):
     """The Plan for a folder's decks in other formats. looks: the paths
     of the decks' reference documents (slides.reference_doc), which aren't
     decks, so an original whose PowerPoint name is one isn't read."""
-    here = {name.lower(): name for name in os.listdir(base)}
+    here = {name.lower(): name for name in os.listdir(projectpaths.of(base).sources())}
     looks = {os.path.normcase(os.path.abspath(path)) for path in looks}
     result = Plan()
     wanted = {}
@@ -128,7 +128,7 @@ def plan(base, looks=()):
         if existing is None:
             wanted.setdefault(target.lower(), []).append((name, target))
             continue
-        path = os.path.join(base, existing)
+        path = projectpaths.of(base).media(existing)
         if os.path.normcase(os.path.abspath(path)) in looks:
             result.looks.append((name, existing))
         elif os.path.isfile(path):
@@ -207,7 +207,7 @@ def problem(path):
 def save(program, path, target):
     """Save the deck at path as the PowerPoint file target, through
     LibreOffice, or raise SaveError saying why it couldn't be."""
-    with tempfile.TemporaryDirectory(prefix="decksave-") as work:
+    with projectpaths.TemporaryDirectory(prefix="decksave-") as work:
         profile = os.path.join(work, "profile")
         out = os.path.join(work, "out")
         os.makedirs(out)

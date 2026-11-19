@@ -83,7 +83,6 @@ import os
 import posixpath
 import re
 import shutil
-import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
@@ -96,6 +95,7 @@ import pptxorder
 import pptxparse
 import pptxtitle
 import sidecars
+import projectpaths
 
 DECORATIVE_EXT = ('<a:ext uri="%s"><adec:decorative xmlns:adec="%s" val="1"/></a:ext>'
                   % (pptxparse.DECORATIVE_URI, pptxparse.NS["adec"]))
@@ -1542,7 +1542,7 @@ def remediate(source, destination, alts=None, tables=None, titles=None, language
             parts[part] = pptxparse.encode_part(xml, encodings[part])
     folder = os.path.dirname(os.path.abspath(destination))
     os.makedirs(folder, exist_ok=True)
-    fd, temp = tempfile.mkstemp(suffix=".pptx", dir=folder)
+    fd, temp = projectpaths.mkstemp(suffix=".pptx", dir=folder)
     os.close(fd)
     try:
         with zipfile.ZipFile(temp, "w") as zout:

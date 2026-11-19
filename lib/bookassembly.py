@@ -67,13 +67,13 @@ def page_id(stem):
 # reading the intermediates
 # --------------------------------------------------------------------------
 
-def page_stems(base):
-    return sorted((f[:-len(INTERMEDIATE)] for f in os.listdir(base)
+def page_stems(pages_dir):
+    return sorted((f[:-len(INTERMEDIATE)] for f in os.listdir(pages_dir)
                    if f.endswith(INTERMEDIATE)), key=natural_key)
 
 
-def load_page(base, stem):
-    with open(os.path.join(base, stem + INTERMEDIATE), encoding="utf-8") as fh:
+def load_page(pages_dir, stem):
+    with open(os.path.join(pages_dir, stem + INTERMEDIATE), encoding="utf-8") as fh:
         return json.load(fh)
 
 

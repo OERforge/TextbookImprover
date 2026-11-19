@@ -76,6 +76,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import lxml  # noqa: F401
 except ImportError:
@@ -217,7 +220,7 @@ def main():
     for check, count in sorted(counts.items()):
         print(f"  {count:5d}  {check}")
     if result.notes:
-        print(f"Details in {os.path.join(out, 'unpack-report.csv')}.")
+        print(f"Details in {P(out).report('unpack-report.csv')}.")
     print(f"Next: cd {out} && python3 {os.path.join(HERE, 'convert.py')}")
     return 0
 

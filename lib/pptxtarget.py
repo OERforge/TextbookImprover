@@ -143,7 +143,6 @@ import posixpath
 import re
 import shutil
 import subprocess
-import tempfile
 import zipfile
 from collections import Counter
 from urllib.parse import unquote
@@ -156,6 +155,9 @@ import highlighting
 import pptxorder
 import pptxparse
 import pptxremediate
+import projectpaths
+
+P = projectpaths.of
 
 ATTRS = pptxorder.ATTRS
 _attr_value = pptxremediate._attr_value
@@ -433,7 +435,7 @@ def svgs_to_png(doc, base, out_dir):
         src = target[0]
         if src not in done:
             out = os.path.join(out_dir, "svg-%d.png" % len(done))
-            source = os.path.join(base, unquote(src))
+            source = P(base).referenced(unquote(src))
             why = None
             if not os.path.isfile(source):
                 why = "there's no such file"
@@ -484,7 +486,7 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
     result = {"ok": False, "log": "", "svg_failed": [], "not_rendered": [], "layouts": [],
               "warnings": [], "record": {}, "counts": {}, "notes": [], "slides": 0,
               "overlaps": [], "pptx": out}
-    work = tempfile.mkdtemp(prefix="deck-pptx-")
+    work = projectpaths.mkdtemp(prefix="deck-pptx-")
     try:
         svgs, result["svg_failed"] = svgs_to_png(doc, base, work)
         if result["svg_failed"]:
@@ -507,7 +509,7 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
         for path in filters:
             command += ["--lua-filter", path]
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-        done = subprocess.run(command, cwd=base, capture_output=True, text=True,
+        done = subprocess.run(command, cwd=P(base).run_dir(), capture_output=True, text=True,
                               env=dict(env or os.environ, DECK_PPTX_RECORD=record_path,
                                        DECK_SLIDE_LEVEL=str(level), DECK_NOTES=str(notes)))
         if done.returncode:
@@ -2294,7 +2296,7 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
 
 def _write(path, infos, parts, texts, added):
     """The package with the parts changed and the SVGs added."""
-    handle, temporary = tempfile.mkstemp(suffix=".pptx", dir=os.path.dirname(os.path.abspath(path)))
+    handle, temporary = projectpaths.mkstemp(suffix=".pptx", dir=os.path.dirname(os.path.abspath(path)))
     os.close(handle)
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as zout:

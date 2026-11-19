@@ -45,6 +45,7 @@ import pandocversion
 import pandocrun
 import sidecars
 import wcag
+import projectpaths
 
 COLUMNS = ["Where", "Check", "Detail", "File", "Kind", "Severity",
            "Standard", "Tool", "Fix"]
@@ -615,7 +616,6 @@ def render_html(markdown_path, html_path, css_path=None):
     read, whatever a file's text in it says (md_text keeps it text)."""
     import subprocess
     import sys
-    import tempfile
     command = [*pandocrun.PANDOC, "-f", REPORT_READER, os.path.abspath(markdown_path),
                "-t", "html5", *pandocversion.mathml(), "-o", os.path.abspath(html_path),
                "--standalone", "--sandbox", "--metadata", "lang=en",
@@ -627,7 +627,7 @@ def render_html(markdown_path, html_path, css_path=None):
             # header of its own, as --embed-resources had made it.
             with open(css_path, encoding="utf-8") as fh:
                 css = fh.read()
-            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False,
+            with projectpaths.NamedTemporaryFile("w", suffix=".html", delete=False,
                                              encoding="utf-8") as fh:
                 fh.write("<style>\n" + css + "\n</style>\n")
                 header = fh.name

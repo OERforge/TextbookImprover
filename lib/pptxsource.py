@@ -96,7 +96,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import zipfile
 from collections import Counter, OrderedDict
 from xml.etree import ElementTree as ET
@@ -108,6 +107,9 @@ import pandocrun
 import pptxparse
 import pptxremediate
 import pptxtitle
+import projectpaths
+
+P = projectpaths.of
 
 q = pptxparse.q
 NS = pptxparse.NS
@@ -815,7 +817,7 @@ class Reader:
         """The image's path in the intermediate, written beside the decks
         once under its key."""
         name = pptxremediate.image_key(digest) + ext
-        target = os.path.join(self.base, *name.split("/"))
+        target = P(self.base).media(*name.split("/"))
         if not self.dry and not os.path.exists(target):
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as fh:
@@ -1234,7 +1236,7 @@ def read_tex(equations, work, pandoc="pandoc", env=None):
     the file."""
     if not equations:
         return []
-    folder = tempfile.mkdtemp(prefix="equations-", dir=work)
+    folder = projectpaths.mkdtemp(prefix="equations-", dir=work)
     try:
         stub = os.path.join(folder, "equations.docx")
         stub_docx(stub, equations)

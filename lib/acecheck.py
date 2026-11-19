@@ -49,12 +49,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import findings as findings_lib  # noqa: E402
+import projectpaths
 
 VARIABLE = "ACE"
 # Looked for on the path in this order: Puppeteer's headless Chrome first,
@@ -122,7 +122,7 @@ def said(result):
 
 def run(command, epub, timeout=TIMEOUT):
     """Ace's report on an EPUB, read (read_report), or {"error": why}."""
-    with tempfile.TemporaryDirectory(prefix="ace-") as work:
+    with projectpaths.TemporaryDirectory(prefix="ace-") as work:
         out = os.path.join(work, "report")
         try:
             result = subprocess.run(command + ["-o", out, "-t", os.path.join(work, "temp"),
@@ -370,7 +370,7 @@ def probe_epub(path):
 def probe(command, timeout=TIMEOUT):
     """The summary's line for the probe: that Ace found what the probe
     lacks, or why not."""
-    with tempfile.TemporaryDirectory(prefix="ace-probe-") as work:
+    with projectpaths.TemporaryDirectory(prefix="ace-probe-") as work:
         path = os.path.join(work, "probe.epub")
         probe_epub(path)
         result = run(command, path, timeout)

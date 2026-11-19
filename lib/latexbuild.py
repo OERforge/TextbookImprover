@@ -25,9 +25,9 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 
 import pandocrun
+import projectpaths
 
 ENGINE = "lualatex"
 # The oldest LaTeX release a tagged build is taken to. The tagging project
@@ -64,7 +64,7 @@ MISSING_FONT = re.compile(r'The font "([^"]+)" cannot be found')
 def latex_release():
     """The LaTeX release LuaLaTeX runs, as its \\fmtversion gives it
     ("2026-06-01"), or None when it can't be read."""
-    work = tempfile.mkdtemp(prefix="build-pdf-probe-")
+    work = projectpaths.mkdtemp(prefix="build-pdf-probe-")
     try:
         result = subprocess.run(
             [ENGINE, "-interaction=nonstopmode", "-halt-on-error",

@@ -58,6 +58,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import yaml
     import sidecars
@@ -169,7 +172,7 @@ def main():
                 parts[stem] = origin
             if page_role(path):
                 roles[stem] = page_role(path)
-    project_path = os.path.join(book, "project.yaml")
+    project_path = P(book).project_file()
     document = {}
     if os.path.isfile(project_path):
         with open(project_path, encoding="utf-8") as fh:
@@ -185,31 +188,31 @@ def main():
 
     shutil.copytree(pages_dir, out)
     for stem in stems:
-        path = os.path.join(out, stem + ext)
+        path = P(out).source(stem + ext)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         text = strip_provenance(rewrite(text, names, ext), ext)
         os.remove(path)
         where = out
         passthrough = str(project.get("passthrough", "_pt") or "")
-        if passthrough and os.path.isfile(os.path.join(book, passthrough,
+        if passthrough and os.path.isfile(P(book).source(passthrough,
                                                        stem + ext)):
-            where = os.path.join(out, passthrough)
+            where = P(out).source(passthrough)
             os.makedirs(where, exist_ok=True)
         with open(os.path.join(where, names.get(stem, stem) + ext), "w",
                   encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(out, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
         fh.write("# Written by adopt-pages.py from " + book + ".\n"
                  + yaml.safe_dump(document, sort_keys=False,
                                   allow_unicode=True, width=1000))
     for name in SIDECARS:
-        if os.path.isfile(os.path.join(book, name)):
-            unread = sidecars.unreadable(os.path.join(book, name))
+        if os.path.isfile(P(book).sidecar(name)):
+            unread = sidecars.unreadable(P(book).sidecar(name))
             if unread:
                 problems.append(f"{name} isn't copied: {unread}")
                 continue
-            shutil.copy2(os.path.join(book, name), os.path.join(out, name))
+            shutil.copy2(P(book).sidecar(name), P(out).sidecar(name))
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)
     print(f"{len(stems)} page(s) written to {out}/, {len(names)} renamed.")

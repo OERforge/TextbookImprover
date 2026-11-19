@@ -74,6 +74,9 @@ import pptxremediate
 import pptxtitle
 import sidecars
 import tablecensus
+import projectpaths
+
+P = projectpaths.of
 
 ALT_COLUMNS = ["Image", "Alt", "Source", "Reason", "CurrentAlt", "Drafted by", "Reviewed"]
 TABLE_COLUMNS = ["key", "headers", "split-at", "caption-rows", "part-captions", "source",
@@ -97,9 +100,9 @@ def deck_sources(base):
     """The PowerPoint decks at the top of a folder, in name order, all but
     the lock files PowerPoint keeps beside a deck it has open (~$...). One
     that can't be read is still a deck, for the run to name."""
-    return [name for name in sorted(os.listdir(base))
+    return [name for name in sorted(os.listdir(P(base).sources()))
             if name.lower().endswith(".pptx") and not name.startswith("~$")
-            and os.path.isfile(os.path.join(base, name))]
+            and os.path.isfile(P(base).source(name))]
 
 
 # An OLE compound file's first bytes: what Office writes a deck saved with
@@ -361,7 +364,6 @@ def equation_tex(path):
     (tex_pandoc_problem)."""
     if tex_pandoc_problem():
         return {}
-    import tempfile
     import xml.etree.ElementTree as ET
     import pptxsource
     found = []
@@ -377,7 +379,7 @@ def equation_tex(path):
             continue
     if not elements:
         return {}
-    work = tempfile.mkdtemp(prefix="deck-equations-")
+    work = projectpaths.mkdtemp(prefix="deck-equations-")
     try:
         tex = pptxsource.read_tex(elements, work)
     finally:
@@ -497,9 +499,8 @@ def minus_signs(path, alts, tables, titles, orders, keep, dname, api, repair=Tru
     import json
     import shutil
     import subprocess
-    import tempfile
     import pptxsource
-    folder = tempfile.mkdtemp(prefix="deck-minus-")
+    folder = projectpaths.mkdtemp(prefix="deck-minus-")
     try:
         marks = {}
         doc, _record = pptxsource.read(path, folder, folder, alts, tables, titles, orders,
@@ -595,7 +596,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     image_found = {}  # image digest: [(name, deck, slide, shape, check, detail)] to decide
     failed = 0
     for name in decks:
-        path = os.path.join(base, name)
+        path = P(base).source(name)
         try:
             deck = pptxparse.read(path)
         except Exception as exc:
@@ -714,7 +715,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     # The images the report names, written where their keys point, so a
     # person can open the one a row is about.
     for digest, (path, part, key) in images.items():
-        target = os.path.join(base, key)
+        target = P(base).report(key)
         if not os.path.exists(target):
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with zipfile.ZipFile(path) as zf, open(target, "wb") as out:

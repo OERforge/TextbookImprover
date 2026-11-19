@@ -44,6 +44,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
+import projectpaths  # noqa: E402
+
+P = projectpaths.of
 try:
     import epubsource
     from unpacking import contents_tree, project_yaml, write_report, summarize
@@ -106,7 +109,7 @@ def main():
                                                   package.root)
         links_to_pages[path] = len(set(re.findall(
             r'href="([^"#]+\.html)', rewritten)))
-        with open(os.path.join(out, names[path] + ".html"), "w",
+        with open(P(out).source(names[path] + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(rewritten)
         if not linear:
@@ -126,7 +129,7 @@ def main():
                           "the manifest names a file the archive lacks"))
             continue
         relative = posixpath.relpath(path, package.root or ".")
-        dest = os.path.join(out, *relative.split("/"))
+        dest = P(out).source(*relative.split("/"))
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
         with open(dest, "wb") as fh:
             fh.write(data)
@@ -158,11 +161,11 @@ def main():
 
     meta = dict(package.metadata)
     title = (meta["title"] or [os.path.basename(out)])[0]
-    with open(os.path.join(out, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
         fh.write(project_yaml("unpack-epub.py from "
                               + os.path.basename(args.epub), meta, tree,
                               flagged, unnamed, title))
-    write_report(os.path.join(out, "unpack-report.csv"), notes)
+    write_report(P(out).report("unpack-report.csv"), notes)
     summarize(notes, out, len(names))
     return 0
 

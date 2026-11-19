@@ -79,6 +79,9 @@ import os
 import re
 import struct
 from urllib.parse import unquote
+import projectpaths
+
+P = projectpaths.of
 
 try:
     from PIL import Image
@@ -360,7 +363,7 @@ def measure(base, documents):
                 continue
             if os.path.normpath(rel).split(os.sep)[0] == os.pardir:
                 continue          # outside the book's folder, as its copy would be
-            path = os.path.normpath(os.path.join(base, rel))
+            path = os.path.normpath(P(base).referenced(rel))
             if rel not in sizes:
                 sizes[rel] = pixel_size(path) if os.path.isfile(path) else None
             pixels = sizes[rel]
@@ -369,7 +372,7 @@ def measure(base, documents):
             width = shown_width(attributes, pixels)
             if width is not None:
                 shown[rel] = max(shown.get(rel, 0), width)
-    out = [Measured(rel, os.path.normpath(os.path.join(base, rel)), sizes[rel], width)
+    out = [Measured(rel, os.path.normpath(P(base).referenced(rel)), sizes[rel], width)
            for rel, width in shown.items()]
     return sorted(out, key=lambda m: (-m.ratio, m.src))
 

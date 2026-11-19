@@ -62,7 +62,13 @@ BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ROOT, "lib"))
 import parallel  # noqa: E402
+import projectpaths  # noqa: E402
+
+# Where a project's files are is lib/projectpaths.py's to say: the cases
+# ask it where to put a fixture and where to look for what a run wrote.
+P = projectpaths.Project
 
 
 def load(path, name):
@@ -94,53 +100,53 @@ def convert(work, names, sidecars=None):
     os.makedirs(work, exist_ok=True)
     environment = dict(os.environ)
     environment.update({
-        "TABLE_CAPTIONS": os.path.join(work, "table-captions.csv"),
-        "IMAGE_ALT": os.path.join(work, "image-alt.csv"),
-        "TABLE_HEADERS": os.path.join(work, "table-headers.csv"),
-        "IMAGE_ALT_MISSING": os.path.join(work, "alt-missing.csv"),
-        "TABLE_CAPTIONS_MISSING": os.path.join(work, "caps-missing.csv"),
-        "SPACER_LOG": os.path.join(work, "spacers.csv"),
+        "TABLE_CAPTIONS": P(work).sidecar("table-captions.csv"),
+        "IMAGE_ALT": P(work).sidecar("image-alt.csv"),
+        "TABLE_HEADERS": P(work).sidecar("table-headers.csv"),
+        "IMAGE_ALT_MISSING": P(work).report("alt-missing.csv"),
+        "TABLE_CAPTIONS_MISSING": P(work).report("caps-missing.csv"),
+        "SPACER_LOG": P(work).report("spacers.csv"),
         "PROMOTE_H1_TO_TITLE": "always",
         "AUTHOR_BYLINE": "meta",
     })
     for name, content in (sidecars or {}).items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(P(work).sidecar(name), "w", encoding="utf-8") as fh:
             fh.write(content)
     for name in names:
-        shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+        shutil.copy(os.path.join(FIXTURES, name + ".docx"), P(work).sources())
     docx = [n + ".docx" for n in names]
     # The pre-pass, so declared headers reach the filter as they do in a
     # real run. Its guesses are adopted wholesale, which is what makes
     # the first-column declaration on tables.docx produce row headers.
-    new = os.path.join(work, "new.csv")
+    new = P(work).report("new.csv")
     run(["python3", os.path.join(BIN, "table-headers.py")] + docx
-        + ["--sidecar", os.path.join(work, "table-headers.csv"),
-           "--new", new, "--report", os.path.join(work, "report.csv"),
-           "--resolved", os.path.join(work, "resolved.json")], work)
+        + ["--sidecar", P(work).sidecar("table-headers.csv"),
+           "--new", new, "--report", P(work).report("report.csv"),
+           "--resolved", P(work).work_file("resolved.json")], P(work).run_dir())
     if os.path.exists(new):
-        shutil.copy(new, os.path.join(work, "table-headers.csv"))
+        shutil.copy(new, P(work).sidecar("table-headers.csv"))
         run(["python3", os.path.join(BIN, "table-headers.py")] + docx
-            + ["--sidecar", os.path.join(work, "table-headers.csv"),
-               "--new", new, "--report", os.path.join(work, "report.csv"),
-               "--resolved", os.path.join(work, "resolved.json")], work)
-    environment["TABLE_HEADERS_RESOLVED"] = os.path.join(work, "resolved.json")
+            + ["--sidecar", P(work).sidecar("table-headers.csv"),
+               "--new", new, "--report", P(work).report("report.csv"),
+               "--resolved", P(work).work_file("resolved.json")], P(work).run_dir())
+    environment["TABLE_HEADERS_RESOLVED"] = P(work).work_file("resolved.json")
     for name in names:
         run(["pandoc", "-f", "docx", "-t", "json", name + ".docx",
              "-o", name + ".json",
              "--lua-filter", os.path.join(BIN, "media-extensions.lua"),
-             "--extract-media", name], work, environment)
+             "--extract-media", name], P(work).run_dir(), environment)
         run(["pandoc", "-f", "json", "-t", "json", name + ".json",
              "-o", name + ".filtered.json",
              "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")],
-            work, environment)
+            P(work).run_dir(), environment)
 
 
 def write_config(work, contents, extra_project="", extra_epub=""):
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(P(work).project_file(), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.fixtures\n"
                  "  title: The Fixture Book\n  language: en\n"
                  + extra_project + "  contents:\n" + contents)
-    with open(os.path.join(work, "conversion.yaml"), "w",
+    with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n"
                  "  epub:\n    format: epub3\n" + extra_epub)
@@ -156,7 +162,7 @@ class Built:
         self.status = result.returncode
         self.stderr = result.stderr
         self.files = {}
-        path = os.path.join(work, "epub", "org.example.fixtures.epub")
+        path = P(work).target_file("epub", "org.example.fixtures.epub")
         if os.path.exists(path):
             with zipfile.ZipFile(path) as archive:
                 for name in archive.namelist():
@@ -231,7 +237,7 @@ def case_structure(work):
     convert(work, NEEDED)
     # No fixture has a heading below its title, so give one a section to
     # show the page's own headings continuing below its entry.
-    path = os.path.join(work, "tables.filtered.json")
+    path = P(work).page("tables")
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     doc["blocks"].append({"t": "Header", "c": [
@@ -366,7 +372,7 @@ def case_contents_edges(work):
     guessed = os.path.join(work, "guessed")
     convert(guessed, ["tables", "math"])
     write_config(guessed, "")
-    with open(os.path.join(guessed, "project.yaml"), "w",
+    with open(P(guessed).project_file(), "w",
               encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.fixtures\n"
                  "  title: The Fixture Book\n")
@@ -394,14 +400,14 @@ def case_targets(work):
     """Which targets get built, and how convert.py keeps its own."""
     convert(work, ["tables"])
     write_config(work, "    - tables\n")
-    with open(os.path.join(work, "conversion.yaml"), "w",
+    with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n")
     none = Built(work)
     quiet = subprocess.run(
         ["python3", os.path.join(BIN, "build-epub.py"), "-d", work,
          "--if-declared"], capture_output=True, text=True)
-    with open(os.path.join(work, "conversion.yaml"), "w",
+    with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n"
                  "  epub:\n    format: epub3\n    output_dir: books\n"
@@ -416,7 +422,7 @@ def case_targets(work):
          lambda: quiet.returncode == 0 and not quiet.stderr.strip()),
         ("output_dir and filename name the file, with the extension added",
          lambda: named.returncode == 0
-         and os.path.exists(os.path.join(work, "books", "fixtures.epub"))),
+         and os.path.exists(P(work).target_file("books", "fixtures.epub"))),
     ]
 
 
@@ -473,7 +479,7 @@ def case_outline(work):
     out = Built(work)
     cartridge = load(os.path.join(ROOT, "bin", "build-cartridge.py"),
                      "cartridge")
-    path = os.path.join(work, "epub", "org.example.fixtures.epub")
+    path = P(work).target_file("epub", "org.example.fixtures.epub")
     entries = cartridge.epub_outline(path)
     # The same book with no navigation document declared, so toc.ncx is
     # all there is: what an EPUB 2 offers.
@@ -488,7 +494,7 @@ def case_outline(work):
     stems = [s for s in NEEDED]
     titles = {}
     for stem in stems:
-        with open(os.path.join(work, stem + ".filtered.json"),
+        with open(P(work).page(stem),
                   encoding="utf-8") as fh:
             titles[stem] = epub.page_title(json.load(fh), stem)
     tree, placed, unmapped = cartridge.contents_from_outline(path, stems,
@@ -522,14 +528,14 @@ def case_outline(work):
 def markdown_page(work, name, text):
     """A page from Markdown, as convert.py leaves one: raw and filtered."""
     environment = dict(os.environ, PROMOTE_H1_TO_TITLE="always", AUTHOR_BYLINE="meta",
-                       IMAGE_ALT_MISSING=os.path.join(work, "alt-missing.csv"),
-                       TABLE_CAPTIONS_MISSING=os.path.join(work, "caps-missing.csv"))
-    with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+                       IMAGE_ALT_MISSING=P(work).report("alt-missing.csv"),
+                       TABLE_CAPTIONS_MISSING=P(work).report("caps-missing.csv"))
+    with open(P(work).source(name + ".md"), "w", encoding="utf-8") as fh:
         fh.write(text)
     run(["pandoc", "-f", "markdown", "-t", "json", name + ".md", "-o", name + ".json"],
-        work, environment)
+        P(work).run_dir(), environment)
     run(["pandoc", "-f", "json", "-t", "json", name + ".json", "-o", name + ".filtered.json",
-         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")], work, environment)
+         "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")], P(work).run_dir(), environment)
 
 
 def case_divisions(work):
@@ -586,7 +592,7 @@ def case_divisions(work):
     marks, named = landmarks(out)
     written = subprocess.run(
         ["pandoc", "-f", "json", "-t", "markdown", "preface.filtered.json",
-         "--lua-filter", os.path.join(BIN, "target-blocks.lua")], cwd=work,
+         "--lua-filter", os.path.join(BIN, "target-blocks.lua")], cwd=P(work).run_dir(),
         capture_output=True, text=True, env=dict(os.environ, TITLE_WRITER="markdown"))
 
     # The same pages with no contents page, and Pandoc's own types in a
@@ -612,8 +618,8 @@ def case_divisions(work):
     def passes(built_dir):
         if not (epubcheck and os.path.exists(epubcheck) and shutil.which("java")):
             return True
-        return subprocess.run(["java", "-jar", epubcheck, os.path.join(
-            built_dir, "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0
+        return subprocess.run(["java", "-jar", epubcheck, P(built_dir).target_file(
+            "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0
     return [
         ("a front-matter page whose heading says it's a preface is front matter, its "
          "section a preface with its ARIA role",
@@ -692,10 +698,10 @@ def case_declared_types(work):
     convert(cut, ["metadata"])
     markdown_page(cut, "key-terms", "# Key Terms\n\nIntro.\n\n## A\n\nAbacus.\n\n## B\n\nBeam.\n")
     run(["python3", os.path.join(BIN, "split-pages.py"), "--level", "2",
-         "--sidecar", os.path.join(cut, "page-names.csv"),
-         "--new", os.path.join(cut, "page-names-new.csv"),
-         "--report", os.path.join(cut, "page-names-report.csv"),
-         os.path.join(cut, "key-terms.filtered.json")], cut)
+         "--sidecar", P(cut).sidecar("page-names.csv"),
+         "--new", P(cut).report("page-names-new.csv"),
+         "--report", P(cut).report("page-names-report.csv"),
+         P(cut).page("key-terms")], P(cut).run_dir())
     write_config(cut, "    - metadata\n    - page: key-terms\n      type: glossary\n",
                  extra_project="  numbering: true\n")
     split_book = Built(cut)
@@ -797,8 +803,8 @@ def case_declared_types(work):
         ("a type that isn't a word is a warning, not a crash",
          lambda: opener_book.status == 0 and "type ['glossary'] is not one of" in opener_book.stderr),
         ("epubcheck passes it", lambda: not (os.environ.get("EPUBCHECK_JAR") and shutil.which("java"))
-         or subprocess.run(["java", "-jar", os.environ["EPUBCHECK_JAR"], os.path.join(
-             work, "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0),
+         or subprocess.run(["java", "-jar", os.environ["EPUBCHECK_JAR"], P(work).target_file(
+             "epub", "org.example.fixtures.epub")], capture_output=True).returncode == 0),
     ]
 
 
@@ -853,7 +859,7 @@ def case_one_page_formulas(work):
         folder, dict(os.environ))
     write_config(folder, "    - book\n")
     built = Built(folder)
-    with zipfile.ZipFile(os.path.join(folder, "epub", "org.example.fixtures.epub")) as z:
+    with zipfile.ZipFile(P(folder).target_file("epub", "org.example.fixtures.epub")) as z:
         ncx = z.read("EPUB/toc.ncx").decode("utf-8") \
             if "EPUB/toc.ncx" in z.namelist() else ""
     labels = re.findall(r"<text>([^<]*)</text>", ncx)
@@ -888,14 +894,14 @@ def case_svg_ids(work):
               '<style>#dot{fill:red}</style><circle id="dot" r="1"/>'
               '<circle id="dot" r="2"/><g id="ring"/><g id="ring"/></svg>')
     for name, text in (("graph.svg", svg), ("styled.svg", styled)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(P(work).source(name), "w", encoding="utf-8") as fh:
             fh.write(text)
     markdown_page(work, "book", "# A Graph\n\n![A graph of three points](graph.svg)\n\n"
                   "![Two red dots](styled.svg)\n")
     write_config(work, "    - book\n")
     built = Built(work)
     copies = []
-    path = os.path.join(work, "epub", "org.example.fixtures.epub")
+    path = P(work).target_file("epub", "org.example.fixtures.epub")
     if os.path.exists(path):
         with zipfile.ZipFile(path) as archive:
             copies = [archive.read(n).decode("utf-8") for n in archive.namelist()

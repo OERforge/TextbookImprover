@@ -51,7 +51,6 @@ import shutil
 import zipfile
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
@@ -70,6 +69,7 @@ import languages  # noqa: E402
 import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 import pandocrun
+import projectpaths  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
     load_documents, targets_of, plan_book, wants_title_page, formula_texts,
@@ -136,7 +136,7 @@ def derived_summary(found):
     return " ".join(parts)
 
 
-def book_metadata(project, resolved, found, base):
+def book_metadata(project, resolved, found, paths):
     meta = {
         "title": meta_string(project["title"]),
         "lang": meta_string(project["language"]),
@@ -158,7 +158,7 @@ def book_metadata(project, resolved, found, base):
                                                derived_summary(found))
     cover = str(resolved["epub.cover_image"] or "").strip()
     if cover:
-        path = cover if os.path.isabs(cover) else os.path.join(base, cover)
+        path = paths.named(cover)
         if not os.path.isfile(path):
             sys.exit(f"epub.cover_image is set to {cover}, which does not "
                      f"exist (looked at {os.path.abspath(path)}).")
@@ -1038,13 +1038,13 @@ EPUB_LINKS = """
 """
 
 
-def own_css(base, resolved):
+def own_css(paths, resolved):
     """The absolute path of the stylesheet epub.css names, or None; a path
     that doesn't exist stops the build."""
     setting = str(resolved["epub.css"] or "").strip()
     if not setting:
         return None
-    path = os.path.abspath(os.path.join(base, setting))
+    path = os.path.abspath(paths.named(setting))
     if not os.path.isfile(path):
         sys.exit(f"epub.css is set to {setting}, which does not exist "
                  f"(looked at {path}).")
@@ -1089,7 +1089,7 @@ def epub_targets(schema, project_schema, documents, requested, allow_unknown):
 
 # --------------------------------------------------------------------------
 
-def build(base, name, resolved, keep, intermediates=None):
+def build(paths, name, resolved, keep, intermediates=None):
     project = resolved.project
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -1097,10 +1097,9 @@ def build(base, name, resolved, keep, intermediates=None):
     # Where the filtered intermediates are: the content directory unless
     # a run with several targets put this target's elsewhere. Media paths
     # inside them are relative to the content directory either way.
-    pages_dir = intermediates or base
+    pages_dir = paths.pages(own=intermediates)
     tree, titles, placed, numbered = plan_book(pages_dir, resolved, "EPUB")
-    real = [s for s in placed if os.path.exists(
-        os.path.join(pages_dir, s + INTERMEDIATE))]
+    real = [s for s in placed if os.path.exists(paths.page(s, own=intermediates))]
     if numbered:
         number_tree(tree, titles)
 
@@ -1124,17 +1123,18 @@ def build(base, name, resolved, keep, intermediates=None):
     document = {
         "pandoc-api-version": load_page(pages_dir,
                                         real[0])["pandoc-api-version"],
-        "meta": book_metadata(project, resolved, assembly.found, base),
+        "meta": book_metadata(project, resolved, assembly.found, paths),
         "blocks": assembly.blocks,
     }
 
-    out_dir = os.path.join(base, str(resolved["output_dir"] or name))
+    out_dir = paths.target_dir(name, resolved["output_dir"])
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, output_name(resolved, project, name))
+    out_path = paths.target_file(name, output_name(resolved, project, name),
+                                 resolved["output_dir"])
     toc_depth = int(resolved["epub.toc_depth"])
-    own = own_css(base, resolved)
+    own = own_css(paths, resolved)
 
-    work = tempfile.mkdtemp(prefix="build-epub-")
+    work = paths.temp_dir("build-epub-")
     try:
         book_json = os.path.join(work, "book.json")
         with open(book_json, "w", encoding="utf-8") as fh:
@@ -1155,7 +1155,7 @@ def build(base, name, resolved, keep, intermediates=None):
             # resolved for this target.
             "--lua-filter", os.path.join(HERE, "target-blocks.lua"),
         ]
-        footer = pagefooter.xhtml(resolved["footer"], base)
+        footer = pagefooter.xhtml(resolved["footer"], paths.settings_folder())
         if footer:
             command += ["-V", "oer-footer=" + footer]
         environment = dict(os.environ, TARGET_NAME=name,
@@ -1165,13 +1165,13 @@ def build(base, name, resolved, keep, intermediates=None):
         plan, label = downsample.plan_for(resolved)
         try:
             scaled = downsample.folder_for_build(
-                plan, base, [document], work, lambda line: print(line, file=sys.stderr), label)
+                plan, paths.run_dir(), [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
         command += downsample.resource_args(scaled)
         # Run in the content directory: image paths in the intermediates
         # are relative to it.
-        result = subprocess.run(command, cwd=base, capture_output=True,
+        result = subprocess.run(command, cwd=paths.run_dir(), capture_output=True,
                                 text=True, env=environment)
         if result.stderr.strip():
             print(result.stderr.rstrip(), file=sys.stderr)
@@ -1201,7 +1201,8 @@ def build(base, name, resolved, keep, intermediates=None):
                   "element an id of its own, and the stylesheet a rule for "
                   "each, settles it.", file=sys.stderr)
         if keep:
-            shutil.copy(book_json, os.path.join(out_dir, "book.json"))
+            shutil.copy(book_json, paths.target_file(name, "book.json",
+                                                     resolved["output_dir"]))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -1244,9 +1245,10 @@ def main():
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
 
+    paths = projectpaths.Project(args.dir)
     try:
         schema, project_schema, documents = load_documents(
-            args.dir, args.allow_unknown_keys)
+            paths, args.allow_unknown_keys)
         targets = epub_targets(schema, project_schema, documents,
                                args.target, args.allow_unknown_keys)
     except oerconfig.ConfigError as exc:
@@ -1264,7 +1266,7 @@ def main():
     for name, resolved in targets:
         if args.title:
             resolved.project["title"] = args.title
-        status = build(args.dir, name, resolved, args.keep,
+        status = build(paths, name, resolved, args.keep,
                        args.intermediates) or status
     return status
 

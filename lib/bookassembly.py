@@ -38,6 +38,7 @@ import sys
 
 import languages
 import oerconfig
+import projectpaths
 from bookcontents import (
     guess_contents, walk_contents, flatten_pages, natural_key, stem_title,
     expand_split_sources, is_generated, numbered_title, toc_blocks, opener_types,
@@ -46,9 +47,9 @@ from bookcontents import (
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(LIB), "bin")
-CONFIG_NAME = "conversion.yaml"
-PROJECT_NAME = "project.yaml"
-INTERMEDIATE = ".filtered.json"
+CONFIG_NAME = projectpaths.CONFIG_NAME
+PROJECT_NAME = projectpaths.PROJECT_NAME
+INTERMEDIATE = projectpaths.INTERMEDIATE
 
 # Attributes whose value is a list of ids, kept in step when ids are
 # prefixed. headers is what a cell uses to name its header cells when
@@ -536,14 +537,17 @@ def group_id(title, depth, assembly):
 
 
 def load_documents(base, allow_unknown):
+    """The schemas and the project's settings documents; base is the
+    project's folder or its projectpaths.Project."""
+    paths = base if isinstance(base, projectpaths.Project) else projectpaths.Project(base)
     schema = oerconfig.load_schema(os.path.join(BIN, "schema-conversion.yaml"))
     project_schema = oerconfig.load_schema(
         os.path.join(LIB, "schema-project.yaml"))
     documents = []
-    project_path = os.path.join(base, PROJECT_NAME)
+    project_path = paths.project_file()
     if os.path.isfile(project_path):
         documents.append(oerconfig.load_document(project_path, project_schema))
-    config_path = os.path.join(base, CONFIG_NAME)
+    config_path = paths.config_file()
     if os.path.isfile(config_path):
         documents.append(oerconfig.load_document(config_path, schema))
     return schema, project_schema, documents

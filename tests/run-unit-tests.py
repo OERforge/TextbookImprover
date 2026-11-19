@@ -929,6 +929,87 @@ def check_move_to_src():
     ]
 
 
+# The scripts that ask lib/projectpaths.py for every path in a project,
+# and the folders each may still join a name to itself: its own (HERE)
+# and a temporary folder the path module gave it.
+PATHS_SCRIPTS = {"bin/build-epub.py": ("HERE", "work")}
+
+
+def own_paths(source, allowed):
+    """What a script does that puts a project's path together itself: a
+    name joined to a folder that isn't the script's own or a temporary
+    one, a temporary folder made without asking, or a program run in a
+    folder the path module didn't name."""
+    import ast
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in node.names] + [getattr(node, "module", None)]
+            if "tempfile" in names:
+                found.append(f"line {node.lineno}: imports tempfile")
+        if isinstance(node, ast.Attribute) and node.attr == "root" \
+                and ast.unparse(node.value) == "paths":
+            found.append(f"line {node.lineno}: paths.root")
+        if not isinstance(node, ast.Call):
+            continue
+        called = ast.unparse(node.func) if hasattr(ast, "unparse") else ""
+        if called == "os.path.join" and node.args:
+            first = node.args[0]
+            if not (isinstance(first, ast.Name) and first.id in allowed) \
+                    and ast.unparse(first) != "os.path.dirname(HERE)":
+                found.append(f"line {node.lineno}: os.path.join("
+                             f"{ast.unparse(first)}, ...)")
+        for keyword in node.keywords:
+            if keyword.arg == "cwd" \
+                    and not ast.unparse(keyword.value).startswith("paths.run_dir("):
+                found.append(f"line {node.lineno}: cwd={ast.unparse(keyword.value)}")
+    return found
+
+
+def check_project_paths():
+    paths = load(os.path.join(ROOT, "lib", "projectpaths.py"), "projectpaths")
+    here = paths.Project(".")
+    work = scratch("project-paths-")
+    there = paths.Project(work)
+    os.symlink("/etc", os.path.join(work, "out"))
+    made = [there.temp_dir("project-paths-made-") for _ in range(2)]
+    for folder in made:
+        atexit.register(shutil.rmtree, folder, ignore_errors=True)
+    found = {}
+    for script, allowed in PATHS_SCRIPTS.items():
+        with open(os.path.join(ROOT, script), encoding="utf-8") as fh:
+            found[script] = own_paths(fh.read(), allowed)
+    wrong = ("import tempfile\nx = os.path.join(base, 'epub')\nrun(c, cwd=base)\n"
+             "run(c, cwd=paths.root)\n")
+    return [
+        ("today's layout: the settings, a part's sources, sidecars, reports, and "
+         "intermediates in the project's folder, a target's folder beside them",
+         lambda: here.project_file() == "./project.yaml"
+         and here.config_file() == "./conversion.yaml"
+         and here.sidecar("image-alt.csv") == "./image-alt.csv"
+         and here.report("fidelity.csv", part="slides") == "./fidelity.csv"
+         and here.source("a.md") == "./a.md" and here.page("a") == "./a.filtered.json"
+         and here.page("a", own="pages") == "pages/a.filtered.json"
+         and here.target_dir("epub") == "./epub" and here.target_dir("epub", "books") == "./books"
+         and here.target_file("epub", "b.epub") == "./epub/b.epub"
+         and here.run_dir() == "." and here.sources() == "."),
+        ("a setting's file is read from the project's folder, a full path as written",
+         lambda: there.named("css/own.css") == os.path.join(work, "css", "own.css")
+         and there.named("/tmp/own.css") == "/tmp/own.css"),
+        ("a path is inside the project by where it leads, a link followed",
+         lambda: there.inside("a/b.png") and there.inside(work)
+         and not there.inside("../b.png") and not there.inside("/etc/passwd")
+         and not there.inside("out/passwd") and not there.inside(work + "-other/x")),
+        ("a temporary folder is new each time it's asked for",
+         lambda: len(set(made)) == 2 and all(os.path.isdir(m) for m in made)),
+        ("a script that joins a name to the book's folder, makes its own temporary "
+         "folder, or runs a program in a folder it chose is found",
+         lambda: len(own_paths(wrong, ("HERE",))) == 5 or fail(str(own_paths(wrong, ("HERE",))))),
+        ("no converted script puts a project's path together itself",
+         lambda: not any(found.values()) or fail(str(found))),
+    ]
+
+
 def _raises(call):
     try:
         call()
@@ -10679,6 +10760,7 @@ GROUPS = [
     ("the rule for a name that becomes a folder or a file", check_naming_rule),
     ("a target's stamp, the five digests of what it's built from", check_stamps),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
+    ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),
     ("cells a spreadsheet would take for formulas, written and read", check_formula_cells),
     ("alt text's rules, and their findings", check_alt_text_rules),

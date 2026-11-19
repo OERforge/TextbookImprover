@@ -52,7 +52,7 @@ Decisions about TextbookImprover itself whose reasons aren't obvious from the co
 
 ### Targets and their intermediates
 
-**Every target is built, and the driver knows which intermediates they share.** `read-conversion-config.py` resolves each target; the schema's `stage` attribute on a setting says whether it changes the filtered intermediate, and targets whose filter-stage settings (and variant files) agree share one. `build-epub.py` finds the `epub3` targets for itself; the packager reads the first HTML target's directory.
+**Every target is built, and the driver knows which intermediates they share.** `convert.py` resolves each target through `lib/oerconfig.py`; the schema's `stage` attribute on a setting says whether it changes the filtered intermediate, and targets whose filter-stage settings (and variant files) agree share one. `build-epub.py` finds the `epub3` targets for itself; the packager reads the first HTML target's directory.
 
 **Every target writes into its own directory, and the packager takes `--pages`** (since 0.5, 2026-09-19). The only reason pages had ever been written beside the sources was that the packager read its configuration and its pages from one directory. Once that was split, nothing argued for the old layout; the change is marked Breaking because a v0.4 directory looks different after one run. `output_dir: .` keeps the old layout for anyone who wants it, except for a book with HTML sources, where it would overwrite them and is refused.
 

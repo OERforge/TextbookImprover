@@ -409,12 +409,6 @@ def case_targets(work):
     named = subprocess.run(
         ["python3", os.path.join(BIN, "build-epub.py"), "-d", work],
         capture_output=True, text=True)
-    reader = subprocess.run(
-        ["python3", os.path.join(BIN, "read-conversion-config.py"),
-         "-d", work, os.path.join(work, "settings"), "--format", "html"],
-        capture_output=True, text=True)
-    settings = open(os.path.join(work, "settings", "settings.sh"),
-                    encoding="utf-8").read() if reader.returncode == 0 else ""
     return [
         ("with no epub3 target the tool says how to declare one",
          lambda: none.status == 1 and "format: epub3" in none.stderr),
@@ -423,8 +417,6 @@ def case_targets(work):
         ("output_dir and filename name the file, with the extension added",
          lambda: named.returncode == 0
          and os.path.exists(os.path.join(work, "books", "fixtures.epub"))),
-        ("the settings reader picks the html target among several",
-         lambda: reader.returncode == 0 and "TARGET_NAME='html'" in settings),
     ]
 
 

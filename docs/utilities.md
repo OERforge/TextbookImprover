@@ -5,6 +5,7 @@ Tools in `util/` that aren't part of a conversion but help before or around one:
 | Tool | Purpose |
 | --- | --- |
 | `migrate-config.py` | One-time: splits a v0.1 `imsmanifest.yaml` into the three v0.2 files. |
+| `move-to-src.py` | One-time, for the next release: moves a book into the layout it reads, each part's sources in `src/<part>/` and its sidecars in `sidecars/<part>/`, splitting a folder of a book and its decks; `--dry-run` says what it would do. This version's `convert.py` still reads the layout before it. |
 | `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |

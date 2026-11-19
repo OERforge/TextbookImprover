@@ -666,6 +666,234 @@ def check_stamps():
     ]
 
 
+def check_move_to_src():
+    work = scratch("move-to-src-")
+    tool = os.path.join(ROOT, "util", "move-to-src.py")
+    fixtures = os.path.join(ROOT, "tests", "fixtures")
+
+    def write(folder, files):
+        for name, text in files.items():
+            path = os.path.join(folder, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if isinstance(text, bytes):
+                with open(path, "wb") as fh:
+                    fh.write(text)
+            else:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+    def tree(folder):
+        return sorted(os.path.relpath(os.path.join(here, n), folder).replace(os.sep, "/")
+                      for here, dirs, names in os.walk(folder) for n in names)
+
+    def move(name, files, *options, home=None):
+        folder = os.path.join(work, name, "book")
+        write(folder, files)
+        before = tree(folder)
+        env = dict(os.environ, HOME=home or os.environ.get("HOME", "/"))
+        done = subprocess.run([sys.executable, tool, "-d", folder, *options],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                              env=env)
+        return folder, done, before, tree(folder)
+
+    def read(*parts):
+        with open(os.path.join(*parts), encoding="utf-8-sig") as fh:
+            return fh.read()
+    project = "project:\n  identifier: org.example.moved\n  title: Moved\n"
+    with open(os.path.join(fixtures, "media-a.docx"), "rb") as fh:
+        word = fh.read()
+
+    # Markdown with its pictures in assets/, a template and a footer the
+    # settings name, a sidecar, and what an earlier run left.
+    md, md_run, _, md_after = move("markdown", {
+        "project.yaml": project,
+        "conversion.yaml": ("defaults:\n  # Where the decisions are kept.\n  sidecars:\n"
+                            "    image_alt: image-alt.csv\n  html:\n"
+                            "    css: templates/book.css\n  footer: footer.md\n"
+                            "targets:\n  html:\n    format: html\n  beside:\n"
+                            "    format: html\n    # Beside the sources, as before.\n"
+                            "    output_dir: .\n"),
+        "intro.md": "# Intro\n\n![A rising line](assets/fig.png)\n",
+        "assets/fig.png": "png", "templates/book.css": "p {}\n", "footer.md": "A footer.\n",
+        "image-alt.csv": "Image,Alt\nassets/fig.png,A rising line\n",
+        "_pt/about.html": "<p>About</p>\n", "intro.json": "{}", "intro.filtered.json": "{}",
+        "card.json": "{}", "card.filtered.json": "{}",
+        "fidelity.csv": "r\n", "html/intro.html": "<p/>\n", "intro.html": "<p/>\n"})
+    md_config = read(md, "conversion.yaml")
+    md_dry, md_dry_run, md_dry_before, md_dry_after = move("markdown-dry", {
+        "project.yaml": project, "intro.md": "# Intro\n", "image-alt.csv": "Image,Alt\n"},
+        "--dry-run")
+    again = subprocess.run([sys.executable, tool, "-d", md], capture_output=True, text=True)
+    # A Word book alone, with its media from an earlier run.
+    docx, docx_run, _, docx_after = move("word", {
+        "project.yaml": project, "chapter-1.docx": word, "chapter-1/media/image1.png": "png"})
+    # A LaTeX book that keeps its sources in its own src/.
+    latex, latex_run, _, latex_after = move("latex", {
+        "project.yaml": project, "README.md": "# About this repository\n",
+        "src/main.tex": "\\documentclass{book}\n\\begin{document}\n"
+                        "\\input{chapters/one}\n\\end{document}\n",
+        "src/chapters/one.tex": "\\chapter{One}\\includegraphics{figs/a}\n",
+        "src/figs/a.png": "png", "src/.latexmkrc": "$pdf_mode = 4;\n"})
+    # A LaTeX book with its master at the top, its .latexmkrc beside it.
+    top, top_run, _, top_after = move("latex-top", {
+        "project.yaml": project, "main.tex": "\\documentclass{book}\n",
+        "chapters/one.tex": "\\chapter{One}\n", ".latexmkrc": "$pdf_mode = 4;\n",
+        ".gitignore": "*.pdf\n"})
+    # Decks alone, one in another format with the copy a run saved of it.
+    decks, decks_run, _, decks_after = move("decks", {
+        "a.pptx": "deck", "b.odp": "deck", "b.pptx": "its copy"})
+    # A sidecar and a template outside the book's folder, and a sidecar in
+    # a folder of the book's.
+    outside_root = os.path.join(work, "outside")
+    write(os.path.join(outside_root, "shared"), {"alt.csv": "Image,Alt\n",
+                                                 "book.css": "p {}\n"})
+    out, out_run, _, out_after = move("outside", {
+        "project.yaml": project,
+        "conversion.yaml": ("defaults:\n  sidecars:\n    image_alt: ../shared/alt.csv\n"
+                            "    table_headers: decisions/headers.csv\n  html:\n"
+                            "    css: ../shared/book.css\n"),
+        "intro.md": "# Intro\n", "decisions/headers.csv": "key,headers\n",
+        "decisions/notes.txt": "mine\n"})
+    out_config = read(out, "conversion.yaml")
+    # A Word book and its decks, split by type, the sidecars' rows divided.
+    split, split_run, _, split_after = move("split", {
+        "project.yaml": project, "ch1.docx": word, "lecture-01.pptx": "deck",
+        "lecture-02.pptx": "deck", "notes.txt": "mine\n",
+        "image-alt.csv": ("Image,Alt\nch1/media/image1.png,A chart\n"
+                          "lecture-01/slide-2/shape-3,A shape\n"
+                          "media/0123456789abcdef,A picture by its bytes\nmystery.png,Whose\n"),
+        "table-captions.csv": "Table,Caption\nch1#table-1,Placed\nTable 2.1,Labeled\n",
+        "slide-titles.csv": "Slide,Title\nlecture-02/slide-4,A title\n",
+        "table-headers.csv": "key,headers\nabc,first-row\n"})
+    # Markdown, its decks named by --slides, a picture both use.
+    marked = {"project.yaml": project + "  contents:\n    - ch1\n",
+              "ch1.md": "# One\n\n![Both](assets/shared.png)\n",
+              "lecture-1.md": "# Lecture\n\n![Both](assets/shared.png)\n\n"
+                              "![Deck](assets/deck.png)\n",
+              "assets/shared.png": "s", "assets/deck.png": "d", "assets/unused.png": "u",
+              "deck.pptx": "deck"}
+    mixed, mixed_run, _, mixed_after = move("mixed", marked, "--slides", "lecture-*.md")
+    stuck, stuck_run, stuck_before, stuck_after = move("unplaced", marked)
+    # Where a project can't be, and a configuration that's out of date.
+    colon = os.path.join(work, "a:b")
+    os.makedirs(colon)
+    colon_run = subprocess.run([sys.executable, tool, "-d", colon], capture_output=True,
+                               text=True)
+    home, home_run, home_before, home_after = move("home", {"intro.md": "# I\n"},
+                                                   home=os.path.join(work, "home", "book"))
+    legacy, legacy_run, legacy_before, legacy_after = move("legacy", {
+        "imsmanifest.yaml": "title: Old\n", "intro.md": "# I\n"})
+    stale, stale_run, stale_before, stale_after = move("stale", {
+        "conversion.yaml": "defaults:\n  promote_h1: always\n", "intro.md": "# I\n"})
+    with open(os.path.join(ROOT, "bin", "convert.py"), encoding="utf-8") as fh:
+        convert_text = fh.read()
+    mover = load(tool, "movetosrc")
+
+    def failed(done):
+        return fail(f"got {done.returncode}: {done.stdout}{done.stderr}")
+    return [
+        ("one book goes whole into src/book/, its pictures and _pt/ with it",
+         lambda: md_run.returncode == 0
+         and {"src/book/intro.md", "src/book/assets/fig.png", "src/book/_pt/about.html"}
+         <= set(md_after) or failed(md_run)),
+        ("what a setting names stays where the setting finds it, once",
+         lambda: "templates/book.css" in md_after and "footer.md" in md_after
+         and not any(p.startswith("src/book/templates") for p in md_after)
+         or fail(f"got: {md_after}")),
+        ("the sidecar goes to sidecars/book/, and sidecars: and output_dir: . come out of "
+         "conversion.yaml with the comments above them, the rest as it was",
+         lambda: "sidecars/book/image-alt.csv" in md_after and "image-alt.csv" not in md_after
+         and "sidecars:" not in md_config and "output_dir" not in md_config
+         and "Where the decisions" not in md_config and "Beside the sources" not in md_config
+         and "    css: templates/book.css\n  footer: footer.md\n" in md_config
+         or fail(md_config)),
+        ("what earlier runs wrote stays at the top, named: a page beside its source, and the "
+         "intermediates of a page an included file made among it",
+         lambda: {"intro.json", "intro.filtered.json", "card.json", "card.filtered.json",
+                  "fidelity.csv", "html/intro.html", "intro.html"} <= set(md_after)
+         and all(n in md_run.stdout for n in ("intro.json", "fidelity.csv", "html/",
+                                              "intro.html")) or failed(md_run)),
+        ("--dry-run says what it would do and changes nothing",
+         lambda: md_dry_run.returncode == 0 and md_dry_before == md_dry_after
+         and "intro.md -> src/book/intro.md" in md_dry_run.stdout
+         and "Nothing was moved" in md_dry_run.stdout or failed(md_dry_run)),
+        ("run again, it says the project's in the new layout already",
+         lambda: again.returncode == 1 and "new layout already" in again.stderr
+         or failed(again)),
+        ("a Word book goes whole, its media from an earlier run left and named",
+         lambda: docx_run.returncode == 0 and "src/book/chapter-1.docx" in docx_after
+         and "chapter-1/media/image1.png" in docx_after and "chapter-1/" in docx_run.stdout
+         or failed(docx_run)),
+        ("a LaTeX book's own src/ becomes src/book/, its .latexmkrc with it, a README left",
+         lambda: latex_run.returncode == 0
+         and {"src/book/main.tex", "src/book/chapters/one.tex", "src/book/figs/a.png",
+              "src/book/.latexmkrc", "README.md"} <= set(latex_after) or failed(latex_run)),
+        ("a LaTeX book's master at the top goes whole with its .latexmkrc, and another dot "
+         "file stays",
+         lambda: top_run.returncode == 0
+         and {"src/book/main.tex", "src/book/chapters/one.tex", "src/book/.latexmkrc",
+              ".gitignore"} <= set(top_after) or failed(top_run)),
+        ("decks alone go into src/slides/, the copy a run saved of one left",
+         lambda: decks_run.returncode == 0
+         and {"src/slides/a.pptx", "src/slides/b.odp", "b.pptx"} <= set(decks_after)
+         or failed(decks_run)),
+        ("a sidecar and a template outside the folder are copied in, the setting rewritten "
+         "and the originals left; one in a folder of the book's moves out of it first",
+         lambda: out_run.returncode == 0
+         and {"sidecars/book/image-alt.csv", "sidecars/book/table-headers.csv",
+              "templates/book.css", "src/book/decisions/notes.txt"} <= set(out_after)
+         and "src/book/decisions/headers.csv" not in out_after
+         and 'css: "templates/book.css"' in out_config
+         and os.path.isfile(os.path.join(outside_root, "shared", "alt.csv"))
+         or fail(f"{out_after}\n{out_config}\n{out_run.stdout}{out_run.stderr}")),
+        ("a Word book and its decks split by type, each into its part",
+         lambda: split_run.returncode == 0
+         and {"src/book/ch1.docx", "src/slides/lecture-01.pptx", "src/slides/lecture-02.pptx",
+              "notes.txt"} <= set(split_after) or failed(split_run)),
+        ("a sidecar's rows divided by their keys: a Word file's media and a page's table to "
+         "the book, a deck's shape and slide to the decks, content and labels to both, the "
+         "original left",
+         lambda: read(split, "sidecars", "book", "image-alt.csv") ==
+         "Image,Alt\nch1/media/image1.png,A chart\nmedia/0123456789abcdef,A picture by its "
+         "bytes\nmystery.png,Whose\n"
+         and read(split, "sidecars", "slides", "image-alt.csv") ==
+         "Image,Alt\nlecture-01/slide-2/shape-3,A shape\nmedia/0123456789abcdef,A picture "
+         "by its bytes\nmystery.png,Whose\n"
+         and "ch1#table-1" not in read(split, "sidecars", "slides", "table-captions.csv")
+         and "Table 2.1" in read(split, "sidecars", "slides", "table-captions.csv")
+         and "slide-titles.csv" not in os.listdir(os.path.join(split, "sidecars", "book"))
+         and "abc" in read(split, "sidecars", "slides", "table-headers.csv")
+         and "image-alt.csv" in split_after
+         and "image-alt.csv: mystery.png" in split_run.stdout or failed(split_run)),
+        ("split by contents and --slides, a picture both use is copied into both, one only "
+         "a deck uses into the decks, and one none uses named and left",
+         lambda: mixed_run.returncode == 0
+         and {"src/book/ch1.md", "src/slides/lecture-1.md", "src/slides/deck.pptx",
+              "src/book/assets/shared.png", "src/slides/assets/shared.png",
+              "src/slides/assets/deck.png", "assets/unused.png"} <= set(mixed_after)
+         and "src/book/assets/deck.png" not in mixed_after
+         and "assets/unused.png" in mixed_run.stdout or failed(mixed_run)),
+        ("a Markdown source left unplaced moves nothing, and is named",
+         lambda: stuck_run.returncode == 1 and stuck_before == stuck_after
+         and "lecture-1.md" in stuck_run.stderr and "--slides" in stuck_run.stderr
+         or failed(stuck_run)),
+        ("a folder whose path holds a colon, and the home folder, are refused",
+         lambda: colon_run.returncode == 1 and "colon" in colon_run.stderr
+         and home_run.returncode == 1 and "home folder" in home_run.stderr
+         and home_before == home_after or fail(colon_run.stderr + home_run.stderr)),
+        ("a v0.1 configuration, or one this version doesn't read, moves nothing",
+         lambda: legacy_run.returncode == 1 and "migrate-config.py" in legacy_run.stderr
+         and legacy_before == legacy_after and stale_run.returncode == 1
+         and "nothing was moved" in stale_run.stderr and stale_before == stale_after
+         or fail(legacy_run.stderr + stale_run.stderr)),
+        ("its sources' extensions and a repository's own files are convert.py's",
+         lambda: re.search(r"^SOURCE_EXTENSIONS = (\(.*\))$", convert_text, re.M)
+         and eval(re.search(r"^SOURCE_EXTENSIONS = (\(.*\))$", convert_text, re.M).group(1))
+         == mover.SOURCE_EXTENSIONS
+         and all(f'"{name}"' in convert_text for name in mover.REPOSITORY_FILES)),
+    ]
+
+
 def _raises(call):
     try:
         call()
@@ -10415,6 +10643,7 @@ def check_run_all():
 GROUPS = [
     ("the rule for a name that becomes a folder or a file", check_naming_rule),
     ("a target's stamp, the five digests of what it's built from", check_stamps),
+    ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("a report's rows", check_report_rows),
     ("cells a spreadsheet would take for formulas, written and read", check_formula_cells),
     ("alt text's rules, and their findings", check_alt_text_rules),

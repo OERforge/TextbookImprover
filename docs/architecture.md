@@ -132,6 +132,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | File | What it does |
 |---|---|
 | `migrate-config.py` | One-time: splits a v0.1 `imsmanifest.yaml` into the three v0.2 files. |
+| `move-to-src.py` | One-time, for the next release: moves a book into the layout it reads, each part's sources in `src/<part>/` and its sidecars in `sidecars/<part>/`. |
 | `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |

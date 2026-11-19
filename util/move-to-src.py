@@ -27,14 +27,17 @@ source placed by the first of these that places it:
      book's, and an HTML or AsciiDoc file the book's, since no deck is
      one.
   2. By the book's contents: a Markdown or LaTeX file it names is the
-     book's, and so is a LaTeX master and each .tex a master of the
-     book's includes.
+     book's, by its own name or its page's (01-Intro for "01 Intro.md"),
+     and so is a LaTeX master and each .tex a master of the book's
+     includes.
   3. By --slides PATTERN, for decks written in Markdown.
 
 If a Markdown or LaTeX source is left unplaced, it moves nothing and
 names them. Split, each part gets a copy of every file its sources name,
 so a picture both use is in both and no reference is rewritten; a file
-no source names is named and left where it is.
+no source names is named and left where it is. A LaTeX book takes its
+.latexmkrc, its file of definitions (latex.macros), and any package,
+class, or bibliography style it keeps beside its sources.
 
 SIDECARS
 
@@ -102,6 +105,7 @@ except ImportError:
 
 import bookcontents                                  # noqa: E402
 import decksave                                      # noqa: E402
+import names                                         # noqa: E402
 import oerconfig                                     # noqa: E402
 
 SETTINGS_FILES = ("project.yaml", "conversion.yaml", "packaging.yaml")
@@ -398,7 +402,13 @@ SRCSET = re.compile(r"""\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
 CSS_URL = re.compile(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""", re.I)
 LATEX_NAMES = re.compile(
     r"\\(includegraphics|input|include|subfile|bibliography|addbibresource|"
-    r"lstinputlisting|verbatiminput|includepdf|includesvg)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
+    r"lstinputlisting|verbatiminput|includepdf|includesvg|usepackage|RequirePackage|"
+    r"documentclass|LoadClass|bibliographystyle)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
+# A package, class, or bibliography style a book keeps beside its sources
+# is found by its name and this extension; one TeX's own tree supplies
+# isn't there, and nothing is copied for it.
+LATEX_OWN = {"usepackage": ".sty", "RequirePackage": ".sty", "documentclass": ".cls",
+             "LoadClass": ".cls", "bibliographystyle": ".bst"}
 GRAPHICSPATH = re.compile(r"\\graphicspath\s*\{((?:\{[^}]*\})+)\}")
 ASCIIDOC_NAMES = re.compile(r"(?:image::?|include::|video::|audio::|link:)([^\[\s]+)\[")
 
@@ -732,6 +742,10 @@ class Move:
                    and _is_master(os.path.join(root, n))]
         for master in masters:
             latex_book |= self.latex_closure(master)
+        # The book's file of definitions (latex.macros) is the book's too.
+        macros = str(config.setting("latex", "macros") or "").strip()
+        if masters and macros in book:
+            latex_book.add(macros)
         for name in sources:
             lower = name.lower()
             stem = self.stem(name)
@@ -739,7 +753,8 @@ class Move:
                 placed["slides"].append(name)
             elif lower.endswith((".docx", ".html", ".adoc", ".asciidoc")):
                 placed["book"].append(name)
-            elif stem in contents or name in latex_book:
+            elif stem in contents or names.safe_stem(stem) in contents \
+                    or name in latex_book:
                 placed["book"].append(name)
             elif any(fnmatch.fnmatch(name, p) for p in self.slides_patterns) \
                     and lower.endswith(".md"):
@@ -787,6 +802,9 @@ class Move:
             if target is None:
                 return
             options = candidates or [target]
+            # A backslash between folders is read as a slash, as the run
+            # reads it, so the file comes with the source that names it.
+            options = options + [o.replace("\\", "/") for o in options if "\\" in o]
             for option in options:
                 full = option if os.path.isabs(option) else os.path.join(self.root, option)
                 if not inside(full, self.root):
@@ -818,6 +836,8 @@ class Move:
                     add(item, [item, item + ".tex"])
                 elif command in ("bibliography",):
                     add(item, [item + ".bib", item])
+                elif command in LATEX_OWN:
+                    add(item, [item + LATEX_OWN[command]])
                 else:
                     add(item)
             for included in sorted(found):
@@ -885,6 +905,15 @@ class Move:
                     more, far = self.names(part, name)
                     named[part] |= more
                     self.outside += far
+            # A LaTeX book's .latexmkrc and its file of definitions
+            # (latex.macros) are read from the book's folder though no
+            # source names them, so they go with the book.
+            if any(s.lower().endswith(LATEX_EXTENSIONS) for s in self.parts.get("book", [])):
+                macros = str(self.config.setting("latex", "macros") or "").strip()
+                for name in BOOK_DOT_FILES + ((macros,) if macros else ()):
+                    if os.sep not in name and "/" not in name \
+                            and os.path.isfile(os.path.join(root, name)):
+                        named["book"].add(name)
             moving = {s for sources in self.parts.values() for s in sources}
             moved_tops = {m.rstrip("/").split("/")[0] for m in moving}
             everything = set()

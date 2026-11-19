@@ -32,8 +32,9 @@ THE FIVE
   top       what the target reads outside src/: the three settings files,
             the part's sidecars, and each file a setting names.
   software  TextbookImprover's own code, Pandoc, and, where a target uses
-            them, TeX, the drawing and PDF programs, LibreOffice, and the
-            Python packages that write output.
+            them (a PDF, and every target of a LaTeX book), TeX, the
+            drawing and PDF programs, LibreOffice, and the Python packages
+            that write output.
   options   the command-line options that change an output.
 
 Each is kept apart, so a run can say which changed, and the stamp is a
@@ -100,9 +101,12 @@ SKIPPED_NAMES = ("Thumbs.db", "desktop.ini")
 # Programs whose versions a target's output depends on, by format: every
 # format's pages may hold a drawing rsvg-convert made, and a deck in
 # another format is saved as PowerPoint by LibreOffice. A PDF's build runs
-# LuaTeX, pdftocairo, and Ghostscript (and through it epstopdf).
+# LuaTeX, pdftocairo, and Ghostscript (and through it epstopdf). So does
+# every target of a LaTeX book, a page or an EPUB too: its drawings are
+# set by pdfLaTeX or LuaLaTeX with the book's preamble and made pictures
+# by pdftocairo, whatever the target (lib/latexsource.py's render).
 COMMON_TOOLS = ("pandoc", "rsvg-convert", "libreoffice")
-TEX_TOOLS = ("luatex", "texlive", "pdftocairo", "gs")
+TEX_TOOLS = ("luatex", "pdftex", "texlive", "pdftocairo", "gs")
 TEX_FORMATS = ("pdf", "latex")
 
 # The Python packages that write output, by their distributions' names.
@@ -114,6 +118,7 @@ VERSION_COMMANDS = {
     "rsvg-convert": ["rsvg-convert", "--version"],
     "libreoffice": ["libreoffice", "--version"],
     "luatex": ["luatex", "--version"],
+    "pdftex": ["pdftex", "--version"],
     "pdftocairo": ["pdftocairo", "-v"],
     "gs": ["gs", "--version"],
 }
@@ -286,9 +291,11 @@ def top_digest(root, part, named=()):
     return text_digest(top_entries(root, part, named))
 
 
-def software(fmt):
-    """The programs a target of this format depends on."""
-    return COMMON_TOOLS + (TEX_TOOLS if fmt in TEX_FORMATS else ())
+def software(fmt, latex_book=False):
+    """The programs a target of this format depends on; latex_book for a
+    target of a LaTeX book, whose drawings TeX and pdftocairo make for
+    every format."""
+    return COMMON_TOOLS + (TEX_TOOLS if fmt in TEX_FORMATS or latex_book else ())
 
 
 _VERSIONS = {}

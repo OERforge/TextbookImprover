@@ -656,9 +656,12 @@ def check_stamps():
          lambda: stamps.stamp_name("package", "course") == "package-course.json"
          and all(_raises(lambda n=n: stamps.stamp_name("target", n)) for n in ("../x", "Work"))),
         ("the software digest names Pandoc, and TeX's programs only for a PDF or a LaTeX "
-         "target",
+         "target, or any target of a LaTeX book, whose drawings they make",
          lambda: "pandoc" in stamps.software("html") and "luatex" not in stamps.software("html")
-         and {"luatex", "texlive", "pdftocairo", "gs"} <= set(stamps.software("pdf"))
+         and {"luatex", "pdftex", "texlive", "pdftocairo", "gs"} <= set(stamps.software("pdf"))
+         and set(stamps.software("html", latex_book=True)) == set(stamps.software("pdf"))
+         and all(name == "pandoc" or name == "texlive" or name in stamps.VERSION_COMMANDS
+                 for name in stamps.software("pdf"))
          and set(stamps.software_values(["pandoc"], root=own)) ==
          {"textbookimprover", "tools", "packages", "python"}),
         ("each builder of one format reads only the format sections its stamp keeps",
@@ -774,6 +777,23 @@ def check_move_to_src():
               "deck.pptx": "deck"}
     mixed, mixed_run, _, mixed_after = move("mixed", marked, "--slides", "lecture-*.md")
     stuck, stuck_run, stuck_before, stuck_after = move("unplaced", marked)
+    # A book whose files have spaces in their names, which contents names
+    # by their pages' names, and a picture named with a backslash.
+    spaced, spaced_run, _, spaced_after = move("spaced", {
+        "project.yaml": project + "  contents:\n    - 01-Big-Picture\n",
+        "01 Big Picture.md": "# One\n\n![A portrait](assets\\portrait.png)\n",
+        "S01 Slides.md": "# Lecture\n", "assets/portrait.png": "p"},
+        "--slides", "S*.md")
+    # A LaTeX book beside decks: what LaTeX reads by name without a source
+    # naming a file goes with the book.
+    texdecks, texdecks_run, _, texdecks_after = move("latex-decks", {
+        "project.yaml": project, "deck.pptx": "deck",
+        "main.tex": "\\documentclass{mybook}\n\\usepackage[x]{mystyle,amsmath}\n"
+                    "\\bibliographystyle{mine}\n\\begin{document}\n\\include{one}\n"
+                    "\\end{document}\n",
+        "one.tex": "\\chapter{One}\n", "mybook.cls": "c", "mystyle.sty": "s", "mine.bst": "b",
+        ".latexmkrc": "$pdf_mode = 4;\n", "latex-conversion-macros.tex": "% mine\n",
+        ".gitignore": "*.pdf\n", "stray.sty": "x"})
     # Where a project can't be, and a configuration that's out of date.
     colon = os.path.join(work, "a:b")
     os.makedirs(colon)
@@ -873,6 +893,21 @@ def check_move_to_src():
               "src/slides/assets/deck.png", "assets/unused.png"} <= set(mixed_after)
          and "src/book/assets/deck.png" not in mixed_after
          and "assets/unused.png" in mixed_run.stdout or failed(mixed_run)),
+        ("contents places a file by its page's name, and a picture named with a backslash "
+         "comes with its source",
+         lambda: spaced_run.returncode == 0
+         and {"src/book/01 Big Picture.md", "src/slides/S01 Slides.md",
+              "src/book/assets/portrait.png"} <= set(spaced_after) or failed(spaced_run)),
+        ("a LaTeX book split from decks takes its .latexmkrc, its definitions, and the "
+         "package, class, and style it keeps beside it, another dot file and a package it "
+         "doesn't load left",
+         lambda: texdecks_run.returncode == 0
+         and {"src/book/main.tex", "src/book/one.tex", "src/book/.latexmkrc",
+              "src/book/latex-conversion-macros.tex", "src/book/mybook.cls",
+              "src/book/mystyle.sty", "src/book/mine.bst", "src/slides/deck.pptx",
+              ".gitignore", "stray.sty"} <= set(texdecks_after)
+         and not {"src/book/.gitignore", "src/book/stray.sty", "src/slides/.latexmkrc"}
+         & set(texdecks_after) or failed(texdecks_run)),
         ("a Markdown source left unplaced moves nothing, and is named",
          lambda: stuck_run.returncode == 1 and stuck_before == stuck_after
          and "lecture-1.md" in stuck_run.stderr and "--slides" in stuck_run.stderr

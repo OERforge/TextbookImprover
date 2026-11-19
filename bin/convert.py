@@ -3425,7 +3425,9 @@ def filter_env(target, base, paths, env, reads=None):
         # filter, keying a picture on its path, would only apply again; and
         # its pictures and tables were reported from the deck itself.
         out["IMAGE_ALT"] = ""
-        out["DECK_REPORTED"] = "1"
+    # Said on every run, so that the filter never takes it from whatever
+    # the run was started with.
+    out["DECK_REPORTED"] = "1" if PPTX_RUN else ""
     return out
 
 
@@ -4743,14 +4745,17 @@ BABEL_UNTAGGED = re.compile(r"Package TIQ Warning: babel's language (\S+)\s+(?:\
 
 
 def pdf_env():
-    """The environment build-pdf.py runs in: this one, and a LaTeX book's
-    own colors, which its formulas can name (BOOK_LATEX_COLORS), and the
+    """The environment build-pdf.py runs in: this one, and, set here and
+    never inherited, a LaTeX book's own colors, which its formulas can name (BOOK_LATEX_COLORS), and the
     layout its preamble gives its pages, as Pandoc's variables
     (BOOK_LATEX_LAYOUT, JSON, {} when it gives none, which keeps the
     default page from a LaTeX book)."""
-    if not LATEX_COLORS and not LATEX_BOOK:
-        return None
     env = dict(os.environ)
+    # Neither is taken from whatever the run was started with: a book of
+    # another source has none, and build-pdf.py reads the layout's being
+    # there as a LaTeX book.
+    env.pop("BOOK_LATEX_COLORS", None)
+    env.pop("BOOK_LATEX_LAYOUT", None)
     if LATEX_COLORS:
         # A statement a line, as build-pdf.py reads them.
         env["BOOK_LATEX_COLORS"] = "\n".join(" ".join(c.split()) for c in LATEX_COLORS)
@@ -5574,7 +5579,7 @@ def deck_presentations(target, stems, base, language):
         shape, why = decklib.aspect_ratio(doc.get("meta") or {}, ratio)
         jobs.append((stem, intermediate, level, shape, why))
     env = dict(os.environ, TARGET_NAME=target.name, TITLE_BLOCK=str(target["title_block"]),
-               MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
+               MEDIA_SAFE="1", MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     os.makedirs(target.output_dir, exist_ok=True)
     notes = str(target["slides.notes"])
 
@@ -5885,7 +5890,7 @@ def number_page_headings(target, tree, titles, texts=None):
 def render_html(target, pages, base, fragments, language, env):
     env = dict(env, TARGET_NAME=target.name,
                TITLE_BLOCK=str(target["title_block"]), TITLE_WRITER="html",
-               MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
+               MEDIA_SAFE="1", MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     """--lua-filter figures-and-tables ran already; what remains is the
     writer. -M lang sets the html lang attribute (WCAG 3.1.1), from the
     project's declared language, and target-blocks.lua sets the page's own
@@ -7393,7 +7398,7 @@ def main():
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
-                         env=dict(pdf_env() or os.environ,
+                         env=dict(pdf_env(),
                                   DOWNSAMPLED=DOWNSAMPLED.get(target.name, "")),
                          capture=True, check=False)
             sys.stderr.write(result.stderr)

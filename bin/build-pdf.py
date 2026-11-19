@@ -2306,6 +2306,27 @@ def write_latex(base, name, resolved, project, document, out_dir):
     return 0
 
 
+def inherited_notes(environ, pdf=True):
+    """A line for each thing set before the run that changes what's built
+    and that nothing in the project says: OER_MEASURES, which is there for
+    the suites, and, for a PDF (pdf), OER_PDF_VIA, which is there for
+    comparing the two routes, and a TEXINPUTS, whose folders LaTeX
+    searches after the build's own and before TeX's."""
+    notes = []
+    if environ.get("OER_MEASURES"):
+        notes.append("NOTE: OER_MEASURES is set, so the book's page isn't measured and its "
+                     "tables are laid out by the measures given; unset it for the usual build.")
+    if not pdf:
+        return notes
+    if environ.get("OER_PDF_VIA") == "pandoc":
+        notes.append("NOTE: OER_PDF_VIA=pandoc is set, so this PDF is built by Pandoc's own "
+                     "run of LaTeX and not by TextbookImprover's; unset it for the usual build.")
+    if environ.get("TEXINPUTS"):
+        notes.append("NOTE: TEXINPUTS is set, so LaTeX also looks for its files in "
+                     f"{environ['TEXINPUTS']}; a book built elsewhere won't have them.")
+    return notes
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Assemble the filtered intermediates into a tagged PDF.")
@@ -2362,6 +2383,8 @@ def main():
         print("  targets:\n    pdf:\n      format: pdf", file=sys.stderr)
         return 1
 
+    for note in inherited_notes(os.environ, pdf=not args.latex_target):
+        print(note, file=sys.stderr)
     status = 0
     for name, resolved in targets:
         if args.title:

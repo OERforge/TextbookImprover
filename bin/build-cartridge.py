@@ -44,7 +44,7 @@ import os
 import re
 import sys
 import zipfile
-from datetime import date
+from datetime import date, datetime, timezone
 from urllib.parse import quote, unquote
 
 try:
@@ -893,7 +893,7 @@ def build_manifest(config, tree, page_files, common_files):
         description=xml_escape(manifest.get("description", "")),
         language=xml_escape(manifest.get("language", "en")),
         version=xml_escape(str(manifest.get("version", "1.0"))),
-        modified=manifest.get("modified") or date.today().isoformat(),
+        modified=manifest.get("modified") or build_day(),
         keywords=keywords,
     )
 
@@ -940,6 +940,16 @@ def build_manifest(config, tree, page_files, common_files):
 # --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
+
+def build_day(environ=None):
+    """The day a manifest gives when modified doesn't say one: the day
+    SOURCE_DATE_EPOCH names, in UTC, where it's set, so that a book built
+    again under it has the same manifest, and otherwise today."""
+    epoch = (os.environ if environ is None else environ).get("SOURCE_DATE_EPOCH", "")
+    if epoch.strip().isdigit():
+        return datetime.fromtimestamp(int(epoch), timezone.utc).date().isoformat()
+    return date.today().isoformat()
+
 
 def main():
     parser = argparse.ArgumentParser(

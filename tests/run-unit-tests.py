@@ -3216,6 +3216,58 @@ def check_images_plan():
     ]
 
 
+def check_inherited():
+    """What a run is started with and doesn't take, or takes and says: a
+    LaTeX book's layout and colors reach build-pdf.py from convert.py
+    alone (pdf_env); build-pdf.py names OER_PDF_VIA, OER_MEASURES, and a
+    TEXINPUTS set before the run (inherited_notes); and a cartridge's
+    manifest is dated from SOURCE_DATE_EPOCH where it's set (build_day)."""
+    from datetime import date
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_inherited")
+    pdf = load(os.path.join(ROOT, "bin", "build-pdf.py"), "pdf_inherited")
+    names = ("BOOK_LATEX_LAYOUT", "BOOK_LATEX_COLORS")
+    kept = {name: os.environ.get(name) for name in names}
+    os.environ["BOOK_LATEX_LAYOUT"] = '{"papersize":"a5"}'
+    os.environ["BOOK_LATEX_COLORS"] = "\\definecolor{x}{HTML}{FF0000}"
+    try:
+        convert.LATEX_BOOK, convert.LATEX_COLORS, convert.LATEX_LAYOUT = False, [], {}
+        other = convert.pdf_env()
+        convert.LATEX_BOOK, convert.LATEX_COLORS, convert.LATEX_LAYOUT = (
+            True, ["\\definecolor{mine}{HTML}{00FF00}"], {"papersize": "letter"})
+        latex = convert.pdf_env()
+    finally:
+        for name, value in kept.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    notes = pdf.inherited_notes
+    every = {"OER_PDF_VIA": "pandoc", "OER_MEASURES": "none", "TEXINPUTS": "/somewhere:"}
+    return [
+        ("a book that isn't LaTeX gives build-pdf.py no layout or colors, whatever the run "
+         "was started with",
+         lambda: other is not None and not any(name in other for name in names)),
+        ("a LaTeX book gives its own, not the ones the run was started with",
+         lambda: latex["BOOK_LATEX_LAYOUT"] == '{"papersize": "letter"}'
+         and latex["BOOK_LATEX_COLORS"] == "\\definecolor{mine}{HTML}{00FF00}"),
+        ("build-pdf.py says nothing of an environment that sets none of the three",
+         lambda: notes({"PATH": "/bin", "OER_PDF_VIA": ""}) == []),
+        ("it names OER_MEASURES, OER_PDF_VIA=pandoc, and TEXINPUTS with its folders, a line each",
+         lambda: [n.split()[1] for n in notes(every)] == ["OER_MEASURES", "OER_PDF_VIA=pandoc",
+                                                           "TEXINPUTS"]
+         and "/somewhere:" in notes(every)[2]
+         and all(n.startswith("NOTE: ") for n in notes(every))),
+        ("for a latex target, which builds no PDF, only OER_MEASURES",
+         lambda: [n.split()[1] for n in notes(every, pdf=False)] == ["OER_MEASURES"]),
+        ("a cartridge's manifest is dated from SOURCE_DATE_EPOCH, in UTC",
+         lambda: cartridge.build_day({"SOURCE_DATE_EPOCH": "1700000000"}) == "2023-11-14"
+         and cartridge.build_day({"SOURCE_DATE_EPOCH": "86399"}) == "1970-01-01"),
+        ("and from today without one, or with one that isn't a number",
+         lambda: cartridge.build_day({}) == date.today().isoformat()
+         and cartridge.build_day({"SOURCE_DATE_EPOCH": "soon"}) == date.today().isoformat()),
+    ]
+
+
 def check_upright():
     """A picture whose EXIF orientation turns or mirrors it (lib/downsample.py):
     the orientation read, 1 for anything else; a copy drawn the way a
@@ -10808,6 +10860,7 @@ GROUPS = [
     ("images.compress and images.downsample, as the copies are made",
      check_images_plan),
     ("a picture turned by its EXIF orientation, and its upright copy", check_upright),
+    ("what a run is started with and doesn't take, or takes and says", check_inherited),
     ("the stand-in for Pandoc 3.9 (tests/pandoc39)", check_pandoc39_stand_in),
     ("MathML asked for in every call that writes HTML", check_math_asked_for),
     ("a name bound once, and lengths in TeX's units", check_bound_once),

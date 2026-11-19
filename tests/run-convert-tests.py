@@ -4311,6 +4311,55 @@ def case_html_ids(work):
     ]
 
 
+def case_inherited_variables(work):
+    """What a run takes from the environment it's started in: nothing of
+    what its filters and its PDF builder are told by convert.py itself. A
+    book with a picture that has no alt text and a picture whose name has a
+    space, built once as it is and once with DECK_REPORTED, MEDIA_SAFE, and
+    a LaTeX book's layout and colors set beforehand, says the same and
+    writes the same pages."""
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+                           "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+
+    def build(name, **extra):
+        folder = os.path.join(work, name)
+        os.makedirs(folder)
+        for picture in ("plain.png", "my photo.png"):
+            with open(os.path.join(folder, picture), "wb") as fh:
+                fh.write(png)
+        with open(os.path.join(folder, "p.md"), "w", encoding="utf-8") as fh:
+            fh.write("# P\n\n![](plain.png)\n\n![A dot](<my photo.png>)\n\n"
+                     "| A | B |\n|---|---|\n| 1 | 2 |\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        with open(os.path.join(folder, "project.yaml"), "w") as fh:
+            fh.write("project:\n  identifier: org.example.inherited\n  title: Inherited\n")
+        ran = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                             cwd=folder, capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, env=dict(os.environ, **extra))
+        page = os.path.join(folder, "html", "p.html")
+        text = ""
+        if os.path.exists(page):
+            with open(page, encoding="utf-8") as fh:
+                text = fh.read()
+        said = (ran.stdout + ran.stderr).replace(folder, "")
+        return ran.returncode, said, text
+    plain = build("plain")
+    given = build("given", DECK_REPORTED="1", MEDIA_SAFE="0",
+                  BOOK_LATEX_LAYOUT='{"papersize":"a5"}',
+                  BOOK_LATEX_COLORS="\\definecolor{x}{HTML}{FF0000}")
+    return [
+        ("the book builds, and warns of its picture with no alt text",
+         lambda: plain[0] == 0 and "no alt text" in plain[1] and bool(plain[2])),
+        ("with DECK_REPORTED, MEDIA_SAFE, and a LaTeX book's layout and colors set before "
+         "the run, it builds as well",
+         lambda: given[0] == 0),
+        ("and says the same, its warnings among it", lambda: given[1] == plain[1]),
+        ("and writes the same page", lambda: given[2] == plain[2]),
+    ]
+
+
 def case_turned_pictures(work):
     """A photograph stored on its side, its EXIF orientation turning it:
     a Word target carries a copy drawn the way a browser shows it, with no
@@ -10545,6 +10594,7 @@ CASES = [
     ("file names lowercased", case_lowercase_names),
     ("images scaled down to a set number of times the width shown", case_downsample),
     ("a photograph turned by its EXIF orientation", case_turned_pictures),
+    ("variables set before the run that convert.py sets itself", case_inherited_variables),
     ("white space with nothing to show: an empty mark, a cell of a no-break space",
      case_white_marks),
     ("a link to a file in another case, or with backslashes", case_linked_paths),

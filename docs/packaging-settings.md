@@ -50,7 +50,7 @@ Version recorded in the package metadata. Quote it: unquoted 1.10 is read as the
 
 **`modified`**—`date`; default `""` (empty)
 
-Date recorded in the package metadata, as YYYY-MM-DD. Empty means the day the package is built, which makes the output differ between runs; set it to keep builds reproducible.
+Date recorded in the package metadata, as YYYY-MM-DD. Empty means the day SOURCE_DATE_EPOCH names, in UTC, where the run has it set, and otherwise the day the package is built, which makes the output differ between runs; set either to keep builds reproducible.
 
 **`keywords`**—`list`; default `[]`
 

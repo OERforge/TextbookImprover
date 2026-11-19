@@ -12,6 +12,10 @@ What this target produces. markdown and asciidoc write source again: what the au
 
 Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other. One folder's name, as a target's is: a lowercase letter, then lowercase letters, digits, - and _. A target written with output_dir: . goes into the book's own folder, which the next release's layout doesn't allow; the run warns of it.
 
+**`part`**—`string`; default `""` (empty); *target only*
+
+Which of the project's parts (project.parts) this target is built from; left empty, the book's. Read and checked; not acted on yet: the layout that builds each part from a folder of its own comes with the next release (see ROADMAP.md).
+
 **`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
 
 Whether this target's folder is packed into one file too, once it's written: a zip or a tar.gz beside the folder, named after it (remediated.zip), holding the folder, less the intermediates folder the run keeps there for a target whose filter settings differ from the first target's. The folder stays, and each run writes both afresh. A Common Cartridge is the packager's (--zip); this is for handing a folder on whole, such as a set of remediated decks.

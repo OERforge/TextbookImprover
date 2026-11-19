@@ -1,0 +1,3 @@
+# A target's part is one the project names.
+target: decks
+error: "the project's parts are book"

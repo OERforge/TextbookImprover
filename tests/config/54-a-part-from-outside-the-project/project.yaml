@@ -1,0 +1,5 @@
+project:
+  parts:
+    book:
+      kind: book
+      from: ../elsewhere/book.zip

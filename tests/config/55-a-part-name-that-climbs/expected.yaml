@@ -1,0 +1,2 @@
+# A part's name becomes its folders' (src/<part>/, sidecars/<part>/).
+error: "a part is named '../book'"

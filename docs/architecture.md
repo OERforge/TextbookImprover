@@ -119,7 +119,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 
 | File | What it does |
 |---|---|
-| `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. |
+| `oerconfig.py` | Loads, merges, validates, and writes configuration. Both halves use it; neither uses the other. It holds the rule for a name that becomes a folder or a file, and checks `project.parts`. |
 | `tablecensus.py` | Reads the tables in a Word document and says what shape they're: the classification, the guess, and the sidecar key. Used by the pre-pass and by `table-census.py`. |
 | `outputcheck.py` | The output checks, in nothing but the standard library. |
 | `bookassembly.py` | Reads the filtered intermediates and assembles them into one Pandoc document by the contents tree, with every id prefixed by its page; `build-epub.py` and `build-pdf.py` share it. |

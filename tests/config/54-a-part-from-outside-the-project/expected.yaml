@@ -1,0 +1,2 @@
+# A part's upstream file is inside the project, so the project is whole.
+error: "with no '..'"

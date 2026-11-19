@@ -1,0 +1,4 @@
+project:
+  parts:
+    ../book:
+      kind: book

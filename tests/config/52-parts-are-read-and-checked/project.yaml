@@ -1,0 +1,15 @@
+project:
+  license: CC-BY-4.0
+  parts:
+    book:
+      kind: book
+      from: upstream/book.zip
+    slides:
+      kind: slides
+      license: CC-BY-NC-SA-4.0
+      from:
+        file: upstream/slides.zip
+        unpacker: archive
+    exercises:
+      kind: files
+  include: [README.md]

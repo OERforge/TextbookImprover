@@ -131,6 +131,20 @@ DEVICE_NAMES = frozenset(
 # wrote three levels above the book (measured at 401e1d9, 2026-11-15).
 FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+# What a part is. A testbank is reserved for the test banks to come.
+PART_KINDS = ("book", "slides", "files", "testbank")
+
+# The unpackers a part's upstream file may name, and the options of each
+# that change what it writes. An option that only changes how it works
+# (where it caches, whether it lists) isn't the part's to set.
+UNPACKERS = {
+    "cartridge": ("--linked-documents",),
+    "cnx": ("--book", "--update-exercises", "--no-boxes"),
+    "epub": (),
+    "jekyll": (),
+    "site": ("--whole-pages", "--profile", "--third-party"),
+    "archive": (),
+}
 
 
 class ConfigError(Exception):
@@ -818,6 +832,17 @@ def resolve(schema, project_schema, documents, target=None,
             problem = name_problem(value, f"{what}'s {name}")
             if problem:
                 problems.append(problem)
+        part = settings.get("part") if schema.node("part") is not None else None
+        if part:
+            declared_parts = project.get("parts") if isinstance(project.get("parts"), dict) else {}
+            known = list(declared_parts) or ["book", "slides"]
+            if part not in known:
+                problems.append(
+                    f"{what} has part: {part}, and "
+                    + (f"the project's parts are {', '.join(map(str, known))}."
+                       if declared_parts else
+                       "the project names no parts, so its one part is book, "
+                       "or slides for a folder of decks."))
         if schema.node("filename") is not None and settings.get("filename"):
             problem = filename_problem(settings["filename"], f"{what}'s filename")
             if problem:
@@ -828,6 +853,9 @@ def resolve(schema, project_schema, documents, target=None,
         problem = filename_problem(project["identifier"], f"{where}: project.identifier")
         if problem:
             problems.append(problem)
+    more, warned = parts_problems(project, where)
+    problems.extend(more)
+    warnings.extend(warned)
     if problems:
         raise ConfigError("\n".join(problems))
 
@@ -895,6 +923,121 @@ def filename_problem(value, what):
                 "the dot, so no file there can have it.")
     return None
 
+
+def _inside_path_problem(value, what):
+    """Why value can't be a path inside the project, or None."""
+    text = str(value).replace("\\", "/")
+    parts = [p for p in text.split("/") if p not in ("", ".")]
+    if not text.strip() or text.startswith("/") or re.match(r"^[A-Za-z]:", text) \
+            or ".." in parts or not parts:
+        return (f"{what} is {value!r}; it's a path inside the project's "
+                "folder, written from there, with no '..'.")
+    return None
+
+
+def parts_problems(project, where):
+    """What's wrong with project.parts, project.include, and project.license,
+    as messages, and what to warn of. Read and checked; nothing builds from
+    them yet."""
+    problems, warnings = [], []
+    parts = project.get("parts")
+    if parts in (None, {}, []):
+        parts = {}
+    if not isinstance(parts, dict):
+        problems.append(f"{where}: project.parts is a block of names, one "
+                        "for each part (book:, slides:), each with its kind.")
+        parts = {}
+    for name, block in parts.items():
+        what = f"{where}: part {name!r}"
+        problem = name_problem(name, f"{where}: a part")
+        if problem:
+            problems.append(problem)
+        if not isinstance(block, dict):
+            problems.append(f"{what} is a block holding its kind "
+                            f"({', '.join(PART_KINDS)}).")
+            continue
+        unknown = sorted(set(block) - {"kind", "from", "license"})
+        if unknown:
+            problems.append(f"{what} has {', '.join(map(str, unknown))}, which a "
+                            "part doesn't have: a part has kind, from, and "
+                            "license.")
+        kind = block.get("kind")
+        if kind not in PART_KINDS:
+            problems.append(f"{what} has kind {kind!r}; a part's kind is one of "
+                            f"{', '.join(PART_KINDS)}.")
+        elif kind == "testbank":
+            warnings.append(f"{what} has kind testbank, which is kept for the "
+                            "test banks to come; nothing is built from it.")
+        license = block.get("license")
+        if license is not None and (not isinstance(license, str) or not license.strip()):
+            problems.append(f"{what} has a license that isn't text; give its "
+                            "SPDX identifier, CC-BY-4.0 say, or its name.")
+        source = block.get("from")
+        if source is not None:
+            problems.extend(_from_problems(source, f"{what}'s from"))
+    include = project.get("include")
+    if include not in (None, []):
+        if not isinstance(include, list):
+            include = [include]
+        for item in include:
+            problem = _inside_path_problem(item, f"{where}: an entry of project.include")
+            if problem:
+                problems.append(problem)
+    return problems, warnings
+
+
+def _from_problems(source, what):
+    """What's wrong with a part's from: a path inside the project, or a
+    mapping naming its file and unpacker, or the address and commit a
+    repository is fetched from."""
+    if isinstance(source, str):
+        problem = _inside_path_problem(source, what)
+        return [problem] if problem else []
+    if not isinstance(source, dict):
+        return [f"{what} is a path to the part's upstream file, or a block "
+                "with file and unpacker."]
+    problems = []
+    if "address" in source:
+        allowed = {"address", "commit", "unpacker"}
+        if not str(source.get("address") or "").startswith("https://"):
+            problems.append(f"{what} has an address that isn't an https:// one.")
+        if not str(source.get("commit") or "").strip():
+            problems.append(f"{what} names an address and no commit, which "
+                            "the upstream file is fetched at.")
+    else:
+        allowed = {"file", "unpacker", "options"}
+        if source.get("file") is None:
+            problems.append(f"{what} has no file, the path to the part's "
+                            "upstream file.")
+        else:
+            problem = _inside_path_problem(source["file"], f"{what}'s file")
+            if problem:
+                problems.append(problem)
+    unknown = sorted(set(source) - allowed)
+    if unknown:
+        problems.append(f"{what} has {', '.join(map(str, unknown))}, which it "
+                        f"doesn't take; it takes {', '.join(sorted(allowed))}.")
+    unpacker = source.get("unpacker")
+    if unpacker is not None and unpacker not in UNPACKERS:
+        problems.append(f"{what} names the unpacker {unpacker!r}; it's one of "
+                        f"{', '.join(UNPACKERS)}.")
+    options = source.get("options")
+    if options not in (None, []):
+        if not isinstance(options, list):
+            options = [options]
+        if unpacker is None:
+            problems.append(f"{what} gives options and no unpacker for them.")
+        else:
+            takes = UNPACKERS.get(unpacker, ())
+            for option in options:
+                flag = str(option).split("=", 1)[0]
+                if flag not in takes:
+                    problems.append(
+                        f"{what} gives the option {option!r}, which the {unpacker} "
+                        "unpacker doesn't take here"
+                        + (f"; it takes {', '.join(takes)}." if takes else
+                           "; it takes none."))
+    return problems
 
 
 # --------------------------------------------------------------------------

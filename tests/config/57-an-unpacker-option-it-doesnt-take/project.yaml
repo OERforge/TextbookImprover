@@ -1,0 +1,8 @@
+project:
+  parts:
+    book:
+      kind: book
+      from:
+        file: upstream/book.imscc
+        unpacker: cartridge
+        options: [--no-boxes]

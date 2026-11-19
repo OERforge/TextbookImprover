@@ -65,11 +65,17 @@ def unusual(node):
     kind = node.type
     # A name that becomes a folder or a file follows the naming rule, so
     # its awkward value is one the rule takes: a file's name that YAML
-    # would read as a number.
+    # would read as a number, and a part named with the word YAML makes a
+    # boolean of, which project.parts declares.
     if node.path == "output_dir":
         return "awkward-out"
     if node.path == "filename":
         return "1.10"
+    if node.path == "part":
+        return "no"
+    if node.path == "parts":
+        return {"no": {"kind": "files", "from": "sub dir/file, with comma.zip",
+                       "license": "1.10"}}
     if kind == "bool":
         return not bool(node.default)
     if kind == "int":

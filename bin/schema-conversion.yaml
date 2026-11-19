@@ -64,6 +64,16 @@ keys:
       book's own folder, which the next release's layout doesn't allow;
       the run warns of it.
 
+  part:
+    type: string
+    default: ""
+    target_only: true
+    stage: render
+    description: >
+      Which of the project's parts (project.parts) this target is built
+      from; left empty, the book's. Read and checked; not acted on yet:
+      the layout that builds each part from a folder of its own comes with
+      the next release (see ROADMAP.md).
 
   archive:
     type: enum

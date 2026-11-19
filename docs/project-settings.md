@@ -28,6 +28,10 @@ A sentence or two about the book, used wherever a package format asks for one.
 
 Who published the book. Written as document metadata, and available to package formats that record it.
 
+**`license`**—`string`; default `""` (empty)
+
+The license the book is published under, as its SPDX identifier where it has one (CC-BY-4.0, CC-BY-NC-SA-4.0) and otherwise as its name. A part may have a license of its own (parts). Read and checked; not acted on yet (see ROADMAP.md).
+
 **`numbering`**—`bool`; default `false`
 
 Number the book's structure the way a printed book does: groups and top-level pages with the main role 1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1, A.2; front and back matter unnumbered. The numbers appear in the EPUB's table of contents and headings, the cartridge organization, the generated contents page, and the pages' titles.
@@ -43,3 +47,11 @@ A directory, inside the book's, for pages that aren't converted from the book's 
 **`contents`**—`opaque`; default `[]`
 
 The book's structure as a nested list of pages and groups. This describes the book, not any one package, so a cartridge organization and an EPUB table of contents are both built from it. A group or page may carry a role, front, main, appendix, or back, which says how it counts when numbering is on and where it belongs in the book; the default is main. It may also carry a type, what it is (preface, glossary, index, part, or another of the types EPUB's structural semantics name that docs/configuration.md lists; any other is warned of and ignored), which an EPUB marks for reading systems and screen readers; a top-level entry with no role is in the part of the book its type implies, and a type isn't inherited. An entry "generate: toc" is a page the run writes, a full table of contents with links, named toc unless "name" says otherwise and titled Contents unless "title" does. Left empty, tools that need an order guess one and say so.
+
+**`parts`**—`opaque`; default `{}`
+
+What the project is made of, when it's more than one thing: a block of names, each a part with its kind, book, slides, or files (a folder of files that travel with the project and that no target uses; testbank is kept for the test banks to come). A part may name the file it's unpacked from, its from, as a path inside the project (upstream/book.zip) or as a block with file, unpacker (cartridge, cnx, epub, jekyll, site, or archive), and options, the unpacker's options that change what it writes; and a license, when the part's isn't the book's. A part's name is a lowercase letter, then lowercase letters, digits, - and _. Read and checked; not acted on yet: the layout that builds each part from a folder of its own comes with the next release (see ROADMAP.md).
+
+**`include`**—`list`; default `[]`
+
+Files at the top of the project's folder that travel with it, a README or a notes file, each a path from there. Read and checked; not acted on yet (see ROADMAP.md).

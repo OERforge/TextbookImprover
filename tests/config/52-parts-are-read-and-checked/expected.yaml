@@ -1,0 +1,10 @@
+# Parts, their licenses, and the files that travel with the project are
+# read and checked, though nothing builds from them yet.
+target: decks
+expect:
+  part: slides
+expect_project:
+  license: CC-BY-4.0
+  parts.slides.license: CC-BY-NC-SA-4.0
+  parts.slides.from.unpacker: archive
+  include: [README.md]

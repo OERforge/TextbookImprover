@@ -1,0 +1,4 @@
+targets:
+  decks:
+    format: source
+    part: slides

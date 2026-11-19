@@ -1,0 +1,4 @@
+# Lowercase only, so two names can't be one folder on a disk that ignores
+# case. The message offers the name the rule would take.
+target: Html
+error: "html, say"

@@ -1,0 +1,3 @@
+targets:
+  ../course:
+    format: common-cartridge

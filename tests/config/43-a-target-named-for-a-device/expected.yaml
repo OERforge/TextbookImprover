@@ -1,0 +1,4 @@
+# Windows keeps con, prn, aux, nul, com1 to com9, and lpt1 to lpt9 for
+# devices, and no folder there can have one of them.
+target: con
+error: keeps for a device

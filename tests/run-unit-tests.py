@@ -406,6 +406,66 @@ def check_identifiers():
     ]
 
 
+def names_in_use():
+    """Every target's and package's name the docs and the suites write in
+    a configuration, as YAML or as a string a suite writes."""
+    forms = (re.compile(r"(?m)^\s*([A-Za-z0-9_.\-/]+):\s*\n\s*format:"),
+             re.compile(r"\\n  ([A-Za-z0-9_.\-/]+):\\n    format:"),
+             re.compile(r"(?m)^\s+([A-Za-z0-9_.\-/]+):\s*\{\s*format:"))
+    found = set()
+    for folder, pattern in (("docs", ".md"), ("tests", ".py")):
+        for name in sorted(os.listdir(os.path.join(ROOT, folder))):
+            if name.endswith(pattern):
+                with open(os.path.join(ROOT, folder, name), encoding="utf-8") as fh:
+                    text = fh.read()
+                for form in forms:
+                    found.update(m.group(1) for m in form.finditer(text))
+    # The convert suite's own case of a name the run refuses.
+    return found - {"../../escaped"}
+
+
+def check_naming_rule():
+    in_use = names_in_use()
+    refused = ["../x", "../../escaped", "/tmp/x", "CON", "con", "nul", "com1", "lpt9",
+               "Html", "work", "reports", "packages", "x.y", ".hidden", "", "1st",
+               "-x", "_pt", "a b", "a" * 65, "a\\b"]
+    taken = ["html", "epub", "print-2", "a", "a" * 64, "remediated", "my_book", "com10"]
+    files = ["org.example.book.epub", "book", "Book_2e.pdf", "1.0.zip", "a-b"]
+    not_files = ["../x.epub", "x/y.epub", ".epub", "a..b", "con.epub", "AUX", "x\\y",
+                 "", "-x.epub"]
+    return [
+        ("every target's and package's name the docs and the suites use fits the rule",
+         lambda: len(in_use) > 20
+         and not [n for n in in_use if oerconfig.name_problem(n, "target")]
+         or fail(f"got: {sorted(n for n in in_use if oerconfig.name_problem(n, 'target'))}")),
+        ("a name that climbs, a path, a capital, a dot, a device's, or output/'s own is "
+         "refused",
+         lambda: not [n for n in refused if not oerconfig.name_problem(n, "target")]
+         or fail(f"taken: {[n for n in refused if not oerconfig.name_problem(n, 'target')]}")),
+        ("a plain lowercase name of up to 64 characters is taken",
+         lambda: not [n for n in taken if oerconfig.name_problem(n, "target")]
+         or fail(f"refused: {[n for n in taken if oerconfig.name_problem(n, 'target')]}")),
+        ("the name the message offers is one the rule takes, or none",
+         lambda: all(not oerconfig.suggest_name(n)
+                     or not oerconfig.name_problem(oerconfig.suggest_name(n), "target")
+                     for n in refused)
+         and oerconfig.suggest_name("My Book (2e)") == "my-book-2e"
+         and oerconfig.suggest_name("CON") == "" or fail("got: " + str(
+             {n: oerconfig.suggest_name(n) for n in refused}))),
+        ("one file's name is taken, and a path, a dot first, '..', or a device's is refused",
+         lambda: not [n for n in files if oerconfig.filename_problem(n, "filename")]
+         and not [n for n in not_files if not oerconfig.filename_problem(n, "filename")]
+         or fail(f"got: {[n for n in files if oerconfig.filename_problem(n, 'f')]}, "
+                 f"{[n for n in not_files if not oerconfig.filename_problem(n, 'f')]}")),
+        ("the reserved names and the devices are written once, and the docs name the "
+         "reserved ones",
+         lambda: oerconfig.RESERVED_NAMES == ("reports", "work", "packages")
+         and len(oerconfig.DEVICE_NAMES) == 22
+         and "never `reports`, `work`, or `packages`" in open(
+             os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8").read()),
+    ]
+
+
 # --------------------------------------------------------------------------
 # facts written down twice
 # --------------------------------------------------------------------------
@@ -10145,6 +10205,7 @@ def check_run_all():
 
 
 GROUPS = [
+    ("the rule for a name that becomes a folder or a file", check_naming_rule),
     ("a report's rows", check_report_rows),
     ("cells a spreadsheet would take for formulas, written and read", check_formula_cells),
     ("alt text's rules, and their findings", check_alt_text_rules),

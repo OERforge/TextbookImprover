@@ -1,0 +1,3 @@
+# A package's file is written in its own folder too.
+target: course
+error: "package 'course'"

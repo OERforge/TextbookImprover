@@ -1,0 +1,4 @@
+# An XML name may start with an underscore, but a file a target writes is
+# named after the identifier when its filename isn't set, and that file's
+# name starts with a letter or digit.
+error: project.identifier is '_book'

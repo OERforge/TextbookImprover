@@ -1,0 +1,4 @@
+# A target's name is its folder's, joined to the book's folder: one named
+# ../../escaped wrote two levels above the book, with no word.
+target: ../../escaped
+error: isn't a name its folder can have

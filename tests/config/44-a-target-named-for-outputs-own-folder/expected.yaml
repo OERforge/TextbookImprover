@@ -1,0 +1,4 @@
+# reports, work, and packages are output/'s own folders in the layout to
+# come, so no target may take one of them.
+target: work
+error: keeps for its own folder

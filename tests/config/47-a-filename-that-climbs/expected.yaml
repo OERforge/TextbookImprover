@@ -1,0 +1,4 @@
+# filename is one file's name inside the target's folder: this one wrote
+# three levels above the book, with no word.
+target: epub
+error: isn't one file's name

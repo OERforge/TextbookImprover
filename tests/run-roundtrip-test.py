@@ -63,6 +63,13 @@ def unusual(node):
     on these.
     """
     kind = node.type
+    # A name that becomes a folder or a file follows the naming rule, so
+    # its awkward value is one the rule takes: a file's name that YAML
+    # would read as a number.
+    if node.path == "output_dir":
+        return "awkward-out"
+    if node.path == "filename":
+        return "1.10"
     if kind == "bool":
         return not bool(node.default)
     if kind == "int":

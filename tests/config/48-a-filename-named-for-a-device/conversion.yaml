@@ -1,0 +1,4 @@
+targets:
+  epub:
+    format: epub3
+    filename: aux.epub

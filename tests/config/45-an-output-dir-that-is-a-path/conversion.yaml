@@ -1,0 +1,4 @@
+targets:
+  html:
+    format: html
+    output_dir: /tmp/abs-target

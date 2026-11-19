@@ -28,6 +28,9 @@
 description: >
   How converted files are assembled into a distributable package.
 
+# What a target here is called in a message: each is a package.
+target_noun: package
+
 keys:
 
   format:

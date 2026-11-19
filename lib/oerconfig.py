@@ -107,6 +107,31 @@ NCNAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9._-]*$")
 # wrong type, which is technically true and useless.
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# A name that becomes a folder: a target's, a package's, a part's, and an
+# output_dir. Lowercase, so two names can't be one folder on a disk that
+# ignores case; no dot, so no ., .., hidden folder, or name like a file's;
+# short and plain, since a web interface will put these in addresses. A
+# target named ../../escaped wrote its folder two levels above the book,
+# and one named /tmp/abs-target wrote there (measured at 401e1d9,
+# 2026-11-15), each with no word.
+NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+
+# What output/ keeps for itself in the layout to come: the reports, the
+# run's own work, and the packages, each a folder beside the targets'.
+RESERVED_NAMES = ("reports", "work", "packages")
+
+# The names Windows keeps for devices, which can't be a file's or a
+# folder's there, with or without an extension (con.epub is con).
+DEVICE_NAMES = frozenset(
+    ["con", "prn", "aux", "nul"]
+    + [f"com{n}" for n in range(1, 10)] + [f"lpt{n}" for n in range(1, 10)])
+
+# One file's name, written inside a target's folder: a letter or digit,
+# then letters, digits, and . - _. A filename of ../../../fn-escaped.epub
+# wrote three levels above the book (measured at 401e1d9, 2026-11-15).
+FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 
 class ConfigError(Exception):
     """A problem in a configuration or schema file, phrased for a user."""
@@ -209,9 +234,12 @@ class Node:
 class Schema:
     """A parsed schema file."""
 
-    def __init__(self, root, source):
+    def __init__(self, root, source, noun="target"):
         self.root = root
         self.source = source
+        # What a target of this schema is called to a person: a target in
+        # conversion.yaml, a package in packaging.yaml.
+        self.noun = noun
 
     @property
     def keys(self):
@@ -248,7 +276,7 @@ def load_schema(path):
         raw = yaml.safe_load(handle) or {}
     if "keys" not in raw:
         raise ConfigError(f"{path} is not a schema: it has no top-level keys")
-    return Schema(Node("", "", raw), path)
+    return Schema(Node("", "", raw), path, str(raw.get("target_noun") or "target"))
 
 
 # --------------------------------------------------------------------------
@@ -765,6 +793,44 @@ def resolve(schema, project_schema, documents, target=None,
             if child.default_from_target and not settings.get(name):
                 settings[name] = target
 
+    # Every name that becomes a folder or a file follows one rule, since
+    # each is joined to the book's folder as it's written.
+    what = f"{target_source or where}: {schema.noun} {target!r}"
+    if target is not None:
+        problem = name_problem(target, f"{target_source or where}: a {schema.noun}")
+        if problem:
+            problems.append(problem)
+        for name, child in schema.keys.items():
+            if not child.default_from_target or settings.get(name) == target:
+                continue
+            value = str(settings.get(name))
+            if value in (".", "./"):
+                # Today's books write a target beside their sources this
+                # way, and the next release's layout can't: said now, and
+                # taken out by util/move-to-src.py.
+                warnings.append(
+                    f"{what} has {name}: {value}, which writes it into the "
+                    "book's own folder. The next release writes each target "
+                    f"in a folder of its own, and util/move-to-src.py takes "
+                    f"this setting out; give it a name ({target}, say) to "
+                    "choose the folder now.")
+                continue
+            problem = name_problem(value, f"{what}'s {name}")
+            if problem:
+                problems.append(problem)
+        if schema.node("filename") is not None and settings.get("filename"):
+            problem = filename_problem(settings["filename"], f"{what}'s filename")
+            if problem:
+                problems.append(problem)
+    # A file a target writes is named after the identifier when its
+    # filename isn't set, so the identifier is held to a file's rule too.
+    if project.get("identifier"):
+        problem = filename_problem(project["identifier"], f"{where}: project.identifier")
+        if problem:
+            problems.append(problem)
+    if problems:
+        raise ConfigError("\n".join(problems))
+
     return Resolved(project, settings, target, warnings)
 
 
@@ -776,6 +842,59 @@ def target_names(documents):
             if name not in names:
                 names.append(name)
     return names
+
+
+# --------------------------------------------------------------------------
+# names
+# --------------------------------------------------------------------------
+
+def suggest_name(text):
+    """A name the rule takes, made from one it doesn't, or "" if none can
+    be: lowercase, each run of other characters a hyphen, a letter first."""
+    name = re.sub(r"[^a-z0-9_-]+", "-", str(text).lower()).strip("-_")
+    name = re.sub(r"^[^a-z]+", "", name)[:64].rstrip("-_")
+    if not name or name in RESERVED_NAMES or name in DEVICE_NAMES:
+        return ""
+    return name
+
+
+def name_problem(name, what):
+    """Why name can't be the folder of what ("target 'html'", say), or
+    None when it can."""
+    text = str(name)
+    if text in RESERVED_NAMES:
+        return (f"{what} is named {text!r}, which output/ keeps for its own "
+                f"folder ({', '.join(RESERVED_NAMES)} are kept). Give it "
+                "another name.")
+    if not NAME_RE.match(text):
+        better = suggest_name(text)
+        return (f"{what} is named {text!r}, which isn't a name its folder "
+                "can have. A name that becomes a folder is a lowercase "
+                "letter, then lowercase letters, digits, - and _, 64 "
+                "characters at most"
+                + (f": {better}, say." if better and better != text else "."))
+    if text in DEVICE_NAMES:
+        return (f"{what} is named {text!r}, which Windows keeps for a "
+                "device, so no folder there can have it. Give it another "
+                "name.")
+    return None
+
+
+def filename_problem(value, what):
+    """Why value can't be one file's name inside a folder, or None when it
+    can. what is the setting, as a person would find it."""
+    text = str(value)
+    if not FILENAME_RE.match(text) or ".." in text:
+        return (f"{what} is {text!r}, which isn't one file's name. It's "
+                "written inside its own folder, so it's a letter or digit, "
+                "then letters, digits, ., -, and _, with no '..' and no "
+                "folders.")
+    if text.split(".", 1)[0].lower() in DEVICE_NAMES:
+        return (f"{what} is {text!r}, and Windows keeps "
+                f"{text.split('.', 1)[0]!r} for a device, whatever follows "
+                "the dot, so no file there can have it.")
+    return None
+
 
 
 # --------------------------------------------------------------------------

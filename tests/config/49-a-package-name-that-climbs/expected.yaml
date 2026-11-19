@@ -1,0 +1,3 @@
+# A package's name is held to the same rule, and called a package.
+target: ../course
+error: a package is named

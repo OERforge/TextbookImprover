@@ -132,6 +132,59 @@ def epubcheck(path):
     return outputcheck.run_epubcheck(command, path) if os.path.exists(path) else None
 
 
+def case_names(work):
+    """A name that becomes a folder or a file is held to one rule: a target
+    named ../../escaped had written two levels above the book, and a
+    filename of ../../../fn-escaped.epub three, with no word. Each book is
+    two folders down, so anything that escaped lands inside work/."""
+    def book(name, config):
+        folder = os.path.join(work, "outer", "inner", name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "page.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Page\n\nA line.\n")
+        return convert(folder, config, fixtures=())
+    climbing = book("climbing", "targets:\n  ../../escaped:\n    format: html\n")
+    absolute = book("absolute", "targets:\n  html:\n    format: html\n"
+                                f"    output_dir: {os.path.join(work, 'abs-target')}\n")
+    named = book("named", "targets:\n  epub:\n    format: epub3\n"
+                          "    filename: ../../../fn-escaped.epub\n")
+    shared = book("shared", "targets:\n  html:\n    format: html\n    output_dir: pages\n"
+                            "  plain:\n    format: html\n    output_dir: pages\n")
+    beside = book("beside", "targets:\n  html:\n    format: html\n    output_dir: .\n")
+    escaped = [os.path.relpath(os.path.join(folder, name), work)
+               for folder, dirs, names in os.walk(work)
+               for name in dirs + names
+               if name in ("escaped", "abs-target", "fn-escaped.epub")]
+
+    def fail(message):
+        print("        " + message[:2000])
+        return False
+    return [
+        ("a target named ../../escaped stops the run, offering a name, and nothing's written",
+         lambda: climbing.returncode != 0
+         and "a target is named '../../escaped', which isn't a name its folder can have"
+             in climbing.stderr
+         and "escaped, say" in climbing.stderr or fail(climbing.stderr)),
+        ("an output_dir that's a full path stops it too",
+         lambda: absolute.returncode != 0 and "output_dir is named" in absolute.stderr
+         or fail(absolute.stderr)),
+        ("a filename of ../../../fn-escaped.epub stops it, as one file's name it isn't",
+         lambda: named.returncode != 0 and "isn't one file's name" in named.stderr
+         or fail(named.stderr)),
+        ("nothing's written outside a book whose names were refused",
+         lambda: not escaped or fail(f"got: {escaped}")),
+        ("two targets with one output_dir stop the run, naming both",
+         lambda: shared.returncode != 0
+         and "Targets html and plain both write into pages/" in shared.stderr
+         and not exists(work, "outer", "inner", "shared", "pages") or fail(shared.stderr)),
+        ("output_dir: . still writes beside the sources, warning that the next release won't",
+         lambda: beside.returncode == 0
+         and exists(work, "outer", "inner", "beside", "page.html")
+         and "output_dir: ., which writes it into the book's own folder" in beside.stderr
+         or fail(beside.stderr)),
+    ]
+
+
 def case_bare(work):
     """No configuration at all: one page per document, in html/."""
     result = convert(work, config=None, project=False)
@@ -10469,6 +10522,7 @@ def case_own_files(work):
 
 CASES = [
     ("a bare directory", case_bare),
+    ("names that would write outside the book", case_names),
     ("the output check, with --quick and without", case_quick),
     ("where the book is named", case_book_name),
     ("a page contents doesn't list, and --include-all-html", case_include_all_html),

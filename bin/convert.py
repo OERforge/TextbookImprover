@@ -1012,8 +1012,27 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
         if not targets:
             die("Every target here is a format that isn't written for decks; add an html, "
                 "pdf, pptx, revealjs, markdown, or source target to conversion.yaml.")
-    for warning in targets[0].resolved.warnings if targets else []:
-        say(f"WARNING: {warning}")
+    # Most warnings are the configuration's and the same for every target;
+    # a few, such as an output_dir of ".", are one target's own.
+    warned = []
+    for target in targets:
+        for warning in target.resolved.warnings:
+            if warning not in warned:
+                warned.append(warning)
+                say(f"WARNING: {warning}")
+    # Two targets writing into one folder would each empty or overwrite
+    # the other's files. The book's own folder (output_dir: .) is warned of
+    # above, and the next release's layout ends it.
+    folders = {}
+    for target in targets:
+        folder = str(target["output_dir"])
+        if folder in (".", "./"):
+            continue
+        if folder in folders:
+            die(f"Targets {folders[folder]} and {target.name} both write into "
+                f"{folder}/. Give each an output_dir of its own, or leave "
+                "output_dir out, so each writes into a folder named after it.")
+        folders[folder] = target.name
 
     # Stage fingerprints: targets whose filter-stage settings agree share
     # a filtered intermediate. The first target with a fingerprint owns

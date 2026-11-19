@@ -1,0 +1,3 @@
+targets:
+  ../../escaped:
+    format: html

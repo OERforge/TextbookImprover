@@ -1,0 +1,3 @@
+# Windows takes aux.epub for the device aux, whatever follows the dot.
+target: epub
+error: "keeps 'aux' for a device"

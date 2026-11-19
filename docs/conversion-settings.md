@@ -10,7 +10,7 @@ What this target produces. markdown and asciidoc write source again: what the au
 
 **`output_dir`**—`path`; default `""` (empty); *target only*
 
-Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other.
+Where this target writes. Defaults to the target's own name, so two targets in the same format can't overwrite each other. One folder's name, as a target's is: a lowercase letter, then lowercase letters, digits, - and _. A target written with output_dir: . goes into the book's own folder, which the next release's layout doesn't allow; the run warns of it.
 
 **`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
 

@@ -1,0 +1,4 @@
+targets:
+  course:
+    format: common-cartridge
+    filename: ../course.imscc

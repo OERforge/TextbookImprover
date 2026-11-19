@@ -1,0 +1,6 @@
+# A target written into the book's own folder still builds until the
+# layout changes, with a warning that it won't then.
+target: epub
+expect:
+  output_dir: .
+warns: "output_dir: ., which writes it into the book's own folder"

@@ -186,14 +186,15 @@ def style_length(style, name):
 def pixel_size(path):
     """(width, height) of a raster image as shown, from Pillow when it's
     installed, its sides changing places where its EXIF orientation turns
-    it a quarter and Pillow hasn't made the turn already (_turn): the
-    shape a browser shows a JPEG or a PNG in. Else from the file's header.
+    it a quarter and Pillow hasn't made the turn already (_turn), or will
+    make it only when it loads the pixels (_tiff_unturned): the shape a
+    browser shows a JPEG or a PNG in. Else from the file's header.
     None when neither knows the file."""
     if Image is not None:
         try:
             with Image.open(path) as im:
                 width, height = im.size
-                if _turn(im) in SIDEWAYS:
+                if _turn(im) in SIDEWAYS or _tiff_unturned(im):
                     width, height = height, width
                 return width, height
         except Exception:
@@ -696,6 +697,9 @@ def resource_args(folder, first=None):
 ORIENTATION = 0x0112
 TURNS = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM", 5: "TRANSPOSE",
          6: "ROTATE_270", 7: "TRANSVERSE", 8: "ROTATE_90"}
+# A TIFF's tags for its own layout: width, length, strip offsets, rows
+# per strip, and strip byte counts.
+TIFF_LAYOUT = (256, 257, 273, 278, 279)
 # The turns that change an image's sides over.
 SIDEWAYS = ("TRANSPOSE", "ROTATE_270", "TRANSVERSE", "ROTATE_90")
 # Whether Pillow's TIFF reader makes the turn itself (_tiff_turned); None
@@ -725,6 +729,22 @@ def _tiff_turned():
         except Exception:
             _TIFF_TURNED = False
     return _TIFF_TURNED
+
+
+def _tiff_unturned(im):
+    """Whether an opened TIFF still gives its stored shape though Pillow
+    will turn it a quarter when it's loaded: a release before 11 turns a
+    TIFF as it loads the pixels and gives the stored size until then
+    (10.2.0 and 9.0.1: 60 by 40 at open, 40 by 60 loaded), where a later
+    one gives the turned size from the start. Told by the file's own
+    width and length against the size Pillow gives, with no pixels read."""
+    if im.format != "TIFF" or not _tiff_turned() or TURNS.get(_tagged(im)) not in SIDEWAYS:
+        return False
+    try:
+        stored = (im.tag_v2.get(256), im.tag_v2.get(257))
+    except Exception:
+        return False
+    return im.size == stored and im.size[0] != im.size[1]
 
 
 def _tagged(im):
@@ -806,6 +826,12 @@ def upright_one(path, out):
         dpi = tuple(float(d) for d in dpi)
         options["dpi"] = dpi[::-1] if sideways else dpi
     try:
+        # A TIFF's EXIF data as Pillow gives it holds the file's own
+        # width, length, and strips, and Pillow before 10 writes them
+        # over the turned copy's (9.5.0: a copy 40 by 60 written as 60
+        # by 40), so they're left out.
+        for key in TIFF_LAYOUT if fmt == "TIFF" else ():
+            exif.pop(key, None)
         del exif[ORIENTATION]
         across, down = EXIF_RESOLUTION
         if sideways and exif.get(across) and exif.get(down):

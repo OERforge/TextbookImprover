@@ -3319,9 +3319,11 @@ def check_upright():
         """An upright copy's size, whether its top left is the red corner
         and its bottom right gray, its orientation, and its resolutions."""
         with Image.open(path) as im:
+            # Read before the pixels: an older Pillow (9.0.1) has closed a
+            # TIFF's file once they're loaded and can't read its tags then.
+            tags = im.getexif()
             rgb = im.convert("RGB")
             red, gray = rgb.getpixel((5, 5)), rgb.getpixel((im.size[0] - 5, im.size[1] - 5))
-            tags = im.getexif()
             return (im.size, red[0] > 170 and red[1] < 90, min(gray) > 150,
                     tags.get(0x0112), float(tags.get(282) or 0), float(tags.get(283) or 0))
     made = {tag: downsample.upright_one(os.path.join(book, "media", f"o{tag}.jpg"),
@@ -3364,7 +3366,10 @@ def check_upright():
         others[name] = (downsample.orientation(source), downsample.pixel_size(source),
                         downsample.upright_one(source, out),
                         corner(out)[:4] if os.path.exists(out) else None)
+    # A Pillow before 11 turns a TIFF only as it loads the pixels, so the
+    # shape is asked for after loading.
     with Image.open(os.path.join(book, "media", "o6.tif")) as im:
+        im.load()
         opened_turned = im.size == (40, 60)
     return checks + [
         ("a picture's orientation is read where it turns or mirrors it, and is 1 for one "
@@ -3390,7 +3395,8 @@ def check_upright():
         ("and documents with no turned picture get no folder",
          lambda: none is None and not os.path.exists(os.path.join(work, "none"))),
         ("a TIFF and a PNG stored on their sides are turned once, whether or not Pillow's "
-         "reader has turned the TIFF already, and their shape as shown is the upright one",
+         "reader turns the TIFF itself, as it opens it or only as it loads it, and their "
+         "shape as shown is the upright one",
          lambda: downsample._tiff_turned() == opened_turned and all(
              others[name] == (6, (40, 60), True, ((40, 60), True, True, None))
              for name in ("o6.tif", "o6.png"))

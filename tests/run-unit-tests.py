@@ -466,6 +466,214 @@ def check_naming_rule():
     ]
 
 
+def check_stamps():
+    import stamps
+    work = scratch("stamps-")
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def write(path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    # A project in the layout to come, and a copy of it elsewhere.
+    one = os.path.join(work, "one")
+    write(os.path.join(one, "project.yaml"), "project:\n  identifier: org.example.b\n"
+          "  title: B\n")
+    write(os.path.join(one, "conversion.yaml"),
+          "defaults:\n  html:\n    css: templates/book.css\ntargets:\n"
+          "  html:\n    format: html\n  pdf:\n    format: pdf\n")
+    write(os.path.join(one, "templates", "book.css"), "p { margin: 0 }\n")
+    write(os.path.join(one, "src", "book", "intro.md"), "# Intro\n")
+    write(os.path.join(one, "src", "book", "_pt", "about.html"), "<p>About</p>\n")
+    write(os.path.join(one, "src", "book", "assets", "fig.svg"), "<svg/>\n")
+    write(os.path.join(one, "sidecars", "book", "image-alt.csv"), "image,alt\n")
+    write(os.path.join(one, "sidecars", "slides", "image-alt.csv"), "image,alt\n")
+    two = os.path.join(work, "elsewhere", "two")
+    shutil.copytree(one, two)
+    source = os.path.join(one, "src", "book")
+    before = stamps.tree_digest(source)
+    for name in (".DS_Store", "intro.md~", "#intro.md#", "Thumbs.db", "desktop.ini",
+                 "intro.md:Zone.Identifier", ".latexmkrc", os.path.join(".git", "config")):
+        write(os.path.join(source, name), "not the author's\n")
+    after_skipped = stamps.tree_digest(source)
+    allowed = stamps.tree_digest(source, allow=(".latexmkrc",))
+    write(os.path.join(source, "notes.md"), "# Notes\n")
+    added = stamps.tree_digest(source)
+    os.remove(os.path.join(source, "notes.md"))
+    write(os.path.join(source, "_pt", "about.html"), "<p>About us</p>\n")
+    changed_pt = stamps.tree_digest(source)
+    write(os.path.join(source, "_pt", "about.html"), "<p>About</p>\n")
+    os.rename(os.path.join(source, "assets", "fig.svg"), os.path.join(source, "assets", "f.svg"))
+    renamed = stamps.tree_digest(source)
+    os.rename(os.path.join(source, "assets", "f.svg"), os.path.join(source, "assets", "fig.svg"))
+    os.symlink("fig.svg", os.path.join(source, "assets", "same.svg"))
+    linked = stamps.tree_digest(source)
+    os.remove(os.path.join(source, "assets", "same.svg"))
+
+    def resolved(root, target, epoch="1700000000", **paths):
+        documents = [oerconfig.load_document(os.path.join(root, name))
+                     for name in ("project.yaml", "conversion.yaml")]
+        settled = oerconfig.resolve(conversion, project_schema, documents, target=target)
+        for dotted, value in paths.items():
+            section, key = dotted.split("__")
+            settled.settings[section][key] = value
+        fmt = settled.settings["format"]
+        return stamps.settings_digest(conversion, project_schema, settled, root, fmt,
+                                      epoch=epoch)
+    html_one, pdf_one = resolved(one, "html"), resolved(one, "pdf")
+    html_absolute = resolved(one, "html",
+                             html__css=os.path.join(one, "templates", "book.css"))
+    html_two = resolved(two, "html", html__css=os.path.join(two, "templates", "book.css"))
+    html_css = resolved(one, "html", html__css="templates/other.css")
+    pdf_css = resolved(one, "pdf", html__css="templates/other.css")
+    html_images = resolved(one, "html", images__max_width=640)
+    pdf_images = resolved(one, "pdf", images__max_width=640)
+    html_epoch = resolved(one, "html", epoch="1800000000")
+
+    top = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "notes.txt"), "a stray file\n")
+    write(os.path.join(one, "hyperref.cfg"), "\\errmessage{stop}\n")
+    write(os.path.join(one, ".git", "HEAD"), "ref: refs/heads/main\n")
+    top_stray = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "sidecars", "slides", "image-alt.csv"), "image,alt\na.png,A\n")
+    top_other = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "sidecars", "book", "image-alt.csv"), "image,alt\na.png,A\n")
+    top_sidecar = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "sidecars", "book", "image-alt.csv"), "image,alt\n")
+    write(os.path.join(one, "templates", "book.css"), "p { margin: 1em }\n")
+    top_named = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "templates", "book.css"), "p { margin: 0 }\n")
+    top_missing = stamps.top_digest(one, "book", ["templates/book.css", "templates/gone.css"])
+
+    # TextbookImprover's own digest, from a copy of its folders.
+    own = os.path.join(work, "own")
+    for folder in stamps.OWN_FOLDERS:
+        write(os.path.join(own, folder, "a.py"), "print('a')\n")
+    own_before = stamps.own_digest(own)
+    write(os.path.join(own, "lib", "__pycache__", "a.cpython-312.pyc"), "compiled\n")
+    write(os.path.join(own, "lib", "__pycache__", "a.cpython-312.opt-1.txt"), "compiled\n")
+    write(os.path.join(own, "lib", "b.pyc"), "compiled\n")
+    write(os.path.join(own, "tests", "c.py"), "a test\n")
+    stamps._OWN.clear()
+    own_cache = stamps.own_digest(own)
+    write(os.path.join(own, "vendor", "a.py"), "print('b')\n")
+    stamps._OWN.clear()
+    own_changed = stamps.own_digest(own)
+
+    # An outline, read once for a file's bytes.
+    reads = []
+
+    def reader(path):
+        reads.append(path)
+        return [(0, "Chapter 1"), (1, "1.1 Sampling")]
+    toc = os.path.join(work, "book.pdf")
+    write(toc, "%PDF-1.7 one\n")
+    cache = stamps.OutlineCache(os.path.join(work, "outlines.json"))
+    first = cache.digest(toc, reader)
+    again = stamps.OutlineCache(os.path.join(work, "outlines.json")).digest(toc, reader)
+    write(toc, "%PDF-1.7 rebuilt, the same bookmarks\n")
+    rebuilt = cache.digest(toc, reader)
+
+    def stamp(settings=html_one, sources=before):
+        return stamps.Stamp(settings, sources, top, own_before, stamps.options_digest({}))
+    recorded = os.path.join(work, "stamps", stamps.stamp_name("target", "html"))
+    stamps.write_stamp(recorded, stamp())
+    back = stamps.read_stamp(recorded)
+    with open(recorded, encoding="utf-8") as fh:
+        tampered = json.load(fh)
+    tampered["sources"] = "0" * 64
+    write(recorded + "-t", json.dumps(tampered))
+    write(recorded + "-half", '{"settings": "')
+
+    # Each builder of one format reads only the format sections its stamp
+    # keeps: build-epub.py and build-pdf.py, and convert.py's writers of
+    # one format each.
+    def sections_read(text):
+        return set(re.findall(r'\["(' + "|".join(stamps.FORMAT_SECTIONS) + r')\.', text)) | \
+            set(re.findall(r'\.get\("(' + "|".join(stamps.FORMAT_SECTIONS) + r')"\)', text))
+
+    def function_text(path, name):
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        found = re.search(r"(?ms)^def " + name + r"\(.*?(?=^def |\Z)", text)
+        return found.group(0) if found else ""
+    builders = []
+    for script, fmt in (("build-epub.py", "epub3"), ("build-pdf.py", "pdf")):
+        with open(os.path.join(ROOT, "bin", script), encoding="utf-8") as fh:
+            builders.append((script, fmt, sections_read(fh.read())))
+    for name, fmt in (("render_html", "html"), ("deck_pdfs", "pdf"), ("deck_pptxs", "pptx"),
+                      ("deck_presentations", "revealjs"), ("latex_book_pdf", "pdf")):
+        text = function_text(os.path.join(ROOT, "bin", "convert.py"), name)
+        builders.append((f"convert.py's {name}", fmt, sections_read(text) if text else None))
+    beyond = [(where, sorted(read - set(stamps.own_sections(fmt))))
+              for where, fmt, read in builders
+              if read is None or read - set(stamps.own_sections(fmt))]
+    return [
+        ("a part's sources: the same files elsewhere give the same digest",
+         lambda: stamps.tree_digest(os.path.join(two, "src", "book")) == before),
+        ("a dot file or folder, a backup, an autosave, and Windows' own files change nothing",
+         lambda: after_skipped == before),
+        ("a dot file on the allow list counts, as one added, a changed page in _pt/, a rename, "
+         "and a link do",
+         lambda: len({before, allowed, added, changed_pt, renamed, linked}) == 6),
+        ("a target's settings: a path written in full inside the project counts as the "
+         "same path written from it, so a copied project has the same settings digest",
+         lambda: html_one == html_absolute == html_two),
+        ("html.css changes the pages' settings digest and not the PDF's; images changes "
+         "both; SOURCE_DATE_EPOCH changes it",
+         lambda: html_css != html_one and pdf_css == pdf_one
+         and html_images != html_one and pdf_images != pdf_one and html_epoch != html_one),
+        ("what's read at the top: a stray file there, a .git, and another part's sidecars "
+         "change nothing",
+         lambda: top_stray == top and top_other == top),
+        ("the part's own sidecar, a file a setting names, and a named file that's missing do",
+         lambda: len({top, top_sidecar, top_named, top_missing}) == 4),
+        ("TextbookImprover's digest leaves out __pycache__, .pyc files, and what's outside "
+         "bin/, lib/, and vendor/, and counts a change in vendor/",
+         lambda: own_cache == own_before and own_changed != own_before),
+        ("a --toc file's outline digest is read once for its bytes, and a file rebuilt with "
+         "the same outline has the same digest",
+         lambda: first == again == rebuilt == stamps.outline_digest(reader(toc))
+         and len(reads) == 3 or fail(f"got {len(reads)} reads")),
+        ("a stamp written and read back is the same, and changed() names what differs",
+         lambda: back is not None and back.digest == stamp().digest
+         and stamps.changed(back, stamp()) == []
+         and stamps.changed(back, stamp(settings=html_css, sources=added))
+         == ["settings", "sources"] and stamps.changed(None, stamp()) == list(stamps.PARTS)),
+        ("a stamp whose digests don't sum to it, half a file, or none is no stamp, so the "
+         "target is built",
+         lambda: stamps.read_stamp(recorded + "-t") is None
+         and stamps.read_stamp(recorded + "-half") is None
+         and stamps.read_stamp(recorded + "-none") is None),
+        ("the options digest counts an option and its value, in any order",
+         lambda: stamps.options_digest({"--toc": first, "--include-all-html": True})
+         == stamps.options_digest({"--include-all-html": True, "--toc": first})
+         != stamps.options_digest({"--toc": first})
+         != stamps.options_digest({}) == stamps.options_digest(None)),
+        ("a stamp file is named after its target, and a name the rule refuses has none",
+         lambda: stamps.stamp_name("package", "course") == "package-course.json"
+         and all(_raises(lambda n=n: stamps.stamp_name("target", n)) for n in ("../x", "Work"))),
+        ("the software digest names Pandoc, and TeX's programs only for a PDF or a LaTeX "
+         "target",
+         lambda: "pandoc" in stamps.software("html") and "luatex" not in stamps.software("html")
+         and {"luatex", "texlive", "pdftocairo", "gs"} <= set(stamps.software("pdf"))
+         and set(stamps.software_values(["pandoc"], root=own)) ==
+         {"textbookimprover", "tools", "packages", "python"}),
+        ("each builder of one format reads only the format sections its stamp keeps",
+         lambda: not beyond or fail(f"got: {beyond}")),
+    ]
+
+
+def _raises(call):
+    try:
+        call()
+    except ValueError:
+        return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # facts written down twice
 # --------------------------------------------------------------------------
@@ -10206,6 +10414,7 @@ def check_run_all():
 
 GROUPS = [
     ("the rule for a name that becomes a folder or a file", check_naming_rule),
+    ("a target's stamp, the five digests of what it's built from", check_stamps),
     ("a report's rows", check_report_rows),
     ("cells a spreadsheet would take for formulas, written and read", check_formula_cells),
     ("alt text's rules, and their findings", check_alt_text_rules),

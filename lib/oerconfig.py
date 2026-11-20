@@ -859,13 +859,21 @@ def resolve(schema, project_schema, documents, target=None,
     if problems:
         raise ConfigError("\n".join(problems))
 
-    # The contents order the book's pages and numbering numbers them: a
-    # run of another part of the project, its decks say, is given
-    # neither.
+    # A run of one part takes what the part says of its own (PART_OWN) in
+    # place of the project's, and the project's where it says nothing.
+    # The one exception: the project's contents order a book's pages and
+    # its numbering numbers them, so a part that isn't a book (the decks)
+    # and sets neither is given neither.
     import projectpaths
-    if not projectpaths.contents_apply() and (project.get("contents")
-                                              or project.get("numbering")):
-        project = dict(project, contents=[], numbering=False)
+    part = projectpaths.run_part()
+    declared = project.get("parts") if isinstance(project.get("parts"), dict) else {}
+    own = declared.get(part) if part and isinstance(declared.get(part), dict) else {}
+    changes = {key: own[key] for key in PART_OWN if own.get(key) is not None}
+    if not projectpaths.contents_apply() and own.get("kind") != "book":
+        changes.setdefault("contents", [])
+        changes.setdefault("numbering", False)
+    if changes:
+        project = dict(project, **changes)
     return Resolved(project, settings, target, warnings)
 
 
@@ -942,6 +950,12 @@ def _inside_path_problem(value, what):
     return None
 
 
+# What a part may say of its own in place of the project's: a second book
+# in a project (an instructor's version) is another course to an LMS and
+# has its own order.
+PART_OWN = ("identifier", "title", "contents", "numbering")
+
+
 def parts_problems(project, where):
     """What's wrong with project.parts, project.include, and project.license,
     as messages, and what to warn of. Read and checked; nothing builds from
@@ -963,11 +977,26 @@ def parts_problems(project, where):
             problems.append(f"{what} is a block holding its kind "
                             f"({', '.join(PART_KINDS)}).")
             continue
-        unknown = sorted(set(block) - {"kind", "from", "license"})
+        unknown = sorted(set(block) - {"kind", "from", "license", *PART_OWN})
         if unknown:
             problems.append(f"{what} has {', '.join(map(str, unknown))}, which a "
                             "part doesn't have: a part has kind, from, and "
-                            "license.")
+                            "license, and may have an identifier, title, contents, "
+                            "and numbering of its own.")
+        identifier = block.get("identifier")
+        if identifier is not None and not (isinstance(identifier, str)
+                                           and NCNAME_RE.match(identifier)):
+            problems.append(f"{what} has an identifier, {identifier!r}, that isn't one: "
+                            "it's formed as the project's is (org.example.course.instructor).")
+        title = block.get("title")
+        if title is not None and not (isinstance(title, str) and title.strip()):
+            problems.append(f"{what} has a title that isn't text.")
+        if block.get("numbering") is not None and not isinstance(block["numbering"], bool):
+            problems.append(f"{what} has numbering {block['numbering']!r}; it's true or "
+                            "false.")
+        if block.get("contents") is not None and not isinstance(block["contents"], list):
+            problems.append(f"{what} has contents that aren't a list of its pages, as "
+                            "project.contents is.")
         kind = block.get("kind")
         if kind not in PART_KINDS:
             problems.append(f"{what} has kind {kind!r}; a part's kind is one of "

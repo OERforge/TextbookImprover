@@ -584,6 +584,11 @@ def set_part(part, folder=None):
     _PART[:] = [str(part) if part else None, folder if part else None]
 
 
+def run_part():
+    """The part this run builds, when the driver has said, or None."""
+    return _PART[0]
+
+
 def contents_apply():
     """Whether the project's contents and numbering are this run's
     part's: they order and number the book's pages, so a run of another

@@ -916,6 +916,20 @@ def old_places(base):
     return found
 
 
+def part_setting(base, part, key):
+    """What project.yaml says for one of a part's own settings, or None."""
+    import yaml
+    try:
+        with open(P(base).project_file(), encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    try:
+        return data["project"]["parts"][part].get(key)
+    except (KeyError, TypeError, AttributeError):
+        return None
+
+
 def without_dir(arguments):
     """A command line's arguments less -d DIR, for a run started in the
     folder itself."""
@@ -7018,6 +7032,12 @@ def main():
         else:
             PART = wanted[0] if wanted else DEFAULT_PART
         PART_KIND = parts.get(PART)
+        if PART != DEFAULT_PART and PART_KIND not in ("slides", None) \
+                and not part_setting(base, PART, "identifier"):
+            say(f"WARNING: the part {PART} has no identifier of its own (project.parts."
+                f"{PART}.identifier), so what's packaged from it carries the project's: an "
+                f"LMS would take its cartridge and {DEFAULT_PART}'s for one course, the "
+                "second imported over the first.")
         PART_ARGS = ["--part", PART]
         projectpaths.set_part(PART, base)
     elif args.part:

@@ -806,6 +806,85 @@ def case_two_parts(work):
     ]
 
 
+def case_two_books(work):
+    """Two books in one project, a student's and an instructor's version:
+    each part's cartridge is its own course where the part has an
+    identifier and title of its own, the instructor's pages are in its
+    own order, and what it doesn't say is the project's."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build():
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+
+    def manifest(package):
+        path = os.path.join(work, "output", "packages", package, "imsmanifest.xml")
+        if not os.path.isfile(path):
+            return "", [], ""
+        text = read(path)
+        listed = read(os.path.dirname(path), "cartridge-files.txt")
+        folder = re.search(r"go under (\S+)/", listed)
+        return (re.search(r'<manifest identifier="([^"]+)"', text).group(1),
+                re.findall(r"<title>([^<]*)", text), folder.group(1) if folder else "")
+
+    project = ("project:\n  identifier: org.example.course\n  title: The Course\n"
+               "  numbering: true\n  contents:\n    - one\n    - two\n  parts:\n"
+               "    book:\n      kind: book\n    instructor:\n      kind: book\n")
+    own = ("      identifier: org.example.course.instructor\n"
+           "      title: The Course for Instructors\n"
+           "      contents:\n        - answers\n        - one\n        - two\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n  instructor-html:\n"
+          "    format: html\n    part: instructor\n")
+    for part in ("book", "instructor"):
+        write(f"src/{part}/one.md", "# One\n\ntext\n")
+        write(f"src/{part}/two.md", "# Two\n\ntext\n")
+    write("src/instructor/answers.md", "# Answers\n\nkey\n")
+    write("project.yaml", project)
+    shared = build()
+    same = (manifest("cartridge"), manifest("cartridge-instructor"))
+    shutil.rmtree(os.path.join(work, "output"))
+    write("project.yaml", project + own)
+    apart = build()
+    book, instructor = manifest("cartridge"), manifest("cartridge-instructor")
+    write("project.yaml", project + "      identifier: 9 lives\n      pages: 3\n")
+    wrong = build()
+    return [
+        ("each run succeeds",
+         lambda: shared.returncode == 0 and apart.returncode == 0
+         or fail(shared.stderr[-300:] + apart.stderr[-300:])),
+        ("a second book that says nothing of its own has the project's identifier, title, "
+         "contents, and numbering, and the run warns that its cartridge is the book's "
+         "course to an LMS",
+         lambda: same[0][0] == same[1][0] == "org.example.course" and same[0][2] == same[1][2]
+         and same[1][1][1:] == ["1 One", "2 Two"]
+         and "WARNING: the part instructor has no identifier of its own" in shared.stderr
+         or fail(str(same) + shared.stderr[-300:])),
+        ("with an identifier and a title of its own it's another course, in a folder of "
+         "its own name, and the book's is as it was",
+         lambda: instructor[0] == "org.example.course.instructor"
+         and instructor[1][0].startswith("The Course for Instructors")
+         and instructor[2] != book[2] and book == same[0]
+         and "has no identifier of its own" not in apart.stderr
+         or fail(str((book, instructor)))),
+        ("its pages are in its own order, numbered as the project says",
+         lambda: instructor[1][1:] == ["1 Answers", "2 One", "3 Two"]
+         and book[1][1:] == ["1 One", "2 Two"] or fail(str((book, instructor)))),
+        ("an identifier that isn't one, and a setting a part doesn't have, stop the run, "
+         "each named",
+         lambda: wrong.returncode != 0 and "9 lives" in wrong.stderr
+         and "pages" in wrong.stderr or fail(wrong.stderr[-400:])),
+    ]
+
+
 def case_lowercase_names(work):
     """media.lowercase: each file a page names copied under its name in
     lowercase and named so, beside an html target's pages and in a
@@ -10872,6 +10951,7 @@ CASES = [
     ("a Markdown source", case_markdown),
     ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
     ("a book and its decks in one project, each a part", case_two_parts),
+    ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),

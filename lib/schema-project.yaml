@@ -196,8 +196,13 @@ keys:
       each part under src/, a part's kind is what its run takes it for,
       and a project that names no parts has one, the folder src/ holds;
       with more than one folder there the run stops and asks for them.
-      A part's from and license are read and checked; not acted on yet
-      (see ROADMAP.md).
+      A part may have an identifier, title, contents, and numbering of
+      its own, which its run takes in place of the project's: a second
+      book in a project (an instructor's version beside the student's)
+      is then another course to an LMS, with its own order. Where a
+      part has none, the project's is used, but for a part that isn't a
+      book (decks), which gets no contents or numbering it doesn't set. A part's from and license are
+      read and checked; not acted on yet (see ROADMAP.md).
 
   include:
     type: list

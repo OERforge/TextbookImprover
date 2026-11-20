@@ -847,10 +847,12 @@ def project_parts(base):
     part a target with no part: is made from; (None, None) for a folder
     in the layout with everything in one folder.
 
-    The parts are the ones project.yaml names (project.parts), or, when
-    it names none, the folders src/ holds, where one named slides is
-    slides and any other is a book as far as its sources say. A part of
-    kind files travels with the project and is never built."""
+    The parts are the ones project.yaml names (project.parts). A project
+    that names none has one, the folder src/ holds, which is a book or
+    slides as project.kind or its sources say; more than one folder there
+    stops the run, since nothing says what each is and a folder isn't a
+    part for being there. A part of kind files travels with the project
+    and is never built."""
     if not projectpaths.is_tree(base):
         return None, None
     import yaml
@@ -866,9 +868,24 @@ def project_parts(base):
                              if isinstance(value, dict) else "book")
                  for name, value in declared.items()}
     else:
-        parts = {name: ("slides" if name == "slides" else None)
-                 for name in sorted(os.listdir(P(base).top("src")))
-                 if os.path.isdir(P(base).top("src", name)) and not name.startswith(".")}
+        found = [name for name in sorted(os.listdir(P(base).top("src")))
+                 if os.path.isdir(P(base).top("src", name)) and not name.startswith(".")]
+        if len(found) > 1:
+            def looks(name):
+                files = [f for f in os.listdir(P(base).top("src", name))
+                         if not f.startswith(".") and os.path.isfile(P(base).top("src", name, f))]
+                decks = [f for f in files if f.lower().endswith(
+                    (".pptx", ".ppt", ".odp", ".key"))]
+                return "slides" if name == "slides" or (decks and len(decks) == len(files)) \
+                    else "book"
+            die(f"src/ holds {len(found)} folders ({', '.join(found)}) and {PROJECT_NAME} "
+                "doesn't say what each is. A project of more than one part names them, in "
+                f"{PROJECT_NAME}:\n\nproject:\n  parts:\n"
+                + "".join(f"    {name}:\n      kind: {looks(name)}\n" for name in found)
+                + "\nEach kind above is a guess from the folder's name and files: book, "
+                "slides, or files for a folder no target is made from. Nothing was "
+                "converted.")
+        parts = {name: None for name in found}
     built = {name: kind for name, kind in parts.items() if kind != "files"}
     default = projectpaths.BOOK if projectpaths.BOOK in built or len(built) != 1 \
         else next(iter(built))

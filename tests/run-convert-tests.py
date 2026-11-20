@@ -660,10 +660,18 @@ def case_two_parts(work):
         folder = os.path.join(work, *parts)
         return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
 
+    for folder in ("src/book", "src/slides"):
+        os.makedirs(os.path.join(work, folder))
+
     settings = ("targets:\n  html:\n    format: html\n  handout:\n    format: html\n"
                 "    part: slides\n")
     write("project.yaml", "project:\n  identifier: org.example.two\n  title: Two Parts\n"
           "  numbering: true\n  contents:\n    - chapter\n")
+    write("conversion.yaml", settings)
+    unnamed = build()
+    write("project.yaml", "project:\n  identifier: org.example.two\n  title: Two Parts\n"
+          "  numbering: true\n  contents:\n    - chapter\n  parts:\n    book:\n"
+          "      kind: book\n    slides:\n      kind: slides\n")
     write("conversion.yaml", settings)
     write("src/book/chapter.md", "# Chapter\n\nBook text.\n\n![](in-book.png)\n")
     write("src/book/own.css", "p { color: black }\n")
@@ -696,8 +704,14 @@ def case_two_parts(work):
          and "Part book (src/book/)" in both.stdout + both.stderr
          and "Part slides (src/slides/)" in both.stdout + both.stderr
          or fail(str(both.returncode) + both.stdout[-300:] + both.stderr[-300:])),
+        ("with two folders under src/ and no parts named, the run stops before it writes "
+         "anything, naming the folders and the lines that would name them",
+         lambda: unnamed.returncode != 0 and "book, slides" in unnamed.stderr
+         and "    slides:\n      kind: slides" in unnamed.stderr
+         and "Nothing was converted" in unnamed.stderr
+         or fail(str(unnamed.returncode) + unnamed.stderr[-400:])),
         ("each target is made from its part: the book's page in one, the deck in the "
-         "other, a part named slides read as slides",
+         "other, each part the kind the project says",
          lambda: "chapter.html" in made["html"] and "deck-one.html" not in made["html"]
          and "deck-one.html" in made["handout"] and "chapter.html" not in made["handout"]
          or fail(str(made))),

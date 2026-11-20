@@ -782,6 +782,7 @@ def check_move_to_src():
                               "![Deck](assets/deck.png)\n",
               "assets/shared.png": "s", "assets/deck.png": "d", "assets/unused.png": "u",
               "deck.pptx": "deck"}
+    bare, bare_run, _, _ = move("split-bare", {"ch1.docx": word, "lecture-01.pptx": "deck"})
     mixed, mixed_run, _, mixed_after = move("mixed", marked, "--slides", "lecture-*.md")
     stuck, stuck_run, stuck_before, stuck_after = move("unplaced", marked)
     # A book whose files have spaces in their names, which contents names
@@ -886,6 +887,16 @@ def check_move_to_src():
          lambda: split_run.returncode == 0
          and {"src/book/ch1.docx", "src/slides/lecture-01.pptx", "src/slides/lecture-02.pptx",
               "notes.txt"} <= set(split_after) or failed(split_run)),
+        ("a split names its parts in project.yaml, each with its kind, the settings there "
+         "kept; a folder moved whole names none; and a split with no project.yaml gets one",
+         lambda: yaml.safe_load(read(split, "project.yaml"))["project"]
+         == {"identifier": "org.example.moved", "title": "Moved",
+             "parts": {"book": {"kind": "book"}, "slides": {"kind": "slides"}}}
+         and "parts" not in yaml.safe_load(read(md, "project.yaml"))["project"]
+         and bare_run.returncode == 0
+         and yaml.safe_load(read(bare, "project.yaml"))
+         == {"project": {"parts": {"book": {"kind": "book"}, "slides": {"kind": "slides"}}}}
+         or fail(read(split, "project.yaml") + bare_run.stdout + bare_run.stderr)),
         ("a sidecar's rows divided by their keys: a Word file's media and a page's table to "
          "the book, a deck's shape and slide to the decks, content and labels to both, the "
          "original left",

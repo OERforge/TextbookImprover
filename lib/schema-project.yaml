@@ -193,9 +193,9 @@ keys:
       options that change what it writes; and a license, when the part's
       isn't the book's. A part's name is a lowercase letter, then
       lowercase letters, digits, - and _. In a project with a folder for
-      each part under src/, a part's kind is what its run takes it for
-      (a part named here as slides is slides), and a project that names
-      no parts has the folders src/ holds, one named slides being slides.
+      each part under src/, a part's kind is what its run takes it for,
+      and a project that names no parts has one, the folder src/ holds;
+      with more than one folder there the run stops and asks for them.
       A part's from and license are read and checked; not acted on yet
       (see ROADMAP.md).
 

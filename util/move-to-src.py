@@ -974,6 +974,7 @@ class Move:
                                 if why == "run" and os.path.exists(os.path.join(root, n)))
         self.plan_sidecars()
         self.plan_settings()
+        self.plan_parts()
         for source, target in self.renames + self.copies + self.sidecar_renames:
             if os.path.lexists(os.path.join(root, target)) and not (
                     how == "own" and target == os.path.join("src", "book")):
@@ -1186,6 +1187,64 @@ class Move:
             if removed:
                 self.said.append(f"{name}: took out " + ", ".join(removed)
                                  + ", which the next release doesn't read.")
+
+    def plan_parts(self):
+        """A folder split into more than one part says so in project.yaml
+        (project.parts), which a run asks of a project whose src/ holds
+        more than one folder; a project that names its parts already is
+        left as it is."""
+        if len(self.parts) < 2:
+            return
+        name = "project.yaml"
+        path = os.path.join(self.root, name)
+        text = self.config_text.get(name)
+        if text is None:
+            text = ""
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+        data = yaml.safe_load(text) or {}
+        block = data.get("project") if isinstance(data, dict) else None
+        if isinstance(block, dict) and block.get("parts"):
+            return
+        kinds = {part: ("slides" if part == "slides" else "book") for part in sorted(self.parts)}
+        lines = text.split("\n")
+        at = next((i for i, line in enumerate(lines) if re.match(r"project:\s*(#.*)?$", line)),
+                  None)
+        if at is None:
+            if isinstance(data, dict) and "project" in data:
+                raise Stop(f"{name} couldn't be edited to name the parts, so nothing was "
+                           "moved. Add them by hand and run this again:\n\nproject:\n"
+                           "  parts:\n" + "".join(f"    {p}:\n      kind: {k}\n"
+                                                    for p, k in kinds.items()))
+            indent = "  "
+            if text and not text.endswith("\n"):
+                lines.append("")
+            lines = [line for line in lines] + (["project:"] if lines[-1:] != [""]
+                                                else [])
+            if lines and lines[-1] == "":
+                lines[-1] = "project:"
+            at = len(lines) - 1
+        else:
+            indent = next((re.match(r"\s+", line).group(0) for line in lines[at + 1:]
+                           if line.strip() and not line.lstrip().startswith("#")
+                           and re.match(r"\s+", line)), "  ")
+        new = [indent + "parts:"]
+        for part, kind in kinds.items():
+            new += [indent * 2 + part + ":", indent * 3 + "kind: " + kind]
+        lines[at + 1:at + 1] = new
+        edited = "\n".join(lines)
+        if not edited.endswith("\n"):
+            edited += "\n"
+        expected = dict(data) if isinstance(data, dict) else {}
+        expected["project"] = dict(block or {}, parts={p: {"kind": k} for p, k in kinds.items()})
+        if (yaml.safe_load(edited) or {}) != expected:
+            raise Stop(f"{name} couldn't be edited cleanly to name the parts, so nothing was "
+                       "moved. Add them by hand and run this again:\n\nproject:\n  parts:\n"
+                       + "".join(f"    {p}:\n      kind: {k}\n" for p, k in kinds.items()))
+        self.config_text[name] = edited
+        self.said.append(f"{name} now names the parts (project.parts): "
+                         + ", ".join(f"{p}, kind {k}" for p, k in kinds.items()) + ".")
 
     # ---- doing it -------------------------------------------------------
 

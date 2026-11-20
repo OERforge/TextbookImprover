@@ -650,11 +650,12 @@ def case_two_parts(work):
         with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as fh:
             fh.write(text)
 
-    def build(*options, folder=None):
+    def build(*options, folder=None, home=None):
         return subprocess.run(
             ["python3", os.path.join(BIN, "convert.py"), "--quick", *options],
             cwd=folder or work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC",
+                     **({"HOME": home} if home else {})))
 
     def listed(*parts):
         folder = os.path.join(work, *parts)
@@ -698,6 +699,20 @@ def case_two_parts(work):
     with open(os.path.join(flat, "a.md"), "w", encoding="utf-8") as fh:
         fh.write("# A\n")
     in_flat = build("--part", "book", folder=flat)
+    # From elsewhere with -d, from among the sources, and in folders that
+    # can't be a project's.
+    write("conversion.yaml", settings)
+    shutil.rmtree(os.path.join(work, "output"))
+    elsewhere = build("-d", work, folder=os.path.dirname(work))
+    from_elsewhere = listed("output")
+    among = build(folder=os.path.join(work, "src", "book"))
+    as_home = build(home=work)
+    nested = os.path.join(work, "sidecars", "nested")
+    os.makedirs(os.path.join(nested, "src", "book"))
+    with open(os.path.join(nested, "src", "book", "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("# A\n")
+    in_nested = build(folder=nested)
+    absent = build("-d", os.path.join(work, "no-such-folder"))
     return [
         ("the run builds each part in turn, saying which, and succeeds",
          lambda: both.returncode == 0
@@ -733,6 +748,18 @@ def case_two_parts(work):
          "folder that holds its sources itself stops it too",
          lambda: unknown.returncode != 0 and "book, slides" in unknown.stderr
          and in_flat.returncode != 0 and "--part" in in_flat.stderr),
+        ("-d builds a project from another folder, each part's run started in the project",
+         lambda: elsewhere.returncode == 0 and {"html", "handout"} <= set(from_elsewhere)
+         or fail(str(elsewhere.returncode) + elsewhere.stderr[-300:])),
+        ("a run started among a project's sources stops, naming the project and -d; a "
+         "project's folder that is the home folder, or is inside another project, stops "
+         "it too, and so does a -d that names no folder",
+         lambda: among.returncode != 0 and f"-d {os.path.realpath(work)}" in among.stderr
+         and as_home.returncode != 0 and "home folder" in as_home.stderr
+         and in_nested.returncode != 0 and "inside another project" in in_nested.stderr
+         and absent.returncode != 0 and "no-such-folder" in absent.stderr
+         or fail(str([(r.returncode, r.stderr[-160:])
+                      for r in (among, as_home, in_nested, absent)]))),
         ("a setting of one part's target that names a file among another part's sources "
          "stops that part's run, naming the setting",
          lambda: reached.returncode != 0 and "html.css names src/book/own.css" in reached.stderr

@@ -892,6 +892,21 @@ def project_parts(base):
     return built, default
 
 
+def without_dir(arguments):
+    """A command line's arguments less -d DIR, for a run started in the
+    folder itself."""
+    kept, skip = [], False
+    for argument in arguments:
+        if skip:
+            skip = False
+        elif argument in ("-d", "--dir"):
+            skip = True
+        elif not (argument.startswith("--dir=")
+                  or (argument.startswith("-d") and not argument.startswith("--"))):
+            kept.append(argument)
+    return kept
+
+
 def targets_parts(base, default):
     """The part each target conversion.yaml declares is made from, in the
     file's order; one target of the default part when it declares none or
@@ -6875,6 +6890,9 @@ def main():
         epilog="Anything else is passed to build-cartridge.py: --zip, "
                "--toc FILE, --check, --include-all-html.")
     projectpaths.add_part_option(parser)
+    parser.add_argument("-d", "--dir", default=None, metavar="DIR",
+                        help="the project's folder (default: the current one); a path "
+                             "given to another option is then read from DIR")
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
     parser.add_argument("--linked-documents", action="store_true",
@@ -6911,7 +6929,26 @@ def main():
         say(pdfcheck.WCAG_ALONE)
     if wcag.choices_given(args) and not args.wcag:
         say(wcag.CHOICES_ALONE)
+    if args.dir is not None:
+        try:
+            os.chdir(args.dir)
+        except OSError as exc:
+            die(f"-d {args.dir}: {exc.strerror or exc}. Nothing was converted.")
     base = os.getcwd()
+    # A run started among a project's sources or outputs is told where
+    # the project is: it doesn't take the folder it's in for a book, and
+    # doesn't adopt the project it finds above.
+    above = projectpaths.inside_project(base)
+    if above:
+        die(f"{base} is inside the project {above}, among its sources or its outputs. Run "
+            f"this from the project's folder, or give it with -d {above}. Nothing was "
+            "converted.")
+    # Everything in a project's folder is the project's to read, so some
+    # folders can't be one.
+    if projectpaths.is_tree(base):
+        why = projectpaths.refused_root(base)
+        if why:
+            die(f"{base} can't be a project's folder: {why}. Nothing was converted.")
 
     for required in (FIGURE_FILTER, MATH_FILTER, TITLE_FILTER, MEDIA_FILTER,
                      HEADER_FILTER, PAGE_CSS):
@@ -6934,7 +6971,7 @@ def main():
             for name in wanted:
                 say(f"\nPart {name} (src/{name}/):")
                 done = subprocess.run([sys.executable, os.path.abspath(__file__),
-                                       "--part", name] + sys.argv[1:])
+                                       "--part", name] + without_dir(sys.argv[1:]))
                 worst = max(worst, done.returncode)
             return worst
         else:

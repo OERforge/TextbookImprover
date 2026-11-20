@@ -977,7 +977,9 @@ def own_paths(source, folders=BOOK_FOLDERS):
         if not isinstance(node, ast.Call):
             continue
         called = ast.unparse(node.func)
-        if called.split(".")[0] in ("os", "glob", "shutil", "open", "io"):
+        # Going to the folder a run was given (-d) puts no path together.
+        if called.split(".")[0] in ("os", "glob", "shutil", "open", "io") \
+                and called != "os.chdir":
             found += [f"line {node.lineno}: {called}({ast.unparse(arg)}, ...)"
                       for arg in node.args if ast.unparse(arg) in folders]
         found += [f"line {node.lineno}: cwd={ast.unparse(keyword.value)}"
@@ -1009,7 +1011,7 @@ def check_project_paths():
     laid = scratch("project-paths-tree-")
     for folder in ("src/book/img", "src/slides", "output/work/parts/book/rendered"):
         os.makedirs(os.path.join(laid, folder))
-    for name in ("own.css", "templates/page.html", "src/book/_preamble.md",
+    for name in ("project.yaml", "own.css", "templates/page.html", "src/book/_preamble.md",
                  "src/book/img/a.png", "src/book/own.css", "src/book/Free to read",
                  "src/slides/notes.md", "output/work/parts/book/rendered/d.svg",
                  "output/html/a.html", "upstream/page.html", "sidecars/book/image-alt.csv",
@@ -1128,6 +1130,27 @@ def check_project_paths():
          and _stops(lambda: paths.set_part("x:y"), paths.Refused)),
         ("the project's contents are the book's: a run of another part has none",
          lambda: books_contents and not others_contents and paths.contents_apply()),
+        ("a project's folder can't be the file system's root, the home folder or one that "
+         "holds it, a Windows drive, one holding TextbookImprover or the TeX tree, or one "
+         "inside another project; a book's own folder can",
+         lambda: paths.refused_root(laid, home=one, own=ROOT, tex=None) is None
+         and "root" in paths.refused_root("/", home=one, own=ROOT, tex=None)
+         and "home folder" in paths.refused_root(laid, home=laid, own=ROOT, tex=None)
+         and "holds your home" in paths.refused_root(
+             laid, home=os.path.join(laid, "src"), own=ROOT, tex=None)
+         and "Windows" in paths.refused_root("/mnt/c/books/one", home=one, own=ROOT, tex=None)
+         and "TextbookImprover" in paths.refused_root(
+             laid, home=one, own=os.path.join(laid, "tools"), tex=None)
+         and "TeX tree" in paths.refused_root(
+             laid, home=one, own=ROOT, tex=lambda: os.path.join(laid, "texlive"))
+         and "inside another project" in paths.refused_root(
+             os.path.join(laid, "templates"), home=one, own=ROOT, tex=None)),
+        ("a folder among a project's sources or outputs is known for one, and the "
+         "project's own folder and a folder beside it aren't",
+         lambda: paths.inside_project(at("src", "book", "img")) == os.path.realpath(laid)
+         and paths.inside_project(at("output", "html")) == os.path.realpath(laid)
+         and paths.inside_project(laid) is None
+         and paths.inside_project(at("templates")) is None and paths.inside_project(one) is None),
         ("a folder under src/ whose name isn't a part's, one with a colon that would begin "
          "another folder in a search path among them, stops the run, and so does a "
          "project whose own path has one",

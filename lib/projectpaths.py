@@ -43,6 +43,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 
 PROJECT_NAME = "project.yaml"
@@ -421,6 +423,78 @@ def is_tree(folder):
     except OSError:
         return False
     return any(e.is_dir() for e in entries) and all(e.is_dir() for e in entries)
+
+
+def tex_tree():
+    """The TeX tree's folder, where kpsewhich says, or None."""
+    kpsewhich = shutil.which("kpsewhich")
+    if not kpsewhich:
+        return None
+    done = subprocess.run([kpsewhich, "-var-value=TEXMFROOT"], capture_output=True,
+                          text=True, stdin=subprocess.DEVNULL)
+    found = done.stdout.strip()
+    return os.path.realpath(found) if found else None
+
+
+def _holds(folder, path):
+    folder, path = os.path.realpath(folder), os.path.realpath(path)
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+
+
+def refused_root(root, home=None, own=None, tex=tex_tree):
+    """Why root can't be a project's folder, or None. Everything in a
+    project's folder is the project's to read, so a folder that holds
+    more than a book (a home folder's keys, another project, the programs
+    a run starts) can't be one: a hostile book's ![](.ssh/id_rsa) would
+    be inside it. home, own (TextbookImprover's folder), and tex (what
+    finds the TeX tree) are given by a check."""
+    real = os.path.realpath(root)
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    own = own or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if real == os.sep:
+        return "it's the file system's root"
+    if real == home:
+        return "it's your home folder; make a folder for the book and run it there"
+    if re.match(r"^/mnt/[a-zA-Z](/|$)", real):
+        return ("it's on a Windows drive (" + real[:6] + "); WSL reads those slowly and "
+                "can't keep their files' permissions. Copy the book into your WSL home")
+    if os.pathsep in real:
+        return ("its path holds a colon, which TEXINPUTS and Pandoc's resource path take "
+                "as a separator")
+    if _holds(real, home):
+        return "it holds your home folder"
+    if _holds(real, own):
+        return "it holds TextbookImprover's own folder"
+    tree = tex() if tex else None
+    if tree and _holds(real, tree):
+        return "it holds the TeX tree"
+    parent = os.path.dirname(real)
+    while parent and parent != os.path.dirname(parent):
+        marker = os.path.join(parent, "output", ".textbookimprover")
+        if os.path.isfile(marker) or (os.path.isdir(os.path.join(parent, "src")) and any(
+                os.path.isfile(os.path.join(parent, name))
+                for name in (PROJECT_NAME, CONFIG_NAME, PACKAGING_NAME))):
+            return f"it's inside another project, {parent}"
+        parent = os.path.dirname(parent)
+    return None
+
+
+def inside_project(folder):
+    """The project a folder is in the sources or the outputs of (the
+    nearest folder above it named src or output whose own parent holds
+    src/ and a settings file, or a marked output/), or None: a tool run
+    there is told where the project is, and doesn't adopt it."""
+    here = os.path.realpath(folder)
+    while here != os.path.dirname(here):
+        parent = os.path.dirname(here)
+        if os.path.basename(here) in ("src", "output") and (
+                os.path.isfile(os.path.join(parent, "output", ".textbookimprover"))
+                or (os.path.isdir(os.path.join(parent, "src")) and any(
+                    os.path.isfile(os.path.join(parent, name))
+                    for name in (PROJECT_NAME, CONFIG_NAME, PACKAGING_NAME)))):
+            return parent
+        here = parent
+    return None
 
 
 _KNOWN = {}

@@ -684,12 +684,16 @@ def folder_for_build(plan, base, documents, work, announce=None, label=None):
     return made
 
 
-def resource_args(folder, first=None):
+def resource_args(folder, first=None, originals=(".",)):
     """Pandoc's options to find the copies in folder before the originals,
-    which it looks for in the folder it runs in, and those in first (the
-    copies upright makes) before either."""
+    and those in first (the copies upright makes) before either.
+    originals: where the originals are from the folder Pandoc runs in,
+    as projectpaths gives it; with no copies and the originals in that
+    folder alone, Pandoc needs no telling."""
     folders = [f for f in (first, folder) if f]
-    return ["--resource-path", os.pathsep.join(folders + ["."])] if folders else []
+    if not folders and tuple(originals) == (".",):
+        return []
+    return ["--resource-path", os.pathsep.join(folders + list(originals))]
 
 
 # How Pillow turns an image stored with each EXIF orientation into the

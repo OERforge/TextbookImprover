@@ -539,7 +539,7 @@ def group_id(title, depth, assembly):
 def load_documents(base, allow_unknown):
     """The schemas and the project's settings documents; base is the
     project's folder or its projectpaths.Project."""
-    paths = base if isinstance(base, projectpaths.Project) else projectpaths.Project(base)
+    paths = projectpaths.of(base)
     schema = oerconfig.load_schema(os.path.join(BIN, "schema-conversion.yaml"))
     project_schema = oerconfig.load_schema(
         os.path.join(LIB, "schema-project.yaml"))

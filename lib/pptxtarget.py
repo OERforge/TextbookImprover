@@ -505,7 +505,7 @@ def build(intermediate, base, out, *, filters, reference, level, language, title
         command = [*pandocrun.PANDOC, "-f", "json", "-t", "pptx", source, "-o", out,
                    "--reference-doc", reference, "--slide-level", str(level),
                    "--log", log_path] + highlighting.ARGS + downsample.resource_args(
-                       scaled, upright)
+                       scaled, upright, originals=P(base).originals())
         for path in filters:
             command += ["--lua-filter", path]
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

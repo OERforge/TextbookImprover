@@ -32,6 +32,7 @@ import argparse
 import csv
 import html as html_lib
 import glob
+import hashlib
 import io
 import json
 import os
@@ -521,6 +522,90 @@ def case_asciidoc(work):
                                                          "two.html")
          and "<code>ftp://</code>" in read(work, "html", "two.html")
          and 'href="ftp://"' not in read(work, "html", "two.html")),
+    ]
+
+
+def case_tree_layout(work):
+    """A book laid out with its sources in src/book/ and its sidecars in
+    sidecars/book/ builds what the same book builds with everything in
+    one folder, and writes only under output/."""
+    def lay(folder, sources, sidecars):
+        os.makedirs(os.path.join(sources, "assets"), exist_ok=True)
+        os.makedirs(sidecars, exist_ok=True)
+        with open(os.path.join(sources, "long run.md"), "w", encoding="utf-8") as fh:
+            fh.write(MARKDOWN)
+        for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
+            with open(os.path.join(sources, "assets", image), "wb") as fh:
+                fh.write(ONE_PIXEL)
+        shutil.copy(os.path.join(FIXTURES, "tables.docx"), sources)
+        with open(os.path.join(sidecars, "table-captions.csv"), "w",
+                  encoding="utf-8-sig") as fh:
+            fh.write("Label,Description\nTable 1.1,Intervals and their counts\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+                     "  word:\n    format: docx\n")
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.fixtures\n"
+                     "  title: The Fixture Book\n")
+
+    def build(folder):
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=folder,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+
+    def files(folder):
+        found = {}
+        for root, _dirs, names in os.walk(folder):
+            for name in names:
+                path = os.path.join(root, name)
+                with open(path, "rb") as fh:
+                    found[os.path.relpath(path, folder)] = hashlib.sha256(fh.read()).hexdigest()
+        return found
+
+    def fail(message):
+        raise AssertionError(message)
+
+    flat, tree = os.path.join(work, "flat"), os.path.join(work, "tree")
+    lay(flat, flat, flat)
+    lay(tree, os.path.join(tree, "src", "book"), os.path.join(tree, "sidecars", "book"))
+    before = files(os.path.join(tree, "src"))
+    ran_flat, ran_tree = build(flat), build(tree)
+    targets = {name: (files(os.path.join(flat, name)),
+                      files(os.path.join(tree, "output", name)))
+               for name in ("html", "epub", "word")}
+    for name in ("html", "word"):         # a target's own intermediates, kept elsewhere
+        targets[name] = tuple({k: v for k, v in side.items()
+                               if not k.startswith("intermediates" + os.sep)}
+                              for side in targets[name])
+    page = read(tree, "output", "html", "tables.html") \
+        if exists(tree, "output", "html", "tables.html") else ""
+    return [
+        ("each layout's run succeeds",
+         lambda: ran_flat.returncode == 0 and ran_tree.returncode == 0
+         or fail(ran_tree.stderr[-600:])),
+        ("the pages, the EPUB, and the Word files are the same files from either layout",
+         lambda: all(a and a == b for a, b in targets.values())
+         or fail(str({n: sorted(set(a.items()) ^ set(b.items()))[:4]
+                      for n, (a, b) in targets.items() if a != b}))),
+        ("a sidecar in sidecars/book/ is read",
+         lambda: "Intervals and their counts" in page),
+        ("a picture a page names, one named with another case, and one named as Windows "
+         "names it are found among the sources",
+         lambda: all(exists(tree, "output", "html", "assets", image)
+                     for image in ("Pipe-Sizes.png", "Curve.png", "_under.png"))),
+        ("the run writes nothing among the sources and nothing at the project's top",
+         lambda: files(os.path.join(tree, "src")) == before
+         and sorted(os.listdir(tree)) == ["conversion.yaml", "output", "project.yaml",
+                                          "sidecars", "src"]
+         or fail(str(sorted(os.listdir(tree)))
+                 + str(sorted(set(files(os.path.join(tree, "src"))) - set(before))[:6]))),
+        ("intermediates go under output/work/, a target's own beside them, and drafts and "
+         "reports under output/reports/book/",
+         lambda: exists(tree, "output", "work", "parts", "book", "long-run.filtered.json")
+         and exists(tree, "output", "work", "targets", "word", "long-run.filtered.json")
+         and exists(tree, "output", "reports", "book", "table-captions-missing.csv")
+         or fail(str(sorted(files(os.path.join(tree, "output")))[:40]))),
     ]
 
 
@@ -10588,6 +10673,7 @@ CASES = [
     ("footnote numbering and placement", case_notes),
     ("footnotes grouped as the contents group the pages", case_notes_groups),
     ("a Markdown source", case_markdown),
+    ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),

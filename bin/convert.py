@@ -1071,7 +1071,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
         if target.fingerprint not in owners:
             owners[target.fingerprint] = target
             target.pages_dir = P(base).pages() if len(owners) == 1 else \
-                os.path.join(target.output_dir, "intermediates")
+                P(base).target_pages(target.name, target.resolved["output_dir"])
         else:
             target.pages_dir = owners[target.fingerprint].pages_dir
     return targets, targets[0].resolved.project
@@ -1162,8 +1162,7 @@ def check_sidecar(path, setting, default, base):
     if os.path.isdir(path):
         die(f"ERROR: {setting} is set to {path}, which is a folder, not a file.\n"
             f"       Name the sidecar's file, or remove the setting to use ./{default}.")
-    named = not (os.path.basename(path) == default and
-                 os.path.dirname(os.path.abspath(path)) == os.path.abspath(P(base).settings_folder()))
+    named = os.path.abspath(path) != os.path.abspath(P(base).sidecar(default))
     # A link to nothing at the default name is gone without, said to be;
     # a setting naming one stops the run, as one naming nothing does.
     if os.path.exists(path) or (os.path.lexists(path) and not named):
@@ -2343,9 +2342,10 @@ def portable_media_paths(path, base, name):
         if os.path.isfile(P(base).referenced(unquote(ref))):
             return None
         if "%" not in ref and not os.path.isabs(ref):
-            cased = case_match(base, ref)
-            if cased:
-                return cased.replace(os.sep, "/"), "case"
+            for folder in P(base).reference_folders():
+                cased = case_match(folder, ref)
+                if cased:
+                    return cased.replace(os.sep, "/"), "case"
         return None
 
     def candidate(ref):
@@ -2356,7 +2356,8 @@ def portable_media_paths(path, base, name):
         if swapped != ref and os.path.isfile(
                 P(base).referenced(unquote(swapped))):
             return swapped, "windows"
-        for entry in sorted(os.listdir(P(base).run_dir())):
+        for entry in sorted({e for folder in P(base).reference_folders()
+                             for e in os.listdir(folder)}):
             rest = ref[len(entry):]
             if ref.startswith(entry) and rest \
                     and os.path.isdir(P(base).referenced(entry)) \
@@ -2491,7 +2492,8 @@ def read_markdown_to_json(base, docs, env, decks=False):
         # cartridge's, the EPUB's, an LMS's. "01 BigPicture.md" is the
         # page 01-BigPicture.
         stem = safe_stem(os.path.basename(name)[:-3])
-        run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json", name,
+        run([*pandocrun.PANDOC, "-f", MARKDOWN_READER, "-t", "json",
+             P(base).source_arg(name),
              "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
              "--lua-filter=" + MEDIA_FILTER],
             env=env, cwd=P(base).run_dir())
@@ -5740,7 +5742,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
                     # A picture whose EXIF orientation turns it, which Word
                     # doesn't read as a browser does: a copy drawn that way.
                     downsample.upright(base, [source], os.path.join(work, f"upright-{target.name}"),
-                                       DOWNSAMPLED.get(target.name))),
+                                       DOWNSAMPLED.get(target.name)),
+                    originals=P(base).originals()),
                 env=dict(env, FIDELITY_FOUND=found, TITLE_WRITER="docx"), cwd=P(base).run_dir())
             collect_losses(found, target.name, stem, losses)
             for key, n in docxtarget.finish(out, page, keep, footer).items():
@@ -6195,7 +6198,7 @@ def write_project_sample(project, contents, notes=(), hint_contents=False):
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
     values, extra, used = oerconfig.project_sample_values(
         project, DECLARED_PROJECT, BOOK_HINT, contents, hint_contents, notes)
-    path = os.path.join(os.getcwd(), PROJECT_SAMPLE)
+    path = P(os.getcwd()).report(PROJECT_SAMPLE)
     oerconfig.write_project(project_schema, values, path, notes=extra)
     return path, used
 
@@ -6935,7 +6938,7 @@ def main():
             else:
                 seen_sources[mode] = target.name
 
-    paths = {key: resolve_path(base, first[f"sidecars.{key}"])
+    paths = {key: P(base).sidecar(first[f"sidecars.{key}"])
              for key in ("table_captions", "image_alt", "table_headers",
                          "page_names", "bare_links", "math_keep", "slide_titles",
                          "reading_order", "languages")}
@@ -6949,7 +6952,7 @@ def main():
                          ("reading_order", "reading-order.csv"),
                          ("languages", "languages.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
-    reports = {key: resolve_path(base, first[f"reports.{key}"])
+    reports = {key: P(base).report(first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
                            "bare_links_new", "fidelity",
                            "table_headers_new", "table_headers_report",
@@ -7135,7 +7138,7 @@ def main():
                     "changes, which won't appear: " + ", ".join(with_deletions[:5])
                     + (", ..." if len(with_deletions) > 5 else "")
                     + ". word.tracked_deletions: strike keeps it, struck through.")
-        prepass = list(docs) + [P(base).raw(s)
+        prepass = [P(base).source_arg(d) for d in docs] + [P(base).raw(s)
                                 for s in list(html_stems) + (tex_stems if master else [])]
         if prepass:
             env["TABLE_HEADERS_RESOLVED"] = os.path.join(work,

@@ -93,50 +93,55 @@ class Project:
 
     # -- a part's files ----------------------------------------------------
 
-    def sources(self, part=BOOK):
+    def sources(self, part=None):
         """The folder holding a part's sources."""
         return self.root
 
-    def source(self, *names, part=BOOK):
+    def source(self, *names, part=None):
         """A source, a folder of them, or a file a source names, by its
         path from the part's folder; a pattern for glob too."""
         return os.path.join(self.sources(part), *names)
 
-    def sidecar(self, value, part=BOOK):
+    def source_arg(self, *names, part=None):
+        """A source as a program run in run_dir names it: its path from
+        that folder."""
+        return os.path.relpath(self.source(*names, part=part), self.run_dir(part))
+
+    def sidecar(self, value, part=None):
         """A part's sidecar, by the name its setting gives."""
         return self.named(value)
 
-    def report(self, value, part=BOOK):
+    def report(self, value, part=None):
         """A draft or a report of a part's, by the name its setting gives."""
         return self.named(value)
 
-    def pages(self, part=BOOK, own=None):
+    def pages(self, part=None, own=None):
         """The folder holding a part's intermediates; own, the folder a
         target was given for its own, where its filters differ."""
         return own or self.root
 
-    def page(self, stem, part=BOOK, own=None, suffix=INTERMEDIATE):
+    def page(self, stem, part=None, own=None, suffix=INTERMEDIATE):
         """One page's intermediate, as the filters left it."""
         return os.path.join(self.pages(part, own), stem + suffix)
 
-    def raw(self, stem, part=BOOK):
+    def raw(self, stem, part=None):
         """One source's document as Pandoc read it, before the filters."""
         return os.path.join(self.pages(part), stem + RAW)
 
-    def referenced(self, *names, part=BOOK):
+    def referenced(self, *names, part=None):
         """The file a page names by a path from its part's folder: a
         picture or a linked file among the sources, or one the run
         extracted or rendered for the part."""
         return os.path.join(self.run_dir(part), *names)
 
-    def media(self, *names, part=BOOK):
+    def media(self, *names, part=None):
         """What a run extracts or renders for a part beside its
         intermediates, by the path a page names it by: a Word file's
         pictures, a LaTeX book's rendered drawings, a deck saved as
         PowerPoint."""
         return os.path.join(self.run_dir(part), *names)
 
-    def work_file(self, name, part=BOOK):
+    def work_file(self, name, part=None):
         """A file one step of a run leaves for a later one (the table
         headers as resolved, say), which no person reads."""
         return self._in(name)
@@ -146,6 +151,11 @@ class Project:
     def target_dir(self, name, output_dir=None):
         """A target's folder: named after it unless output_dir says."""
         return self._in(str(output_dir or name))
+
+    def target_pages(self, name, output_dir=None):
+        """A target's own intermediates, where its filters differ from
+        the first target's."""
+        return os.path.join(self.target_dir(name, output_dir), "intermediates")
 
     def target_file(self, name, filename, output_dir=None):
         return os.path.join(self.target_dir(name, output_dir), filename)
@@ -166,15 +176,39 @@ class Project:
         return mkstemp(prefix=prefix, suffix=suffix, text=text,
                        dir=os.path.dirname(beside) if beside else None)
 
-    def unpack_dir(self, part=BOOK):
+    def unpack_dir(self, part=None):
         """A new folder to unpack an archive of sources into, on the disk
         the sources are on, so its files can be renamed into place."""
         return mkdtemp(prefix=".unpacking-", dir=self.sources(part))
 
-    def run_dir(self, part=BOOK):
+    def run_dir(self, part=None):
         """The folder Pandoc and LaTeX run in for a part: where a page's
         pictures are found by the paths its intermediate names."""
         return self.root
+
+    def originals(self, part=None):
+        """The folders, from run_dir, that a page's pictures are looked
+        for in after any copies made of them: Pandoc's resource path's
+        last entries."""
+        return (".",)
+
+    def reference_folders(self, part=None):
+        """The folders a path a page names is looked for in, in order:
+        what referenced() goes through."""
+        return [self.run_dir(part)]
+
+    def tex_env(self, env=None, part=None):
+        """The environment for a LaTeX, BibTeX, or Biber run in run_dir
+        that reads the book's own files: env, or the run's own, with the
+        sources' folder on the programs' search paths when it isn't the
+        folder they run in."""
+        env = dict(os.environ if env is None else env)
+        folders = [os.path.abspath(os.path.join(self.run_dir(part), o))
+                   for o in self.originals(part) if o != "."]
+        if folders:
+            for name in ("TEXINPUTS", "BIBINPUTS", "BSTINPUTS"):
+                env[name] = os.pathsep.join(["."] + folders + [env.get(name, "")])
+        return env
 
     # -- what a part may read ----------------------------------------------
 
@@ -183,6 +217,114 @@ class Project:
         root = os.path.realpath(self.root)
         real = os.path.realpath(path if os.path.isabs(path) else self._in(path))
         return real == root or real.startswith(root.rstrip(os.sep) + os.sep)
+
+
+
+class Tree(Project):
+    """A project in the layout with a folder for each part's sources:
+
+        src/<part>/               a part's sources
+        sidecars/<part>/          its sidecars, under their standard names
+        output/<target>/          a target's folder
+        output/packages/<name>/   a package's
+        output/reports/<part>/    drafts, reports, and samples
+        output/work/parts/<part>/ intermediates and what a run extracts
+                                  or renders, where Pandoc and LaTeX run
+        output/work/targets/<target>/  a target's own intermediates
+    """
+
+    def part(self, part=None):
+        """The part meant: the one named, or the project's own when it
+        has one alone (book, or the one folder under src/)."""
+        if part:
+            return part
+        if not hasattr(self, "_only"):
+            try:
+                found = sorted(e.name for e in os.scandir(self._in("src")) if e.is_dir())
+            except OSError:
+                found = []
+            self._only = BOOK if BOOK in found or len(found) != 1 else found[0]
+        return self._only
+
+    def _made(self, *names):
+        folder = self._in(*names)
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def sources(self, part=None):
+        part = self.part(part)
+        return self._in("src", part)
+
+    def sidecar(self, value, part=None):
+        part = self.part(part)
+        return self._in("sidecars", part, os.path.basename(str(value)))
+
+    def report(self, value, part=None):
+        part = self.part(part)
+        return os.path.join(self._made("output", "reports", part),
+                            os.path.basename(str(value)))
+
+    def pages(self, part=None, own=None):
+        part = self.part(part)
+        return own or self.run_dir(part)
+
+    def target_pages(self, name, output_dir=None):
+        return self._made("output", "work", "targets", name)
+
+    def referenced(self, *names, part=None):
+        part = self.part(part)
+        made = os.path.join(self.run_dir(part), *names)
+        return made if os.path.lexists(made) else self.source(*names, part=part)
+
+    def work_file(self, name, part=None):
+        part = self.part(part)
+        return os.path.join(self.run_dir(part), name)
+
+    def target_dir(self, name, output_dir=None):
+        return self._in("output", str(output_dir or name))
+
+    def package_file(self, name, package=None):
+        return os.path.join(self._made("output", "packages", package or "cartridge"),
+                            str(name))
+
+    def run_dir(self, part=None):
+        part = self.part(part)
+        return self._made("output", "work", "parts", part)
+
+    def named(self, value):
+        """The file or folder a setting names: at the project's top,
+        where a person keeps what the settings name, or, when nothing
+        there has the name, among the book's sources, where a file that
+        is also a page (a preamble the contents list) has to be."""
+        top = self._in(str(value))
+        if os.path.isabs(str(value)) or os.path.lexists(top):
+            return top
+        among = os.path.join(self.sources(), str(value))
+        return among if os.path.lexists(among) else top
+
+    def reference_folders(self, part=None):
+        part = self.part(part)
+        return [self.run_dir(part), self.sources(part)]
+
+    def originals(self, part=None):
+        part = self.part(part)
+        return (".", os.path.relpath(self.sources(part), self.run_dir(part)))
+
+
+def is_tree(folder):
+    """Whether a folder is a project in the layout with src/<part>/: it
+    has a src/ that holds at least one folder and no file, since a part
+    is a folder there and nothing else belongs beside the parts. A book
+    kept in one folder with a src/ of its own (a course's documents in
+    src/, their shared files in folders below) has files there, and is
+    read as today's layout while both are read. A dot file isn't
+    counted: a .gitkeep or a .DS_Store says nothing of the layout."""
+    src = os.path.join(folder, "src")
+    try:
+        entries = [e for e in os.scandir(src) if not e.name.startswith(".")]
+    except OSError:
+        return False
+    return any(e.is_dir() for e in entries) and all(e.is_dir() for e in entries)
 
 
 _KNOWN = {}
@@ -194,7 +336,7 @@ def of(folder="."):
     if isinstance(folder, Project):
         return folder
     if folder not in _KNOWN:
-        _KNOWN[folder] = Project(folder)
+        _KNOWN[folder] = (Tree if is_tree(folder) else Project)(folder)
     return _KNOWN[folder]
 
 

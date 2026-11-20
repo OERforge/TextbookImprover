@@ -1168,7 +1168,7 @@ def build(paths, name, resolved, keep, intermediates=None):
                 plan, paths.run_dir(), [document], work, lambda line: print(line, file=sys.stderr), label)
         except RuntimeError as exc:
             sys.exit(str(exc))
-        command += downsample.resource_args(scaled)
+        command += downsample.resource_args(scaled, originals=paths.originals())
         # Run in the content directory: image paths in the intermediates
         # are relative to it.
         result = subprocess.run(command, cwd=paths.run_dir(), capture_output=True,
@@ -1245,7 +1245,7 @@ def main():
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
 
-    paths = projectpaths.Project(args.dir)
+    paths = projectpaths.of(args.dir)
     try:
         schema, project_schema, documents = load_documents(
             paths, args.allow_unknown_keys)

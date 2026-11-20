@@ -1930,7 +1930,11 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
     with open(tex, encoding="utf-8") as fh:
         source = fh.read()
     env = dict(environment)
-    env["TEXINPUTS"] = os.pathsep.join([tex_dir] + [d for d in searched if d]
+    # After the copies, the part's own pictures where they aren't in the
+    # folder LaTeX runs in.
+    originals = [os.path.abspath(os.path.join(P(base).run_dir(), folder))
+                 for folder in P(base).originals() if folder != "."]
+    env["TEXINPUTS"] = os.pathsep.join([tex_dir] + [d for d in searched if d] + originals
                                        + [environment.get("TEXINPUTS", "")])
     env["TEXMFOUTPUT"] = tex_dir
     if env.get("SOURCE_DATE_EPOCH"):
@@ -2148,7 +2152,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
                 pages={page_id(stem): stem for stem, _t, _d in assembly.pages},
                 kept=os.path.abspath(out_dir))
         else:
-            command += downsample.resource_args(scaled, turned)
+            command += downsample.resource_args(scaled, turned,
+                                                originals=P(base).originals())
             # Pandoc's log, as JSON: LaTeX's input and what each run of it said,
             # which names the lines it couldn't fit (overfull_lines).
             log_path = os.path.join(work, "pandoc-log.json")

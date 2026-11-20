@@ -727,6 +727,13 @@ def check_move_to_src():
         "project.yaml": project, "intro.md": "# Intro\n", "image-alt.csv": "Image,Alt\n"},
         "--dry-run")
     again = subprocess.run([sys.executable, tool, "-d", md], capture_output=True, text=True)
+    # A preamble a setting names that the contents list as a page too.
+    both, both_run, _, both_after = move("named-page", {
+        "project.yaml": project + "  contents:\n    - page: _preamble\n    - intro\n",
+        "conversion.yaml": ("defaults:\n  footer: footer.md\ntargets:\n  pdf:\n"
+                            "    format: pdf\n    pdf:\n      metadata: _preamble.md\n"),
+        "_preamble.md": "---\ntitle: Moved\n---\n", "intro.md": "# Intro\n",
+        "footer.md": "A footer.\n"})
     # A Word book alone, with its media from an earlier run.
     docx, docx_run, _, docx_after = move("word", {
         "project.yaml": project, "chapter-1.docx": word, "chapter-1/media/image1.png": "png"})
@@ -820,6 +827,11 @@ def check_move_to_src():
          lambda: "templates/book.css" in md_after and "footer.md" in md_after
          and not any(p.startswith("src/book/templates") for p in md_after)
          or fail(f"got: {md_after}")),
+        ("a file a setting names that is also a page in the contents goes with the book, "
+         "where the setting's file is looked for next, and one that's no page stays",
+         lambda: both_run.returncode == 0 and "src/book/_preamble.md" in both_after
+         and "_preamble.md" not in both_after and "footer.md" in both_after
+         and "src/book/footer.md" not in both_after or fail(str(both_after))),
         ("the sidecar goes to sidecars/book/, and sidecars: and output_dir: . come out of "
          "conversion.yaml with the comments above them, the rest as it was",
          lambda: "sidecars/book/image-alt.csv" in md_after and "image-alt.csv" not in md_after
@@ -932,7 +944,7 @@ def check_move_to_src():
 # The names a script holds the book's folder under as it's handed down: a
 # script asks lib/projectpaths.py for a path in it, and doesn't use the
 # folder itself.
-BOOK_FOLDERS = ("base", "args.dir")
+BOOK_FOLDERS = ("base", "args.dir", "os.getcwd()")
 
 
 def own_paths(source, folders=BOOK_FOLDERS):
@@ -975,8 +987,38 @@ def check_project_paths():
                     mine = own_paths(fh.read())
                 if mine:
                     found[folder + "/" + name] = mine
+    # A project with its sources in src/: one part named book, one of
+    # slides, a settings-named file at the top, and one that is also a
+    # page among the sources.
+    laid = scratch("project-paths-tree-")
+    for folder in ("src/book/img", "src/slides", "output/work/parts/book/rendered"):
+        os.makedirs(os.path.join(laid, folder))
+    for name in ("own.css", "src/book/_preamble.md", "src/book/img/a.png",
+                 "output/work/parts/book/rendered/d.svg"):
+        with open(os.path.join(laid, name), "w", encoding="utf-8") as fh:
+            fh.write("x")
+    tree = paths.of(laid)
+    one = scratch("project-paths-one-")
+    os.makedirs(os.path.join(one, "src", "notes"))
+    bare = scratch("project-paths-bare-")
+    os.makedirs(os.path.join(bare, "src"))
+    with open(os.path.join(bare, "src", "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("x")
+    own = scratch("project-paths-own-src-")
+    os.makedirs(os.path.join(own, "src", "shared"))
+    for name in ("src/one.tex", "src/shared/note.tex"):
+        with open(os.path.join(own, name), "w", encoding="utf-8") as fh:
+            fh.write("x")
+    with open(os.path.join(laid, "src", ".gitkeep"), "w", encoding="utf-8") as fh:
+        fh.write("")
+    downsample = load(os.path.join(ROOT, "lib", "downsample.py"), "downsample")
+
+    def at(*parts):
+        return os.path.join(laid, *parts)
+
     wrong = ("import tempfile\nx = os.path.join(base, 'epub')\nrun(c, cwd=base)\n"
-             "for name in os.listdir(args.dir):\n    pass\ny = P(base).source('a.md')\n")
+             "for name in os.listdir(args.dir):\n    pass\ny = P(base).source('a.md')\n"
+             "z = os.path.join(os.getcwd(), 'sample.yaml')\nw = P(os.getcwd()).report('s')\n")
     return [
         ("today's layout: the settings, a part's sources, sidecars, reports, and "
          "intermediates in the project's folder, a target's folder beside them",
@@ -992,15 +1034,68 @@ def check_project_paths():
         ("a setting's file is read from the project's folder, a full path as written",
          lambda: there.named("css/own.css") == os.path.join(work, "css", "own.css")
          and there.named("/tmp/own.css") == "/tmp/own.css"),
+        ("a folder whose src/ holds folders and no file but a dot file is laid out the new "
+         "way, and one without a src/, or whose src/ holds a file, as today: a book in one "
+         "folder that keeps its documents in a src/ of its own",
+         lambda: paths.is_tree(laid) and isinstance(tree, paths.Tree)
+         and not paths.is_tree(work) and not paths.is_tree(bare) and not paths.is_tree(own)
+         and not isinstance(paths.of(bare), paths.Tree)),
+        ("the new layout: sources in src/<part>/, sidecars in sidecars/<part>/, a target "
+         "in output/, a package in output/packages/, reports in output/reports/<part>/, "
+         "and intermediates under output/work/",
+         lambda: tree.sources() == at("src", "book")
+         and tree.source("a.md", part="slides") == at("src", "slides", "a.md")
+         and tree.sidecar("image-alt.csv") == at("sidecars", "book", "image-alt.csv")
+         and tree.sidecar("old/image-alt.csv", part="slides")
+         == at("sidecars", "slides", "image-alt.csv")
+         and tree.report("fidelity.csv") == at("output", "reports", "book", "fidelity.csv")
+         and tree.target_dir("epub") == at("output", "epub")
+         and tree.target_dir("epub", "books") == at("output", "books")
+         and tree.package_file("imsmanifest.xml")
+         == at("output", "packages", "cartridge", "imsmanifest.xml")
+         and tree.package_file("imsmanifest.xml", "course")
+         == at("output", "packages", "course", "imsmanifest.xml")
+         and tree.run_dir() == at("output", "work", "parts", "book")
+         and tree.page("a") == at("output", "work", "parts", "book", "a.filtered.json")
+         and tree.target_pages("word") == at("output", "work", "targets", "word")
+         and tree.project_file() == at("project.yaml")),
+        ("the part nothing names is book, or the only one there is",
+         lambda: tree.part() == "book" and tree.part("slides") == "slides"
+         and paths.of(one).part() == "notes"),
+        ("a file a page names is the one the run made when there is one, else the source's, "
+         "and a source is named to a program by its path from where the program runs",
+         lambda: tree.referenced("rendered/d.svg")
+         == at("output", "work", "parts", "book", "rendered", "d.svg")
+         and tree.referenced("img/a.png") == at("src", "book", "img", "a.png")
+         and tree.source_arg("a.md") == os.path.join("..", "..", "..", "..", "src", "book",
+                                                     "a.md")
+         and here.source_arg("a.md") == "a.md"),
+        ("a setting's file is the one at the top, or among the sources when none is there",
+         lambda: tree.named("own.css") == at("own.css")
+         and tree.named("_preamble.md") == at("src", "book", "_preamble.md")
+         and tree.named("absent.css") == at("absent.css")),
+        ("Pandoc and LaTeX are told of the sources' folder only where it isn't the one "
+         "they run in",
+         lambda: downsample.resource_args(None, originals=here.originals()) == []
+         and downsample.resource_args(None, originals=tree.originals())
+         == ["--resource-path", os.pathsep.join(tree.originals())]
+         and downsample.resource_args("small", "upright", tree.originals())
+         == ["--resource-path", os.pathsep.join(("upright", "small") + tree.originals())]
+         and tree.originals()[1:] == (os.path.join("..", "..", "..", "..", "src", "book"),)
+         and "TEXINPUTS" not in here.tex_env({})
+         and tree.tex_env({"TEXINPUTS": "/own"})["TEXINPUTS"].split(os.pathsep)
+         == [".", at("src", "book"), "/own"]
+         and tree.tex_env({})["BIBINPUTS"].endswith(os.pathsep)),
         ("a path is inside the project by where it leads, a link followed",
          lambda: there.inside("a/b.png") and there.inside(work)
          and not there.inside("../b.png") and not there.inside("/etc/passwd")
          and not there.inside("out/passwd") and not there.inside(work + "-other/x")),
         ("a temporary folder is new each time it's asked for",
          lambda: len(set(made)) == 2 and all(os.path.isdir(m) for m in made)),
-        ("a script that joins a name to the book's folder, lists it, makes its own "
+        ("a script that joins a name to the book's folder or the one it runs in, lists it, "
+         "makes its own "
          "temporary folder, or runs a program in it is found, and one that asks isn't",
-         lambda: len(own_paths(wrong)) == 4 or fail(str(own_paths(wrong)))),
+         lambda: len(own_paths(wrong)) == 5 or fail(str(own_paths(wrong)))),
         ("no script in bin/ or lib/ puts a project's path together itself",
          lambda: not found or fail(str(found))),
     ]

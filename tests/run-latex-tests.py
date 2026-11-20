@@ -849,6 +849,59 @@ def case_book(work):
     ]
 
 
+def case_tree_layout(work):
+    """The book with its files in src/book/ and its macros file at the
+    project's top builds the pages and the EPUB it builds with everything
+    in one folder, and nothing is written among its sources."""
+    def files(folder):
+        found = {}
+        for top, _, names in os.walk(folder):
+            for name in names:
+                path = os.path.join(top, name)
+                with open(path, "rb") as fh:
+                    found[os.path.relpath(path, folder)] = hashlib.sha256(fh.read()).hexdigest()
+        return found
+
+    def fail(message):
+        raise AssertionError(message)
+
+    flat, tree = os.path.join(work, "flat"), os.path.join(work, "tree")
+    sources = os.path.join(tree, "src", "book")
+    write_book(flat, macros=True, epub=True)
+    os.makedirs(os.path.dirname(sources))
+    write_book(sources, macros=True, epub=True)
+    for name in ("conversion.yaml", "latex-conversion-macros.tex"):
+        os.rename(os.path.join(sources, name), os.path.join(tree, name))
+    for folder in (flat, tree):
+        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.latex\n  title: A Test Book\n")
+    before = files(sources)
+    env = dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC")
+    ran = [convert(flat, env), convert(tree, env)]
+    pages = [{k: v for k, v in files(os.path.join(folder, "html")).items()
+              if not k.startswith("intermediates" + os.sep)}
+             for folder in (flat, os.path.join(tree, "output"))]
+    books = [files(os.path.join(folder, "epub")) for folder in (flat, os.path.join(tree, "output"))]
+    one = read(tree, "output", "html", "one.html") \
+        if os.path.exists(os.path.join(tree, "output", "html", "one.html")) else ""
+    return [
+        ("each layout's run succeeds",
+         lambda: [r.returncode for r in ran] == [0, 0]
+         or fail(str([r.returncode for r in ran]) + ran[1].stderr[-900:])),
+        ("the pages and the EPUB are the same files from either layout",
+         lambda: pages[0] and pages[0] == pages[1] and books[0] and books[0] == books[1]
+         or fail(str(sorted(set(pages[0].items()) ^ set(pages[1].items()))[:6]))),
+        ("the macros file at the project's top is read",
+         lambda: "∣" in one or "&#x2223;" in one or "|</mo>" in one),
+        ("nothing is written among the sources or at the top",
+         lambda: files(sources) == before
+         and sorted(os.listdir(tree)) == ["conversion.yaml", "latex-conversion-macros.tex",
+                                          "output", "project.yaml", "src"]
+         or fail(str(sorted(os.listdir(tree)))
+                 + str(sorted(set(files(sources)) - set(before))[:6]))),
+    ]
+
+
 def case_masters(work):
     """Two masters: latex.main decides, and without it the run stops."""
     write_book(work, second_master=True, readme=False)
@@ -11013,7 +11066,9 @@ def case_no_contents(work):
     ]
 
 
-CASES = [("a LaTeX book", case_book), ("two masters", case_masters),
+CASES = [("a LaTeX book", case_book),
+         ("a LaTeX book laid out with src/book/", case_tree_layout),
+         ("two masters", case_masters),
          ("a LaTeX book's language", case_language),
          ("inline code in a LaTeX book", case_inline_code),
          ("babel's main language in a LaTeX book's tagged copy", case_babel_main),

@@ -584,6 +584,27 @@ class Move:
             if inside(full, root) and os.path.exists(full):
                 self.named_by_settings.append(
                     os.path.relpath(os.path.realpath(full), os.path.realpath(root)))
+        # A file a setting names that the contents also list as a page (a
+        # preamble a PDF's metadata is read from, set as a page too) is a
+        # source: it goes with the book, where a setting's file is looked
+        # for when the top has none of its name.
+        listed = set()
+
+        def pages(node):
+            if isinstance(node, str):
+                listed.add(node)
+            elif isinstance(node, list):
+                for item in node:
+                    pages(item)
+            elif isinstance(node, dict):
+                if isinstance(node.get("page"), str):
+                    listed.add(node["page"])
+                pages(node.get("items"))
+        pages(self.config.project.get("contents"))
+        self.named_pages = [n for n in self.named_by_settings
+                            if os.sep not in n and self.is_source(n) and self.stem(n) in listed]
+        self.named_by_settings = [n for n in self.named_by_settings
+                                  if n not in self.named_pages]
         self.src_layout()
         top_sources = [e for e in self.entries if self.is_source(e)
                        and e not in self.named_by_settings]

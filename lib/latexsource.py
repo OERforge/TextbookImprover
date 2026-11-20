@@ -5106,8 +5106,8 @@ def render(base, work, preamble, items, say, counter=None):
         result = subprocess.run(
             [engine, "-interaction=nonstopmode", "-halt-on-error",
              "-output-directory", rdir, os.path.join(rdir, job + ".tex")],
-            cwd=P(base).run_dir(), capture_output=True, text=True, errors="replace",
-            stdin=subprocess.DEVNULL)
+            cwd=P(base).run_dir(), env=P(base).tex_env(), capture_output=True, text=True,
+            errors="replace", stdin=subprocess.DEVNULL)
         pdf = os.path.join(rdir, job + ".pdf")
         if result.returncode != 0 or not os.path.isfile(pdf):
             return None, result.stdout[-800:]

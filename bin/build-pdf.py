@@ -910,7 +910,7 @@ def own_template(base, resolved):
     setting = str(resolved["pdf.template"] or "").strip()
     if not setting:
         return None
-    path = os.path.abspath(P(base).named(setting))
+    path = os.path.abspath(P(base).named(setting, setting="pdf.template"))
     if not os.path.isfile(path):
         sys.exit(f"pdf.template is set to {setting}, which does not exist "
                  f"(looked at {path}).")
@@ -922,7 +922,7 @@ def metadata_file(base, setting):
     # Whole, since Pandoc runs in the book's folder: a path relative to a
     # folder given relative to where the build runs (-d book) had Pandoc
     # look for book/book/meta.yaml.
-    path = os.path.abspath(P(base).named(setting))
+    path = os.path.abspath(P(base).named(setting, setting="pdf.metadata"))
     if not os.path.isfile(path):
         sys.exit(f"pdf.metadata is set to {setting}, which does not exist "
                  f"(looked at {path}).")

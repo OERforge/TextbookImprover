@@ -1077,7 +1077,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     return targets, targets[0].resolved.project
 
 
-def resolve_path(base, name):
+def resolve_path(base, name, setting=None):
     """A setting's path: absolute as given, otherwise against the
     content directory.
 
@@ -1087,7 +1087,7 @@ def resolve_path(base, name):
     to a path that did not exist.
     """
     name = str(name)
-    return P(base).named(name)
+    return P(base).named(name, setting=setting)
 
 
 # A book's own template, stylesheet, or Word reference document, kept with
@@ -1106,7 +1106,7 @@ def own_file(target, setting, base):
     name = str(target[setting] or "").strip()
     if not name:
         return None
-    path = os.path.abspath(resolve_path(base, name))
+    path = os.path.abspath(resolve_path(base, name, setting))
     if not os.path.isfile(path):
         die(f"{setting} is {name} for target {target.name}, which doesn't exist "
             f"(looked at {path}). Nothing was converted.")
@@ -4167,7 +4167,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         mathml = str(target["latex_mathml"]) == "on"
         pictures = str(target["picture_paths"]) == "on"
         definitions = None
-        macros_path = P(base).named(LATEX_MACROS) if LATEX_MACROS else ""
+        macros_path = P(base).named(LATEX_MACROS, setting="latex.macros") if LATEX_MACROS else ""
         if str(target["latex_definitions"]) == "on" and os.path.isfile(macros_path):
             definitions = latexsource.read_text(macros_path)
         # Each master the book is read through (latex.main's, in order), with
@@ -4833,7 +4833,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         with open(html_json, encoding="utf-8") as fh:
             resolved_html = json.load(fh)
     definitions = None
-    macros_path = P(base).named(LATEX_MACROS) if LATEX_MACROS else ""
+    macros_path = P(base).named(LATEX_MACROS, setting="latex.macros") if LATEX_MACROS else ""
     if os.path.isfile(macros_path):
         definitions = latexsource.read_text(macros_path)
     alts = htmlremediate.alt_rows(paths["image_alt"])
@@ -5273,7 +5273,7 @@ def deck_pptxs(target, stems, names, base, language, work):
     slide_size = str(target["slides.size"] or "widescreen")
     reference = str(target["slides.reference_doc"] or "").strip()
     if reference:
-        reference = resolve_path(base, reference)
+        reference = resolve_path(base, reference, "slides.reference_doc")
         if not os.path.isfile(reference):
             die(f"slides.reference_doc is {reference} for target {target.name}, which doesn't "
                 "exist. A relative name resolves against the folder converted.")
@@ -6222,7 +6222,7 @@ def early_project_sample(base, project, targets, check_only):
 def metadata_title(base, setting):
     """The title in the file pdf.metadata names, as build-pdf.py reads it,
     which a PDF takes over project.yaml's."""
-    path = P(base).named(setting)
+    path = P(base).named(setting, setting="pdf.metadata")
     if not os.path.isfile(path):
         return ""
     if path.lower().endswith((".yaml", ".yml")):

@@ -9238,8 +9238,8 @@ def prepare(base, work, master, say, macros=""):
     # given the extension, PDF and EPS made SVG. A person's definitions
     # win over the book's, as they do in the reading.
     definitions_file = None
-    if macros and os.path.isfile(P(base).named(macros)):
-        definitions_file = (macros, read_text(P(base).named(macros)))
+    if macros and os.path.isfile(P(base).named(macros, setting="latex.macros")):
+        definitions_file = (macros, read_text(P(base).named(macros, setting="latex.macros")))
     expand_image_macros(texts, files, counts, definitions_file)
     record_path = P(base).media(RENDERED, ".rendered.json")
     try:
@@ -9284,8 +9284,8 @@ def prepare(base, work, master, say, macros=""):
     # A person's definitions for reading, after the book's own, so they
     # win: \suchthat as \mid, say, where the book draws a bar with a rule.
     extra = ""
-    if macros and os.path.isfile(P(base).named(macros)):
-        extra = read_text(P(base).named(macros)) + "\n"
+    if macros and os.path.isfile(P(base).named(macros, setting="latex.macros")):
+        extra = read_text(P(base).named(macros, setting="latex.macros")) + "\n"
         counts["macros_file"] = 1
     preamble_copy = re.sub(
         r"(\\begin\s*\{document\})$",
@@ -9996,8 +9996,8 @@ def macro_sample(base, preps, filter_path, macros_file, say):
     if isinstance(preps, dict):
         preps = [preps]
     defined, uses, failing, suggestions = {}, {}, set(), {}
-    person = read_text(P(base).named(macros_file)) \
-        if macros_file and os.path.isfile(P(base).named(macros_file)) else ""
+    person = read_text(P(base).named(macros_file, setting="latex.macros")) \
+        if macros_file and os.path.isfile(P(base).named(macros_file, setting="latex.macros")) else ""
     alt = {}
     for prep in preps:
         for found in alt_arguments([(n, read_text(P(base).source(n)))

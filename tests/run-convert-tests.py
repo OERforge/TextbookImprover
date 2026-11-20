@@ -531,6 +531,12 @@ def case_tree_layout(work):
     one folder, and writes only under output/."""
     def lay(folder, sources, sidecars):
         os.makedirs(os.path.join(sources, "assets"), exist_ok=True)
+        if sources != folder:
+            # A file among the sources named as the footer's text is, and
+            # one named as a setting's file would be at the top.
+            for name in ("Free to read", "page.css"):
+                with open(os.path.join(sources, name), "w", encoding="utf-8") as fh:
+                    fh.write("PLANTED { color: red }\n")
         os.makedirs(sidecars, exist_ok=True)
         with open(os.path.join(sources, "long run.md"), "w", encoding="utf-8") as fh:
             fh.write(MARKDOWN)
@@ -542,7 +548,8 @@ def case_tree_layout(work):
                   encoding="utf-8-sig") as fh:
             fh.write("Label,Description\nTable 1.1,Intervals and their counts\n")
         with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
-            fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+            fh.write("defaults:\n  footer: Free to read\n"
+                     "targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                      "  word:\n    format: docx\n")
         with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
@@ -580,6 +587,16 @@ def case_tree_layout(work):
                               for side in targets[name])
     page = read(tree, "output", "html", "tables.html") \
         if exists(tree, "output", "html", "tables.html") else ""
+    # A setting's file that isn't at the top stops the run, though the
+    # sources hold one of its name; so does one that leads out.
+    stops = {}
+    for label, value in (("among", "page.css"), ("out", "../page.css"),
+                         ("wrote", "output/html/long-run.html")):
+        with open(os.path.join(tree, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write(f"targets:\n  html:\n    format: html\n    html:\n      css: {value}\n")
+        with open(os.path.join(work, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write("PLANTED { color: red }\n")
+        stops[label] = build(tree)
     return [
         ("each layout's run succeeds",
          lambda: ran_flat.returncode == 0 and ran_tree.returncode == 0
@@ -588,6 +605,17 @@ def case_tree_layout(work):
          lambda: all(a and a == b for a, b in targets.values())
          or fail(str({n: sorted(set(a.items()) ^ set(b.items()))[:4]
                       for n, (a, b) in targets.items() if a != b}))),
+        ("a footer whose text is the name of a file among the sources is still that text",
+         lambda: "Free to read" in page and "PLANTED" not in page),
+        ("a stylesheet the settings name that is among the sources and not at the top "
+         "stops the run, as one outside the project and one a run wrote do, each naming "
+         "the setting",
+         lambda: all(run.returncode != 0 and "html.css" in run.stderr + run.stdout
+                     for run in stops.values())
+         and "doesn't exist" in stops["among"].stderr + stops["among"].stdout
+         and "leads out of the project" in stops["out"].stderr
+         and "is in output/" in stops["wrote"].stderr
+         or fail(str({k: (v.returncode, v.stderr[-300:]) for k, v in stops.items()}))),
         ("a sidecar in sidecars/book/ is read",
          lambda: "Intervals and their counts" in page),
         ("a picture a page names, one named with another case, and one named as Windows "

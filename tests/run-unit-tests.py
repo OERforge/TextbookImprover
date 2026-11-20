@@ -827,11 +827,15 @@ def check_move_to_src():
          lambda: "templates/book.css" in md_after and "footer.md" in md_after
          and not any(p.startswith("src/book/templates") for p in md_after)
          or fail(f"got: {md_after}")),
-        ("a file a setting names that is also a page in the contents goes with the book, "
-         "where the setting's file is looked for next, and one that's no page stays",
+        ("a file a setting names that is also a page in the contents goes with the book and "
+         "the setting is rewritten to say where; one that's no page stays",
          lambda: both_run.returncode == 0 and "src/book/_preamble.md" in both_after
          and "_preamble.md" not in both_after and "footer.md" in both_after
-         and "src/book/footer.md" not in both_after or fail(str(both_after))),
+         and "src/book/footer.md" not in both_after
+         and yaml.safe_load(read(both, "conversion.yaml"))["targets"]["pdf"]["pdf"]["metadata"]
+         == "src/book/_preamble.md"
+         and "footer: footer.md" in read(both, "conversion.yaml")
+         or fail(str(both_after) + read(both, "conversion.yaml"))),
         ("the sidecar goes to sidecars/book/, and sidecars: and output_dir: . come out of "
          "conversion.yaml with the comments above them, the rest as it was",
          lambda: "sidecars/book/image-alt.csv" in md_after and "image-alt.csv" not in md_after
@@ -910,15 +914,16 @@ def check_move_to_src():
          lambda: spaced_run.returncode == 0
          and {"src/book/01 Big Picture.md", "src/slides/S01 Slides.md",
               "src/book/assets/portrait.png"} <= set(spaced_after) or failed(spaced_run)),
-        ("a LaTeX book split from decks takes its .latexmkrc, its definitions, and the "
-         "package, class, and style it keeps beside it, another dot file and a package it "
-         "doesn't load left",
+        ("a LaTeX book split from decks takes its .latexmkrc and the package, class, and "
+         "style it keeps beside it; its definitions for reading, a setting's file, another "
+         "dot file, and a package it doesn't load are left",
          lambda: texdecks_run.returncode == 0
          and {"src/book/main.tex", "src/book/one.tex", "src/book/.latexmkrc",
-              "src/book/latex-conversion-macros.tex", "src/book/mybook.cls",
+              "latex-conversion-macros.tex", "src/book/mybook.cls",
               "src/book/mystyle.sty", "src/book/mine.bst", "src/slides/deck.pptx",
               ".gitignore", "stray.sty"} <= set(texdecks_after)
-         and not {"src/book/.gitignore", "src/book/stray.sty", "src/slides/.latexmkrc"}
+         and not {"src/book/.gitignore", "src/book/stray.sty", "src/slides/.latexmkrc",
+                  "src/book/latex-conversion-macros.tex"}
          & set(texdecks_after) or failed(texdecks_run)),
         ("a Markdown source left unplaced moves nothing, and is named",
          lambda: stuck_run.returncode == 1 and stuck_before == stuck_after
@@ -993,11 +998,29 @@ def check_project_paths():
     laid = scratch("project-paths-tree-")
     for folder in ("src/book/img", "src/slides", "output/work/parts/book/rendered"):
         os.makedirs(os.path.join(laid, folder))
-    for name in ("own.css", "src/book/_preamble.md", "src/book/img/a.png",
-                 "output/work/parts/book/rendered/d.svg"):
+    for name in ("own.css", "templates/page.html", "src/book/_preamble.md",
+                 "src/book/img/a.png", "src/book/own.css", "src/book/Free to read",
+                 "src/slides/notes.md", "output/work/parts/book/rendered/d.svg",
+                 "output/html/a.html", "upstream/page.html", "sidecars/book/image-alt.csv",
+                 "originals/book/a.md", ".git/config", ".env"):
+        os.makedirs(os.path.dirname(os.path.join(laid, name)), exist_ok=True)
         with open(os.path.join(laid, name), "w", encoding="utf-8") as fh:
             fh.write("x")
     tree = paths.of(laid)
+    beside = scratch("project-paths-beside-")
+    with open(os.path.join(beside, "secret.txt"), "w", encoding="utf-8") as fh:
+        fh.write("x")
+    os.symlink(os.path.join(beside, "secret.txt"), os.path.join(laid, "linked.txt"))
+    os.symlink(beside, os.path.join(laid, "linked"))
+    os.symlink(os.path.join(laid, "output", "html"), os.path.join(laid, "pages"))
+    os.symlink(os.path.join(laid, "templates"), os.path.join(laid, "looks"))
+
+    def refused(value, part=None):
+        try:
+            tree.named(value, part, setting="html.template")
+        except paths.Refused as stop:
+            return "html.template names " + value in str(stop)
+        return False
     one = scratch("project-paths-one-")
     os.makedirs(os.path.join(one, "src", "notes"))
     bare = scratch("project-paths-bare-")
@@ -1011,6 +1034,15 @@ def check_project_paths():
             fh.write("x")
     with open(os.path.join(laid, "src", ".gitkeep"), "w", encoding="utf-8") as fh:
         fh.write("")
+    odd = scratch("project-paths-odd-")
+    os.makedirs(os.path.join(odd, "src", "x:"))
+
+    def _stops(call, kind):
+        try:
+            call()
+        except kind:
+            return True
+        return False
     downsample = load(os.path.join(ROOT, "lib", "downsample.py"), "downsample")
 
     def at(*parts):
@@ -1062,6 +1094,13 @@ def check_project_paths():
         ("the part nothing names is book, or the only one there is",
          lambda: tree.part() == "book" and tree.part("slides") == "slides"
          and paths.of(one).part() == "notes"),
+        ("a folder under src/ whose name isn't a part's, one with a colon that would begin "
+         "another folder in a search path among them, stops the run, and so does a "
+         "project whose own path has one",
+         lambda: all(_stops(lambda name=name: tree.part(name), paths.Refused)
+                     for name in ("x:/etc", "Book", "a b", "..", "-x", "a/b", "1"))
+         and _stops(lambda: paths.of(odd).sources(), paths.Refused)
+         and _stops(lambda: paths.Tree(os.path.join(work, "a:b")), paths.Refused)),
         ("a file a page names is the one the run made when there is one, else the source's, "
          "and a source is named to a program by its path from where the program runs",
          lambda: tree.referenced("rendered/d.svg")
@@ -1070,10 +1109,37 @@ def check_project_paths():
          and tree.source_arg("a.md") == os.path.join("..", "..", "..", "..", "src", "book",
                                                      "a.md")
          and here.source_arg("a.md") == "a.md"),
-        ("a setting's file is the one at the top, or among the sources when none is there",
+        ("a setting's file is read from the project's top and nowhere else: one of its name "
+         "among the sources doesn't stand in for it, there or not, and a footer that is "
+         "the name of a file among the sources is still the footer's text",
          lambda: tree.named("own.css") == at("own.css")
-         and tree.named("_preamble.md") == at("src", "book", "_preamble.md")
-         and tree.named("absent.css") == at("absent.css")),
+         and tree.named("templates/page.html") == at("templates", "page.html")
+         and tree.named("_preamble.md") == at("_preamble.md")
+         and tree.named("absent.css") == at("absent.css")
+         and tree.named_file("Free to read") is None
+         and tree.named_file("own.css") == at("own.css")
+         and tree.named_file("absent.css") is None),
+        ("it may be among the sources of the part being built, when the setting says so, "
+         "and through a link that stays in the project's own folders",
+         lambda: tree.named("src/book/_preamble.md") == at("src", "book", "_preamble.md")
+         and tree.named("src/slides/notes.md", "slides") == at("src", "slides", "notes.md")
+         and tree.named("looks/page.html") == at("looks", "page.html")),
+        ("and a full path, one that leads out of the project, a link out of it, another "
+         "part's sources, what a run wrote, the sidecars, the publisher's files, what was "
+         "taken out of the sources, and a name beginning with a dot each stop the run, "
+         "naming the setting; where the setting may be text, each is text",
+         lambda: all(refused(value) for value in (
+             os.path.join(beside, "secret.txt"), "/etc/passwd", "../x.css", "~/x.css",
+             "C:/x.css", "templates/../../x.css", "linked.txt", "linked/secret.txt",
+             "src/slides/notes.md", "src/x.css", "src", ".", "", "output/html/a.html",
+             "pages/a.html", "OUTPUT/html/a.html", "upstream/page.html",
+             "sidecars/book/image-alt.csv", "originals/book/a.md", ".git/config", ".env",
+             "templates/.hidden", "src/book/../slides/notes.md"))
+         and refused("src/book/_preamble.md", "slides")
+         and all(tree.named_file(value) is None for value in (
+             "/etc/passwd", "linked.txt", ".env", "output/html/a.html",
+             "src/slides/notes.md", os.path.join(beside, "secret.txt")))
+         and here.named("/etc/passwd") == "/etc/passwd"),
         ("Pandoc and LaTeX are told of the sources' folder only where it isn't the one "
          "they run in",
          lambda: downsample.resource_args(None, originals=here.originals()) == []

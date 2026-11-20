@@ -11,9 +11,8 @@ sidecars in sidecars/<part>/, and the settings files at the top.
 Run it from the book's folder, or give -d. That folder becomes the
 project's: the settings files stay at its top, and so does every file a
 setting names (a template, a stylesheet, a cover). This version's
-convert.py still reads the old layout, so run the move when you take up
-the release that reads the new one, or with --dry-run to see what it
-would do.
+convert.py reads either layout and the next release only the new one;
+--dry-run shows what the move would do.
 
 WHERE THE SOURCES GO
 
@@ -36,8 +35,9 @@ If a Markdown or LaTeX source is left unplaced, it moves nothing and
 names them. Split, each part gets a copy of every file its sources name,
 so a picture both use is in both and no reference is rewritten; a file
 no source names is named and left where it is. A LaTeX book takes its
-.latexmkrc, its file of definitions (latex.macros), and any package,
-class, or bibliography style it keeps beside its sources.
+.latexmkrc and any package, class, or bibliography style it keeps beside
+its sources; its file of definitions for reading (latex.macros) is a
+setting's file and stays at the top.
 
 SIDECARS
 
@@ -584,10 +584,22 @@ class Move:
             if inside(full, root) and os.path.exists(full):
                 self.named_by_settings.append(
                     os.path.relpath(os.path.realpath(full), os.path.realpath(root)))
+        # The file of definitions for reading a LaTeX book (latex.macros,
+        # by its default name too) is the person's, made for the
+        # conversion, and a setting's: it stays at the top.
+        macros = str(self.config.setting("latex", "macros") or "").strip()
+        if macros and os.sep not in macros and "/" not in macros \
+                and os.path.isfile(os.path.join(root, macros)) \
+                and macros not in self.named_by_settings:
+            self.named_by_settings.append(macros)
         # A file a setting names that the contents also list as a page (a
         # preamble a PDF's metadata is read from, set as a page too) is a
-        # source: it goes with the book, where a setting's file is looked
-        # for when the top has none of its name.
+        # source: it goes with the book, and the setting is rewritten to
+        # say where (plan_settings), a setting's path being read from the
+        # top and nowhere else. A header or a footer isn't rewritten, so
+        # its file stays.
+        named_paths = {value for _where, dotted, value in self.config.named_paths()
+                       if dotted.split(".")[-1] not in ("header", "footer")}
         listed = set()
 
         def pages(node):
@@ -602,7 +614,8 @@ class Move:
                 pages(node.get("items"))
         pages(self.config.project.get("contents"))
         self.named_pages = [n for n in self.named_by_settings
-                            if os.sep not in n and self.is_source(n) and self.stem(n) in listed]
+                            if os.sep not in n and n in named_paths and n != macros
+                            and self.is_source(n) and self.stem(n) in listed]
         self.named_by_settings = [n for n in self.named_by_settings
                                   if n not in self.named_pages]
         self.src_layout()
@@ -763,10 +776,6 @@ class Move:
                    and _is_master(os.path.join(root, n))]
         for master in masters:
             latex_book |= self.latex_closure(master)
-        # The book's file of definitions (latex.macros) is the book's too.
-        macros = str(config.setting("latex", "macros") or "").strip()
-        if masters and macros in book:
-            latex_book.add(macros)
         for name in sources:
             lower = name.lower()
             stem = self.stem(name)
@@ -926,12 +935,10 @@ class Move:
                     more, far = self.names(part, name)
                     named[part] |= more
                     self.outside += far
-            # A LaTeX book's .latexmkrc and its file of definitions
-            # (latex.macros) are read from the book's folder though no
-            # source names them, so they go with the book.
+            # A LaTeX book's .latexmkrc is read from the book's folder
+            # though no source names it, so it goes with the book.
             if any(s.lower().endswith(LATEX_EXTENSIONS) for s in self.parts.get("book", [])):
-                macros = str(self.config.setting("latex", "macros") or "").strip()
-                for name in BOOK_DOT_FILES + ((macros,) if macros else ()):
+                for name in BOOK_DOT_FILES:
                     if os.sep not in name and "/" not in name \
                             and os.path.isfile(os.path.join(root, name)):
                         named["book"].add(name)
@@ -1134,6 +1141,14 @@ class Move:
             for prefix in [["defaults"]] + [["targets", t] for t in (document.targets or {})]:
                 block = raw_block(document, prefix) or {}
                 for dotted, value in _path_values(config.conversion.root, block):
+                    if os.path.normpath(value) in self.named_pages:
+                        part = "book" if "book" in self.parts else sorted(self.parts)[0]
+                        target = "/".join(("src", part, os.path.normpath(value)))
+                        changes.append(("set", prefix + dotted.split("."), target))
+                        self.said.append(
+                            f"{'.'.join(prefix + [dotted])} named {value}, which is a page "
+                            f"too: it goes with the book, and the setting now says {target}.")
+                        continue
                     full = value if os.path.isabs(value) else os.path.join(root, value)
                     if inside(full, root) or not os.path.isfile(full):
                         continue
@@ -1301,8 +1316,8 @@ def main(argv=None):
         say("\nNothing was moved (--dry-run).")
         return 0
     move.execute()
-    say("\nMoved. This version's convert.py still reads the old layout; the next release "
-        "reads this one.")
+    say("\nMoved. This version's convert.py reads either layout; the next release reads "
+        "only this one.")
     return 0
 
 

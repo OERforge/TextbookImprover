@@ -42,6 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import os
+import re
 import tempfile
 
 PROJECT_NAME = "project.yaml"
@@ -51,6 +52,21 @@ PACKAGING_NAME = "packaging.yaml"
 RAW = ".json"
 INTERMEDIATE = ".filtered.json"
 BOOK = "book"
+# The folders at a project's top that no setting's file is read from:
+# what runs write, what was taken out of the sources, the sidecars, and
+# the files as a publisher sent them.
+NOT_NAMED = ("output", "originals", "sidecars", "upstream")
+
+
+# A part's name, as the project's schema has it: it's a folder's name
+# and goes into the search paths Pandoc and LaTeX are given, where a
+# colon would start another folder.
+PART_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+
+
+class Refused(SystemExit):
+    """A path the settings give that a run won't read; raised, it stops
+    the script with its message, as sys.exit does."""
 
 
 class Project:
@@ -81,10 +97,17 @@ class Project:
         a configuration from an earlier version, say."""
         return self._in(*names)
 
-    def named(self, value):
+    def named(self, value, part=None, setting=None):
         """The file or folder a setting names: from the project's folder,
         or as written when it's a full path."""
         return self._in(str(value))
+
+    def named_file(self, value, part=None):
+        """The file a setting names where the setting may be text
+        instead (a header's or a footer's): its path when it's a file
+        the settings may name, and otherwise None."""
+        path = self.named(value, part)
+        return path if os.path.isfile(path) else None
 
     def settings_folder(self):
         """The folder a setting's path is read from, for a module that
@@ -233,18 +256,36 @@ class Tree(Project):
         output/work/targets/<target>/  a target's own intermediates
     """
 
+    def __init__(self, root):
+        super().__init__(root)
+        # The sources' folder goes into TEXINPUTS and Pandoc's resource
+        # path whole, where the separator would begin a folder of the
+        # path's own choosing.
+        if os.pathsep in os.path.abspath(root):
+            raise Refused(f"{os.path.abspath(root)} has a {os.pathsep!r} in its path, which "
+                          "the programs a run starts read as the end of a folder's name. "
+                          "Move or rename the project's folder.")
+
     def part(self, part=None):
         """The part meant: the one named, or the project's own when it
-        has one alone (book, or the one folder under src/)."""
-        if part:
-            return part
-        if not hasattr(self, "_only"):
-            try:
-                found = sorted(e.name for e in os.scandir(self._in("src")) if e.is_dir())
-            except OSError:
-                found = []
-            self._only = BOOK if BOOK in found or len(found) != 1 else found[0]
-        return self._only
+        has one alone (book, or the one folder under src/). A name that
+        isn't a part's stops the run: it's a folder's name here and part
+        of a search path for Pandoc and LaTeX."""
+        if not part:
+            if not hasattr(self, "_only"):
+                try:
+                    found = sorted(e.name for e in os.scandir(self._in("src")) if e.is_dir())
+                except OSError:
+                    found = []
+                self._only = BOOK if BOOK in found or len(found) != 1 else found[0]
+            part = self._only
+        if not PART_NAME.match(str(part)):
+            raise Refused(
+                f"src/{part}/ in {os.path.abspath(self.root)} can't be a part of a project: a "
+                "part's name is a lowercase letter, then lowercase letters, digits, - and _. "
+                "Rename the folder (src/book/ for a book), or, for a book that keeps a src/ "
+                "of its own, move it into the new layout with util/move-to-src.py.")
+        return part
 
     def _made(self, *names):
         folder = self._in(*names)
@@ -291,16 +332,59 @@ class Tree(Project):
         part = self.part(part)
         return self._made("output", "work", "parts", part)
 
-    def named(self, value):
-        """The file or folder a setting names: at the project's top,
-        where a person keeps what the settings name, or, when nothing
-        there has the name, among the book's sources, where a file that
-        is also a page (a preamble the contents list) has to be."""
-        top = self._in(str(value))
-        if os.path.isabs(str(value)) or os.path.lexists(top):
-            return top
-        among = os.path.join(self.sources(), str(value))
-        return among if os.path.lexists(among) else top
+    def _unnamed(self, value, part=None):
+        """Why the settings may not name value, or None when they may.
+
+        A setting's path is read from the project's top and nowhere else:
+        one name is one file, so nothing put among the sources (which may
+        be a publisher's package, unpacked) can stand in for a file the
+        settings name. It may lead to the top, to a folder of the
+        person's own there, or into the sources of the part being built,
+        when it says so (src/book/preamble.md). It may not lead out of
+        the project, a link followed; into what a run wrote, what was
+        taken out of the sources, the sidecars, the publisher's files, or
+        another part; or to a name beginning with a dot, which is where
+        a checkout keeps what was never meant for a book."""
+        value = str(value)
+        if not value.strip() or "\0" in value:
+            return "which is no file's name"
+        if os.path.isabs(value) or value.startswith(("\\", "~")) \
+                or (len(value) > 1 and value[1] == ":"):
+            return "a full path, where a setting's path is from the project's folder"
+        root = os.path.realpath(self.root)
+        real = os.path.realpath(os.path.join(root, value))
+        if real == root or not real.startswith(root.rstrip(os.sep) + os.sep):
+            return "which leads out of the project's folder"
+        names = os.path.relpath(real, root).split(os.sep)
+        written = [n for n in value.replace("\\", "/").split("/") if n not in ("", ".")]
+        if any(n.startswith(".") for n in names + written):
+            return "which has a name beginning with a dot"
+        first = names[0].casefold()
+        if first in NOT_NAMED:
+            return f"which is in {names[0]}/"
+        if first == "src":
+            own = self.part(part)
+            if len(names) < 3 or names[1] != own:
+                return f"which is in src/ and not among the sources of the part built (src/{own}/)"
+        return None
+
+    def named(self, value, part=None, setting=None):
+        """The file or folder a setting names, from the project's top;
+        a path the settings may not name stops the run (_unnamed)."""
+        why = self._unnamed(value, part)
+        if why:
+            raise Refused(
+                f"{setting or 'A setting'} names {value}, {why}. A file a setting names is "
+                "kept in the project's folder: at its top, in a folder of its own there "
+                f"(templates/), or among the sources of the part being built (src/"
+                f"{self.part(part)}/); copy it there and name the copy.")
+        return self._in(str(value))
+
+    def named_file(self, value, part=None):
+        if self._unnamed(value, part):
+            return None
+        path = self._in(str(value))
+        return path if os.path.isfile(path) else None
 
     def reference_folders(self, part=None):
         part = self.part(part)

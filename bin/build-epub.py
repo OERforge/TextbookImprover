@@ -158,7 +158,7 @@ def book_metadata(project, resolved, found, paths):
                                                derived_summary(found))
     cover = str(resolved["epub.cover_image"] or "").strip()
     if cover:
-        path = paths.named(cover)
+        path = paths.named(cover, setting="epub.cover_image")
         if not os.path.isfile(path):
             sys.exit(f"epub.cover_image is set to {cover}, which does not "
                      f"exist (looked at {os.path.abspath(path)}).")
@@ -1044,7 +1044,7 @@ def own_css(paths, resolved):
     setting = str(resolved["epub.css"] or "").strip()
     if not setting:
         return None
-    path = os.path.abspath(paths.named(setting))
+    path = os.path.abspath(paths.named(setting, setting="epub.css"))
     if not os.path.isfile(path):
         sys.exit(f"epub.css is set to {setting}, which does not exist "
                  f"(looked at {path}).")

@@ -86,8 +86,8 @@ def named_file(text, base):
     text = str(text or "").strip()
     if not text or "\n" in text:
         return None
-    candidate = P(base).named(text)
-    return os.path.abspath(candidate) if os.path.isfile(candidate) else None
+    candidate = P(base).named_file(text)
+    return os.path.abspath(candidate) if candidate else None
 
 
 def markdown(value, base):

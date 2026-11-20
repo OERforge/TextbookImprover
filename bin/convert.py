@@ -842,6 +842,56 @@ def declared_kind(documents):
     return kind
 
 
+def project_parts(base):
+    """A project's parts and the kind of each, in the order built, and the
+    part a target with no part: is made from; (None, None) for a folder
+    in the layout with everything in one folder.
+
+    The parts are the ones project.yaml names (project.parts), or, when
+    it names none, the folders src/ holds, where one named slides is
+    slides and any other is a book as far as its sources say. A part of
+    kind files travels with the project and is never built."""
+    if not projectpaths.is_tree(base):
+        return None, None
+    import yaml
+    try:
+        with open(P(base).project_file(), encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        data = {}                 # load_targets says what's wrong with it
+    block = data.get("project") if isinstance(data, dict) else None
+    declared = block.get("parts") if isinstance(block, dict) else None
+    if isinstance(declared, dict) and declared:
+        parts = {str(name): (str(value.get("kind") or "book")
+                             if isinstance(value, dict) else "book")
+                 for name, value in declared.items()}
+    else:
+        parts = {name: ("slides" if name == "slides" else None)
+                 for name in sorted(os.listdir(P(base).top("src")))
+                 if os.path.isdir(P(base).top("src", name)) and not name.startswith(".")}
+    built = {name: kind for name, kind in parts.items() if kind != "files"}
+    default = projectpaths.BOOK if projectpaths.BOOK in built or len(built) != 1 \
+        else next(iter(built))
+    return built, default
+
+
+def targets_parts(base, default):
+    """The part each target conversion.yaml declares is made from, in the
+    file's order; one target of the default part when it declares none or
+    can't be read (load_targets says why)."""
+    import yaml
+    try:
+        with open(P(base).config_file(), encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        data = {}
+    declared = data.get("targets") if isinstance(data, dict) else None
+    if not isinstance(declared, dict) or not declared:
+        return [default]
+    return [(str(block.get("part") or "").strip() or default)
+            if isinstance(block, dict) else default for block in declared.values()]
+
+
 def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
                  markdown_decks=False):
     """Every conversion target, resolved, plus the project block. A slides
@@ -889,7 +939,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
     # into the author's files only then, never the schema's default.
     global LANGUAGE_DECLARED, TITLE_DECLARED, DECLARED_PROJECT, KIND_DECLARED, DECK_RUN
     LANGUAGE_DECLARED = any((doc.project or {}).get("language") for doc in documents)
-    KIND_DECLARED = declared_kind(documents)
+    KIND_DECLARED = PART_KIND or declared_kind(documents)
     # Markdown is a deck only where the project says the folder is slides:
     # Pandoc's slide Markdown is ordinary Markdown. A folder of both kinds
     # of deck is stopped once the targets are read.
@@ -951,6 +1001,14 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
             targets.append(Target(name, resolved, base))
     except oerconfig.ConfigError as exc:
         die(str(exc))
+    if PART:
+        # A run builds one part: the targets made from it.
+        targets = [t for t in targets
+                   if (str(t["part"] or "").strip() or DEFAULT_PART) == PART]
+        if not targets:
+            die(f"No target is built from the part {PART}: a target says which part it's "
+                f"made from with part:, and one that doesn't is made from {DEFAULT_PART}. "
+                "Nothing was converted.")
     # A PowerPoint deck's own PowerPoint file is its copy, format source,
     # which keeps its design. A pptx target rebuilds the deck from what the
     # reader keeps, through Pandoc's PowerPoint writer, which keeps none of
@@ -1207,6 +1265,14 @@ LATEX_LANGUAGES = {}
 LATEX_PAGE_FILES = {}
 LANGUAGES = {}
 KIND_DECLARED = None        # project.kind as a file gives it, if one does
+# In a project with a folder for each part: the part this run builds, the
+# part a target with no part: is built from, the kind the part is when the
+# project says (project.parts) or its folder's name does (slides), and
+# the option that tells each script the run starts which part it is.
+PART = None
+DEFAULT_PART = None
+PART_KIND = None
+PART_ARGS = []
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -6791,6 +6857,7 @@ def main():
         description="Convert the .docx files here, one output per target.",
         epilog="Anything else is passed to build-cartridge.py: --zip, "
                "--toc FILE, --check, --include-all-html.")
+    projectpaths.add_part_option(parser)
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
     parser.add_argument("--linked-documents", action="store_true",
@@ -6833,6 +6900,35 @@ def main():
                      HEADER_FILTER, PAGE_CSS):
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
+    # A project with a folder for each part: a run builds one part, so a
+    # project whose targets are made from more than one is a run of each,
+    # started here, one after another.
+    global PART, DEFAULT_PART, PART_KIND, PART_ARGS
+    parts, DEFAULT_PART = project_parts(base)
+    if parts is not None:
+        wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
+        if args.part:
+            if args.part not in parts:
+                die(f"--part {args.part}: the project's parts are "
+                    f"{', '.join(parts) or 'none'}. Nothing was converted.")
+            PART = args.part
+        elif len(wanted) > 1:
+            worst = 0
+            for name in wanted:
+                say(f"\nPart {name} (src/{name}/):")
+                done = subprocess.run([sys.executable, os.path.abspath(__file__),
+                                       "--part", name] + sys.argv[1:])
+                worst = max(worst, done.returncode)
+            return worst
+        else:
+            PART = wanted[0] if wanted else DEFAULT_PART
+        PART_KIND = parts.get(PART)
+        PART_ARGS = ["--part", PART]
+        projectpaths.set_part(PART, base)
+    elif args.part:
+        die("--part is for a project with a folder for each part under src/; this folder "
+            "holds its sources itself. Nothing was converted.")
+
     # What of Pandoc's data folders a run leaves alone (lib/pandocrun.py).
     for line in pandocrun.notices():
         say(line)
@@ -7360,7 +7456,7 @@ def main():
                                             pages_by_dir[target.pages_dir])
             if not named:
                 continue
-            result = run(["python3", EPUB_TOOL, "-d", base,
+            result = run(["python3", EPUB_TOOL, "-d", base, *PART_ARGS,
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7397,7 +7493,7 @@ def main():
                                        language if LANGUAGE_DECLARED else None,
                                        project, targets)
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base,
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS,
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7441,7 +7537,7 @@ def main():
                                             pages_by_dir[target.pages_dir])
             if not named:
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base, "--latex-target",
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, "--latex-target",
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7548,7 +7644,7 @@ def main():
             f"{PROJECT_NAME}, or a {PACKAGING_NAME} with a project: block, "
             "would build the cartridge.")
         return unnamed
-    command = ["python3", CARTRIDGE_TOOL, "-d", base]
+    command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS]
     if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
         command += ["--pages", html_targets[0].output_dir]
     # What the sources said about the book, for the packager's sample.

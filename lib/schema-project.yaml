@@ -192,9 +192,12 @@ keys:
       cnx, epub, jekyll, site, or archive), and options, the unpacker's
       options that change what it writes; and a license, when the part's
       isn't the book's. A part's name is a lowercase letter, then
-      lowercase letters, digits, - and _. Read and checked; not acted on
-      yet: the layout that builds each part from a folder of its own comes
-      with the next release (see ROADMAP.md).
+      lowercase letters, digits, - and _. In a project with a folder for
+      each part under src/, a part's kind is what its run takes it for
+      (a part named here as slides is slides), and a project that names
+      no parts has the folders src/ holds, one named slides being slides.
+      A part's from and license are read and checked; not acted on yet
+      (see ROADMAP.md).
 
   include:
     type: list

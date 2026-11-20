@@ -637,6 +637,95 @@ def case_tree_layout(work):
     ]
 
 
+def case_two_parts(work):
+    """A project whose src/ holds a book and decks builds each part in a
+    run of its own: each target from its part, each part's reports and
+    intermediates in its own folders, and neither reading the other."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text, mode="w"):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as fh:
+            fh.write(text)
+
+    def build(*options, folder=None):
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", *options],
+            cwd=folder or work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+
+    def listed(*parts):
+        folder = os.path.join(work, *parts)
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+    settings = ("targets:\n  html:\n    format: html\n  handout:\n    format: html\n"
+                "    part: slides\n")
+    write("project.yaml", "project:\n  identifier: org.example.two\n  title: Two Parts\n"
+          "  numbering: true\n  contents:\n    - chapter\n")
+    write("conversion.yaml", settings)
+    write("src/book/chapter.md", "# Chapter\n\nBook text.\n\n![](in-book.png)\n")
+    write("src/book/own.css", "p { color: black }\n")
+    write("src/slides/deck-one.md", "---\ntitle: Deck One\n---\n\n# First slide\n\n"
+          "- a point\n\n![](in-deck.png)\n")
+    write("src/book/in-book.png", ONE_PIXEL, "wb")
+    write("src/slides/in-deck.png", ONE_PIXEL, "wb")
+    both = build()
+    made = {name: listed("output", name) for name in ("html", "handout")}
+    deck = read(work, "output", "handout", "deck-one.html") \
+        if exists(work, "output", "handout", "deck-one.html") else ""
+    reports = {part: read(work, "output", "reports", part, "image-alt-missing.csv")
+               if exists(work, "output", "reports", part, "image-alt-missing.csv") else ""
+               for part in ("book", "slides")}
+    shutil.rmtree(os.path.join(work, "output"))
+    one = build("--part", "slides")
+    alone = listed("output")
+    parts_built = listed("output", "work", "parts")
+    unknown = build("--part", "answers")
+    write("conversion.yaml", settings + "    html:\n      css: src/book/own.css\n")
+    reached = build()
+    flat = os.path.join(work, "flat")
+    os.makedirs(flat)
+    with open(os.path.join(flat, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("# A\n")
+    in_flat = build("--part", "book", folder=flat)
+    return [
+        ("the run builds each part in turn, saying which, and succeeds",
+         lambda: both.returncode == 0
+         and "Part book (src/book/)" in both.stdout + both.stderr
+         and "Part slides (src/slides/)" in both.stdout + both.stderr
+         or fail(str(both.returncode) + both.stdout[-300:] + both.stderr[-300:])),
+        ("each target is made from its part: the book's page in one, the deck in the "
+         "other, a part named slides read as slides",
+         lambda: "chapter.html" in made["html"] and "deck-one.html" not in made["html"]
+         and "deck-one.html" in made["handout"] and "chapter.html" not in made["handout"]
+         or fail(str(made))),
+        ("the contents and the numbering are the book's: the decks' run isn't told its "
+         "pages are missing, and a deck isn't numbered as a chapter",
+         lambda: "listed in contents" not in both.stdout + both.stderr
+         and "<title>Deck One</title>" in deck
+         or fail(str(re.findall(r"<title>.*?</title>", deck))
+                 + (both.stdout + both.stderr)[-300:])),
+        ("each part's reports are its own, in a folder of its own",
+         lambda: "in-book.png" in reports["book"] and "in-deck.png" not in reports["book"]
+         and "in-deck.png" in reports["slides"] and "in-book.png" not in reports["slides"]
+         or fail(str(reports))),
+        ("--part builds one part's targets and nothing of another's",
+         lambda: one.returncode == 0 and "handout" in alone and "html" not in alone
+         and parts_built == ["slides"]
+         or fail(str((one.returncode, alone, parts_built)) + one.stderr[-300:])),
+        ("a part the project hasn't stops the run, naming the ones it has, and --part in a "
+         "folder that holds its sources itself stops it too",
+         lambda: unknown.returncode != 0 and "book, slides" in unknown.stderr
+         and in_flat.returncode != 0 and "--part" in in_flat.stderr),
+        ("a setting of one part's target that names a file among another part's sources "
+         "stops that part's run, naming the setting",
+         lambda: reached.returncode != 0 and "html.css names src/book/own.css" in reached.stderr
+         and "src/slides/" in reached.stderr or fail(reached.stderr[-500:])),
+    ]
+
+
 def case_lowercase_names(work):
     """media.lowercase: each file a page names copied under its name in
     lowercase and named so, beside an html target's pages and in a
@@ -10702,6 +10791,7 @@ CASES = [
     ("footnotes grouped as the contents group the pages", case_notes_groups),
     ("a Markdown source", case_markdown),
     ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
+    ("a book and its decks in one project, each a part", case_two_parts),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),
     ("two files, one page", case_stem_collisions),

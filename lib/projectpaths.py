@@ -266,19 +266,27 @@ class Tree(Project):
                           "the programs a run starts read as the end of a folder's name. "
                           "Move or rename the project's folder.")
 
+    def default_part(self):
+        """The part a target is made from when it names none, whose the
+        project's contents are: book, or the one folder src/ holds."""
+        if not hasattr(self, "_only"):
+            try:
+                found = sorted(e.name for e in os.scandir(self._in("src")) if e.is_dir())
+            except OSError:
+                found = []
+            self._only = BOOK if BOOK in found or len(found) != 1 else found[0]
+        return self._only
+
     def part(self, part=None):
-        """The part meant: the one named, or the project's own when it
-        has one alone (book, or the one folder under src/). A name that
-        isn't a part's stops the run: it's a folder's name here and part
-        of a search path for Pandoc and LaTeX."""
+        """The part meant: the one named, the one this run builds
+        (set_part), or the project's own when it has one alone (book, or
+        the one folder under src/). A name that isn't a part's stops the
+        run: it's a folder's name here and part of a search path for
+        Pandoc and LaTeX."""
         if not part:
-            if not hasattr(self, "_only"):
-                try:
-                    found = sorted(e.name for e in os.scandir(self._in("src")) if e.is_dir())
-                except OSError:
-                    found = []
-                self._only = BOOK if BOOK in found or len(found) != 1 else found[0]
-            part = self._only
+            part = _PART[0]
+        if not part:
+            part = self.default_part()
         if not PART_NAME.match(str(part)):
             raise Refused(
                 f"src/{part}/ in {os.path.abspath(self.root)} can't be a part of a project: a "
@@ -325,8 +333,12 @@ class Tree(Project):
         return self._in("output", str(output_dir or name))
 
     def package_file(self, name, package=None):
-        return os.path.join(self._made("output", "packages", package or "cartridge"),
-                            str(name))
+        """A file of a package's; the package no file names is the
+        book's cartridge, or another part's, named for the part."""
+        if not package:
+            part = self.part()
+            package = "cartridge" if part == BOOK else f"cartridge-{part}"
+        return os.path.join(self._made("output", "packages", package), str(name))
 
     def run_dir(self, part=None):
         part = self.part(part)
@@ -412,6 +424,36 @@ def is_tree(folder):
 
 
 _KNOWN = {}
+# The part this run builds, when the driver has said: a run builds one
+# part, and every path asked for without a part's name is that part's.
+_PART = [None, None]
+
+
+def set_part(part, folder=None):
+    """Make part the one every path is asked of in this run: the driver
+    says so once it knows which part it builds, and passes --part to each
+    script it starts, which says so too, each with the project's folder."""
+    if part is not None and not PART_NAME.match(str(part)):
+        raise Refused(f"{part!r} can't be a part's name: a lowercase letter, then lowercase "
+                      "letters, digits, - and _.")
+    _PART[:] = [str(part) if part else None, folder if part else None]
+
+
+def contents_apply():
+    """Whether the project's contents and numbering are this run's
+    part's: they order and number the book's pages, so a run of another
+    part (its decks) has neither."""
+    if not _PART[0] or _PART[1] is None:
+        return True
+    project = of(_PART[1])
+    return not isinstance(project, Tree) or _PART[0] == project.default_part()
+
+
+def add_part_option(parser):
+    """The --part option of a script the driver starts for one part."""
+    parser.add_argument("--part", default=None, metavar="NAME",
+                        help="the part of the project to work on, as convert.py passes "
+                             "it; the book's when left out")
 
 
 def of(folder="."):

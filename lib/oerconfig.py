@@ -859,6 +859,13 @@ def resolve(schema, project_schema, documents, target=None,
     if problems:
         raise ConfigError("\n".join(problems))
 
+    # The contents order the book's pages and numbering numbers them: a
+    # run of another part of the project, its decks say, is given
+    # neither.
+    import projectpaths
+    if not projectpaths.contents_apply() and (project.get("contents")
+                                              or project.get("numbering")):
+        project = dict(project, contents=[], numbering=False)
     return Resolved(project, settings, target, warnings)
 
 

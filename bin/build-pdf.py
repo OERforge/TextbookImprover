@@ -2360,7 +2360,9 @@ def main():
                         help="the book's title when no configuration gives "
                              "one: convert.py passes what it read from the "
                              "sources, a master file's title, and says so")
+    projectpaths.add_part_option(parser)
     args = parser.parse_args()
+    projectpaths.set_part(args.part, args.dir)
 
     for program in ("pandoc",) if args.latex_only or args.latex_target else ("pandoc", ENGINE):
         if shutil.which(program) is None:

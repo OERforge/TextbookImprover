@@ -1043,6 +1043,17 @@ def check_project_paths():
         except kind:
             return True
         return False
+    paths.set_part("slides", laid)
+    try:
+        others_contents = paths.contents_apply()
+        paths.set_part("book", laid)
+        books_contents = paths.contents_apply()
+        paths.set_part("slides", laid)
+        of_part = (tree.sources(), tree.sidecar("image-alt.csv"), tree.report("fidelity.csv"),
+                   tree.run_dir(), tree.package_file("imsmanifest.xml"),
+                   tree.named("src/slides/notes.md"))
+    finally:
+        paths.set_part(None)
     downsample = load(os.path.join(ROOT, "lib", "downsample.py"), "downsample")
 
     def at(*parts):
@@ -1094,6 +1105,18 @@ def check_project_paths():
         ("the part nothing names is book, or the only one there is",
          lambda: tree.part() == "book" and tree.part("slides") == "slides"
          and paths.of(one).part() == "notes"),
+        ("a run that builds one part asks every path of that part, its cartridge named for "
+         "it where it isn't the book's, and a name that can't be a part's is refused",
+         lambda: of_part == (at("src", "slides"), at("sidecars", "slides", "image-alt.csv"),
+                             at("output", "reports", "slides", "fidelity.csv"),
+                             at("output", "work", "parts", "slides"),
+                             at("output", "packages", "cartridge-slides", "imsmanifest.xml"),
+                             at("src", "slides", "notes.md"))
+         and tree.sources() == at("src", "book")
+         and tree.package_file("m") == at("output", "packages", "cartridge", "m")
+         and _stops(lambda: paths.set_part("x:y"), paths.Refused)),
+        ("the project's contents are the book's: a run of another part has none",
+         lambda: books_contents and not others_contents and paths.contents_apply()),
         ("a folder under src/ whose name isn't a part's, one with a colon that would begin "
          "another folder in a search path among them, stops the run, and so does a "
          "project whose own path has one",

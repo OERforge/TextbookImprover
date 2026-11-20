@@ -14,7 +14,7 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 **`part`**—`string`; default `""` (empty); *target only*
 
-Which of the project's parts (project.parts) this target is built from; left empty, the book's. Read and checked; not acted on yet: the layout that builds each part from a folder of its own comes with the next release (see ROADMAP.md).
+Which of the project's parts (project.parts) this target is built from; left empty, the book's. In a project with a folder for each part (src/book/, src/slides/), a run builds each part that has a target, one after another, and convert.py --part NAME builds one; in a folder that holds its sources itself, it's read and checked and nothing more.
 
 **`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
 

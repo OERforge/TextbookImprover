@@ -1009,7 +1009,9 @@ def main():
                              "footer sources, spacer rules) into DIR for "
                              "convert.py to read, then stop. Writes only into "
                              "DIR, never into the content directory.")
+    projectpaths.add_part_option(parser)
     args = parser.parse_args()
+    projectpaths.set_part(args.part, args.dir)
     if args.include_all_html_old:
         print("WARNING: --includeallhtml is deprecated and goes after 1.0: use "
               "--include-all-html, the same option.", file=sys.stderr)

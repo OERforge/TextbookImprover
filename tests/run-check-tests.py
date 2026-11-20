@@ -960,7 +960,9 @@ def ace_cases(work):
     package's under the package document and a content document's under
     it, its axe-core results left out and counted; with nothing named,
     its probe; and the lines for no EPUB, --quick, a run that fails, an
-    ACE that names nothing, and no Ace at all; without --wcag, not run."""
+    ACE that names nothing, and no Ace at all; without --wcag, not run.
+    An EPUB whose ZIP holds a symbolic link isn't given to Ace without
+    --ace-unsafe-zip."""
     sys.path.insert(0, HERE)
     import fakeace
     import acecheck
@@ -1021,6 +1023,21 @@ def ace_cases(work):
     failed = run("--wcag", "--epub", book, FAKE_ACE_FAIL="1")
     nothing = run("--wcag", "--epub", book, ACE=os.path.join(folder, "no-such-ace"))
     absent = run("--wcag", "--epub", book, ACE=None, PATH=empty)
+    # A book whose ZIP holds a symbolic link, beside one that doesn't.
+    linked = os.path.join(folder, "linked.epub")
+    with zipfile.ZipFile(book) as archive, zipfile.ZipFile(linked, "w") as copy:
+        for info in archive.infolist():
+            copy.writestr(info, archive.read(info))
+        link = zipfile.ZipInfo("EPUB/escape")
+        link.create_system = 3
+        link.external_attr = 0o120777 << 16
+        copy.writestr(link, "/tmp")
+    before_linked = runs()
+    refused = run("--wcag", "--epub", linked, "--epub", book)
+    refused_runs = runs() - before_linked
+    given = run("--wcag", "--ace-unsafe-zip", "--epub", linked)
+    given_runs = runs() - before_linked - refused_runs
+    alone = run("--ace-unsafe-zip", "--epub", book)
     return [
         ("Ace's own findings are notes, the package's under the package document and a content "
          "document's under it, by the tool ace",
@@ -1057,6 +1074,20 @@ def ace_cases(work):
         ("a run that fails is a warning saying why, in Ace's words",
          lambda: "WARNING: Ace didn't check book.epub: Could not find Chrome (ver. 148.0.7778.97). "
                  "This can occur if either." in failed or fail("got: " + failed)),
+        ("an EPUB whose ZIP holds a symbolic link isn't given to Ace, a warning naming the "
+         "entry and the option, and the other EPUB is",
+         lambda: refused_runs == 1
+         and "WARNING: Ace didn't check linked.epub: its ZIP holds what could take Ace's "
+             "unpacking outside its folder ('EPUB/escape' is a symbolic link), so it wasn't "
+             "unpacked; with --ace-unsafe-zip, check-output.py and audit.py give it to Ace all "
+             "the same." in refused and "Ace by DAISY 1.4.6 checked 1 EPUB(s)" in refused
+         or fail("got: " + refused)),
+        ("with --ace-unsafe-zip it is, and a line says so",
+         lambda: given_runs == 1 and "Ace was given linked.epub with --ace-unsafe-zip" in given
+         and "WARNING: Ace didn't check" not in given or fail("got: " + given)),
+        ("without --wcag the option is a note that it does nothing",
+         lambda: "--ace-unsafe-zip does nothing without --wcag, which runs Ace." in alone
+         or fail("got: " + alone)),
         ("an ACE that names nothing, and no Ace on the path, say so",
          lambda: f"Ace's checks not run: ACE is {os.path.join(folder, 'no-such-ace')}, which "
                  "isn't there." in nothing and acecheck.NOT_FOUND in absent

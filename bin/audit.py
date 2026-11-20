@@ -261,13 +261,14 @@ def audit_one(path, kind, validators, wcag=False, verbose=False,
     return [], [], 1
 
 
-def audit_ace(files, validators, cache=None, reuse=True, tally=None):
+def audit_ace(files, validators, cache=None, reuse=True, tally=None, unsafe_zip=False):
     """(findings, sections) of DAISY's Ace on the EPUBs among the files,
     when it's installed, its section saying whether it ran; for --wcag.
     cache: the audit cache's part for it, each EPUB's result kept by where
     the EPUB is, with its SHA-256, and, with reuse, used again while it
     and Ace are the same (acecheck.check). tally: a Tally, given what
-    Ace did."""
+    Ace did. unsafe_zip: an EPUB whose ZIP holds what could take Ace
+    outside its folder is given to it all the same (acecheck.zip_problems)."""
     epubs = [path for path, kind in files if kind == "epub"]
     if not epubs:
         return [], []
@@ -277,7 +278,7 @@ def audit_ace(files, validators, cache=None, reuse=True, tally=None):
         lines = [why]
         if command:
             found, lines = acecheck.check(command, epubs, by_epub=True, cache=cache,
-                                          reuse=reuse, tally=part)
+                                          reuse=reuse, tally=part, unsafe_zip=unsafe_zip)
     if tally is not None:
         tally.add("ace", part, lines)
     for line in lines:
@@ -332,6 +333,7 @@ def main():
                              "from VERAPDF_WCAG, and DAISY's Ace on each EPUB, when it's "
                              "installed; what they find is a note, never an error")
     wcag_lib.add_choices(parser)
+    acecheck.add_option(parser)
     parser.add_argument("--verbose", action="store_true",
                         help="with --wcag, a note for each element axe-core names and each "
                              "check veraPDF failed, listed in the report too, with what the "
@@ -378,6 +380,8 @@ def main():
         print(pdfcheck.WCAG_ALONE, file=sys.stderr)
     if wcag_lib.choices_given(args) and not args.wcag:
         print(wcag_lib.CHOICES_ALONE, file=sys.stderr)
+    if args.ace_unsafe_zip and not args.wcag:
+        print(acecheck.UNSAFE_ALONE, file=sys.stderr)
     version, level, best_practice, experimental = wcag_lib.chosen(args)
     # What the report says turns on, besides its files: --quick, and
     # --wcag with what it's asked to check against, which a page's and a
@@ -423,7 +427,7 @@ def main():
         sections += extra
         found, extra = audit_ace(files, not args.quick,
                                  None if cache is None else cache.part("ace"), not args.force,
-                                 tally)
+                                 tally, args.ace_unsafe_zip)
         all_found += found
         sections += extra
     # Nothing read again, nor checked, and what the checks found turning

@@ -126,6 +126,7 @@ def main():
                              "installed; what they find is a note, never an error; with "
                              "nothing else to check, check the setup")
     wcag.add_choices(parser)
+    acecheck.add_option(parser)
     parser.add_argument("--verbose", action="store_true",
                         help="with --wcag, a note for each element axe-core names and each "
                              "check veraPDF failed, listed in the summary too, with what the "
@@ -185,6 +186,8 @@ def main():
         notes.append(pdfcheck.WCAG_ALONE)
     if wcag.choices_given(args) and not args.wcag:
         notes.append(wcag.CHOICES_ALONE)
+    if args.ace_unsafe_zip and not args.wcag:
+        notes.append(acecheck.UNSAFE_ALONE)
     if args.wcag:
         version, level, best_practice, experimental = wcag.chosen(args)
         named = bool(args.pages or args.pages_file or args.epub or args.pdf or args.pptx)
@@ -209,7 +212,7 @@ def main():
         elif not ace:
             wcag_lines.append(why)
         else:
-            found, lines = acecheck.check(ace, epubs)
+            found, lines = acecheck.check(ace, epubs, unsafe_zip=args.ace_unsafe_zip)
             wcag_findings += found
             wcag_lines += lines
         command = None if args.quick else outputcheck.find_validator("verapdf")

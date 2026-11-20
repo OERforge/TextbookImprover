@@ -51,6 +51,7 @@ import shutil
 import struct
 import tempfile
 import sys
+import warnings
 import zipfile
 
 # Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
@@ -10485,6 +10486,88 @@ def check_ace_report():
     ]
 
 
+def check_ace_zip():
+    """What an EPUB's ZIP may not hold before Ace unpacks it
+    (acecheck.zip_problems): a symbolic link, by the mode in its
+    external attributes whatever system it says wrote it; a name given
+    twice, after case folding and Unicode normalization, a folder's with
+    its slash; a name that's absolute, starts with a drive, holds a
+    backslash, or has a .. segment; and a file whose directory can't be
+    read. An EPUB of files and folders, each name once, a ..-like name
+    and names alike but for a letter among them, holds none."""
+    import acecheck
+    work = scratch("ace-zip-")
+    base = os.path.join(work, "clean.epub")
+    acecheck.probe_epub(base)
+
+    def epub(name, *entries):
+        path = os.path.join(work, name)
+        with zipfile.ZipFile(base) as a, zipfile.ZipFile(path, "w") as b, \
+                warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for info in a.infolist():
+                b.writestr(info, a.read(info))
+            for entry in entries:
+                if isinstance(entry, str):
+                    entry = zipfile.ZipInfo(entry)
+                b.writestr(entry, "x")
+        return acecheck.zip_problems(path)
+
+    def link(name, system):
+        info = zipfile.ZipInfo(name)
+        info.create_system = system
+        info.external_attr = (0o120777 << 16)
+        return info
+    folder = zipfile.ZipInfo("EPUB/images/")
+    folder.external_attr = (0o40755 << 16) | 0x10
+    plain = epub("plain.epub", folder, "EPUB/images/a.png", "EPUB/images/A1.png",
+                 "EPUB/..x.xhtml", "EPUB/caf\u00e9.xhtml", "EPUB/cafe.xhtml")
+    unix = epub("unix-link.epub", link("EPUB/escape", 3))
+    dos = epub("dos-link.epub", link("EPUB/escape", 0))
+    case = epub("case.epub", "EPUB/NAV.xhtml")
+    nfd = epub("nfd.epub", "EPUB/caf\u00e9.xhtml", "EPUB/cafe\u0301.xhtml")
+    again = epub("again.epub", "EPUB/package.opf")
+    slash = epub("slash.epub", "EPUB/one", "EPUB/one/")
+    shapes = {name: epub(f"{name}.epub", entry) for name, entry in (
+        ("absolute", "/etc/escaped"), ("drive", "C:/escaped"), ("backslash", "EPUB\\a.xhtml"),
+        ("dotdot", "EPUB/../../escaped"), ("dotdot-end", "EPUB/.."))}
+    broken = os.path.join(work, "broken.epub")
+    with open(broken, "wb") as fh:
+        fh.write(b"PK\x03\x04 not a whole ZIP")
+    many = epub("many.epub", *(link(f"EPUB/l{i}", 3) for i in range(5)))
+    message = acecheck.refusal(many)
+    return [
+        ("an EPUB of files and folders, each name once, holds nothing to refuse",
+         lambda: acecheck.zip_problems(base) == [] and plain == [] or fail(str(plain))),
+        ("a symbolic link, by the mode in its external attributes, whatever system wrote it",
+         lambda: unix == ["'EPUB/escape' is a symbolic link"] and dos == unix
+         or fail(str(unix + dos))),
+        ("a name twice after case folding, after Unicode normalization, as written, and a "
+         "folder's with its slash",
+         lambda: case == ["'EPUB/NAV.xhtml' and 'EPUB/nav.xhtml' are one name"]
+         and nfd == ["'EPUB/cafe\u0301.xhtml' and 'EPUB/caf\u00e9.xhtml' are one name"]
+         and again == ["'EPUB/package.opf' is there twice"]
+         and slash == ["'EPUB/one/' and 'EPUB/one' are one name"]
+         or fail(str(case + nfd + again + slash))),
+        ("a name that's absolute, starts with a drive, holds a backslash, or has a .. segment",
+         lambda: shapes == {"absolute": ["'/etc/escaped' is absolute"],
+                            "drive": ["'C:/escaped' starts with a drive"],
+                            "backslash": ["'EPUB\\\\a.xhtml' holds a backslash"],
+                            "dotdot": ["'EPUB/../../escaped' has a '..' segment"],
+                            "dotdot-end": ["'EPUB/..' has a '..' segment"]}
+         or fail(str(shapes))),
+        ("a directory that can't be read",
+         lambda: acecheck.zip_problems(broken)[0].startswith(
+             "its ZIP directory couldn't be read (")
+         and acecheck.zip_problems(os.path.join(work, "none.epub"))[0].startswith(
+             "its ZIP directory couldn't be read (")),
+        ("the warning names the first three and counts the rest, and the option",
+         lambda: "'EPUB/l2' is a symbolic link; and 2 more), so it wasn't unpacked; with "
+                 "--ace-unsafe-zip, check-output.py and audit.py give it to Ace" in message
+         and "l3" not in message or fail(message)),
+    ]
+
+
 def check_axe_setup():
     """What check() finds before the worker runs: AXE_CORE_DIR's copy, a
     4.x release named in a note and another refused, the repository's own
@@ -11050,6 +11133,7 @@ GROUPS = [
     ("axe-core's setup, and what's read before the browser", check_axe_setup),
     ("an audit's cache of axe-core's results", check_axe_cache),
     ("DAISY's Ace's report, read", check_ace_report),
+    ("What an EPUB's ZIP may not hold before Ace unpacks it", check_ace_zip),
     ("a page that holds the check up, given up on", check_page_limits),
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),

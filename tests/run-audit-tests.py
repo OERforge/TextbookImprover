@@ -1506,6 +1506,91 @@ def case_report_text():
     ]
 
 
+def case_ace_zip():
+    """An EPUB whose ZIP holds a symbolic link isn't given to Ace (a
+    stand-in, tests/fakeace.py): a warning in the run and the report
+    naming the entry and --ace-unsafe-zip, Ace not run, and the next
+    audit not taking that report for current; with --ace-unsafe-zip,
+    Ace runs on it and a line says so, and an audit after that without
+    it keeps the result, the EPUB not unpacked again. Without --wcag,
+    the option is a note that it does nothing."""
+    sys.path.insert(0, HERE)
+    import fakeace
+    folder = os.path.join(WORK, "ace-zip")
+    os.makedirs(folder)
+    out = os.path.join(WORK, "ace-zip-out")
+    log = os.path.join(WORK, "ace-zip-runs.jsonl")
+    fake = fakeace.install(os.path.join(WORK, "fake-ace-zip"))
+    epub = os.path.join(folder, "linked.epub")
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
+        archive.writestr("META-INF/container.xml", (
+            '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:'
+            'opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/p.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>'))
+        archive.writestr("EPUB/p.opf", (
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<dc:title>Linked</dc:title><dc:language>en</dc:language></metadata>"
+            '<manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>'
+            '</manifest><spine><itemref idref="a"/></spine></package>'))
+        archive.writestr("EPUB/a.xhtml", (
+            '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+            'lang="en" xml:lang="en"><head><title>A</title></head><body><p>Text.</p></body>'
+            "</html>"))
+        link = zipfile.ZipInfo("EPUB/escape")
+        link.create_system = 3
+        link.external_attr = 0o120777 << 16
+        archive.writestr(link, "/tmp")
+
+    def runs():
+        if not os.path.exists(log):
+            return 0
+        with open(log, encoding="utf-8") as fh:
+            return sum(1 for line in fh if '"-o"' in line)
+
+    def audit(*flags):
+        before = runs()
+        result = subprocess.run([sys.executable, os.path.join(BIN, "audit.py"), folder,
+                                 "-o", out, *flags], cwd=WORK, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL,
+                                env=dict(os.environ, ACE=fake, FAKE_ACE_LOG=log))
+        found = [f for f in fl.read_csv(os.path.join(out, "audit.csv")) if f.tool == "ace"]
+        with open(os.path.join(out, "audit.md"), encoding="utf-8") as fh:
+            return result.stderr, found, fh.read(), runs() - before
+    warning = ("WARNING: Ace didn't check linked.epub: its ZIP holds what could take Ace's "
+               "unpacking outside its folder ('EPUB/escape' is a symbolic link), so it wasn't "
+               "unpacked; with --ace-unsafe-zip, check-output.py and audit.py give it to Ace "
+               "all the same.")
+    refused = audit("--wcag")
+    again = audit("--wcag")
+    given = audit("--wcag", "--ace-unsafe-zip")
+    kept = audit("--wcag")
+    alone = audit("--ace-unsafe-zip")
+    return [
+        ("an EPUB whose ZIP holds a symbolic link isn't given to Ace, and a warning in the run "
+         "and the report says why and names the option",
+         lambda: refused[3] == 0 and not refused[1] and warning in refused[0]
+         and "linked.epub: its ZIP holds what could take Ace" in refused[2]
+         or fail("got: " + refused[0])),
+        ("the next audit doesn't take that report for current, and refuses it again",
+         lambda: again[3] == 0 and "is current" not in again[0] and warning in again[0]
+         or fail("got: " + again[0])),
+        ("with --ace-unsafe-zip Ace runs on it, and a line says it was given it so",
+         lambda: given[3] == 1 and given[1]
+         and "Ace was given linked.epub with --ace-unsafe-zip, though its ZIP holds what could "
+             "take Ace's unpacking outside its folder ('EPUB/escape' is a symbolic link)."
+             in given[0] or fail("got: " + given[0])),
+        ("an audit after it without the option keeps the result, the EPUB not unpacked again",
+         lambda: kept[3] == 0 and len(kept[1]) == len(given[1]) and warning not in kept[0]
+         or fail("got: " + kept[0])),
+        ("without --wcag the option is a note that it does nothing",
+         lambda: alone[3] == 0
+         and "--ace-unsafe-zip does nothing without --wcag, which runs Ace." in alone[0]
+         or fail("got: " + alone[0])),
+    ]
+
+
 def case_validators():
     """epubcheck's and the Nu checker's findings in the report, each as
     its own, where they're installed: the suite's one audit that starts
@@ -1642,6 +1727,8 @@ def main():
                        ("a PDF's own checks, cached", case_pdf_cache),
                        ("axe-core's results, cached", case_axe_cache),
                        ("DAISY's Ace, asked for", case_ace),
+                       ("an EPUB whose ZIP could lead Ace's unpacking outside its folder",
+                        case_ace_zip),
                        ("epubcheck and the Nu checker, where they're installed",
                         case_validators),
                        ("convert.py --check-only", case_check_only)]:

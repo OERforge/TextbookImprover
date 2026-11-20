@@ -25,6 +25,17 @@ An audit keeps each EPUB's result, by where the EPUB is and its
 SHA-256, with Ace's version and this file's, and runs Ace again only on
 an EPUB that has changed (check's cache).
 
+Ace unpacks an EPUB before it checks it: Ace 1.4.6 with node-stream-zip,
+which refuses a name that leads out of its folder and writes a symbolic
+link as a file, and, when that fails, with extract-zip 2.0.1, which
+follows a link it has written (GHSA-7pqw-9j4j-h8q3, GHSA-jmr9-qjv8-65gv,
+with no release that fixes them). So an EPUB's ZIP directory is read
+first, nothing extracted, and an EPUB holding a symbolic link, a name
+given twice, or a name that leads outside its folder isn't given to
+Ace unless UNSAFE_OPTION says to (zip_problems). An EPUB holds only files
+and folders, each name once (EPUB 3.3, 4.2), so none TextbookImprover
+writes is refused.
+
 Copyright 2026 Robert Szarka
 
 This program is free software: you can redistribute it and/or modify
@@ -47,8 +58,10 @@ import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import unicodedata
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +85,15 @@ TIMEOUT = 1800
 # The elements a rule's line names, as axe-core's do.
 SHOWN = 3
 COLORS = re.compile(r"\x1b\[[0-9;]*m")
+# The option that gives Ace an EPUB whose ZIP holds what zip_problems
+# names, and the note when it's given without --wcag.
+UNSAFE_OPTION = "--ace-unsafe-zip"
+UNSAFE_HELP = ("with --wcag, give DAISY's Ace an EPUB whose ZIP holds a symbolic link, a name "
+               "given twice, or a name that leads outside its folder, which it otherwise isn't "
+               "given, since Ace's unpacker may then write outside its own folder; for an EPUB "
+               "you trust")
+UNSAFE_ALONE = f"{UNSAFE_OPTION} does nothing without --wcag, which runs Ace."
+DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def find():
@@ -239,7 +261,67 @@ def kept(entry):
         and isinstance(entry.get("result"), dict)
 
 
-def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT, tally=None):
+def add_option(parser):
+    """UNSAFE_OPTION on a script's command line."""
+    parser.add_argument(UNSAFE_OPTION, dest="ace_unsafe_zip", action="store_true",
+                        help=UNSAFE_HELP)
+
+
+def zip_problems(epub):
+    """What in an EPUB's ZIP directory could take an unpacker outside its
+    folder, each a phrase naming the entry, read with nothing extracted:
+    a symbolic link (by the mode a Unix ZIP keeps in the high 16 bits of
+    an entry's external attributes, which extract-zip reads whatever
+    system wrote the entry); a name given twice, compared after Unicode
+    normalization and case folding, as EPUB 3.3 compares an EPUB's names
+    (4.2.3), and a folder's name with its slash taken off; and a name
+    that's absolute, starts with a drive, holds a backslash, or has a ..
+    segment. And a directory that can't be read, since then Ace's own
+    unpacker fails and its fallback is used."""
+    try:
+        with zipfile.ZipFile(epub) as archive:
+            entries = archive.infolist()
+    except (zipfile.BadZipFile, OSError, ValueError, EOFError) as exc:
+        return [f"its ZIP directory couldn't be read ({exc})"]
+    problems, seen = [], {}
+    for entry in entries:
+        name = entry.filename
+        if stat.S_ISLNK(entry.external_attr >> 16):
+            problems.append(f"{name!r} is a symbolic link")
+        if name.startswith("/"):
+            problems.append(f"{name!r} is absolute")
+        if DRIVE.match(name):
+            problems.append(f"{name!r} starts with a drive")
+        if "\\" in name:
+            problems.append(f"{name!r} holds a backslash")
+        if ".." in name.split("/"):
+            problems.append(f"{name!r} has a '..' segment")
+        key = unicodedata.normalize(
+            "NFC", unicodedata.normalize("NFC", name.rstrip("/")).casefold())
+        if key in seen:
+            first = seen[key]
+            problems.append(f"{name!r} is there twice" if first == name
+                            else f"{name!r} and {first!r} are one name")
+        else:
+            seen[key] = name
+    return problems
+
+
+def listed(problems):
+    """The first of the problems, and how many more."""
+    return "; ".join(problems[:SHOWN]) + (
+        f"; and {len(problems) - SHOWN} more" if len(problems) > SHOWN else "")
+
+
+def refusal(problems):
+    """Why an EPUB wasn't given to Ace, for its warning."""
+    return (f"its ZIP holds what could take Ace's unpacking outside its folder "
+            f"({listed(problems)}), so it wasn't unpacked; with {UNSAFE_OPTION}, "
+            "check-output.py and audit.py give it to Ace all the same")
+
+
+def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT, tally=None,
+          unsafe_zip=False):
     """(findings, lines) for Ace on the EPUBs: a note for each of its own
     findings, and the summary's lines, the first saying what ran, then a
     warning for each EPUB it didn't check, then one for each rule. With no
@@ -253,7 +335,11 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
     audit wrote is started again. tally: a dict given the setup's key
     (None when nothing could be kept) and how many EPUBs Ace was run on,
     as "setup" and "ran", which an audit asks to tell whether its report
-    is current."""
+    is current; an EPUB not given to Ace counts as run, so a report with
+    one is never current. Before Ace runs on an EPUB, its ZIP is read
+    (zip_problems): one that holds what could take Ace outside its
+    folder isn't given to Ace, and is a warning, unless unsafe_zip says
+    to give it all the same, which a line says."""
     if not epubs:
         return [], probe(command, timeout)
     said_version = version(command)
@@ -267,7 +353,7 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
         for entry in stored.values():
             if kept(entry):
                 by_sha.setdefault(entry["sha"], entry)
-    found, failed, results, whens, ran = [], [], [], set(), 0
+    found, failed, results, whens, ran, unsafe = [], [], [], set(), 0, []
     when = findings_lib.now()
     for epub in epubs:
         entry, sha, where = None, None, os.path.realpath(epub)
@@ -282,6 +368,12 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
             whens.add(str(entry.get("when") or "?"))
         else:
             ran += 1
+            problems = zip_problems(epub)
+            if problems and not unsafe_zip:
+                failed.append((epub, refusal(problems)))
+                continue
+            if problems:
+                unsafe.append((epub, problems))
             result = run(command, epub, timeout)
             if "error" in result:
                 failed.append((epub, result["error"]))
@@ -292,7 +384,11 @@ def check(command, epubs, by_epub=False, cache=None, reuse=True, timeout=TIMEOUT
         found += own_findings(result, epub, by_epub)
     if tally is not None:
         tally.update(setup=setup, ran=ran)
-    return found, summary(results, failed, said_version, whens, found)
+    lines = summary(results, failed, said_version, whens, found)
+    lines += [f"Ace was given {os.path.basename(epub)} with {UNSAFE_OPTION}, though its ZIP "
+              f"holds what could take Ace's unpacking outside its folder ({listed(problems)})."
+              for epub, problems in unsafe]
+    return found, lines
 
 
 def summary(results, failed, said_version, whens, found):

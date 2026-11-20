@@ -713,6 +713,9 @@ def case_two_parts(work):
         fh.write("# A\n")
     in_nested = build(folder=nested)
     absent = build("-d", os.path.join(work, "no-such-folder"))
+    write("conversion.yaml", "defaults:\n  sidecars:\n    image_alt: alt.csv\n" + settings)
+    old_setting = build()
+    write("conversion.yaml", settings)
     # output/ is a run's own, marked, and one run at a time has it.
     marked = exists(work, "output", ".textbookimprover")
     held = None
@@ -782,6 +785,10 @@ def case_two_parts(work):
          and absent.returncode != 0 and "no-such-folder" in absent.stderr
          or fail(str([(r.returncode, r.stderr[-160:])
                       for r in (among, as_home, in_nested, absent)]))),
+        ("a sidecars: setting stops the run in this layout, naming it and where a sidecar "
+         "goes",
+         lambda: old_setting.returncode != 0 and "defaults.sidecars" in old_setting.stderr
+         and "sidecars/<part>/" in old_setting.stderr or fail(old_setting.stderr[-300:])),
         ("a run marks the output/ it makes, a second run while one holds the project "
          "stops and one after it goes, and an output/ a run didn't make, with a file in "
          "it, stops the run and is left as it was",

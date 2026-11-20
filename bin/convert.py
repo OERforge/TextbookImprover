@@ -892,6 +892,30 @@ def project_parts(base):
     return built, default
 
 
+def old_places(base):
+    """The sidecars: and reports: settings a project's conversion.yaml
+    still has, as dotted names. In a project with a folder for each part
+    a sidecar has its name in sidecars/<part>/ and a report in
+    output/reports/<part>/, so neither setting says anything a run may
+    follow."""
+    import yaml
+    try:
+        with open(P(base).config_file(), encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    found = []
+    blocks = [("defaults", data.get("defaults"))] if isinstance(data, dict) else []
+    targets = data.get("targets") if isinstance(data, dict) else None
+    if isinstance(targets, dict):
+        blocks += [(f"targets.{name}", block) for name, block in targets.items()]
+    for where, block in blocks:
+        if isinstance(block, dict):
+            found += [f"{where}.{section}" for section in ("sidecars", "reports")
+                      if block.get(section) is not None]
+    return found
+
+
 def without_dir(arguments):
     """A command line's arguments less -d DIR, for a run started in the
     folder itself."""
@@ -6962,6 +6986,15 @@ def main():
     # started here, one after another.
     global PART, DEFAULT_PART, PART_KIND, PART_ARGS
     parts, DEFAULT_PART = project_parts(base)
+    if parts is not None:
+        old = old_places(base)
+        if old:
+            die(f"{CONFIG_NAME} sets {', '.join(old)}, which this layout doesn't read: a "
+                "part's sidecars are in sidecars/<part>/ under their standard names, and "
+                "its drafts and reports are written to output/reports/<part>/. Take the "
+                "setting out, and move a sidecar it named to sidecars/<part>/ under its "
+                "standard name (util/move-to-src.py does both for a book in the old "
+                "layout). Nothing was converted.")
     if parts is not None and not args.locked:
         # output/ is the run's own, and one run at a time writes it.
         projectpaths.claim_output(base)

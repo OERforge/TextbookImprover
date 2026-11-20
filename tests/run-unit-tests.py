@@ -1057,6 +1057,14 @@ def check_project_paths():
         except kind:
             return True
         return False
+    claimed = [paths.claim_output(one), paths.claim_output(one)]
+    locked = paths.lock(one)
+    odd_output = scratch("project-paths-output-")
+    os.makedirs(os.path.join(odd_output, "src", "book"))
+    os.makedirs(os.path.join(odd_output, "output"))
+    with open(os.path.join(odd_output, "output", "mine.txt"), "w", encoding="utf-8") as fh:
+        fh.write("x")
+    refused_output = _stops(lambda: paths.claim_output(odd_output), paths.Refused)
     paths.set_part("slides", laid)
     try:
         others_contents = paths.contents_apply()
@@ -1152,6 +1160,14 @@ def check_project_paths():
          and paths.inside_project(at("output", "html")) == os.path.realpath(laid)
          and paths.inside_project(laid) is None
          and paths.inside_project(at("templates")) is None and paths.inside_project(one) is None),
+        ("an empty or absent output/ is marked as a run's, one marked is taken again, one "
+         "with a file and no marker is refused, and today's layout has neither marker nor "
+         "lock; the lock is held once",
+         lambda: claimed == [os.path.join(one, "output", ".textbookimprover")] * 2
+         and os.path.isfile(claimed[0]) and refused_output
+         and os.listdir(os.path.join(odd_output, "output")) == ["mine.txt"]
+         and paths.claim_output(work) is None and paths.lock(work) is None
+         and locked == os.path.join(one, "output", "work", "lock")),
         ("a folder under src/ whose name isn't a part's, one with a colon that would begin "
          "another folder in a search path among them, stops the run, and so does a "
          "project whose own path has one",

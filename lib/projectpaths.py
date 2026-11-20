@@ -425,6 +425,77 @@ def is_tree(folder):
     return any(e.is_dir() for e in entries) and all(e.is_dir() for e in entries)
 
 
+# The file in output/ that says a run made the folder, and what it holds:
+# a run writes into output/ and replaces what's there, so it takes only a
+# folder it made itself.
+MARKER = ".textbookimprover"
+MARKER_TEXT = ("TextbookImprover writes this folder: everything in it is made from the "
+               "project's sources and settings, and deleting it is always safe.\n")
+_LOCKS = []
+
+
+def claim_output(folder):
+    """Make the project's output/ this run's, in the layout with src/:
+    an output/ that holds something and wasn't made by a run stops it,
+    and a new or empty one gets the marker. Nothing in today's layout,
+    which has no output/."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        return None
+    output = project.top("output")
+    marker = os.path.join(output, MARKER)
+    if os.path.islink(output) or (os.path.lexists(output) and not os.path.isdir(output)):
+        raise Refused(f"{output} is a link or a file, where a project keeps the folder a "
+                      "run writes. Move it away and run this again.")
+    if os.path.isdir(output) and not os.path.isfile(marker) and os.listdir(output):
+        raise Refused(
+            f"{output} holds files and wasn't made by a run (it has no {MARKER}). A run "
+            "writes into output/ and replaces what's there, so it takes only a folder it "
+            "made. Move or rename the folder; if an earlier version's run made it, delete "
+            "it. Nothing was converted.")
+    os.makedirs(output, exist_ok=True)
+    if not os.path.isfile(marker):
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(MARKER_TEXT)
+    return marker
+
+
+def lock(folder):
+    """Hold the project for this run, in the layout with src/: a second
+    run in the same project stops while the first goes, since both would
+    write the same files. The lock is the operating system's on
+    output/work/lock, let go when the run ends however it ends; where
+    there's no such lock (Windows itself), there's none."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        return None
+    try:
+        import fcntl
+    except ImportError:
+        return None
+    work = project.top("output", "work")
+    os.makedirs(work, exist_ok=True)
+    path = os.path.join(work, "lock")
+    handle = open(path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        holder = handle.read().strip()
+        handle.close()
+        raise Refused(
+            f"Another run is going in this project ({os.path.abspath(project.root)})"
+            + (f", process {holder}" if holder.isdigit() else "")
+            + ". Wait for it to end, or stop it, and run this again. Nothing was "
+            "converted.") from None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    _LOCKS.append(handle)          # kept open, and so held, until the run ends
+    return path
+
+
 def tex_tree():
     """The TeX tree's folder, where kpsewhich says, or None."""
     kpsewhich = shutil.which("kpsewhich")

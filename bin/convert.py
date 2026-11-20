@@ -6890,6 +6890,9 @@ def main():
         epilog="Anything else is passed to build-cartridge.py: --zip, "
                "--toc FILE, --check, --include-all-html.")
     projectpaths.add_part_option(parser)
+    # A part's run started by the run of the whole project, which holds
+    # the project's lock already.
+    parser.add_argument("--locked", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("-d", "--dir", default=None, metavar="DIR",
                         help="the project's folder (default: the current one); a path "
                              "given to another option is then read from DIR")
@@ -6959,6 +6962,10 @@ def main():
     # started here, one after another.
     global PART, DEFAULT_PART, PART_KIND, PART_ARGS
     parts, DEFAULT_PART = project_parts(base)
+    if parts is not None and not args.locked:
+        # output/ is the run's own, and one run at a time writes it.
+        projectpaths.claim_output(base)
+        projectpaths.lock(base)
     if parts is not None:
         wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
         if args.part:
@@ -6971,7 +6978,8 @@ def main():
             for name in wanted:
                 say(f"\nPart {name} (src/{name}/):")
                 done = subprocess.run([sys.executable, os.path.abspath(__file__),
-                                       "--part", name] + without_dir(sys.argv[1:]))
+                                       "--part", name, "--locked"]
+                                      + without_dir(sys.argv[1:]))
                 worst = max(worst, done.returncode)
             return worst
         else:

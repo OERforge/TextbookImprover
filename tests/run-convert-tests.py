@@ -713,6 +713,28 @@ def case_two_parts(work):
         fh.write("# A\n")
     in_nested = build(folder=nested)
     absent = build("-d", os.path.join(work, "no-such-folder"))
+    # output/ is a run's own, marked, and one run at a time has it.
+    marked = exists(work, "output", ".textbookimprover")
+    held = None
+    try:
+        import fcntl
+        with open(os.path.join(work, "output", "work", "lock"), "a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            held = build()
+    except ImportError:
+        pass
+    after_lock = build("--part", "slides")
+    theirs = os.path.join(work, "sidecars", "theirs")
+    os.makedirs(os.path.join(theirs, "src", "book"))
+    os.makedirs(os.path.join(theirs, "output"))
+    for name, text in (("src/book/a.md", "# A\n"), ("output/thesis.txt", "mine\n")):
+        with open(os.path.join(theirs, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    shutil.move(theirs, os.path.join(os.path.dirname(work), "theirs-" + os.path.basename(work)))
+    theirs = os.path.join(os.path.dirname(work), "theirs-" + os.path.basename(work))
+    unmarked = build(folder=theirs)
+    kept = sorted(os.listdir(os.path.join(theirs, "output")))
+    shutil.rmtree(theirs)
     return [
         ("the run builds each part in turn, saying which, and succeeds",
          lambda: both.returncode == 0
@@ -760,6 +782,16 @@ def case_two_parts(work):
          and absent.returncode != 0 and "no-such-folder" in absent.stderr
          or fail(str([(r.returncode, r.stderr[-160:])
                       for r in (among, as_home, in_nested, absent)]))),
+        ("a run marks the output/ it makes, a second run while one holds the project "
+         "stops and one after it goes, and an output/ a run didn't make, with a file in "
+         "it, stops the run and is left as it was",
+         lambda: marked and (held is None or (held.returncode != 0
+                                              and "Another run is going" in held.stderr))
+         and after_lock.returncode == 0
+         and unmarked.returncode != 0 and "wasn't made by a run" in unmarked.stderr
+         and kept == ["thesis.txt"]
+         or fail(str([(r.returncode, r.stderr[-200:]) for r in (held, after_lock, unmarked)
+                      if r is not None]) + str(kept))),
         ("a setting of one part's target that names a file among another part's sources "
          "stops that part's run, naming the setting",
          lambda: reached.returncode != 0 and "html.css names src/book/own.css" in reached.stderr

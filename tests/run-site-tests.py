@@ -227,7 +227,20 @@ def case_browser_save(work):
     whole = os.path.join(work, "site")
     unpack([saves], whole, "--whole-pages")
     whole_alpha = read(whole, "ch1-alpha.html")
+    proj = os.path.join(work, "project")
+    as_part = unpack([saves], proj, "--part", "book")
     return [
+        ("with --part the pages and their resources are a part's sources in a project, "
+         "the same files as unpacked into one folder",
+         lambda: as_part.returncode == 0
+         and sorted(n for n in os.listdir(os.path.join(proj, "src", "book")))
+         == sorted(n for n in os.listdir(out)
+                   if n not in ("project.yaml", "unpack-report.csv"))
+         and read(proj, "src", "book", "ch1-alpha.html") == alpha
+         and yaml.safe_load(read(proj, "project.yaml"))["project"]["parts"]
+         == {"book": {"kind": "book"}}
+         and os.path.exists(os.path.join(proj, "output", "reports", "book",
+                                         "unpack-report.csv"))),
         ("the run succeeds, a page per save, named by its path",
          lambda: result.returncode == 0 and sorted(
              n for n in os.listdir(out) if n.endswith(".html"))

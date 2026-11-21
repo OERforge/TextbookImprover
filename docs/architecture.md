@@ -40,7 +40,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | `unpack-site.py` | Turns pages saved from the web into a directory `convert.py` converts, or with `--whole-pages` into an offline copy of the site. See [A book saved from the web](site-input.md). |
 | `lib/sitesource.py` | A saved site as URLs with bytes: the loaders (browser saves, MHTML), the generator profiles, reading the order from menus, and pointing every reference at what is held. |
 | `lib/htmlparse.py` | Parsing and serializing HTML with html5lib, or lxml when that's all there is, behind one interface. |
-| `lib/unpacking.py` | What both unpackers write: `project.yaml` and `unpack-report.csv`. |
+| `lib/unpacking.py` | What the unpackers share: where each writes (one folder, or with `--part` a part of a project laid out with `src/`), `project.yaml`, and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
 | `lib/latexsource.py` | A LaTeX book read through its master: the files it reaches, a copy put right where Pandoc's reader can't take it, its drawings rendered by LaTeX, and the whole book cut into a page per `\include`. |
 | `lib/texremediate.py` | A `source` target on a LaTeX book: the sidecars' decisions written into a copy of the author's files where each element is, and, with `tagging: "on"`, the copy made to build with LaTeX's own tagging. |

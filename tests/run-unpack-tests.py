@@ -387,11 +387,182 @@ def case_jekyll(work):
     ]
 
 
+SMALL_CARTRIDGE = """<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="m" xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1">
+<metadata><schema>IMS Common Cartridge</schema><schemaversion>1.1.0</schemaversion>
+<lom xmlns="http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest"><general><title>
+<string language="en-US">A Course</string></title></general></lom></metadata>
+<organizations><organization identifier="o" structure="rooted-hierarchy"><item identifier="root">
+<item identifier="i1" identifierref="ra"><title>Page A</title></item>
+</item></organization></organizations>
+<resources>
+<resource identifier="ra" type="webcontent" href="a.html"><file href="a.html"/></resource>
+</resources></manifest>"""
+
+
+def tool(name, *arguments):
+    return subprocess.run(["python3", os.path.join(BIN, name), *arguments],
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+
+def listing(folder):
+    found = []
+    for directory, _dirs, files in os.walk(folder):
+        found += [os.path.relpath(os.path.join(directory, n), folder).replace(os.sep, "/")
+                  for n in files]
+    return sorted(found)
+
+
+def case_part(work):
+    """An unpacker given --part writes a project laid out with src/: the
+    sources in the part's folder, the report under output/, the file it
+    unpacked in upstream/ and named as the part's from, and nothing of a
+    project that is there already replaced."""
+    import yaml
+    import zipfile
+    os.makedirs(work)
+    epub = os.path.join(work, "small.epub")
+    build_epub(epub)
+    proj = os.path.join(work, "proj")
+    first = tool("unpack-epub.py", epub, "-o", proj, "--part", "book")
+    laid = listing(proj)
+    project_text = read(proj, "project.yaml")
+    project = yaml.safe_load(project_text)["project"]
+    again = tool("unpack-epub.py", epub, "-o", proj, "--part", "book")
+    after_again = listing(proj)
+    # A sidecar there already, and a second part: nothing of the first's
+    # is touched, and project.yaml is the person's by now.
+    second = tool("unpack-epub.py", epub, "-o", proj, "--part", "teacher")
+    kept_project = read(proj, "project.yaml") == project_text
+    sample = os.path.join(proj, "output", "reports", "teacher", "project-sample.yaml")
+    sampled = yaml.safe_load(read(sample))["project"] if os.path.exists(sample) else {}
+    # A file in the project's upstream/ already is named, not copied.
+    inside = os.path.join(work, "inside")
+    os.makedirs(os.path.join(inside, "upstream", "from-the-press"))
+    held = os.path.join(inside, "upstream", "from-the-press", "small.epub")
+    shutil.copyfile(epub, held)
+    from_inside = tool("unpack-epub.py", held, "-o", inside, "--part", "book")
+    inside_from = yaml.safe_load(read(inside, "project.yaml"))["project"]["parts"]["book"]["from"]
+    # Another file of the upstream file's name is never replaced.
+    other = os.path.join(work, "other")
+    os.makedirs(os.path.join(other, "upstream"))
+    with open(os.path.join(other, "upstream", "small.epub"), "w") as fh:
+        fh.write("another file")
+    clash = tool("unpack-epub.py", epub, "-o", other, "--part", "book")
+    # Folders that can't take a part.
+    flat = os.path.join(work, "flat")
+    os.makedirs(flat)
+    with open(os.path.join(flat, "chapter.md"), "w") as fh:
+        fh.write("# A chapter\n")
+    in_flat = tool("unpack-epub.py", epub, "-o", flat, "--part", "book")
+    unmarked = os.path.join(work, "unmarked")
+    os.makedirs(os.path.join(unmarked, "output"))
+    with open(os.path.join(unmarked, "output", "mine.txt"), "w") as fh:
+        fh.write("a person's file\n")
+    in_unmarked = tool("unpack-epub.py", epub, "-o", unmarked, "--part", "book")
+    linked = os.path.join(work, "linked")
+    elsewhere = os.path.join(work, "elsewhere")
+    os.makedirs(os.path.join(linked, "src"))
+    os.makedirs(elsewhere)
+    os.symlink(elsewhere, os.path.join(linked, "src", "book"))
+    in_linked = tool("unpack-epub.py", epub, "-o", linked, "--part", "book")
+    bad_name = tool("unpack-epub.py", epub, "-o", os.path.join(work, "named"),
+                    "--part", "../up")
+    # A cartridge, with an option that changes what's written.
+    course = os.path.join(work, "course.imscc")
+    with zipfile.ZipFile(course, "w") as z:
+        z.writestr("imsmanifest.xml", SMALL_CARTRIDGE)
+        z.writestr("a.html", "<html><head><title>Page A</title></head>"
+                             "<body><p>A page.</p></body></html>")
+    lms = os.path.join(work, "lms")
+    cartridge = tool("unpack-cartridge.py", course, "-o", lms, "--part", "book",
+                     "--linked-documents")
+    lms_from = yaml.safe_load(read(lms, "project.yaml"))["project"]["parts"]["book"]["from"]
+    # The settings the unpacker wrote, and the part's sources where it
+    # put them, pass the run's own check.
+    lms_checked = tool("convert.py", "-d", lms, "--check-only")
+    # A Jekyll site is a folder: outside the project it isn't copied in.
+    site = os.path.join(work, "site")
+    for name, text in JEKYLL.items():
+        path = os.path.join(site, *name.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb" if isinstance(text, bytes) else "w") as fh:
+            fh.write(text)
+    pages = os.path.join(work, "pages")
+    jekyll = tool("unpack-jekyll.py", site, "-o", pages, "--part", "book")
+    jekyll_project = yaml.safe_load(read(pages, "project.yaml"))["project"]
+    return [
+        ("with --part the sources are the part's, the report is under output/, and "
+         "the project's own files are at its top",
+         lambda: first.returncode == 0
+         and {"src/book/chapter-1.html", "src/book/images/curve.png", "project.yaml",
+              "output/reports/book/unpack-report.csv", "output/.textbookimprover",
+              "upstream/small.epub"} <= set(laid)
+         and not [n for n in laid if n.endswith(".html") and "/" not in n]),
+        ("the file unpacked is copied to upstream/ and named as the part's from, with "
+         "its unpacker",
+         lambda: open(os.path.join(proj, "upstream", "small.epub"), "rb").read()
+         == open(epub, "rb").read()
+         and project["parts"] == {"book": {"kind": "book", "from": {
+             "file": "upstream/small.epub", "unpacker": "epub"}}}
+         and project["contents"][0]["title"] == "Chapter 1"),
+        ("a part that holds sources already is refused, and nothing is written",
+         lambda: again.returncode != 0 and "not empty" in again.stderr
+         and "Nothing was unpacked" in again.stderr and after_again == laid),
+        ("a second part is unpacked beside the first; project.yaml is left as it is, "
+         "what would have been written is a sample, and the lines to add are said",
+         lambda: second.returncode == 0 and kept_project
+         and os.path.exists(os.path.join(proj, "src", "teacher", "chapter-1.html"))
+         and sampled.get("parts", {}).get("teacher", {}).get("from", {}).get("file")
+         == "upstream/small.epub"
+         and "left as it is" in second.stdout and "    teacher:" in second.stdout),
+        ("the project written passes the run's own check, its settings and its "
+         "sources read",
+         lambda: lms_checked.returncode == 0),
+        ("a file already in the project's upstream/ is named where it is, not copied",
+         lambda: from_inside.returncode == 0
+         and inside_from["file"] == "upstream/from-the-press/small.epub"
+         and "copied" not in from_inside.stdout
+         and not os.path.exists(os.path.join(inside, "upstream", "small.epub"))),
+        ("another file of that name in upstream/ is never replaced: the unpacking "
+         "stops before it writes",
+         lambda: clash.returncode != 0 and "never replaced" in clash.stderr
+         and read(other, "upstream", "small.epub") == "another file"
+         and not os.path.exists(os.path.join(other, "src"))),
+        ("a folder that holds a book's sources at its top is refused",
+         lambda: in_flat.returncode != 0 and "util/move-to-src.py" in in_flat.stderr
+         and sorted(os.listdir(flat)) == ["chapter.md"]),
+        ("an output/ that a run didn't make is refused, and the part's folder isn't left",
+         lambda: in_unmarked.returncode != 0 and "wasn't made by a run" in in_unmarked.stderr
+         and not os.path.exists(os.path.join(unmarked, "src", "book"))
+         and listing(unmarked) == ["output/mine.txt"]),
+        ("a part's folder that is a link is refused, and nothing is written through it",
+         lambda: in_linked.returncode != 0 and "is a link" in in_linked.stderr
+         and os.listdir(elsewhere) == []),
+        ("a part's name that isn't one is refused",
+         lambda: bad_name.returncode != 0 and "part's name" in bad_name.stderr
+         and not os.path.exists(os.path.join(work, "named"))),
+        ("a cartridge's from carries the option that changes what's written",
+         lambda: cartridge.returncode == 0
+         and lms_from == {"file": "upstream/course.imscc", "unpacker": "cartridge",
+                          "options": ["--linked-documents"]}
+         and os.path.exists(os.path.join(lms, "src", "book", "a.html"))),
+        ("a folder unpacked from outside the project isn't copied in, the part has no "
+         "from, and the unpacker says so",
+         lambda: jekyll.returncode == 0
+         and jekyll_project["parts"] == {"book": {"kind": "book"}}
+         and not os.path.exists(os.path.join(pages, "upstream"))
+         and "from isn't written" in jekyll.stdout
+         and os.path.exists(os.path.join(pages, "src", "book", "sec-page.md"))),
+    ]
+
+
 CASES = [
     ("unpacking", case_unpack),
     ("a declared page that was split", case_split_source),
     ("converting what was unpacked", case_convert),
     ("a Jekyll site's Markdown", case_jekyll),
+    ("an unpacker writing a part of a project", case_part),
 ]
 
 

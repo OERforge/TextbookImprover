@@ -88,6 +88,7 @@ try:
     from cnx.exercises import Bank, default_cache
     from cnx.repo import Repo
     from cnx.unpack import unpack
+    from unpacking import Placed, add_part_option
 except ImportError:
     sys.exit("Cannot find the library. It should be in a lib/ directory "
              "beside bin/.")
@@ -119,6 +120,7 @@ def main():
     parser.add_argument("--no-boxes", action="store_true",
                         help="don't make the book's notes boxes (class box), "
                         "which every format draws with a border or rules")
+    add_part_option(parser)
     args = parser.parse_args()
     if args.offline and args.update_exercises:
         parser.error("--update-exercises asks the bank, which --offline "
@@ -137,17 +139,21 @@ def main():
     except LookupError as exc:
         sys.exit(str(exc))
     out = args.output or book.slug
-    if os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty; unpacking would mix two "
-                 "books. Name another directory with -o.")
+    placed = Placed(out, args.part, args.repository, "cnx",
+                    ([f"--book={args.book}"] if args.book else [])
+                    + (["--update-exercises"] if args.update_exercises else [])
+                    + (["--no-boxes"] if args.no_boxes else []))
     bank = Bank(cache=args.exercises_cache, offline=args.offline,
                 update=args.update_exercises)
     result = unpack(args.repository, out, book.slug, bank=bank,
-                    boxes=not args.no_boxes)
+                    boxes=not args.no_boxes, placed=placed)
     how = (f"baked as OpenStax bakes style {result.style!r}" if result.baked
            else "not baked: numbered within each page")
     print(f"{result.pages} page(s), {result.media} media file(s), and "
-          f"project.yaml written to {out}/ ({how}).")
+          f"project.yaml written to {placed.where}/ ({how})."
+          if not args.part else
+          f"{result.pages} page(s) and {result.media} media file(s) written to "
+          f"{placed.where}/, a part of the project {out}/ ({how}).")
     if result.boxes:
         print(f"{result.boxes} note(s) made boxes (class box), which every "
               "format draws with a border or rules; --no-boxes leaves them "
@@ -221,6 +227,7 @@ def main():
         print(f"  {count:5d}  {check}")
     if result.notes:
         print(f"Details in {P(out).report('unpack-report.csv')}.")
+    placed.finish()
     print(f"Next: cd {out} && python3 {os.path.join(HERE, 'convert.py')}")
     return 0
 

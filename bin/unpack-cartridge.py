@@ -40,7 +40,8 @@ P = projectpaths.of
 try:
     import cartridgesource as cs
     import epubsource
-    from unpacking import contents_tree, project_yaml, write_report, summarize
+    from unpacking import (Placed, add_part_option, contents_tree, project_yaml,
+                           write_report, summarize)
     from names import safe_stem
 except ImportError:
     sys.exit("Cannot find the library. It should be in a lib/ directory "
@@ -64,14 +65,14 @@ def main():
     parser.add_argument("--linked-documents", action="store_true",
                         help="make each document a page links to, when the "
                         "pipeline can convert it, a page of the book")
+    add_part_option(parser)
     args = parser.parse_args()
     out = args.output
-    if os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty; unpacking would mix two "
-                 "books. Name another directory with -o.")
     if not cs.is_cartridge(args.cartridge):
         sys.exit(f"{args.cartridge} isn't a Common Cartridge: no "
                  "imsmanifest.xml of one in it.")
+    placed = Placed(out, args.part, args.cartridge, "cartridge",
+                    ["--linked-documents"] if args.linked_documents else [])
     cartridge = cs.Cartridge(args.cartridge)
     os.makedirs(out, exist_ok=True)
     notes = []
@@ -188,18 +189,18 @@ def main():
                       "which an EPUB can't carry; --linked-documents makes it "
                       "a page"))
     if children:
-        placed = []
+        beneath = []
 
         def place(depth, title, path):
-            placed.append((depth, title, path, None))
+            beneath.append((depth, title, path, None))
             for text, doc in children.get(path, []):
                 place(depth + 1, text, doc)
         for depth, title, path, fragment in entries:
             if path is None:
-                placed.append((depth, title, path, fragment))
+                beneath.append((depth, title, path, fragment))
             else:
                 place(depth, title, path)
-        entries = placed
+        entries = beneath
 
     # What the outline never lists, by kind: a course's test banks sit
     # outside its modules, and matter for anyone making them into output.
@@ -284,14 +285,13 @@ def main():
     meta = {"title": [title]}
     if cartridge.language:
         meta["language"] = [cartridge.language]
-    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
-        fh.write(project_yaml("unpack-cartridge.py from "
-                              + os.path.basename(args.cartridge)
-                              + (f" (Common Cartridge {cartridge.version})"
-                                 if cartridge.version else ""),
-                              meta, tree, {}, unnamed, title))
+    placed.write_project(project_yaml("unpack-cartridge.py from "
+                                      + os.path.basename(args.cartridge)
+                                      + (f" (Common Cartridge {cartridge.version})"
+                                         if cartridge.version else ""),
+                                      meta, tree, {}, unnamed, title))
     write_report(P(out).report("unpack-report.csv"), notes)
-    summarize(notes, out, len(order))
+    summarize(notes, out, len(order), placed)
     if copied:
         print(f"{copied} other file(s) kept where the cartridge had them.")
     return 0

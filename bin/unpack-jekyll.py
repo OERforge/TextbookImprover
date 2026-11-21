@@ -67,7 +67,7 @@ P = projectpaths.of
 try:
     import yaml
     from names import safe_stem
-    from unpacking import write_report, summarize
+    from unpacking import Placed, add_part_option, write_report, summarize
 except ImportError as exc:
     sys.exit(f"Cannot find the library ({exc}). It should be in a lib/ "
              "directory beside bin/, and PyYAML must be installed.")
@@ -234,11 +234,12 @@ def main():
                     "the front matter.")
     parser.add_argument("source")
     parser.add_argument("-o", "--output", required=True)
+    add_part_option(parser)
     args = parser.parse_args()
     src, out = os.path.abspath(args.source), args.output
-    if os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty. Name another directory "
-                 "with -o.")
+    if not os.path.isdir(src):
+        sys.exit(f"{args.source} isn't a folder: a Jekyll site's sources are one.")
+    placed = Placed(out, args.part, src, "jekyll")
     config = {}
     if os.path.isfile(os.path.join(src, "_config.yml")):
         with open(os.path.join(src, "_config.yml"), encoding="utf-8") as fh:
@@ -314,10 +315,9 @@ def main():
         "title": str(config.get("title") or os.path.basename(src)),
         "language": str(config.get("lang") or "en"),
         "contents": tree}}
-    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
-        fh.write("# Written by unpack-jekyll.py from " + src + "; yours to "
-                 "edit.\n" + yaml.safe_dump(project, allow_unicode=True,
-                                            sort_keys=False, width=1000))
+    placed.write_project("# Written by unpack-jekyll.py from " + src + "; yours to "
+                         "edit.\n" + yaml.safe_dump(project, allow_unicode=True,
+                                                    sort_keys=False, width=1000))
     named = set()
 
     def collect(nodes):
@@ -331,7 +331,7 @@ def main():
             notes.append((page["name"] + ".md", "not-in-navigation",
                           "no nav_order or parent places it"))
     write_report(P(out).report("unpack-report.csv"), notes)
-    summarize(notes, out, len(pages))
+    summarize(notes, out, len(pages), placed)
     return 0
 
 

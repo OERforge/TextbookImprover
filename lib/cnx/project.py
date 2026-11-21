@@ -427,7 +427,7 @@ def reads_out(summary, rows=()):
     return repeats(summary, rows)
 
 
-def write_captions(out, tables, report=None):
+def write_captions(out, tables, report=None, captions=None, listing=None):
     """table-captions.csv, prefilled where a table's caption is its label
     alone, or it has none, and the source has a summary that says
     something; not for a layout table, which needs none. A summary that
@@ -479,15 +479,19 @@ def write_captions(out, tables, report=None):
                        "summary, reads the table out, which a screen reader hears "
                        "before the table itself: “" + " ".join(words[:12])
                        + ("…" if len(words) > 12 else "") + "”")
-    if rows:
-        with open(os.path.join(out, "table-captions.csv"), "w", newline="",
+    if captions is None and listing is None:
+        captions = os.path.join(out, "table-captions.csv")
+    if listing is None:
+        listing = os.path.join(out, "cnx-table-summaries.csv")
+    if rows and captions:
+        with open(captions, "w", newline="",
                   encoding=sidecars.CSV_ENCODING) as fh:
             writer = sidecars.csv_writer(fh)
             writer.writerow(["Label", "Description", "Source", "Excerpt",
                              "Drafted by", "Reviewed"])
             writer.writerows(rows)
     if summaries:
-        with open(os.path.join(out, "cnx-table-summaries.csv"), "w",
+        with open(listing, "w",
                   newline="", encoding=sidecars.CSV_ENCODING) as fh:
             writer = sidecars.csv_writer(fh)
             writer.writerow(["Page", "Label", "Caption", "Summary", "Reads out"])

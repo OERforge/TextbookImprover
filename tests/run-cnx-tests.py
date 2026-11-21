@@ -333,6 +333,22 @@ def case_trade(work):
     out = os.path.join(work, "trade")
     result = unpack(repo, out, "--book", "tiny-trade")
     again = unpack(repo, out, "--book", "tiny-trade")
+    # The same book as a part of a project laid out with src/, and then
+    # again as a second part, the project's settings there by then.
+    proj = os.path.join(work, "trade-project")
+    as_part = unpack(repo, proj, "--book", "tiny-trade", "--part", "book")
+    settings_then = {n: read(proj, n) for n in ("project.yaml", "conversion.yaml")
+                     if os.path.exists(os.path.join(proj, n))}
+    second_part = unpack(repo, proj, "--book", "tiny-trade", "--part", "second")
+
+    def files(folder):
+        found = []
+        for directory, _dirs, names_ in os.walk(folder):
+            found += [os.path.relpath(os.path.join(directory, n), folder).replace(os.sep, "/")
+                      for n in names_]
+        return sorted(found)
+    own = {"project.yaml", "conversion.yaml", "pdf-layout.yaml", "unpack-report.csv",
+           "table-captions.csv", "cnx-table-summaries.csv"}
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
     conversion = yaml.safe_load(read(out, "conversion.yaml"))
@@ -656,6 +672,36 @@ def case_trade(work):
          and "[out:" in gains),
         ("a directory that already holds a book is refused",
          lambda: again.returncode != 0 and "not empty" in again.stderr),
+        ("with --part the book is a part of a project: its pages and media in "
+         "src/book/, the settings at the top, a drafted sidecar in sidecars/book/, "
+         "and the reports under output/",
+         lambda: as_part.returncode == 0
+         and files(os.path.join(proj, "src", "book"))
+         == [n for n in files(out) if n not in own]
+         and all(os.path.exists(os.path.join(proj, n)) ==
+                 os.path.exists(os.path.join(out, n))
+                 for n in ("project.yaml", "conversion.yaml", "pdf-layout.yaml"))
+         and os.path.exists(os.path.join(proj, "sidecars", "book", "table-captions.csv"))
+         == os.path.exists(os.path.join(out, "table-captions.csv"))
+         and os.path.exists(os.path.join(proj, "output", "reports", "book",
+                                         "unpack-report.csv"))
+         and os.path.exists(os.path.join(proj, "output", "reports", "book",
+                                         "cnx-table-summaries.csv"))
+         == os.path.exists(os.path.join(out, "cnx-table-summaries.csv"))),
+        ("the part is declared, and a repository outside the project is said not to "
+         "be recorded as its from",
+         lambda: yaml.safe_load(settings_then["project.yaml"])["project"]["parts"]
+         == {"book": {"kind": "book"}}
+         and "from isn't written" in as_part.stdout),
+        ("a second part leaves the project's settings as they are and writes what it "
+         "would have as samples beside its report",
+         lambda: second_part.returncode == 0
+         and all(read(proj, n) == text for n, text in settings_then.items())
+         and os.path.exists(os.path.join(proj, "src", "second",
+                                         "1-1-why-trade-happens.html"))
+         and all(os.path.exists(os.path.join(proj, "output", "reports", "second",
+                                             n.replace(".yaml", "-sample.yaml")))
+                 for n in settings_then)),
     ]
 
 

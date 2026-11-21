@@ -49,7 +49,8 @@ import projectpaths  # noqa: E402
 P = projectpaths.of
 try:
     import epubsource
-    from unpacking import contents_tree, project_yaml, write_report, summarize
+    from unpacking import (Placed, add_part_option, contents_tree, project_yaml,
+                           write_report, summarize)
     from names import safe_stem
 except ImportError:
     sys.exit("Cannot find the library. It should be in a lib/ directory "
@@ -88,14 +89,12 @@ def main():
     parser.add_argument("epub")
     parser.add_argument("-o", "--output",
                         help="directory to write (default: the EPUB's name)")
+    add_part_option(parser)
     args = parser.parse_args()
     out = args.output or os.path.splitext(os.path.basename(args.epub))[0]
-    if os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty; unpacking would mix two "
-                 "books. Name another directory with -o.")
-    os.makedirs(out, exist_ok=True)
-
     package = epubsource.Package(args.epub)
+    placed = Placed(out, args.part, args.epub, "epub")
+    os.makedirs(out, exist_ok=True)
     names = page_names(package)
     notes = []                           # (where, check, detail)
 
@@ -161,12 +160,11 @@ def main():
 
     meta = dict(package.metadata)
     title = (meta["title"] or [os.path.basename(out)])[0]
-    with open(P(out).project_file(), "w", encoding="utf-8") as fh:
-        fh.write(project_yaml("unpack-epub.py from "
-                              + os.path.basename(args.epub), meta, tree,
-                              flagged, unnamed, title))
+    placed.write_project(project_yaml("unpack-epub.py from "
+                                      + os.path.basename(args.epub), meta, tree,
+                                      flagged, unnamed, title))
     write_report(P(out).report("unpack-report.csv"), notes)
-    summarize(notes, out, len(names))
+    summarize(notes, out, len(names), placed)
     return 0
 
 

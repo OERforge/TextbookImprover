@@ -53,7 +53,8 @@ P = projectpaths.of
 try:
     import htmlparse as hp
     import sitesource
-    from unpacking import contents_tree, project_yaml, write_report, summarize
+    from unpacking import (Placed, add_part_option, contents_tree, project_yaml,
+                           write_report, summarize)
 except ImportError as exc:
     sys.exit(f"Cannot find the library ({exc}). It should be in a lib/ "
              "directory beside bin/.")
@@ -103,16 +104,22 @@ def main():
                                               sitesource.PROFILES],
                         help="the generator's profile, when it isn't "
                              "recognized")
+    add_part_option(parser)
     args = parser.parse_args()
     out = args.output
-    if os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty; unpacking would mix two "
-                 "books. Name another directory with -o.")
+    options = ((["--whole-pages"] if args.whole_pages else [])
+               + ([f"--profile={args.profile}"] if args.profile else [])
+               + [f"--third-party={host}" for host in args.third_party])
     backend = hp.require()
 
     site = sitesource.load(args.inputs)
     if not site.pages:
         sys.exit("No saved pages found.")
+    placed = Placed(out, args.part, args.inputs[0] if len(args.inputs) == 1 else None,
+                    "site", options)
+    if args.part and len(args.inputs) > 1:
+        placed.unrecorded = ("More than one input was given, so the part's from, which "
+                             "names one file, isn't written.")
     notes = list(site.notes)
     keep_hosts = set(THIRD_PARTY) | set(args.third_party)
     for page in site.pages.values():
@@ -337,13 +344,11 @@ def main():
     if book:
         notes += book.summary(profile["name"])
     if not args.whole_pages:
-        with open(P(out).project_file(), "w",
-                  encoding="utf-8") as fh:
-            fh.write(project_yaml("unpack-site.py", meta, tree, {}, unnamed,
-                                  title))
+        placed.write_project(project_yaml("unpack-site.py", meta, tree, {}, unnamed,
+                                          title))
     write_report(P(out).report("unpack-report.csv"), notes)
-    summarize(notes, out, len(site.pages))
-    print(f"{len(names)} resource(s) under {out}/assets/, each once.")
+    summarize(notes, out, len(site.pages), placed)
+    print(f"{len(names)} resource(s) under {placed.where}/assets/, each once.")
     return 0
 
 

@@ -20,7 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 
+import projectpaths
 import sidecars
+from unpacking import Placed
 
 from . import exercises
 from . import pages as P
@@ -108,11 +110,15 @@ def _names(repo, other):
     return ({p.module: p for p in pages if p.module}, baked.labels)
 
 
-def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
+def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True,
+           placed=None):
     """Unpack one book of a repository into out, which must be empty or
-    absent. bank is the exercises.Bank its embedded exercises come from
-    (by default, the cache, then the network); boxes, whether its notes
-    are boxes (class box). Returns a Result."""
+    absent, or, with placed (unpacking.Placed) naming a part, into that
+    part of the project out is. bank is the exercises.Bank its embedded
+    exercises come from (by default, the cache, then the network); boxes,
+    whether its notes are boxes (class box). Returns a Result."""
+    placed = placed or Placed(out)
+    project = projectpaths.of(out)
     repo = Repo(repo_dir)
     book = repo.book(slug)
     result = Result()
@@ -137,7 +143,7 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     emitter = Emitter(baked, pages, language, report, boxes=boxes)
     for page in pages:
         html = emitter.page_html(page)
-        with open(os.path.join(out, page.name + ".html"), "w",
+        with open(project.source(page.name + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(serialize(html))
     result.pages = len(pages)
@@ -147,17 +153,15 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
     result.merged_example = emitter.merged_example
     result.kind_alone = emitter.kind_alone
     result.title_alone = emitter.title_alone
-    result.media = copy_media(asm, out, notes)
+    result.media = copy_media(asm, project.sources(), notes)
     source = "unpack-cnx.py from " + (source_name or os.path.basename(
         os.path.abspath(repo_dir))) + f" ({book.slug})"
     is_openstax = bool(book.style)
-    with open(os.path.join(out, "project.yaml"), "w", encoding="utf-8") as fh:
-        fh.write(project_yaml(source, book.collection, book.slug, outline,
-                             publisher="OpenStax" if is_openstax else None,
-                             authors=["OpenStax"] if is_openstax else None))
-    if is_openstax and not os.path.exists(os.path.join(out,
-                                                       "conversion.yaml")):
-        with open(os.path.join(out, "conversion.yaml"), "w",
+    placed.write_project(project_yaml(source, book.collection, book.slug, outline,
+                                      publisher="OpenStax" if is_openstax else None,
+                                      authors=["OpenStax"] if is_openstax else None))
+    if is_openstax:
+        with open(placed.settings(projectpaths.CONFIG_NAME), "w",
                   encoding="utf-8") as fh:
             fh.write(openstax_conversion(
                 source,
@@ -166,18 +170,19 @@ def unpack(repo_dir, out, slug=None, source_name=None, bank=None, boxes=True):
                                        ("folio.access_for_free",
                                         "Access for free at openstax.org")))))
         # The PDF's page, which that conversion.yaml names.
-        if not os.path.exists(os.path.join(out, PDF_LAYOUT)):
-            with open(os.path.join(out, PDF_LAYOUT), "w", encoding="utf-8") as fh:
-                fh.write(openstax_pdf_layout(source, book.style))
+        with open(placed.settings(PDF_LAYOUT), "w", encoding="utf-8") as fh:
+            fh.write(openstax_pdf_layout(source, book.style))
     (result.prefilled, result.summaries, result.empty_summaries,
-     result.summaries_read_out) = write_captions(out, emitter.tables, report)
+     result.summaries_read_out) = write_captions(
+         out, emitter.tables, report, captions=placed.sidecar("table-captions.csv"),
+         listing=project.report("cnx-table-summaries.csv"))
     result.layout_tables = sum(1 for t in emitter.tables if t[4])
     if not result.baked and book.style:
         notes.append(("book", "style-not-baked",
                       f"style {book.style!r} has no recipe here yet; numbered "
                       "within each page, nothing moved"))
     result.notes = notes
-    with open(os.path.join(out, "unpack-report.csv"), "w", newline="",
+    with open(project.report("unpack-report.csv"), "w", newline="",
               encoding=sidecars.CSV_ENCODING) as fh:
         writer = sidecars.csv_writer(fh)
         writer.writerow(["Where", "Check", "Detail"])

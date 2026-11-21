@@ -93,7 +93,7 @@ def main():
     args = parser.parse_args()
     out = args.output or os.path.splitext(os.path.basename(args.epub))[0]
     package = epubsource.Package(args.epub)
-    placed = Placed(out, args.part, args.epub, "epub")
+    placed = Placed(out, args.part, args.epub, "epub", from_run=args.from_run)
     os.makedirs(out, exist_ok=True)
     names = page_names(package)
     notes = []                           # (where, check, detail)

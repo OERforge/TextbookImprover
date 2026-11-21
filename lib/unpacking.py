@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import filecmp
+import hashlib
 import os
 import re
 import shutil
@@ -37,7 +38,83 @@ FLAT_SOURCES = (".docx", ".md", ".html", ".adoc", ".asciidoc", ".tex", ".pptx", 
                 ".ppt", ".key")
 
 
+def record_path(out, part):
+    """Where the record of what a part was unpacked to is kept."""
+    return P(out).top("output", "work", "unpacked", part + ".txt")
+
+
+def hashes(folder):
+    """{path from folder: SHA-256} of every file under it, but what
+    Windows leaves beside a file saved into WSL (name:Zone.Identifier),
+    which is no file of the book's."""
+    found = {}
+    for directory, dirs, names in os.walk(folder):
+        dirs.sort()
+        for name in sorted(names):
+            if name.endswith(":Zone.Identifier"):
+                continue
+            path = os.path.join(directory, name)
+            if os.path.islink(path) or not os.path.isfile(path):
+                continue
+            digest = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(block)
+            found[os.path.relpath(path, folder).replace(os.sep, "/")] = digest.hexdigest()
+    return found
+
+
+def write_record(out, part, unpacker, options, source, folder=None):
+    """Record what a part's upstream file was unpacked to: each file of
+    the part's sources (or of folder, a fresh unpacking elsewhere) and
+    its hash, under the unpacker, its options, and the file it read."""
+    path = record_path(out, part)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    found = hashes(folder or P(out).sources(part))
+    lines = ["# What " + (source or "the part's upstream file") + " was unpacked to, for "
+             "telling later what has changed in src/" + part + "/. Written by a run; "
+             "deleting it is safe.",
+             "# unpacker: " + str(unpacker or ""),
+             "# options: " + " ".join(options or ()),
+             "# from: " + str(source or "")]
+    lines += [f"{digest}  {name}" for name, digest in sorted(found.items())]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return path
+
+
+def read_record(out, part):
+    """({key: value} of the record's head, {path: hash}), or None when
+    there is no record."""
+    try:
+        with open(record_path(out, part), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return None
+    head, found = {}, {}
+    for line in lines:
+        if line.startswith("# ") and ": " in line:
+            key, value = line[2:].split(": ", 1)
+            head.setdefault(key, value)
+        elif not line.startswith("#") and "  " in line:
+            digest, name = line.split("  ", 1)
+            found[name] = digest
+    return head, found
+
+
+def changed(recorded, now):
+    """(added, changed, removed), each a sorted list of paths: what the
+    part's sources hold now against what was unpacked."""
+    return (sorted(set(now) - set(recorded)),
+            sorted(n for n in now if n in recorded and now[n] != recorded[n]),
+            sorted(set(recorded) - set(now)))
+
+
 def add_part_option(parser):
+    import argparse
+    # convert.py's own way of starting an unpacker, in a project it holds
+    # the lock of, or in a folder of its own for making the record again.
+    parser.add_argument("--from-run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--part", metavar="NAME",
         help="write a project laid out with src/: -o is then the project's folder, the "
@@ -96,8 +173,9 @@ class Placed:
     once the unpacking is done, so the project holds what it was made
     from, and every path it was read by is inside it."""
 
-    def __init__(self, out, part=None, upstream=None, unpacker=None, options=()):
-        self.out, self.part = out, part
+    def __init__(self, out, part=None, upstream=None, unpacker=None, options=(),
+                 from_run=False):
+        self.out, self.part, self.from_run = out, part, from_run
         self.unpacker, self.options = unpacker, list(options)
         self.kept, self.copy, self.source, self.unrecorded = [], None, None, None
         if not part:
@@ -108,8 +186,8 @@ class Placed:
         if not projectpaths.PART_NAME.match(part):
             sys.exit(f"--part {part}: a part's name is a lowercase letter, then lowercase "
                      "letters, digits, - and _ (book, for a book).")
-        why = projectpaths.refused_root(out)
-        above = projectpaths.inside_project(out)
+        why = None if from_run else projectpaths.refused_root(out)
+        above = None if from_run else projectpaths.inside_project(out)
         if why or above:
             sys.exit(f"{out} can't be a project's folder: "
                      + (why or f"it's among the sources or outputs of the project {above}")
@@ -143,11 +221,15 @@ class Placed:
                      "part with --part. Nothing was unpacked.")
         if upstream:
             self._upstream(upstream)
+        if from_run:
+            # The run names the file itself and copies nothing.
+            self.copy, self.unrecorded = None, None
         os.makedirs(sources, exist_ok=True)
         projectpaths.set_part(part, out)
         try:
             projectpaths.claim_output(out)
-            projectpaths.lock(out)
+            if not from_run:
+                projectpaths.lock(out)
         except projectpaths.Refused as exc:
             if not os.listdir(sources):
                 os.rmdir(sources)
@@ -206,7 +288,8 @@ class Placed:
         if not self.part or not os.path.lexists(top):
             return top
         stem, ext = os.path.splitext(name)
-        sample = P(self.out).report(f"{stem}-sample{ext}")
+        # Not -sample: the run writes a project-sample.yaml of its own there.
+        sample = P(self.out).report(f"{stem}-unpacked{ext}")
         self.kept.append((name, sample))
         return sample
 
@@ -248,9 +331,11 @@ class Placed:
             fh.write(text)
 
     def finish(self):
-        """Copy the upstream file in, and say what was left as it was."""
+        """Copy the upstream file in, record what was unpacked, and say
+        what was left as it was."""
         if not self.part:
             return
+        write_record(self.out, self.part, self.unpacker, self.options, self.source)
         if self.copy and os.path.isdir(self.copy[0]):
             files, left = copy_folder(*self.copy)
             print(f"{os.path.basename(self.copy[1])}/ copied to "
@@ -265,12 +350,15 @@ class Placed:
         if self.unrecorded:
             print(self.unrecorded)
         for name, sample in self.kept:
+            if self.from_run:
+                continue
             if sample:
                 print(f"{name} is there already and is left as it is; what this would have "
                       f"written is {sample}.")
             else:
                 print(f"{name} is there already and is left as it is.")
-        if any(name == projectpaths.PROJECT_NAME for name, _ in self.kept):
+        if not self.from_run and any(name == projectpaths.PROJECT_NAME
+                                     for name, _ in self.kept):
             print(f"Add the part to {projectpaths.PROJECT_NAME}, under project:\n"
                   + "\n".join(self.from_lines()))
 

@@ -641,6 +641,13 @@ def of(folder="."):
     return _KNOWN[folder]
 
 
+def forget(folder):
+    """Ask again what layout a folder is in, the next time it's asked
+    for: for the run that lays a project out itself, by making its parts'
+    folders, after it had asked."""
+    _KNOWN.pop(folder, None)
+
+
 # -- temporary files ---------------------------------------------------------
 #
 # Every temporary folder and file a script makes is made here, with

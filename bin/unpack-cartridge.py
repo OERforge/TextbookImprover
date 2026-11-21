@@ -72,7 +72,7 @@ def main():
         sys.exit(f"{args.cartridge} isn't a Common Cartridge: no "
                  "imsmanifest.xml of one in it.")
     placed = Placed(out, args.part, args.cartridge, "cartridge",
-                    ["--linked-documents"] if args.linked_documents else [])
+                    ["--linked-documents"] if args.linked_documents else [], from_run=args.from_run)
     cartridge = cs.Cartridge(args.cartridge)
     os.makedirs(out, exist_ok=True)
     notes = []

@@ -434,7 +434,7 @@ def case_part(work):
     # is touched, and project.yaml is the person's by now.
     second = tool("unpack-epub.py", epub, "-o", proj, "--part", "teacher")
     kept_project = read(proj, "project.yaml") == project_text
-    sample = os.path.join(proj, "output", "reports", "teacher", "project-sample.yaml")
+    sample = os.path.join(proj, "output", "reports", "teacher", "project-unpacked.yaml")
     sampled = yaml.safe_load(read(sample))["project"] if os.path.exists(sample) else {}
     # A file in the project's upstream/ already is named, not copied.
     inside = os.path.join(work, "inside")
@@ -517,6 +517,9 @@ def case_part(work):
          and project["parts"] == {"book": {"kind": "book", "from": {
              "file": "upstream/small.epub", "unpacker": "epub"}}}
          and project["contents"][0]["title"] == "Chapter 1"),
+        ("and what it unpacked is recorded for a later run to compare the part with",
+         lambda: "# unpacker: epub" in read(proj, "output", "work", "unpacked", "book.txt")
+         and "  chapter-1.html" in read(proj, "output", "work", "unpacked", "book.txt")),
         ("a part that holds sources already is refused, and nothing is written",
          lambda: again.returncode != 0 and "not empty" in again.stderr
          and "Nothing was unpacked" in again.stderr and after_again == laid),
@@ -579,12 +582,124 @@ def case_part(work):
     ]
 
 
+def case_from(work):
+    """A run unpacks a part's upstream file into the part's empty folder,
+    records what it held, and says afterwards how the folder differs."""
+    import zipfile
+    os.makedirs(work)
+    course = os.path.join(work, "course.imscc")
+    with zipfile.ZipFile(course, "w") as z:
+        z.writestr("imsmanifest.xml", SMALL_CARTRIDGE)
+        z.writestr("a.html", "<html><head><title>Page A</title></head>"
+                             "<body><p>A page.</p></body></html>")
+    settings = "targets:\n  html:\n    format: html\n"
+
+    def project(name, source, files=()):
+        folder = os.path.join(work, name)
+        os.makedirs(os.path.join(folder, "upstream"))
+        for path in files:
+            shutil.copy(path, os.path.join(folder, "upstream"))
+        with open(os.path.join(folder, "project.yaml"), "w") as fh:
+            fh.write("project:\n  identifier: a-course\n  title: A Course\n  parts:\n"
+                     "    book:\n      kind: book\n      from: " + source + "\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write(settings)
+        return folder
+
+    def convert(folder, *arguments):
+        done = tool("convert.py", "-d", folder, "--quick", "--quiet", *arguments)
+        return done.returncode, done.stdout + done.stderr
+
+    proj = project("proj", "upstream/course.imscc", [course])
+    yaml_then = read(proj, "project.yaml")
+    would = convert(proj, "--check-only")
+    empty_after_check = os.listdir(os.path.join(proj, "src", "book"))
+    first = convert(proj)
+    record = os.path.join(proj, "output", "work", "unpacked", "book.txt")
+    recorded = read(record) if os.path.exists(record) else ""
+    same = convert(proj, "--src-status")
+    again = convert(proj)
+    # The person adds a file and changes a page.
+    with open(os.path.join(proj, "src", "book", "mine.txt"), "w") as fh:
+        fh.write("a note of my own\n")
+    with open(os.path.join(proj, "src", "book", "a.html"), "a") as fh:
+        fh.write("<!-- changed -->\n")
+    differs = convert(proj, "--check-only")
+    listed = convert(proj, "--src-status")
+    os.remove(record)
+    relisted = convert(proj, "--src-status")
+    record_again = read(record) if os.path.exists(record) else ""
+    # Paths a from may not give.
+    out_link = project("linked", "upstream/link.imscc")
+    os.symlink(course, os.path.join(out_link, "upstream", "link.imscc"))
+    by_link = convert(out_link)
+    made = project("made", "output/course.imscc")
+    os.makedirs(os.path.join(made, "src", "book"))
+    in_output = convert(made)
+    gone = project("gone", "upstream/none.imscc")
+    absent = convert(gone)
+    # A plain zip of pages, named with its unpacker.
+    pages = os.path.join(work, "pages.zip")
+    with zipfile.ZipFile(pages, "w") as z:
+        z.writestr("My Book/one.md", "# One\n\nA page.\n")
+    zipped = project("zipped", "\n        file: upstream/pages.zip\n        unpacker: archive",
+                     [pages])
+    from_zip = convert(zipped)
+    return [
+        ("a check-only run says the upstream file would be unpacked, and unpacks nothing",
+         lambda: "would be unpacked" in would[1]
+         and empty_after_check == []),
+        ("a run unpacks a part's upstream file into its folder, which the project didn't "
+         "have, and builds from it; project.yaml is as it was, and what the unpacker would "
+         "have written, the outline with it, is beside the report",
+         lambda: first[0] == 0
+         and "upstream/course.imscc unpacked into" in first[1]
+         and os.path.exists(os.path.join(proj, "src", "book", "a.html"))
+         and os.path.exists(os.path.join(proj, "output", "html", "a.html"))
+         and read(proj, "project.yaml") == yaml_then
+         and "page: a" in read(proj, "output", "reports", "book", "project-unpacked.yaml")
+         and "Add the part" not in first[1]),
+        ("what was unpacked is recorded, each file with its hash, under the unpacker and "
+         "the file's name",
+         lambda: "# unpacker: cartridge" in recorded
+         and "# from: upstream/course.imscc" in recorded
+         and re.search(r"^[0-9a-f]{64}  a\.html$", recorded, re.M)),
+        ("a folder as it was unpacked is said to match, and the next run says nothing of it",
+         lambda: same[0] == 0 and "file for file" in same[1]
+         and again[0] == 0 and "no longer matches" not in again[1]
+         and "unpacked into" not in again[1]),
+        ("a file added and one changed are counted by a run and listed by --src-status",
+         lambda: "no longer matches" in differs[1] and "1 file(s) added, 1 changed, 0 removed"
+         in differs[1]
+         and listed[0] == 0 and "    mine.txt" in listed[1] and "    a.html" in listed[1]
+         and not os.path.exists(os.path.join(proj, "output", "html", "mine.txt"))),
+        ("with the record gone it's made again from the upstream file, and the answer is "
+         "the same",
+         lambda: "    mine.txt" in relisted[1] and "    a.html" in relisted[1]
+         and record_again == recorded),
+        ("a from that is a link out of the project, one into output/, and one that isn't "
+         "there each stop the run, naming the setting",
+         lambda: by_link[0] != 0 and "project.parts.book.from" in by_link[1]
+         and "links are followed" in by_link[1]
+         and os.listdir(os.path.join(out_link, "src", "book")) == []
+         and in_output[0] != 0 and "project.parts.book.from" in in_output[1]
+         and absent[0] != 0 and "isn't there" in absent[1]),
+        ("a plain zip named with the archive unpacker is unpacked, its wrapping folder "
+         "dropped, and built",
+         lambda: from_zip[0] == 0
+         and os.path.exists(os.path.join(zipped, "src", "book", "one.md"))
+         and os.path.exists(os.path.join(zipped, "output", "html", "one.html"))
+         and "# unpacker: archive" in read(zipped, "output", "work", "unpacked", "book.txt")),
+    ]
+
+
 CASES = [
     ("unpacking", case_unpack),
     ("a declared page that was split", case_split_source),
     ("converting what was unpacked", case_convert),
     ("a Jekyll site's Markdown", case_jekyll),
     ("an unpacker writing a part of a project", case_part),
+    ("a run unpacking a part's upstream file", case_from),
 ]
 
 

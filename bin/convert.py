@@ -933,6 +933,182 @@ def part_setting(base, part, key):
         return None
 
 
+# The unpacker for each name a part's from may give (oerconfig.UNPACKERS);
+# "archive" is a plain zip or tar, unpacked here.
+UNPACKER_SCRIPTS = {"cartridge": "unpack-cartridge.py", "cnx": "unpack-cnx.py",
+                    "epub": "unpack-epub.py", "jekyll": "unpack-jekyll.py",
+                    "site": "unpack-site.py"}
+TAR_ENDINGS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz")
+# A part's upstream file isn't among what a run makes or what a part is
+# made of.
+NOT_UPSTREAM = ("src", "output", "sidecars", "originals")
+
+
+def part_upstream(base, part):
+    """A part's upstream file, as project.yaml's from names it: (path in
+    the project, its real path, unpacker, options), or None when the part
+    names none. The path is checked here, since it's read and handed to a
+    program: it stays in the project, links followed, outside the folders
+    a run makes and the parts' own. An unpacker left out is told from the
+    file, where that can be told."""
+    named = part_setting(base, part, "from")
+    if not named:
+        return None
+    what = f"project.parts.{part}.from"
+    if isinstance(named, dict) and "address" in named:
+        die(f"{what} names an address to fetch, which a run doesn't do yet: put the "
+            "repository's files in the project's upstream/ and name them with file. "
+            "Nothing was converted.")
+    name = str(named.get("file") if isinstance(named, dict) else named)
+    unpacker = named.get("unpacker") if isinstance(named, dict) else None
+    options = named.get("options") if isinstance(named, dict) else None
+    options = [str(o) for o in (options if isinstance(options, list) else
+                                [options] if options else [])]
+    pieces = [piece for piece in name.replace("\\", "/").split("/") if piece not in ("", ".")]
+    root = os.path.realpath(P(base).top())
+    real = os.path.realpath(os.path.join(root, *pieces))
+    if os.path.isabs(name) or ".." in pieces or not pieces \
+            or any(piece.startswith(".") for piece in pieces) \
+            or pieces[0].lower() in NOT_UPSTREAM \
+            or real == root or os.path.commonpath([root, real]) != root \
+            or os.path.relpath(real, root).split(os.sep)[0].lower() in NOT_UPSTREAM:
+        die(f"{what} is {name!r}, which a run doesn't read as a part's upstream file: it's a "
+            "path inside the project, from its top (upstream/book.zip), that leads nowhere "
+            "else when links are followed, not into src/, output/, sidecars/, or originals/, "
+            "and not a name beginning with a dot. Nothing was converted.")
+    if not os.path.exists(real):
+        die(f"{what} names {name}, which isn't there. Nothing was converted.")
+    if unpacker is None:
+        import cartridgesource
+        low = real.lower()
+        if os.path.isdir(real):
+            unpacker = ("cnx" if os.path.isfile(os.path.join(real, "META-INF", "books.xml"))
+                        else "jekyll" if os.path.isfile(os.path.join(real, "_config.yml"))
+                        else None)
+        elif cartridgesource.is_cartridge(real):
+            unpacker = "cartridge"
+        elif low.endswith(".epub"):
+            unpacker = "epub"
+        elif low.endswith((".warc", ".warc.gz", ".wacz", ".mhtml", ".mht")):
+            unpacker = "site"
+        elif low.endswith((".zip",) + TAR_ENDINGS):
+            unpacker = "archive"
+        if unpacker is None:
+            die(f"{what} names {name}, and what unpacks it can't be told from the file. Say "
+                f"which, as a block:\n\n      from:\n        file: {name}\n        unpacker: "
+                "cartridge    # or cnx, epub, jekyll, site, archive\n\nNothing was converted.")
+    return name, real, str(unpacker), options
+
+
+def run_unpacker(base, part, upstream, into=None):
+    """Unpack a part's upstream file into its sources' folder, which is
+    empty, or, with into, as a part of a project made there for the
+    record's sake. Stops the run when the unpacker does."""
+    import unpacking
+    name, real, unpacker, options = upstream
+    project = into or base
+    if unpacker == "archive":
+        sources = os.path.join(project, "src", part) if into else P(base).sources(part)
+        os.makedirs(sources, exist_ok=True)
+        (extract_tar if real.lower().endswith(TAR_ENDINGS) else extract_zip)(real, sources)
+        if not into:
+            unpacking.write_record(base, part, unpacker, options, name)
+        return
+    command = [sys.executable, os.path.join(HERE, UNPACKER_SCRIPTS[unpacker]), real,
+               "-o", project, "--part", part, "--from-run"] + options
+    if unpacker == "cnx":
+        # A run asks nothing of the network: the exercises come from the
+        # cache, as far as it has them, and none is asked for again.
+        command = [c for c in command if c != "--update-exercises"] + ["--offline"]
+    done = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        die(f"Unpacking {name} for the part {part} failed:\n"
+            + (done.stderr.strip() or done.stdout.strip()) + "\nNothing was converted.")
+    pass_on(done)
+
+
+def unpack_upstream(base, part, check_only=False, status=False):
+    """A part's upstream file and its sources. Into a part's folder that
+    holds nothing, the file is unpacked, and what it held is recorded;
+    one that holds its sources already is compared with the record, made
+    again from the file when it's gone, and the run says when the folder
+    no longer matches. With status, what was added, changed, and removed
+    is listed and the run ends (--src-status)."""
+    import unpacking
+    upstream = part_upstream(base, part)
+    sources = P(base).sources(part)
+    where = os.path.join("src", part) + os.sep
+    if upstream is None:
+        if status:
+            say(f"The part {part} names no upstream file (project.parts.{part}.from), so "
+                f"everything in {where} is its own.")
+        return
+    name = upstream[0]
+    held = [n for n in os.listdir(sources)] if os.path.isdir(sources) else []
+    if not held:
+        if check_only or status:
+            say(f"{where} is empty: {name} would be unpacked into it.")
+            return
+        run_unpacker(base, part, upstream)
+        count = len(unpacking.hashes(sources))
+        say(f"{name} unpacked into {where} ({count} file(s)), which was empty.")
+        return
+    record = unpacking.read_record(base, part)
+    if record is None:
+        work = projectpaths.mkdtemp(prefix="unpacked-again-")
+        try:
+            run_unpacker(base, part, upstream, into=work)
+            unpacking.write_record(base, part, upstream[2], upstream[3], name,
+                                   folder=os.path.join(work, "src", part))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        record = unpacking.read_record(base, part)
+    added, changed, removed = unpacking.changed(record[1], unpacking.hashes(sources))
+    if status:
+        if not (added or changed or removed):
+            say(f"{where} is what {name} unpacks to, file for file ({len(record[1])}): it "
+                "could be deleted and unpacked again by the next run.")
+        else:
+            say(f"{where} against what {name} unpacks to:")
+            for label, names in (("added", added), ("changed", changed), ("removed", removed)):
+                say(f"  {label}: {len(names)}")
+                for one in names:
+                    say(f"    {one}")
+            if not (changed or removed):
+                say(f"What {name} held is all there, unchanged; the added files are the "
+                    "project's own.")
+        return
+    if added or changed or removed:
+        say(f"{where} no longer matches what {name} unpacks to: {len(added)} file(s) "
+            f"added, {len(changed)} changed, {len(removed)} removed (--src-status lists "
+            "them). The run reads the folder as it is.")
+
+
+def part_folders(base):
+    """Make the folder of each part project.yaml names with a from, in a
+    project that has none yet: a project of settings and an upstream file
+    alone is laid out by its first run, which unpacks into them. Nothing
+    where the folder holds a book's sources itself."""
+    import yaml
+    import unpacking
+    if os.path.lexists(P(base).top("src")):
+        return
+    try:
+        with open(P(base).project_file(), encoding="utf-8") as fh:
+            parts = (yaml.safe_load(fh) or {})["project"]["parts"]
+        named = [str(name) for name, value in parts.items()
+                 if isinstance(value, dict) and value.get("from")
+                 and projectpaths.PART_NAME.match(str(name))]
+    except (OSError, yaml.YAMLError, KeyError, TypeError, AttributeError):
+        return
+    if not named or any(n.lower().endswith(unpacking.FLAT_SOURCES)
+                        for n in os.listdir(P(base).top()) if os.path.isfile(P(base).top(n))):
+        return
+    for name in named:
+        os.makedirs(P(base).top("src", name))
+    projectpaths.forget(base)
+
+
 def without_dir(arguments):
     """A command line's arguments less -d DIR, for a run started in the
     folder itself."""
@@ -6958,6 +7134,10 @@ def main():
                         "each document its pages link to that can be "
                         "converted a page of the book (unpack-cartridge.py "
                         "--linked-documents)")
+    parser.add_argument("--src-status", action="store_true",
+                        help="say how each part's sources differ from what its upstream "
+                             "file (project.parts.<part>.from) unpacks to, the files added, "
+                             "changed, and removed, and stop")
     parser.add_argument("--check-only", action="store_true",
                         help="read, gate, pre-pass, filter, and write the "
                              "reports, then stop: no output directory is "
@@ -7001,6 +7181,7 @@ def main():
         die(f"{base} is inside the project {above}, among its sources or its outputs. Run "
             f"this from the project's folder, or give it with -d {above}. Nothing was "
             "converted.")
+    part_folders(base)
     # Everything in a project's folder is the project's to read, so some
     # folders can't be one.
     if projectpaths.is_tree(base):
@@ -7072,6 +7253,13 @@ def main():
     for line in pandocrun.notices():
         say(line)
 
+    if parts is not None:
+        unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
+        if args.src_status:
+            return 0
+    elif args.src_status:
+        die("--src-status is for a project with a folder for each part under src/. Nothing "
+            "was converted.")
     unpack_archives(base, check_only=args.check_only,
                     linked_documents=args.linked_documents)
     import deckrun

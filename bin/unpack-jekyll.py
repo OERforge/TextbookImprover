@@ -239,7 +239,7 @@ def main():
     src, out = os.path.abspath(args.source), args.output
     if not os.path.isdir(src):
         sys.exit(f"{args.source} isn't a folder: a Jekyll site's sources are one.")
-    placed = Placed(out, args.part, src, "jekyll")
+    placed = Placed(out, args.part, src, "jekyll", from_run=args.from_run)
     config = {}
     if os.path.isfile(os.path.join(src, "_config.yml")):
         with open(os.path.join(src, "_config.yml"), encoding="utf-8") as fh:

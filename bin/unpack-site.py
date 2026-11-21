@@ -116,7 +116,7 @@ def main():
     if not site.pages:
         sys.exit("No saved pages found.")
     placed = Placed(out, args.part, args.inputs[0] if len(args.inputs) == 1 else None,
-                    "site", options)
+                    "site", options, from_run=args.from_run)
     if args.part and len(args.inputs) > 1:
         placed.unrecorded = ("More than one input was given, so the part's from, which "
                              "names one file, isn't written.")

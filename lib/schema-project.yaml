@@ -202,8 +202,11 @@ keys:
       is then another course to an LMS, with its own order. Where a
       part has none, the project's is used, but for a part that isn't a
       book (decks), which gets no contents or numbering it doesn't set. An
-      unpacker given --part writes the part's from; a part's from and
-      license are read and checked, and no run acts on either yet (see
+      unpacker given --part writes the part's from, and a run unpacks
+      the file it names into the part's folder under src/ when that
+      folder holds nothing, and says afterwards when the folder no
+      longer matches it (convert.py --src-status lists how). A part's
+      license is read and checked, and no run acts on it yet (see
       ROADMAP.md).
 
   include:

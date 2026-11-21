@@ -142,7 +142,7 @@ def main():
     placed = Placed(out, args.part, args.repository, "cnx",
                     ([f"--book={args.book}"] if args.book else [])
                     + (["--update-exercises"] if args.update_exercises else [])
-                    + (["--no-boxes"] if args.no_boxes else []))
+                    + (["--no-boxes"] if args.no_boxes else []), from_run=args.from_run)
     bank = Bank(cache=args.exercises_cache, offline=args.offline,
                 update=args.update_exercises)
     result = unpack(args.repository, out, book.slug, bank=bank,

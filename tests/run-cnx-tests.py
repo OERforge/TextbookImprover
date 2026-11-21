@@ -704,7 +704,7 @@ def case_trade(work):
          and os.path.exists(os.path.join(proj, "src", "second",
                                          "1-1-why-trade-happens.html"))
          and all(os.path.exists(os.path.join(proj, "output", "reports", "second",
-                                             n.replace(".yaml", "-sample.yaml")))
+                                             n.replace(".yaml", "-unpacked.yaml")))
                  for n in settings_then)),
     ]
 

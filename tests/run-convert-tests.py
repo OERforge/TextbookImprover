@@ -736,6 +736,19 @@ def case_two_parts(work):
     write("conversion.yaml", settings)
     # output/ is a run's own, marked, and one run at a time has it.
     marked = exists(work, "output", ".textbookimprover")
+    # A run's temporary files are the project's: left behind by a run
+    # that was stopped, they're cleared by the next, and the machine's
+    # shared folder gets none of them.
+    kept_tmp = os.path.join(work, "output", "work", "tmp")
+    tmp_after = sorted(os.listdir(kept_tmp)) if os.path.isdir(kept_tmp) else None
+    os.makedirs(os.path.join(kept_tmp, "convert-left-behind"))
+    spy = os.path.join(os.path.dirname(work), os.path.basename(work) + "-shared-tmp")
+    os.makedirs(spy)
+    cleared = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                             cwd=work, capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, env=dict(os.environ, TMPDIR=spy))
+    tmp_cleared = sorted(os.listdir(kept_tmp))
+    shared_got = sorted(os.listdir(spy))
     held = None
     try:
         import fcntl
@@ -811,6 +824,13 @@ def case_two_parts(work):
          and beside_after == ["kept.md"]
          or fail(str([(r.returncode, r.stderr[-200:])
                       for r in (part_linked, sidecars_linked)]))),
+        ("a run keeps its temporary files in output/work/tmp/, empty when it ends, clears "
+         "what an earlier run left there, and writes none to the shared folder it was "
+         "given",
+         lambda: tmp_after == [] and cleared.returncode == 0 and tmp_cleared == []
+         and shared_got == []
+         or fail(str((tmp_after, cleared.returncode, tmp_cleared, shared_got))
+                 + cleared.stderr[-200:])),
         ("a sidecars: setting stops the run in this layout, naming it and where a sidecar "
          "goes",
          lambda: old_setting.returncode != 0 and "defaults.sidecars" in old_setting.stderr

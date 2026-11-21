@@ -1071,13 +1071,16 @@ def check_project_paths():
     no_link = paths.refused_link(links, ["book"])
     linked = {}
     for name in ("sidecars", "output", "originals", "upstream",
-                 os.path.join("src", "slides"), os.path.join("sidecars", "book")):
+                 os.path.join("src", "slides"), os.path.join("sidecars", "book"),
+                 os.path.join("output", "work", "tmp")):
         os.makedirs(os.path.dirname(os.path.join(links, name)), exist_ok=True)
         os.symlink(os.path.join(links, "elsewhere"), os.path.join(links, name))
         linked[name] = paths.refused_link(links, ["book", "slides"]) or ""
         os.remove(os.path.join(links, name))
         if name == os.path.join("sidecars", "book"):
             os.rmdir(os.path.join(links, "sidecars"))
+        if name == os.path.join("output", "work", "tmp"):
+            shutil.rmtree(os.path.join(links, "output"))
     paths.set_part("slides", laid)
     try:
         others_contents = paths.contents_apply()
@@ -1182,9 +1185,9 @@ def check_project_paths():
          and paths.claim_output(work) is None and paths.lock(work) is None
          and locked == os.path.join(one, "output", "work", "lock")),
         ("a project's own folder that is a link is refused by name (src/<part>/, "
-         "sidecars/ and a part's in it, output/, originals/, upstream/), and a project "
-         "with none isn't",
-         lambda: no_link is None and len(linked) == 6
+         "sidecars/ and a part's in it, output/, originals/, upstream/, output/work/tmp/), "
+         "and a project with none isn't",
+         lambda: no_link is None and len(linked) == 7
          and all(os.path.join(links, name) + " is a link" in why
                  for name, why in linked.items())),
         ("a folder under src/ whose name isn't a part's, one with a colon that would begin "

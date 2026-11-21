@@ -507,9 +507,10 @@ OWN_FOLDERS = ("src", "sidecars", "output", "originals", "upstream")
 def refused_link(folder, parts=()):
     """The first of a project's own folders that is a link, as a message,
     or None: src/, sidecars/, output/, originals/, and upstream/, a part's
-    folder in each of the first two, and output/work/. A project in
+    folder in each of the first two, output/work/, and output/work/tmp/. A project in
     today's layout has none of them."""
-    names = list(OWN_FOLDERS) + [os.path.join("output", "work")]
+    names = list(OWN_FOLDERS) + [os.path.join("output", "work"),
+                                 os.path.join("output", "work", "tmp")]
     for part in parts:
         names += [os.path.join("src", part), os.path.join("sidecars", part)]
     for name in names:
@@ -653,6 +654,31 @@ def forget(folder):
 # Every temporary folder and file a script makes is made here, with
 # tempfile's own names and arguments, so that where they go is decided in
 # one place.
+
+def use_tmp(folder, empty=True):
+    """Keep this run's temporary files in the project, in the layout with
+    src/: output/work/tmp/, emptied when a run starts (not for a run of
+    one part that a project's run started, which shares its folder), and
+    named to this process and every program it starts as the temporary
+    folder (TMPDIR). What an interrupted run leaves is then inside the
+    project, where the next run clears it, and nothing of a book's is
+    written to a folder other users of the machine share. The marker and
+    the lock come first: the folder is emptied only in an output/ a run
+    made, by the one run that holds it. Nothing in today's layout."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        return None
+    path = os.path.abspath(project.top("output", "work", "tmp"))
+    if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+        raise Refused(f"{path} is a link or a file, where a run keeps its temporary files. "
+                      "Move it away and run this again.")
+    if empty and os.path.isdir(path):
+        shutil.rmtree(path)           # never through a link: rmtree follows none
+    os.makedirs(path, exist_ok=True)
+    os.environ["TMPDIR"] = path
+    tempfile.tempdir = None           # asked again, now that TMPDIR is set
+    return path
+
 
 def mkdtemp(suffix=None, prefix=None, dir=None):
     return tempfile.mkdtemp(suffix=suffix, prefix=prefix, dir=dir)

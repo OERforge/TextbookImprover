@@ -7219,6 +7219,10 @@ def main():
         projectpaths.claim_output(base)
         projectpaths.lock(base)
     if parts is not None:
+        # The run's temporary files, and those of every program it
+        # starts, are kept in the project and cleared by the next run.
+        projectpaths.use_tmp(base, empty=not args.locked)
+    if parts is not None:
         wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
         if args.part:
             if args.part not in parts:

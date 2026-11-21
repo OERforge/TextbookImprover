@@ -62,6 +62,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import zlib
 
 # Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
@@ -400,10 +401,33 @@ def fingerprint(work, skip_dirs=()):
     return found
 
 
+# What each of a case's runs of convert.py came to, for a case that
+# fails: a check says only that it failed, and where a run stopped under
+# a load that isn't there when the case is run again alone, the run's
+# own last lines are all there is to go on.
+RUNS = []
+RUN_TAIL = 15
+
+
 def convert(work, env=None):
-    return subprocess.run(
+    began = time.monotonic()
+    done = subprocess.run(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
+    RUNS.append((os.path.basename(work), done.returncode, time.monotonic() - began,
+                 (done.stdout + done.stderr).splitlines()[-RUN_TAIL:]))
+    return done
+
+
+def runs_said():
+    """The lines that say what a case's runs came to: each run's folder,
+    exit status, and time, and the last lines of one that failed."""
+    lines = []
+    for folder, status, seconds, tail in RUNS:
+        lines.append(f"        convert.py in {folder}: exit status {status}, {seconds:.0f} s")
+        if status:
+            lines += ["          | " + line for line in tail]
+    return lines
 
 
 
@@ -6010,9 +6034,24 @@ def case_line_breaks(work):
     for folder in (work, own):
         with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
             fh.write(config)
+    # The second book again, with a latexmk that stops as it does when
+    # the system ends LuaLaTeX: LaTeX's log, if there is one, has no error.
+    halted = work + "-halted"
+    shutil.copytree(own, halted)
+    stand_in = os.path.join(work, "..", os.path.basename(work) + "-latexmk")
+    os.makedirs(stand_in, exist_ok=True)
+    with open(os.path.join(stand_in, "latexmk"), "w") as fh:
+        fh.write("#!/bin/sh\n"
+                 "echo \"Latexmk: Errors, so I did not complete making targets\" >&2\n"
+                 "echo \"  lualatex: Command for 'lualatex' gave return code 137\" >&2\n"
+                 "exit 12\n")
+    os.chmod(os.path.join(stand_in, "latexmk"), 0o755)
     result = convert(work)
     said = result.stdout + result.stderr
     convert(own)
+    halt = convert(halted, env=dict(os.environ, PATH=os.path.abspath(stand_in) + os.pathsep
+                                    + os.environ["PATH"]))
+    halt_said = halt.stdout + halt.stderr
     copy = os.path.join(work, "tagged", "notes.tex")
     pdf_path = os.path.join(work, "pdf", "book.pdf")
 
@@ -6454,6 +6493,13 @@ def case_line_breaks(work):
          and pdf_said("a space between a line break's two lines in the text a screen reader "
                       "gets", "a space between a part's or a chapter's number and its title in "
                       "the text a screen reader gets")),
+        ("a build that latexmk stops with no error in LaTeX's log says how latexmk ended and "
+         "what it said, and writes no PDF",
+         lambda: why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
+         or ("latexmk ended with status 12, saying:" in halt_said
+             and "gave return code 137" in halt_said
+             and "wasn't built" in halt_said
+             and not os.path.exists(os.path.join(halted, "pdf", "book.pdf")))),
         ("its PDF, built from its own LaTeX, has a space between the lines of each \\\\, "
          "\\newline, and \\linebreak in its text, none inside a word a \\linebreak breaks, "
          "one space where \\nolinebreak keeps two words together, and a table's rows as "
@@ -11089,10 +11135,13 @@ def run_cases(cases, keep):
     try:
         for label, case in cases:
             directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
+            del RUNS[:]
+            before = failed
             try:
                 checks = case(directory)
             except Exception as exc:
                 print(f"  ERROR {label}: {exc}")
+                print("\n".join(["        the case's runs:"] + runs_said()))
                 failed += 1
                 continue
             for name, predicate in checks:
@@ -11107,6 +11156,8 @@ def run_cases(cases, keep):
                        else "  ok    ") + name)
                 sys.stdout.write(said.getvalue())
                 failed += not passed
+            if failed > before and RUNS:
+                print("\n".join(["        the case's runs:"] + runs_said()))
     finally:
         if keep:
             print(f"\nOutput left in {work}")

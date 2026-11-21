@@ -160,6 +160,9 @@ LATEX_FILTER = os.path.join(HERE, "latex-source.lua")
 REPOSITORY_FILES = ("readme.md", "license.md", "contributing.md", "changelog.md",
                     "code_of_conduct.md", "security.md")
 INCLUDE = re.compile(r"^include::([^\[\s]+\.(?:adoc|asciidoc|asc))\[", re.M)
+# How many of latexmk's own lines a run repeats when a build stopped and
+# LaTeX's log has no error to show.
+LATEXMK_SAID = 8
 SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 # PowerPoint decks: sources of a slides run, not a book's pages (deckrun.py).
 DECK_EXTENSIONS = (".pptx",)
@@ -5032,8 +5035,16 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         log = latexsource.read_text(log_path) if os.path.exists(log_path) else ""
         pdf = os.path.join(folder, stem + ".pdf")
         ok = result.returncode == 0 and os.path.exists(pdf)
+        if not ok:
+            # What latexmk itself said last, for a build that stopped with
+            # no error in LaTeX's log (LuaLaTeX ended by the system, a file
+            # latexmk couldn't write): the log alone gave no reason then.
+            stopped[master] = (result.returncode, [
+                line for line in (result.stderr + "\n" + result.stdout).splitlines()
+                if line.strip()][:LATEXMK_SAID])
         return master, ok, pdf, log or result.stdout
 
+    stopped = {}
     masters = [m for m, _ in latex_parts]
     workers = max(1, min(len(masters), os.cpu_count() or 1, 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -5042,8 +5053,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     for master, log in failed:
         if len(masters) > 1:
             say(f"LaTeX stopped on {master}:")
-        for error in latexbuild.first_errors(log):
+        errors = latexbuild.first_errors(log)
+        for error in errors:
             say(error)
+        if not errors and master in stopped:
+            status, lines = stopped[master]
+            say(f"LaTeX's log has no error for {master}; latexmk ended with status {status}"
+                + (", saying:\n" + "\n".join("  " + line for line in lines) if lines
+                   else " and said nothing."))
         for advice in latexbuild.failure_advice(log):
             say(advice)
 

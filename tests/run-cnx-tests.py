@@ -339,7 +339,8 @@ def case_trade(work):
     as_part = unpack(repo, proj, "--book", "tiny-trade", "--part", "book")
     settings_then = {n: read(proj, n) for n in ("project.yaml", "conversion.yaml")
                      if os.path.exists(os.path.join(proj, n))}
-    second_part = unpack(repo, proj, "--book", "tiny-trade", "--part", "second")
+    second_part = unpack(os.path.join(proj, "upstream", "osbooks-trade"), proj,
+                         "--book", "tiny-trade", "--part", "second")
 
     def files(folder):
         found = []
@@ -688,11 +689,14 @@ def case_trade(work):
          and os.path.exists(os.path.join(proj, "output", "reports", "book",
                                          "cnx-table-summaries.csv"))
          == os.path.exists(os.path.join(out, "cnx-table-summaries.csv"))),
-        ("the part is declared, and a repository outside the project is said not to "
-         "be recorded as its from",
+        ("the part is declared, and a repository outside the project is copied to "
+         "upstream/ and named as its from, with the book unpacked",
          lambda: yaml.safe_load(settings_then["project.yaml"])["project"]["parts"]
-         == {"book": {"kind": "book"}}
-         and "from isn't written" in as_part.stdout),
+         == {"book": {"kind": "book", "from": {
+             "file": "upstream/osbooks-trade", "unpacker": "cnx",
+             "options": ["--book=tiny-trade"]}}}
+         and os.path.isfile(os.path.join(proj, "upstream", "osbooks-trade", "META-INF",
+                                         "books.xml"))),
         ("a second part leaves the project's settings as they are and writes what it "
          "would have as samples beside its report",
          lambda: second_part.returncode == 0

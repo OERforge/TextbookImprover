@@ -481,16 +481,27 @@ def case_part(work):
     # The settings the unpacker wrote, and the part's sources where it
     # put them, pass the run's own check.
     lms_checked = tool("convert.py", "-d", lms, "--check-only")
-    # A Jekyll site is a folder: outside the project it isn't copied in.
+    # A Jekyll site is a folder: it's copied in whole, but for Git's own
+    # folder and a link, and one of its name already there is left alone.
     site = os.path.join(work, "site")
     for name, text in JEKYLL.items():
         path = os.path.join(site, *name.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb" if isinstance(text, bytes) else "w") as fh:
             fh.write(text)
+    os.makedirs(os.path.join(site, ".git"))
+    with open(os.path.join(site, ".git", "config"), "w") as fh:
+        fh.write("[remote]\n\turl = https://token@example.org/site.git\n")
+    os.symlink(epub, os.path.join(site, "linked.epub"))
     pages = os.path.join(work, "pages")
     jekyll = tool("unpack-jekyll.py", site, "-o", pages, "--part", "book")
     jekyll_project = yaml.safe_load(read(pages, "project.yaml"))["project"]
+    site_files = [n for n in listing(site) if not n.startswith(".git/") and n != "linked.epub"]
+    pages_then = listing(pages)
+    jekyll_again = tool("unpack-jekyll.py", site, "-o", pages, "--part", "second")
+    from_copy = tool("unpack-jekyll.py", os.path.join(pages, "upstream", "site"),
+                     "-o", pages, "--part", "second")
+    around = tool("unpack-jekyll.py", work, "-o", os.path.join(work, "within"), "--part", "book")
     return [
         ("with --part the sources are the part's, the report is under output/, and "
          "the project's own files are at its top",
@@ -547,13 +558,24 @@ def case_part(work):
          and lms_from == {"file": "upstream/course.imscc", "unpacker": "cartridge",
                           "options": ["--linked-documents"]}
          and os.path.exists(os.path.join(lms, "src", "book", "a.html"))),
-        ("a folder unpacked from outside the project isn't copied in, the part has no "
-         "from, and the unpacker says so",
+        ("a folder unpacked from outside the project is copied to upstream/ and named as "
+         "the part's from, without Git's folder or a link, and the unpacker says what it "
+         "left out",
          lambda: jekyll.returncode == 0
-         and jekyll_project["parts"] == {"book": {"kind": "book"}}
-         and not os.path.exists(os.path.join(pages, "upstream"))
-         and "from isn't written" in jekyll.stdout
+         and jekyll_project["parts"] == {"book": {"kind": "book", "from": {
+             "file": "upstream/site", "unpacker": "jekyll"}}}
+         and listing(os.path.join(pages, "upstream", "site")) == site_files
+         and ".git/" in jekyll.stdout and "1 link(s)" in jekyll.stdout
          and os.path.exists(os.path.join(pages, "src", "book", "sec-page.md"))),
+        ("a folder of that name in upstream/ already is never added to: the unpacking "
+         "stops before it writes, and from the copy itself it goes on",
+         lambda: jekyll_again.returncode != 0 and "never replaced" in jekyll_again.stderr
+         and from_copy.returncode == 0
+         and set(pages_then) < set(listing(pages))
+         and os.path.exists(os.path.join(pages, "src", "second", "sec-page.md"))),
+        ("a folder that holds the project's own can't be copied into it",
+         lambda: around.returncode != 0 and "holds the project's folder" in around.stderr
+         and not os.path.exists(os.path.join(work, "within"))),
     ]
 
 

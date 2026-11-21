@@ -46,6 +46,42 @@ def add_part_option(parser):
              "the top, with the file this was unpacked from as the part's from")
 
 
+# A version-control folder isn't the book's: Git's can hold a token
+# (.git/config), and its objects are the book's files again.
+NOT_COPIED = (".git", ".hg", ".svn")
+
+
+def copy_folder(source, dest):
+    """Copy a folder of sources to dest, which isn't there: its files and
+    folders, without a version-control folder, a link (which could lead
+    anywhere, and would lead there from the copy), or anything that is
+    neither file nor folder. Returns how many files were copied and what
+    was left out, as phrases."""
+    files, links, others, kept_out = 0, 0, 0, set()
+    for directory, dirs, names in os.walk(source):
+        kept_out |= {d for d in dirs if d in NOT_COPIED}
+        links += sum(1 for d in dirs if os.path.islink(os.path.join(directory, d)))
+        dirs[:] = sorted(d for d in dirs if d not in NOT_COPIED
+                         and not os.path.islink(os.path.join(directory, d)))
+        to = os.path.join(dest, os.path.relpath(directory, source))
+        os.makedirs(to, exist_ok=True)
+        for name in sorted(names):
+            path = os.path.join(directory, name)
+            if os.path.islink(path):
+                links += 1
+            elif not os.path.isfile(path):
+                others += 1
+            else:
+                shutil.copyfile(path, os.path.join(to, name))
+                files += 1
+    left = [f"{name}/" for name in sorted(kept_out)]
+    if links:
+        left.append(f"{links} link(s)")
+    if others:
+        left.append(f"{others} thing(s) that are neither file nor folder")
+    return files, left
+
+
 class Placed:
     """Where an unpacker writes. Without a part, one folder, as before:
     it must be missing or empty. With a part, a project laid out with
@@ -56,8 +92,9 @@ class Placed:
 
     upstream is the file or folder unpacked, unpacker its name among a
     part's from's, options the options given that change what's written.
-    A file from outside the project is copied into upstream/ once the
-    unpacking is done, so the project holds what it was made from."""
+    A file or a folder from outside the project is copied into upstream/
+    once the unpacking is done, so the project holds what it was made
+    from, and every path it was read by is inside it."""
 
     def __init__(self, out, part=None, upstream=None, unpacker=None, options=()):
         self.out, self.part = out, part
@@ -125,17 +162,29 @@ class Placed:
             self.source = os.path.relpath(real, root).replace(os.sep, "/")
             return
         name = os.path.basename(real)
-        if not os.path.isfile(real):
-            self.unrecorded = (f"{upstream} is a folder outside the project, so the part's "
-                               "from isn't written: to record it, put the folder in the "
-                               f"project's upstream/ and unpack it from there.")
+        if not os.path.isfile(real) and not os.path.isdir(real):
+            self.unrecorded = (f"{upstream} is neither a file nor a folder, so it isn't "
+                               "copied to the project's upstream/ and the part's from isn't "
+                               "written.")
             return
         if name.startswith(".") or not re.match(r"[A-Za-z0-9][A-Za-z0-9._ ()+-]*\Z", name):
             self.unrecorded = (f"{upstream} has a name the project's upstream/ doesn't take, "
                                "so it isn't copied there and the part's from isn't written.")
             return
         dest = os.path.join(self.out, "upstream", name)
-        if os.path.lexists(dest):
+        if os.path.isdir(real):
+            # A folder is copied whole or not at all: one of its name
+            # there already is another copy, whose files may have changed.
+            if os.path.commonpath([real, root]) == real:
+                sys.exit(f"{upstream} holds the project's folder, {self.out}, so it can't "
+                         "be copied into it. Name a project's folder outside it with -o. "
+                         "Nothing was unpacked.")
+            if os.path.lexists(dest):
+                sys.exit(f"{dest} is there already: a part's upstream folder is never "
+                         f"replaced or added to. Unpack from {dest} itself, or move or "
+                         "rename it. Nothing was unpacked.")
+            self.copy = (real, dest)
+        elif os.path.lexists(dest):
             if os.path.islink(dest) or not os.path.isfile(dest) \
                     or not filecmp.cmp(real, dest, shallow=False):
                 sys.exit(f"{dest} is there already and isn't {upstream}: a part's upstream "
@@ -202,7 +251,13 @@ class Placed:
         """Copy the upstream file in, and say what was left as it was."""
         if not self.part:
             return
-        if self.copy:
+        if self.copy and os.path.isdir(self.copy[0]):
+            files, left = copy_folder(*self.copy)
+            print(f"{os.path.basename(self.copy[1])}/ copied to "
+                  f"{os.path.dirname(self.copy[1])}/, the part's upstream folder: "
+                  f"{files} file(s)"
+                  + (f"; left out: {', '.join(left)}" if left else "") + ".")
+        elif self.copy:
             os.makedirs(os.path.dirname(self.copy[1]), exist_ok=True)
             shutil.copyfile(*self.copy)
             print(f"{os.path.basename(self.copy[1])} copied to "

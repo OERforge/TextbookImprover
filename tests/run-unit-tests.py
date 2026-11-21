@@ -7179,9 +7179,11 @@ def check_sidecars_another_user():
     os.chown(os.path.join(work, "own"), 65534, 65534)
     lib = os.path.join(work, "lib")
     os.mkdir(lib)
-    shutil.copy(os.path.join(ROOT, "lib", "sidecars.py"), lib)
+    # sidecars.py and the path module it asks for a temporary file's place.
+    for module in ("sidecars.py", "projectpaths.py"):
+        shutil.copy(os.path.join(ROOT, "lib", module), lib)
+        os.chmod(os.path.join(lib, module), 0o644)
     os.chmod(lib, 0o755)
-    os.chmod(os.path.join(lib, "sidecars.py"), 0o644)
     user = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups"]
     who = user + [sys.executable]
     probe = subprocess.run(who + ["-c", "import sys; sys.path.insert(0, %r); import sidecars; "

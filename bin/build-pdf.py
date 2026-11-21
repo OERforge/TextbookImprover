@@ -2221,7 +2221,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
             for advice in latexbuild.failure_advice(result.stderr):
                 print(advice, file=sys.stderr)
             by = "LaTeX" if result.args and result.args[0] == ENGINE else "pandoc"
-            sys.exit(f"{by} failed building {out_path}.")
+            sys.exit(f"{by} failed building {projectpaths.placed(out_path)}.")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -2230,7 +2230,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     # The PDF's pages, where LaTeX said how many, and the book's, which
     # hold the images: the book's alone had been "page(s)", a PDF's 7 pages
     # said as the book's 2.
-    print(f"Wrote {out_path}: " + (f"{printed} page(s); " if printed else "")
+    print(f"Wrote {projectpaths.placed(out_path)}: " + (f"{printed} page(s); " if printed else "")
           + f"the book's {len(assembly.pages)} page(s) hold "
           f"{found['images']} image(s), {found['without_alt']} without "
           "alternative text.", file=sys.stderr)
@@ -2361,8 +2361,12 @@ def main():
                              "one: convert.py passes what it read from the "
                              "sources, a master file's title, and says so")
     projectpaths.add_part_option(parser)
+    # From convert.py, in a run that builds each target beside its folder
+    # and swaps it in: write it there.
+    parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     projectpaths.set_part(args.part, args.dir)
+    projectpaths.build_beside(args.dir, args.beside)
 
     for program in ("pandoc",) if args.latex_only or args.latex_target else ("pandoc", ENGINE):
         if shutil.which(program) is None:

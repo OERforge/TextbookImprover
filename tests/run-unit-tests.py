@@ -1072,15 +1072,79 @@ def check_project_paths():
     linked = {}
     for name in ("sidecars", "output", "originals", "upstream",
                  os.path.join("src", "slides"), os.path.join("sidecars", "book"),
-                 os.path.join("output", "work", "tmp")):
+                 os.path.join("output", "work", "tmp"),
+                 os.path.join("output", "work", "staging"),
+                 os.path.join("output", "work", "staging", "targets"),
+                 os.path.join("output", "work", "replaced")):
         os.makedirs(os.path.dirname(os.path.join(links, name)), exist_ok=True)
         os.symlink(os.path.join(links, "elsewhere"), os.path.join(links, name))
         linked[name] = paths.refused_link(links, ["book", "slides"]) or ""
         os.remove(os.path.join(links, name))
         if name == os.path.join("sidecars", "book"):
             os.rmdir(os.path.join(links, "sidecars"))
-        if name == os.path.join("output", "work", "tmp"):
+        if name.startswith(os.path.join("output", "work", "")):
             shutil.rmtree(os.path.join(links, "output"))
+    # A target built beside its folder and swapped in, and what a stopped
+    # run left of a swap put right.
+    swapped = scratch("project-paths-swap-")
+    os.makedirs(os.path.join(swapped, "src", "book"))
+
+    def put(text, *names):
+        path = os.path.join(swapped, *names)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def tree_of(*names):
+        top = os.path.join(swapped, *names)
+        return sorted(os.path.relpath(os.path.join(here_, name), top)
+                      for here_, _, files in os.walk(top) for name in files)
+    swap = paths.of(swapped)
+    in_place = swap.target_dir("html")
+    put("old", "output", "html", "gone.html")
+    put("old", "output", "html", "a.html")
+    paths.build_beside(swapped)
+    try:
+        beside_dir = swap.target_dir("html")
+        put("new", beside_dir, "a.html")
+        shown = paths.placed(os.path.join(beside_dir, "a.html"))
+        untouched = tree_of("output", "html")
+        placed_at = swap.put_in_place("html")
+        after_swap = (tree_of("output", "html"), tree_of("output", "work"),
+                      open(os.path.join(placed_at, "a.html"), encoding="utf-8").read())
+        nothing_built = swap.put_in_place("epub")
+        # Stopped between the two steps; stopped after them; a name no
+        # target's folder has; an unfinished build.
+        os.makedirs(os.path.join(swapped, "output", "work", "replaced"))
+        os.rename(os.path.join(swapped, "output", "html"),
+                  os.path.join(swapped, "output", "work", "replaced", "html"))
+        put("stale", "output", "work", "replaced", "pdf", "book.pdf")
+        put("new", "output", "pdf", "book.pdf")
+        put("x", "output", "work", "replaced", "Odd Name", "x.txt")
+        put("x", "output", "work", "replaced", "reports", "x.txt")
+        put("half", "output", "work", "staging", "targets", "epub", "book.epub")
+        put_back = paths.settle(swapped)
+        settled = (tree_of("output", "html"), tree_of("output", "pdf"), tree_of("output", "work"),
+                   open(os.path.join(swapped, "output", "pdf", "book.pdf"),
+                        encoding="utf-8").read(),
+                   sorted(os.listdir(os.path.join(swapped, "output"))))
+        os.symlink(os.path.join(swapped, "src"),
+                   os.path.join(swapped, "output", "work", "staging"))
+        staging_linked = _stops(lambda: paths.settle(swapped), paths.Refused)
+        os.remove(os.path.join(swapped, "output", "work", "staging"))
+        # The folder in place is a link: moved aside and deleted itself,
+        # what it leads to left alone.
+        shutil.rmtree(os.path.join(swapped, "output", "html"))
+        os.symlink(os.path.join(swapped, "src"), os.path.join(swapped, "output", "html"))
+        put("kept", "src", "book", "kept.md")
+        put("newer", swap.target_dir("html"), "a.html")
+        swap.put_in_place("html")
+        over_link = (os.path.islink(os.path.join(swapped, "output", "html")),
+                     tree_of("output", "html"), tree_of("src"))
+    finally:
+        paths.build_beside(swapped, False)
+    flat_beside = (paths.build_beside(work), paths.of(work).target_dir("html"),
+                   paths.of(work).put_in_place("html"), paths.settle(work))
     paths.set_part("slides", laid)
     try:
         others_contents = paths.contents_apply()
@@ -1185,11 +1249,37 @@ def check_project_paths():
          and paths.claim_output(work) is None and paths.lock(work) is None
          and locked == os.path.join(one, "output", "work", "lock")),
         ("a project's own folder that is a link is refused by name (src/<part>/, "
-         "sidecars/ and a part's in it, output/, originals/, upstream/, output/work/tmp/), "
-         "and a project with none isn't",
-         lambda: no_link is None and len(linked) == 7
+         "sidecars/ and a part's in it, output/, originals/, upstream/, and under "
+         "output/work/ tmp/, staging/, staging/targets/, and replaced/), and a project "
+         "with none isn't",
+         lambda: no_link is None and len(linked) == 10
          and all(os.path.join(links, name) + " is a link" in why
                  for name, why in linked.items())),
+        ("a target built beside its folder is written under output/work/staging/, a "
+         "message names the file where it will be, and the earlier folder is as it was "
+         "until the new one replaces it whole, nothing left of the swap; a target nothing "
+         "was built for is left alone",
+         lambda: beside_dir == os.path.join(swapped, "output", "work", "staging", "targets",
+                                            "html")
+         and in_place == os.path.join(swapped, "output", "html") == placed_at
+         and shown == os.path.join(swapped, "output", "html", "a.html")
+         and untouched == ["a.html", "gone.html"]
+         and after_swap == (["a.html"], [], "new")
+         and nothing_built == os.path.join(swapped, "output", "epub")
+         and not os.path.exists(nothing_built)),
+        ("what a stopped run left of a swap is put right: a replaced folder goes back "
+         "where its target's is missing and is deleted where it isn't, one whose name "
+         "no target's folder has is deleted, and so is an unfinished build; a staging "
+         "folder that is a link stops it",
+         lambda: put_back == ["html"]
+         and settled == (["a.html"], ["book.pdf"], [], "new", ["html", "pdf", "work"])
+         and staging_linked),
+        ("a target's folder that is a link is replaced itself, what it leads to left "
+         "alone",
+         lambda: over_link == (False, ["a.html"], [os.path.join("book", "kept.md")])),
+        ("today's layout builds a target in its folder, with nothing to swap or put right",
+         lambda: flat_beside == (False, os.path.join(work, "html"),
+                                 os.path.join(work, "html"), [])),
         ("a folder under src/ whose name isn't a part's, one with a colon that would begin "
          "another folder in a search path among them, stops the run, and so does a "
          "project whose own path has one",

@@ -1176,7 +1176,7 @@ def build(paths, name, resolved, keep, intermediates=None):
         if result.stderr.strip():
             print(result.stderr.rstrip(), file=sys.stderr)
         if result.returncode != 0:
-            sys.exit(f"pandoc failed building {out_path}.")
+            sys.exit(f"pandoc failed building {projectpaths.placed(out_path)}.")
         retitle_chapters(out_path, assembly.formula_texts)
         # Before the links are fixed, which declares MathML in the
         # navigation document where it still holds a formula's.
@@ -1209,7 +1209,7 @@ def build(paths, name, resolved, keep, intermediates=None):
     print(os.path.abspath(out_path))          # for whatever runs next
     found = assembly.found
     claims = accessibility_claims(found)
-    print(f"Wrote {out_path}: {len(assembly.pages)} page(s), "
+    print(f"Wrote {projectpaths.placed(out_path)}: {len(assembly.pages)} page(s), "
           f"{found['images']} image(s), {found['without_alt']} without "
           "alternative text.", file=sys.stderr)
     print("  Claims: accessMode " + ", ".join(claims["accessModes"])
@@ -1241,8 +1241,12 @@ def main():
                              "one: convert.py passes what it read from the "
                              "sources, a master file's title, and says so")
     projectpaths.add_part_option(parser)
+    # From convert.py, in a run that builds each target beside its folder
+    # and swaps it in: write it there.
+    parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     projectpaths.set_part(args.part, args.dir)
+    projectpaths.build_beside(args.dir, args.beside)
 
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")

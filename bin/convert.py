@@ -743,8 +743,14 @@ class Target:
         self.name = name
         self.resolved = resolved
         self.format = resolved["format"]
+        # Where its build writes, and where its folder is kept: one
+        # folder, but in a run that builds each target beside its folder
+        # and swaps it in when it's built (put_in_place).
         self.output_dir = os.path.normpath(
             P(base).target_dir(name, resolved["output_dir"]))
+        self.place = os.path.normpath(
+            P(base).target_place(name, resolved["output_dir"]))
+        self.base = base
         self.fingerprint = None      # set once every target is known
         # tables.bands: auto derives from the format, and is resolved here,
         # before targets are compared, so two targets that differ in it
@@ -755,6 +761,19 @@ class Target:
                                             ("markdown", "asciidoc", "docx")
                                             else "split")
         self.pages_dir = None        # where its filtered intermediates are
+
+    def put_in_place(self, written=()):
+        """The target's folder as this run built it, put where it's kept
+        (projectpaths.put_in_place), and written, the files the build
+        named in it, as they're named there."""
+        built = os.path.abspath(self.output_dir)
+        self.output_dir = os.path.normpath(
+            P(self.base).put_in_place(self.name, self.resolved["output_dir"]))
+        if os.path.abspath(self.output_dir) == built:
+            return list(written)
+        return [os.path.join(self.output_dir, os.path.relpath(os.path.abspath(path), built))
+                if os.path.abspath(path).startswith(built + os.sep) else path
+                for path in written]
 
     def __getitem__(self, key):
         if key in self.derived:
@@ -824,6 +843,11 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         code = code or 1
     report_languages(project, reports, paths)
     warn_unreviewed(paths)
+    if not args.check_only:
+        # The copies, checked where they were written, in their folders.
+        for target in targets:
+            if target.format == "source":
+                target.put_in_place()
     if not archive:
         return code
     if not args.check_only and code == 0:
@@ -1522,6 +1546,9 @@ PART = None
 DEFAULT_PART = None
 PART_KIND = None
 PART_ARGS = []
+# For a builder the run starts, in a run that builds each target beside
+# its folder: build it there too.
+BESIDE_ARGS = []
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -5298,8 +5325,8 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
             "the name of one of babel's own locales, or one imported for it "
             "(\\babelprovide[import=...]), would give it one.")
     if written:
-        say((f"Wrote {written[0]}: " if len(masters) == 1 else
-             f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each of the "
+        say((f"Wrote {projectpaths.placed(written[0])}: " if len(masters) == 1 else
+             f"Wrote {len(written)} PDF(s) in {target.place}, one for each of the "
              "book's documents, named as its page is: ")
             + (f"{pages} page(s){' in all' if len(masters) > 1 else ''}, " if pages else "")
             + "built by LaTeX from the book's own files, made to build with LaTeX's "
@@ -5491,7 +5518,7 @@ def deck_pdfs(target, stems, names, base, language):
         if result["tidied"] and result["tidied"]["step_links"]:
             step_links[stem] = result["tidied"]["step_links"]
     if written:
-        say(f"Wrote {len(written)} PDF(s) in {target.output_dir}, one for each deck, "
+        say(f"Wrote {len(written)} PDF(s) in {target.place}, one for each deck, "
             f"through ltx-talk: {pages} page(s); the slides "
             + "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items())
             + ".")
@@ -5718,7 +5745,7 @@ def deck_pptxs(target, stems, names, base, language, work):
             found.setdefault("overlap_slides", []).append(
                 (stem, ", ".join(map(str, result["overlaps"][:6]))))
     if written:
-        say(f"Wrote {len(written)} PowerPoint file(s) in {target.output_dir}, one for each "
+        say(f"Wrote {len(written)} PowerPoint file(s) in {target.place}, one for each "
             f"deck, through Pandoc's PowerPoint writer: {slides} slide(s), "
             + (f"each the size of {os.path.basename(reference)}'s" if reference else
                "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items()))
@@ -5954,7 +5981,7 @@ def deck_presentations(target, stems, base, language):
                         target.output_dir, stem + ".html") in written],
                    lower=bool(target["media.lowercase"]),
                    scaled=DOWNSAMPLED.get(target.name))
-        say(f"Wrote {len(written)} presentation(s) in {target.output_dir}, one for each deck, "
+        say(f"Wrote {len(written)} presentation(s) in {target.place}, one for each deck, "
             f"through Pandoc's reveal.js writer and reveal.js "
             f"{revealtarget.revealjs_version(folder)}, copied beside them: {slides} slide(s); "
             + "; ".join(f"{shape} for {len(which)}" for shape, which in ratios.items())
@@ -7203,7 +7230,7 @@ def main():
     # A project with a folder for each part: a run builds one part, so a
     # project whose targets are made from more than one is a run of each,
     # started here, one after another.
-    global PART, DEFAULT_PART, PART_KIND, PART_ARGS
+    global PART, DEFAULT_PART, PART_KIND, PART_ARGS, BESIDE_ARGS
     parts, DEFAULT_PART = project_parts(base)
     if parts is not None:
         old = old_places(base)
@@ -7222,6 +7249,14 @@ def main():
         # The run's temporary files, and those of every program it
         # starts, are kept in the project and cleared by the next run.
         projectpaths.use_tmp(base, empty=not args.locked)
+        # Each target is built beside its folder and swapped in when it's
+        # built; what a stopped run left of its builds is put right first.
+        if not args.locked:
+            for name in projectpaths.settle(base):
+                say(f"NOTE: output/{name}/ is put back as it was: an earlier run stopped "
+                    "while replacing it, and this run builds it again.")
+        if projectpaths.build_beside(base):
+            BESIDE_ARGS = ["--beside"]
     if parts is not None:
         wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
         if args.part:
@@ -7722,6 +7757,8 @@ def main():
                 for path in written[target.name]:
                     if path.endswith(".html") and os.path.basename(path)[:-5] not in hand_stems:
                         mark_book_parts(path, language)
+            if target.name in written:
+                written[target.name] = target.put_in_place(written[target.name])
 
         # ---- 5. reports, once per book ----------------------------------------
         # A PowerPoint deck's are its checks', about the deck itself, written
@@ -7787,7 +7824,7 @@ def main():
                                             pages_by_dir[target.pages_dir])
             if not named:
                 continue
-            result = run(["python3", EPUB_TOOL, "-d", base, *PART_ARGS,
+            result = run(["python3", EPUB_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS,
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7798,8 +7835,8 @@ def main():
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The EPUB for target {target.name} wasn't built.")
-            epubs += [line for line in result.stdout.split("\n")
-                      if line.strip()]
+            epubs += target.put_in_place([line for line in result.stdout.split("\n")
+                                          if line.strip()])
             # The EPUB is built from the whole book in one run, so its rows
             # name the item, not the page.
             collect_losses(found, target.name, "(book)", losses)
@@ -7810,8 +7847,9 @@ def main():
                 continue
             if DECK_RUN:
                 # A PDF per deck, not one of the whole folder.
-                pdfs += deck_pdfs(target, [s for s in stems if s not in hand_stems],
-                                  DECK_SOURCES, base, language)
+                pdfs += target.put_in_place(deck_pdfs(
+                    target, [s for s in stems if s not in hand_stems],
+                    DECK_SOURCES, base, language))
                 continue
             # A LaTeX book's own build titles its PDF as its \title does.
             own_build = master and str(target["pdf.from"]) == "book"
@@ -7820,11 +7858,11 @@ def main():
             if not named:
                 continue
             if own_build:
-                pdfs += latex_book_pdf(target, base, latex_parts, paths, work,
-                                       language if LANGUAGE_DECLARED else None,
-                                       project, targets)
+                pdfs += target.put_in_place(latex_book_pdf(
+                    target, base, latex_parts, paths, work,
+                    language if LANGUAGE_DECLARED else None, project, targets))
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS,
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS,
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7834,8 +7872,8 @@ def main():
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The PDF for target {target.name} wasn't built.")
-            pdfs += [line for line in result.stdout.split("\n")
-                     if line.strip()]
+            pdfs += target.put_in_place([line for line in result.stdout.split("\n")
+                                         if line.strip()])
         # ---- 5.61 PowerPoint files, per pptx target: a deck's own --------
         pptxs = []
         for target in targets:
@@ -7851,14 +7889,15 @@ def main():
                         "transitions, and what the conversion leaves out of every target. "
                         "It's for moving decks onto a template; a format: source target's "
                         "copy is the deck itself, its design kept.")
-                pptxs += deck_pptxs(target, [s for s in stems if s not in hand_stems],
-                                    DECK_SOURCES, base, language, work)
+                pptxs += target.put_in_place(deck_pptxs(
+                    target, [s for s in stems if s not in hand_stems],
+                    DECK_SOURCES, base, language, work))
         # ---- 5.62 reveal.js presentations, per revealjs target -----------
         presentations = []
         for target in targets:
             if target.format == "revealjs":
-                presentations += deck_presentations(
-                    target, [s for s in stems if s not in hand_stems], base, language)
+                presentations += target.put_in_place(deck_presentations(
+                    target, [s for s in stems if s not in hand_stems], base, language))
         # ---- 5.65 LaTeX, per latex target: the PDF target's own LaTeX,
         # a master and a file per chapter, for an author to go on with.
         for target in targets:
@@ -7868,7 +7907,8 @@ def main():
                                             pages_by_dir[target.pages_dir])
             if not named:
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, "--latex-target",
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS,
+                          "--latex-target",
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -7876,6 +7916,7 @@ def main():
             sys.stderr.write(result.stderr)
             if result.returncode:
                 die(f"The LaTeX for target {target.name} wasn't written.")
+            target.put_in_place()
         # After the EPUBs, which report their losses as they're built.
         write_fidelity(losses, reports["fidelity"])
 

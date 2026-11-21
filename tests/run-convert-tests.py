@@ -637,6 +637,107 @@ def case_tree_layout(work):
     ]
 
 
+def case_built_beside(work):
+    """In the layout with src/, each target is built beside its folder and
+    swapped in when it's built: a page the book no longer has isn't left
+    in the folder, a build that fails leaves the earlier folder as it
+    was, and what a run stopped in mid-swap left is put right."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(*options, env=None):
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC", **(env or {})))
+
+    def listed(*parts):
+        folder = os.path.join(work, *parts)
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else None
+
+    def page(*parts):
+        return read(work, *parts) if exists(work, *parts) else ""
+
+    write("project.yaml", "project:\n  identifier: org.example.beside\n  title: Beside\n"
+          "  contents:\n    - one\n    - two\n")
+    write("conversion.yaml", "targets:\n  md:\n    format: markdown\n  html:\n"
+          "    format: html\n    archive: zip\n")
+    write("src/book/one.md", "# One\n\nFirst wording.\n")
+    write("src/book/two.md", "# Two\n\nA second page.\n")
+    first = build()
+    both = (listed("output", "html"), listed("output", "md"))
+    # A page taken out of the book.
+    os.remove(os.path.join(work, "src", "book", "two.md"))
+    write("project.yaml", "project:\n  identifier: org.example.beside\n  title: Beside\n"
+          "  contents:\n    - one\n")
+    second = build()
+    one_left = (listed("output", "html"), listed("output", "md"))
+    with zipfile.ZipFile(os.path.join(work, "output", "html.zip")) as packed:
+        archived = sorted(packed.namelist())
+    left_of_swap = (listed("output", "work", "staging"), listed("output", "work", "replaced"))
+    # A build that fails: a stand-in Pandoc that writes no page of the
+    # html target, after the md target is built.
+    write("src/book/one.md", "# One\n\nSecond wording.\n")
+    stand_in = os.path.join(os.path.dirname(work), os.path.basename(work) + "-pandoc")
+    os.makedirs(stand_in)
+    with open(os.path.join(stand_in, "pandoc"), "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\ncase \"$*\" in\n  *staging/targets/html/*) exit 7 ;;\nesac\n"
+                 f"exec {shlex.quote(shutil.which('pandoc'))} \"$@\"\n")
+    os.chmod(os.path.join(stand_in, "pandoc"), 0o755)
+    failed = build(env={"PATH": stand_in + os.pathsep + os.environ["PATH"]})
+    after_failure = (page("output", "html", "one.html"), page("output", "md", "one.md"))
+    # The run after it builds the target again, with nothing of the
+    # build that failed.
+    write("output/work/staging/targets/html/half-built.html", "<p>half</p>\n")
+    third = build()
+    rebuilt = (page("output", "html", "one.html"), listed("output", "work", "staging"),
+               listed("output", "html"))
+    # Stopped between a swap's two steps: the earlier folder is in
+    # output/work/replaced/ and the target has none.
+    os.makedirs(os.path.join(work, "output", "work", "replaced"), exist_ok=True)
+    os.rename(os.path.join(work, "output", "html"),
+              os.path.join(work, "output", "work", "replaced", "html"))
+    checked = build("--check-only")
+    back = (listed("output", "html"), listed("output", "work", "replaced"))
+    return [
+        ("each target's folder holds its build",
+         lambda: first.returncode == 0 and both[0] is not None and both[1] is not None
+         and {"one.html", "two.html"} <= set(both[0]) and {"one.md", "two.md"} <= set(both[1])
+         or fail(str(both) + first.stderr[-300:])),
+        ("a page taken out of the book is in no target's folder after the next run, nor in "
+         "the target's archive, and nothing is left of the swap",
+         lambda: second.returncode == 0 and "one.html" in one_left[0]
+         and "two.html" not in one_left[0] and "two.md" not in one_left[1]
+         and "html/one.html" in archived and "html/two.html" not in archived
+         and not any(left_of_swap)
+         or fail(str((one_left, archived, left_of_swap)) + second.stderr[-300:])),
+        ("no message of a run that builds names the folder a target is built in",
+         lambda: "staging" not in first.stderr + first.stdout + second.stderr + second.stdout
+         or fail([line for line in (first.stderr + second.stderr).split("\n")
+                  if "staging" in line][0])),
+        ("a target whose build fails keeps the folder an earlier run left, and a target "
+         "built before it has its new one",
+         lambda: failed.returncode != 0 and "First wording" in after_failure[0]
+         and "Second wording" in after_failure[1]
+         or fail(str((failed.returncode, after_failure)) + failed.stderr[-300:])),
+        ("the next run builds it, and clears what the failed one left",
+         lambda: third.returncode == 0 and "Second wording" in rebuilt[0] and not rebuilt[1]
+         and "half-built.html" not in rebuilt[2]
+         or fail(str((third.returncode, rebuilt)) + third.stderr[-300:])),
+        ("a run that finds a target's folder moved aside by a run stopped in mid-swap puts "
+         "it back and says so",
+         lambda: checked.returncode == 0 and back[0] and "one.html" in back[0]
+         and not back[1] and "output/html/ is put back" in checked.stderr
+         or fail(str((checked.returncode, back)) + checked.stderr[-300:])),
+    ]
+
+
 def case_two_parts(work):
     """A project whose src/ holds a book and decks builds each part in a
     run of its own: each target from its part, each part's reports and
@@ -10997,6 +11098,7 @@ CASES = [
     ("a Markdown source", case_markdown),
     ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
     ("a book and its decks in one project, each a part", case_two_parts),
+    ("a target built beside its folder and swapped in", case_built_beside),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

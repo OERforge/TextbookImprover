@@ -177,6 +177,16 @@ class Project:
         """A target's folder: named after it unless output_dir says."""
         return self._in(str(output_dir or name))
 
+    def target_place(self, name, output_dir=None):
+        """Where a target's folder is once it's built: target_dir, but in
+        the layout that builds a target beside its folder."""
+        return self.target_dir(name, output_dir)
+
+    def put_in_place(self, name, output_dir=None):
+        """A target's folder as built put where it's kept, and that
+        place; nothing to do where it's built there."""
+        return self.target_place(name, output_dir)
+
     def target_pages(self, name, output_dir=None):
         """A target's own intermediates, where its filters differ from
         the first target's."""
@@ -256,6 +266,9 @@ class Tree(Project):
         output/work/parts/<part>/ intermediates and what a run extracts
                                   or renders, where Pandoc and LaTeX run
         output/work/targets/<target>/  a target's own intermediates
+        output/work/staging/targets/<target>/  a target being built
+        output/work/replaced/<target>/  the folder it replaces, for the
+                                  moment of the swap
     """
 
     def __init__(self, root):
@@ -331,8 +344,50 @@ class Tree(Project):
         part = self.part(part)
         return os.path.join(self.run_dir(part), name)
 
-    def target_dir(self, name, output_dir=None):
+    def target_place(self, name, output_dir=None):
         return self._in("output", str(output_dir or name))
+
+    def target_dir(self, name, output_dir=None):
+        """Where a target's build writes: its folder, or, in a run that
+        builds each target beside its folder (build_beside), the folder
+        it's built in, which put_in_place swaps in when the build is
+        done."""
+        if _BESIDE[0]:
+            return self._in(*STAGING, str(output_dir or name))
+        return self.target_place(name, output_dir)
+
+    def put_in_place(self, name, output_dir=None):
+        """A target's folder as this run built it put in the place of the
+        one an earlier run left, whole: a page the book no longer has
+        isn't left in it, and a build that stops leaves the earlier
+        folder as it was. A folder that isn't empty can't be replaced in
+        one step, so it's two: the earlier folder to output/work/replaced/,
+        then the new one into its place, and the earlier one deleted. A
+        run stopped between the two is put right by the next (settle).
+        Nothing was built (no folder in staging): nothing is done."""
+        folder = str(output_dir or name)
+        place = self.target_place(name, output_dir)
+        built = self._in(*STAGING, folder)
+        if not _BESIDE[0] or not os.path.isdir(built) or os.path.islink(built):
+            return place
+        kept = self._in(*REPLACED, folder)
+        try:
+            _delete(kept)
+            os.makedirs(os.path.dirname(kept), exist_ok=True)
+            if os.path.lexists(place):
+                os.rename(place, kept)       # a link is moved, never followed
+            os.rename(built, place)
+            _delete(kept)
+            for emptied in (os.path.dirname(kept), os.path.dirname(built),
+                            os.path.dirname(os.path.dirname(built))):
+                if not os.listdir(emptied):
+                    os.rmdir(emptied)
+        except OSError as exc:
+            raise Refused(f"{place} couldn't be replaced by what this run built ({exc}). "
+                          f"What was built is in {built}; an earlier folder, where there "
+                          f"was one, is there still or in {kept}, and the next run puts "
+                          "it back.") from None
+        return place
 
     def package_file(self, name, package=None):
         """A file of a package's; the package no file names is the
@@ -503,14 +558,19 @@ def lock(folder):
 # folder's files read as the book's.
 OWN_FOLDERS = ("src", "sidecars", "output", "originals", "upstream")
 
+# What output/ keeps for itself, which no target's folder is named.
+OUTPUT_OWN = ("reports", "work", "packages")
+
 
 def refused_link(folder, parts=()):
     """The first of a project's own folders that is a link, as a message,
     or None: src/, sidecars/, output/, originals/, and upstream/, a part's
-    folder in each of the first two, output/work/, and output/work/tmp/. A project in
-    today's layout has none of them."""
-    names = list(OWN_FOLDERS) + [os.path.join("output", "work"),
-                                 os.path.join("output", "work", "tmp")]
+    folder in each of the first two, output/work/, and under it tmp/,
+    staging/, staging/targets/, and replaced/. A project in today's
+    layout has none of them."""
+    names = list(OWN_FOLDERS) + [os.path.join("output", "work")] + [
+        os.path.join("output", "work", *below)
+        for below in (("tmp",), ("staging",), ("staging", "targets"), ("replaced",))]
     for part in parts:
         names += [os.path.join("src", part), os.path.join("sidecars", part)]
     for name in names:
@@ -647,6 +707,79 @@ def forget(folder):
     for: for the run that lays a project out itself, by making its parts'
     folders, after it had asked."""
     _KNOWN.pop(folder, None)
+
+
+# -- a target built beside its folder ----------------------------------------
+#
+# A run builds each target in output/work/staging/targets/<target>/ and
+# puts the folder in output/<target>/'s place when the build is done, so
+# that a build that fails or is stopped leaves the last good output, and
+# a target's folder holds one build's files and no earlier one's.
+
+STAGING = ("output", "work", "staging", "targets")
+REPLACED = ("output", "work", "replaced")
+_STAGED_IN = os.path.join(*STAGING) + os.sep
+_BESIDE = [False]
+
+
+def build_beside(folder, on=True):
+    """Have this process build each target of the project beside its
+    folder, in the layout with src/: target_dir answers the folder under
+    output/work/staging/ until put_in_place swaps it in. Said by the run
+    and by each builder the run starts; a builder run by hand writes the
+    target's folder itself, as it did. Nothing in today's layout."""
+    _BESIDE[0] = bool(on) and isinstance(of(folder), Tree)
+    return _BESIDE[0]
+
+
+def placed(path):
+    """A path in a target's folder as a message names it: where it will
+    be once the folder is in place, not where it's built."""
+    head, found, rest = str(path).partition(_STAGED_IN)
+    if found and (not head or head.endswith(os.sep)):
+        return os.path.join(head, "output", rest)
+    return path
+
+
+def _delete(path):
+    """A folder and what it holds, or a file or link, no link followed."""
+    if os.path.islink(path) or os.path.isfile(path):
+        os.remove(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def settle(folder):
+    """Put right what a stopped run left of its builds, in the layout
+    with src/, before this run builds anything: a folder in
+    output/work/replaced/ goes back to output/ when the target's folder
+    is missing there (the run stopped between a swap's two steps), and is
+    deleted when it isn't (it stopped after them); every unfinished build
+    in output/work/staging/ is deleted. The names put back, as a list.
+    The marker and the lock come first, as for the temporary folder; only
+    a folder's name that a target's can be is put back."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        return []
+    back = []
+    kept = project.top(*REPLACED)
+    for path in (kept, project.top("output", "work", "staging")):
+        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+            raise Refused(f"{os.path.abspath(path)} is a link or a file, where a run keeps "
+                          "the folders it's building. Move it away and run this again.")
+    if os.path.isdir(kept):
+        for name in sorted(os.listdir(kept)):
+            was = os.path.join(kept, name)
+            place = project.top("output", name)
+            if PART_NAME.match(name) and len(name) <= 64 and name not in OUTPUT_OWN \
+                    and os.path.isdir(was) and not os.path.islink(was) \
+                    and not os.path.lexists(place):
+                os.rename(was, place)
+                back.append(name)
+            else:
+                _delete(was)
+    _delete(project.top("output", "work", "staging"))
+    return back
 
 
 # -- temporary files ---------------------------------------------------------

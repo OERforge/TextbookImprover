@@ -496,6 +496,31 @@ def lock(folder):
     return path
 
 
+# The folders of a project that a run reads or writes whole. One that is
+# a link would take the run wherever it leads, out of the project too: a
+# project unpacked with output as a link would have the link's target
+# written and emptied, and one with src/book as a link would have another
+# folder's files read as the book's.
+OWN_FOLDERS = ("src", "sidecars", "output", "originals", "upstream")
+
+
+def refused_link(folder, parts=()):
+    """The first of a project's own folders that is a link, as a message,
+    or None: src/, sidecars/, output/, originals/, and upstream/, a part's
+    folder in each of the first two, and output/work/. A project in
+    today's layout has none of them."""
+    names = list(OWN_FOLDERS) + [os.path.join("output", "work")]
+    for part in parts:
+        names += [os.path.join("src", part), os.path.join("sidecars", part)]
+    for name in names:
+        path = os.path.join(folder, name)
+        if os.path.islink(path):
+            return (f"{path} is a link (to {os.readlink(path)}), where a project keeps "
+                    "a folder of its own: a run would read or write wherever it leads. Put "
+                    "the folder itself there")
+    return None
+
+
 def tex_tree():
     """The TeX tree's folder, where kpsewhich says, or None."""
     kpsewhich = shutil.which("kpsewhich")

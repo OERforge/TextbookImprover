@@ -6990,6 +6990,13 @@ def main():
         why = projectpaths.refused_root(base)
         if why:
             die(f"{base} can't be a project's folder: {why}. Nothing was converted.")
+        try:
+            laid = sorted(e.name for e in os.scandir(P(base).top("src")))
+        except OSError:
+            laid = []
+        why = projectpaths.refused_link(base, laid)
+        if why:
+            die(f"{why}. Nothing was converted.")
 
     for required in (FIGURE_FILTER, MATH_FILTER, TITLE_FILTER, MEDIA_FILTER,
                      HEADER_FILTER, PAGE_CSS):

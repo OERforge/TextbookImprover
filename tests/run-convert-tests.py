@@ -713,6 +713,24 @@ def case_two_parts(work):
         fh.write("# A\n")
     in_nested = build(folder=nested)
     absent = build("-d", os.path.join(work, "no-such-folder"))
+    # A project's own folder that is a link: the sources of a part, and
+    # the sidecars' folder, each leading to a folder beside the project.
+    beside = os.path.join(os.path.dirname(work), os.path.basename(work) + "-beside")
+    os.makedirs(os.path.join(beside, "notes"))
+    with open(os.path.join(beside, "notes", "kept.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Kept\n")
+    os.symlink(os.path.join(beside, "notes"), os.path.join(work, "src", "notes"))
+    part_linked = build()
+    os.remove(os.path.join(work, "src", "notes"))
+    had_sidecars = os.path.isdir(os.path.join(work, "sidecars"))
+    if had_sidecars:
+        os.rename(os.path.join(work, "sidecars"), os.path.join(work, "sidecars-kept"))
+    os.symlink(os.path.join(beside, "notes"), os.path.join(work, "sidecars"))
+    sidecars_linked = build()
+    os.remove(os.path.join(work, "sidecars"))
+    if had_sidecars:
+        os.rename(os.path.join(work, "sidecars-kept"), os.path.join(work, "sidecars"))
+    beside_after = sorted(os.listdir(os.path.join(beside, "notes")))
     write("conversion.yaml", "defaults:\n  sidecars:\n    image_alt: alt.csv\n" + settings)
     old_setting = build()
     write("conversion.yaml", settings)
@@ -785,6 +803,14 @@ def case_two_parts(work):
          and absent.returncode != 0 and "no-such-folder" in absent.stderr
          or fail(str([(r.returncode, r.stderr[-160:])
                       for r in (among, as_home, in_nested, absent)]))),
+        ("a part's folder or the sidecars' folder that is a link stops the run, naming it, "
+         "and nothing is read or written where it leads",
+         lambda: part_linked.returncode != 0 and "is a link" in part_linked.stderr
+         and os.path.join("src", "notes") in part_linked.stderr
+         and sidecars_linked.returncode != 0 and "is a link" in sidecars_linked.stderr
+         and beside_after == ["kept.md"]
+         or fail(str([(r.returncode, r.stderr[-200:])
+                      for r in (part_linked, sidecars_linked)]))),
         ("a sidecars: setting stops the run in this layout, naming it and where a sidecar "
          "goes",
          lambda: old_setting.returncode != 0 and "defaults.sidecars" in old_setting.stderr
